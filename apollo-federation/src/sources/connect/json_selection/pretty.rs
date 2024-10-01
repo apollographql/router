@@ -26,7 +26,7 @@ impl std::fmt::Display for JSONSelection {
 ///
 /// This trait marks a type as supporting pretty printing itself outside of a
 /// Display implementation, which might be more useful for snapshots.
-pub trait PrettyPrintable {
+pub(crate) trait PrettyPrintable {
     /// Pretty print the struct
     fn pretty_print(&self) -> String {
         self.pretty_print_with_indentation(true, 0)

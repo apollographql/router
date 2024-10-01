@@ -54,7 +54,7 @@ pub(super) fn validate_extended_type(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ObjectCategory {
+pub(crate) enum ObjectCategory {
     Query,
     Mutation,
     Other,

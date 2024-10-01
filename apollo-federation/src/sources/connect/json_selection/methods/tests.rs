@@ -362,6 +362,7 @@ fn test_match_methods() {
     );
 }
 
+#[test]
 fn test_arithmetic_methods() {
     assert_eq!(
         selection!("$->add(1)").apply_to(&json!(2)),

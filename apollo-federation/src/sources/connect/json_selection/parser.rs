@@ -108,6 +108,7 @@ impl JSONSelection {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         match self {
             JSONSelection::Named(subselect) => Some(subselect),
@@ -260,6 +261,7 @@ impl NamedSelection {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         match self {
             // Paths are complicated because they can have a subselection deeply nested
@@ -320,10 +322,12 @@ impl PathSelection {
         }
     }
 
+    #[allow(unused)]
     pub(super) fn is_single_key(&self) -> bool {
         self.path.is_single_key()
     }
 
+    #[allow(unused)]
     pub(super) fn from_slice(keys: &[Key], selection: Option<SubSelection>) -> Self {
         Self {
             path: WithRange::new(PathList::from_slice(keys, selection), None),
@@ -338,6 +342,7 @@ impl PathSelection {
         self.path.next_subselection()
     }
 
+    #[allow(unused)]
     pub(super) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         self.path.next_mut_subselection()
     }
@@ -406,7 +411,7 @@ pub(super) enum PathList {
 }
 
 impl PathList {
-    pub fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
+    pub(crate) fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
         match Self::parse_with_depth(input, 0) {
             Ok((remainder, parsed)) if matches!(*parsed, Self::Empty) => Err(nom::Err::Error(
                 nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
@@ -415,6 +420,7 @@ impl PathList {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }
@@ -604,6 +610,7 @@ impl PathList {
         }
     }
 
+    #[allow(unused)]
     pub(super) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
@@ -630,6 +637,7 @@ impl PathList {
         }
     }
 
+    #[allow(unused)]
     /// Find the next subselection, traversing nested chains if needed. Returns a mutable reference
     pub(super) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         match self {
@@ -830,14 +838,6 @@ impl Ranged<StarSelection> for StarSelection {
 }
 
 impl StarSelection {
-    pub(crate) fn new(alias: Option<Alias>, selection: Option<SubSelection>) -> Self {
-        Self {
-            alias,
-            selection: selection.map(Box::new),
-            range: None,
-        }
-    }
-
     pub(crate) fn alias(&self) -> Option<&Alias> {
         self.alias.as_ref()
     }
@@ -1024,7 +1024,7 @@ fn parse_identifier_no_space(input: Span) -> IResult<Span, WithRange<String>> {
 //   | "'" ("\\'" | [^'])* "'"
 //   | '"' ('\\"' | [^"])* '"'
 
-pub fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
+pub(crate) fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
     let input = spaces_or_comments(input)?.0;
     let start = input.location_offset();
     let mut input_char_indices = input.char_indices();
@@ -1079,7 +1079,7 @@ pub fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct MethodArgs {
+pub(super) struct MethodArgs {
     pub(super) args: Vec<WithRange<LitExpr>>,
     pub(super) range: OffsetRange,
 }

@@ -23,8 +23,8 @@ use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 /// The location of a field within an object.
 #[derive(Clone, Copy)]
 pub(super) struct FieldCoordinate<'a> {
-    pub object: &'a Node<ObjectType>,
-    pub field: &'a Component<FieldDefinition>,
+    pub(super) object: &'a Node<ObjectType>,
+    pub(super) field: &'a Component<FieldDefinition>,
 }
 
 impl Display for FieldCoordinate<'_> {
@@ -42,9 +42,9 @@ impl Display for FieldCoordinate<'_> {
 /// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
 pub(super) struct ConnectDirectiveCoordinate<'a> {
-    pub directive: &'a Node<Directive>,
-    pub connect_directive_name: &'a Name,
-    pub field_coordinate: FieldCoordinate<'a>,
+    pub(super) directive: &'a Node<Directive>,
+    pub(super) connect_directive_name: &'a Name,
+    pub(super) field_coordinate: FieldCoordinate<'a>,
 }
 
 impl Display for ConnectDirectiveCoordinate<'_> {
@@ -163,25 +163,6 @@ pub(super) fn connect_directive_http_body_coordinate(
     field: &Name,
 ) -> String {
     format!("`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{object_name}.{field}`", object_name = object.name)
-}
-
-pub(super) fn directive_http_header_coordinate(
-    directive_name: &Name,
-    argument_name: &str,
-    object: Option<&Name>,
-    field: Option<&Name>,
-) -> String {
-    match (object, field) {
-        (Some(object), Some(field)) => {
-            format!(
-                "`@{directive_name}({argument_name}:)` on `{}.{}`",
-                object, field
-            )
-        }
-        _ => {
-            format!("`@{directive_name}({argument_name}:)`")
-        }
-    }
 }
 
 pub(super) fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {

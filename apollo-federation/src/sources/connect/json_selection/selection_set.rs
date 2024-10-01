@@ -205,7 +205,7 @@ impl PathSelection {
 }
 
 impl PathList {
-    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+    pub(crate) fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         match self {
             Self::Var(name, path) => Self::Var(
                 name.clone(),

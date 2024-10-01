@@ -55,7 +55,6 @@ use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::LinksMetadata;
-use crate::query_plan::query_planner::JOIN_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
 use crate::ValidFederationSubgraph;
@@ -300,11 +299,11 @@ impl Merger {
                             field_def.directives = field_def
                                 .directives
                                 .iter()
-                                .filter(|d| d.name != JOIN_FIELD)
+                                .filter(|d| d.name != name!("join__field"))
                                 .cloned()
                                 .collect();
                             field_def.directives.push(Node::new(Directive {
-                                name: Name::new_unchecked(JOIN_FIELD),
+                                name: name!("join__field"),
                                 arguments: vec![],
                             }));
 
@@ -1865,20 +1864,6 @@ fn add_core_feature_inaccessible(supergraph: &mut Schema) {
             repeatable: false,
         }),
     );
-}
-
-// TODO use apollo_compiler::executable::FieldSet
-fn parse_keys<'a>(
-    directives: impl Iterator<Item = &'a Component<Directive>> + Sized,
-) -> IndexSet<&'a str> {
-    IndexSet::from_iter(
-        directives
-            .flat_map(|k| {
-                let field_set = directive_string_arg_value(k, &name!("fields")).unwrap();
-                field_set.split_whitespace()
-            })
-            .collect::<Vec<&str>>(),
-    )
 }
 
 fn merge_directive(

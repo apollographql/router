@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::location::WithRange;
 
 #[derive(PartialEq, Eq, Clone, Hash)]
@@ -31,6 +32,7 @@ impl KnownVariable {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }

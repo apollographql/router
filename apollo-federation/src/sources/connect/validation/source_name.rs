@@ -89,7 +89,7 @@ pub(super) enum SourceName {
 }
 
 impl SourceName {
-    pub fn from_directive(directive: &Component<Directive>) -> Self {
+    pub(crate) fn from_directive(directive: &Component<Directive>) -> Self {
         let directive_name = directive.name.clone();
         let Some(arg) = directive
             .arguments
@@ -125,7 +125,7 @@ impl SourceName {
         }
     }
 
-    pub fn into_value_or_error(self, sources: &SourceMap) -> Result<Node<Value>, Message> {
+    pub(crate) fn into_value_or_error(self, sources: &SourceMap) -> Result<Node<Value>, Message> {
         match self {
             Self::Valid { value, ..} => Ok(value),
             Self::Invalid {

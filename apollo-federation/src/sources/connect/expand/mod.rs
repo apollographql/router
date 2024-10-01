@@ -224,9 +224,11 @@ mod helpers {
     /// A helper struct for expanding a subgraph into one per connect directive.
     pub(super) struct Expander<'a> {
         /// The name of the connect directive, possibly aliased.
+        #[allow(unused)]
         connect_name: Name,
 
         /// The name of the connect directive, possibly aliased.
+        #[allow(unused)]
         source_name: Name,
 
         /// The name of the @key directive, as known in the subgraph
@@ -723,7 +725,7 @@ mod helpers {
                     name: name!("_"),
                     arguments: Vec::new(),
                     ty: ast::Type::Named(ast::NamedType::new("ID")?),
-                    directives: ast::DirectiveList(vec![Node::new(ast::Directive {
+                    directives: ast::DirectiveList(vec![Node::new(Directive {
                         name: name!("federation__inaccessible"),
                         arguments: Vec::new(),
                     })]),

@@ -88,16 +88,6 @@ impl ConnectSpecDefinition {
         Some((connect_spec, link))
     }
 
-    pub(crate) fn get_from_federation_schema(
-        schema: &FederationSchema,
-    ) -> Result<Option<&'static ConnectSpecDefinition>, FederationError> {
-        Ok(schema
-            .metadata()
-            .as_ref()
-            .and_then(|metadata| metadata.for_identity(&ConnectSpecDefinition::identity()))
-            .and_then(|link| CONNECT_VERSIONS.find(&link.url.version)))
-    }
-
     pub(crate) fn check_or_add(schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(link) = schema
             .metadata()
