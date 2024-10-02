@@ -21,7 +21,7 @@ As a follow up to the Entity cache preview that was published in the router 1.46
 
 This introduces two ways to invalidate cached entries:
 - through an HTTP endpoint exposed by the router
-- via extensions in a subgraph response
+- via GraphQL response `extensions` returned from subgraph requests
 
 The invalidation endpoint can be defined in the router's configuration, as follows:
 
