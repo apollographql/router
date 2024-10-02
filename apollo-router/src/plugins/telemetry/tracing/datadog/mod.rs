@@ -1,15 +1,19 @@
 //! Configuration for datadog tracing.
 
+mod agent_sampling;
+mod agent_span_processor;
+
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::time::Duration;
 
+pub(crate) use agent_sampling::AgentSampling;
+pub(crate) use agent_span_processor::BatchSpanProcessor;
 use ahash::HashMap;
 use ahash::HashMapExt;
 use futures::future::BoxFuture;
 use http::Uri;
 use opentelemetry::sdk;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
 use opentelemetry_api::trace::SpanContext;
@@ -211,7 +215,7 @@ impl TracingConfigurator for Config {
         let mut span_metrics = default_span_metrics();
         span_metrics.extend(self.span_metrics.clone());
 
-        let batch_processor = BatchSpanProcessor::builder(
+        let batch_processor = opentelemetry::sdk::trace::BatchSpanProcessor::builder(
             ExporterWrapper {
                 delegate: exporter,
                 span_metrics,

@@ -18,13 +18,11 @@ use tower::BoxError;
 use super::config_new::spans::Spans;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::tracing::datadog_agent_span_processor::DatadogBatchSpanProcessor;
+use crate::plugins::telemetry::tracing::datadog::BatchSpanProcessor;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
-pub(crate) mod datadog_agent_sampler;
-mod datadog_agent_span_processor;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;
 pub(crate) mod jaeger;
@@ -94,7 +92,7 @@ where
     Self: Sized + SpanProcessor,
 {
     fn filtered(self) -> ApolloFilterSpanProcessor<Self>;
-    fn datadog_agent(self) -> DatadogBatchSpanProcessor<Self>;
+    fn datadog_agent(self) -> BatchSpanProcessor<Self>;
 }
 
 impl<T: SpanProcessor> SpanProcessorExt for T
@@ -107,8 +105,8 @@ where
 
     /// This span processor will always send spans to the exporter even if they are not sampled. This is useful for the datadog agent which
     /// uses spans for metrics.
-    fn datadog_agent(self) -> DatadogBatchSpanProcessor<Self> {
-        DatadogBatchSpanProcessor::new(self)
+    fn datadog_agent(self) -> BatchSpanProcessor<Self> {
+        BatchSpanProcessor::new(self)
     }
 }
 

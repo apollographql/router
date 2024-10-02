@@ -9,17 +9,17 @@ use opentelemetry_sdk::trace::SpanProcessor;
 /// This wrapper will override the trace flags to always sample.
 /// THe datadog exporter itself will look at the `sampling.priority` trace context attribute to determine if the span should be sampled.
 #[derive(Debug)]
-pub(crate) struct DatadogBatchSpanProcessor<T: SpanProcessor> {
+pub(crate) struct BatchSpanProcessor<T: SpanProcessor> {
     delegate: T,
 }
 
-impl<T: SpanProcessor> DatadogBatchSpanProcessor<T> {
+impl<T: SpanProcessor> BatchSpanProcessor<T> {
     pub(crate) fn new(delegate: T) -> Self {
         Self { delegate }
     }
 }
 
-impl<T: SpanProcessor> SpanProcessor for DatadogBatchSpanProcessor<T> {
+impl<T: SpanProcessor> SpanProcessor for BatchSpanProcessor<T> {
     fn on_start(&self, span: &mut Span, cx: &Context) {
         self.delegate.on_start(span, cx)
     }
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn test_on_end_updates_trace_flags() {
         let mock_processor = MockSpanProcessor::new();
-        let processor = DatadogBatchSpanProcessor::new(mock_processor.clone());
+        let processor = BatchSpanProcessor::new(mock_processor.clone());
         let span_context = SpanContext::new(
             TraceId::from_u128(1),
             SpanId::from_u64(1),
