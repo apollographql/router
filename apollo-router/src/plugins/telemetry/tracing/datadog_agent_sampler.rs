@@ -103,13 +103,16 @@ impl ShouldSample for DatadogAgentSampling {
 }
 #[cfg(test)]
 mod tests {
+    use buildstructor::Builder;
     use opentelemetry::sdk::trace::Sampler;
     use opentelemetry::trace::TraceState;
-    use opentelemetry_api::trace::Link;
     use opentelemetry_api::trace::SamplingDecision;
     use opentelemetry_api::trace::SamplingResult;
     use opentelemetry_api::trace::SpanKind;
     use opentelemetry_api::trace::TraceId;
+    use opentelemetry_api::trace::{
+        Link, SpanBuilder, SpanContext, SpanId, TraceContextExt, TraceFlags,
+    };
     use opentelemetry_api::Context;
     use opentelemetry_api::Key;
     use opentelemetry_api::OrderMap;
@@ -120,7 +123,7 @@ mod tests {
     use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
     use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Builder)]
     struct StubSampler {
         decision: SamplingDecision,
     }
@@ -138,7 +141,7 @@ mod tests {
             SamplingResult {
                 decision: self.decision.clone(),
                 attributes: Vec::new(),
-                trace_state: TraceState::default(),
+                trace_state: Default::default(),
             }
         }
     }
@@ -146,9 +149,9 @@ mod tests {
     #[test]
     fn test_should_sample_drop() {
         // Test case where the sampling decision is Drop
-        let sampler = StubSampler {
-            decision: SamplingDecision::Drop,
-        };
+        let sampler = StubSampler::builder()
+            .decision(SamplingDecision::Drop)
+            .build();
         let datadog_sampler =
             DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
 
@@ -174,13 +177,16 @@ mod tests {
             .iter()
             .any(|kv| kv.key.as_str() == "sampling.priority"
                 && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64())));
+
+        // Verify that measuring is enabled
+        assert!(result.trace_state.measuring_enabled());
     }
 
     #[test]
     fn test_should_sample_record_only() {
-        let sampler = StubSampler {
-            decision: SamplingDecision::RecordOnly,
-        };
+        let sampler = StubSampler::builder()
+            .decision(SamplingDecision::RecordOnly)
+            .build();
         let datadog_sampler =
             DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
 
@@ -193,7 +199,10 @@ mod tests {
             &[],
         );
 
+        // Record only should remain as record only
         assert_eq!(result.decision, SamplingDecision::RecordOnly);
+
+        // Verify that the sampling priority is set to AutoReject so the trace won't be transmitted to Datadog
         assert_eq!(
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoReject)
@@ -203,13 +212,16 @@ mod tests {
             .iter()
             .any(|kv| kv.key.as_str() == "sampling.priority"
                 && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64())));
+
+        // Verify that measuring is enabled
+        assert!(result.trace_state.measuring_enabled());
     }
 
     #[test]
     fn test_should_sample_record_and_sample() {
-        let sampler = StubSampler {
-            decision: SamplingDecision::RecordAndSample,
-        };
+        let sampler = StubSampler::builder()
+            .decision(SamplingDecision::RecordAndSample)
+            .build();
         let datadog_sampler =
             DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
 
@@ -222,7 +234,10 @@ mod tests {
             &[],
         );
 
+        // Record and sample should remain as record and sample
         assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // Verify that the sampling priority is set to AutoKeep so the trace will be transmitted to Datadog
         assert_eq!(
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoKeep)
@@ -232,18 +247,22 @@ mod tests {
             .iter()
             .any(|kv| kv.key.as_str() == "sampling.priority"
                 && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64())));
+
+        // Verify that measuring is enabled
+        assert!(result.trace_state.measuring_enabled());
     }
 
     #[test]
     fn test_should_sample_with_parent_based_sampler() {
-        let sampler = StubSampler {
-            decision: SamplingDecision::RecordAndSample,
-        };
+        let sampler = StubSampler::builder()
+            .decision(SamplingDecision::RecordAndSample)
+            .build();
+
         let datadog_sampler =
             DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
 
         let result = datadog_sampler.should_sample(
-            None,
+            Some(&Context::new()),
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
@@ -251,7 +270,10 @@ mod tests {
             &[],
         );
 
+        // Record and sample should remain as record and sample
         assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // Verify that the sampling priority is set to AutoKeep so the trace will be transmitted to Datadog
         assert_eq!(
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoKeep)
@@ -261,5 +283,92 @@ mod tests {
             .iter()
             .any(|kv| kv.key.as_str() == "sampling.priority"
                 && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64())));
+
+        // Verify that measuring is enabled
+        assert!(result.trace_state.measuring_enabled());
+    }
+
+    #[test]
+    fn test_trace_state_already_populated_record_and_sample() {
+        let sampler = StubSampler::builder()
+            .decision(SamplingDecision::RecordAndSample)
+            .build();
+
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
+
+        let result = datadog_sampler.should_sample(
+            Some(&Context::new().with_remote_span_context(SpanContext::new(
+                TraceId::from_u128(1),
+                SpanId::from_u64(1),
+                TraceFlags::SAMPLED,
+                true,
+                TraceState::default().with_priority_sampling(SamplingPriority::UserReject),
+            ))),
+            TraceId::from_u128(1),
+            "test_span",
+            &SpanKind::Internal,
+            &OrderMap::new(),
+            &[],
+        );
+
+        // Record and sample should remain as record and sample
+        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // Verify that the sampling priority is not overridden
+        assert_eq!(
+            result.trace_state.sampling_priority(),
+            Some(SamplingPriority::UserReject)
+        );
+        assert!(result
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "sampling.priority"
+                && kv.value == Value::I64(SamplingPriority::UserReject.as_i64())));
+
+        // Verify that measuring is enabled
+        assert!(result.trace_state.measuring_enabled());
+    }
+
+    #[test]
+    fn test_trace_state_already_populated_record_drop() {
+        let sampler = StubSampler::builder()
+            .decision(SamplingDecision::Drop)
+            .build();
+
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
+
+        let result = datadog_sampler.should_sample(
+            Some(&Context::new().with_remote_span_context(SpanContext::new(
+                TraceId::from_u128(1),
+                SpanId::from_u64(1),
+                TraceFlags::default(),
+                true,
+                TraceState::default().with_priority_sampling(SamplingPriority::UserReject),
+            ))),
+            TraceId::from_u128(1),
+            "test_span",
+            &SpanKind::Internal,
+            &OrderMap::new(),
+            &[],
+        );
+
+        // Drop is converted to RecordOnly
+        assert_eq!(result.decision, SamplingDecision::RecordOnly);
+
+        // Verify that the sampling priority is not overridden
+        assert_eq!(
+            result.trace_state.sampling_priority(),
+            Some(SamplingPriority::UserReject)
+        );
+        assert!(result
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "sampling.priority"
+                && kv.value == Value::I64(SamplingPriority::UserReject.as_i64())));
+
+        // Verify that measuring is enabled
+        assert!(result.trace_state.measuring_enabled());
     }
 }
