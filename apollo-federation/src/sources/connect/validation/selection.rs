@@ -5,7 +5,6 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
@@ -34,8 +33,6 @@ use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::selection::visitor::visit;
 use crate::sources::connect::validation::selection::visitor::SelectionPart;
 use crate::sources::connect::validation::selection::visitor::Visitor;
-use crate::sources::connect::validation::graphql::GraphQLString;
-use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
@@ -46,7 +43,7 @@ pub(super) fn validate_selection(
     schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Result<(), Message> {
-    let (selection_arg, json_selection) = get_json_selection(coordinate, &schema.sources)?;
+    let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
     let field = coordinate.field_coordinate.field;
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
@@ -112,7 +109,7 @@ pub(super) fn validate_body_selection(
 
 fn get_json_selection<'a>(
     connect_directive: ConnectDirectiveCoordinate<'a>,
-    source_map: &'a SourceMap,
+    schema: &'a SchemaInfo,
 ) -> Result<(SelectionArg<'a>, JSONSelection), Message> {
     let coordinate = SelectionCoordinate::from(connect_directive);
     let selection_arg = connect_directive
@@ -125,16 +122,16 @@ fn get_json_selection<'a>(
             message: format!("{coordinate} is required."),
             locations: connect_directive
                 .directive
-                .line_column_range(source_map)
+                .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         })?;
     let selection_str =
-        GraphQLString::new(&selection_arg.value, source_map).map_err(|_| Message {
+        GraphQLString::new(&selection_arg.value, &schema.sources).map_err(|_| Message {
             code: Code::GraphQLError,
             message: format!("{coordinate} must be a string."),
             locations: selection_arg
-                .line_column_range(source_map)
+                .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         })?;
@@ -145,7 +142,7 @@ fn get_json_selection<'a>(
             message: format!("{coordinate} is not a valid JSONSelection: {err}",),
             locations: selection_arg
                 .value
-                .line_column_range(source_map)
+                .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         })?;
@@ -153,12 +150,9 @@ fn get_json_selection<'a>(
     visit(
         &selection,
         ArrowMethodValidator {
-            schema_info,
-            source_map,
-            connect_directive,
+            schema_info: schema,
+            connect_directive: &connect_directive,
             selection_str: &selection_str,
-            object,
-            field_name,
         },
     )?;
 
@@ -167,7 +161,7 @@ fn get_json_selection<'a>(
             code: Code::InvalidJsonSelection,
             message: format!("{coordinate} is empty",),
             locations: selection_arg
-                .line_column_range(source_map)
+                .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         });
@@ -189,11 +183,8 @@ struct SelectionArg<'schema> {
 
 struct ArrowMethodValidator<'a> {
     schema_info: &'a SchemaInfo<'a>,
-    source_map: &'a SourceMap,
-    connect_directive: &'a Node<Directive>,
+    connect_directive: &'a ConnectDirectiveCoordinate<'a>,
     selection_str: &'a GraphQLString<'a>,
-    object: &'a Node<ObjectType>,
-    field_name: &'a Name,
 }
 
 // TODO: validation requires significant knowledge about arrow methods - need a better mechanism
@@ -217,6 +208,7 @@ impl<'a> Visitor for ArrowMethodValidator<'a> {
     type Error = Message;
 
     fn visit(&mut self, part: &SelectionPart) -> Result<(), Self::Error> {
+        let coordinate = SelectionCoordinate::from(*self.connect_directive);
         if let SelectionPart::PathList(PathList::Method(name, args, _)) = part {
             let locations = name
                 .range()
@@ -233,11 +225,6 @@ impl<'a> Visitor for ArrowMethodValidator<'a> {
                         code: Code::UnknownMethod,
                         message: format!(
                             "{coordinate} has a call to an unknown method `{name}`",
-                            coordinate = connect_directive_selection_coordinate(
-                                &self.connect_directive.name,
-                                self.object,
-                                self.field_name,
-                            ),
                             name = name.as_str(),
                         ),
                         locations,
@@ -250,11 +237,6 @@ impl<'a> Visitor for ArrowMethodValidator<'a> {
                             code: Code::IncorrectArity,
                             message: format!(
                                 "{coordinate} calls method `{name}` with the wrong number of arguments - expected {arity}, found {arg_count}",
-                                coordinate = connect_directive_selection_coordinate(
-                                    &self.connect_directive.name,
-                                    self.object,
-                                    self.field_name,
-                                ),
                                 name = name.as_str(),
                             ),
                             locations

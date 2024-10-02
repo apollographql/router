@@ -1079,8 +1079,8 @@ pub(crate) fn parse_string_literal(input: Span) -> IResult<Span, WithRange<Strin
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(super) struct MethodArgs {
-    pub(super) args: Vec<WithRange<LitExpr>>,
+pub(crate) struct MethodArgs {
+    pub(crate) args: Vec<WithRange<LitExpr>>,
     pub(super) range: OffsetRange,
 }
 
