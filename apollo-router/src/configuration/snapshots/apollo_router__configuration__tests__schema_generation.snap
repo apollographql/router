@@ -2171,35 +2171,35 @@ expression: "&schema"
     "DnsResolutionStrategy": {
       "oneOf": [
         {
-          "description": "Only query for A (Ipv4) records",
+          "description": "Only query for `A` (IPv4) records",
           "enum": [
             "ipv4_only"
           ],
           "type": "string"
         },
         {
-          "description": "Only query for AAAA (Ipv6) records",
+          "description": "Only query for `AAAA` (IPv6) records",
           "enum": [
             "ipv6_only"
           ],
           "type": "string"
         },
         {
-          "description": "Query for A and AAAA in parallel",
+          "description": "Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel",
           "enum": [
             "ipv4_and_ipv6"
           ],
           "type": "string"
         },
         {
-          "description": "Query for Ipv6 if that fails, query for Ipv4",
+          "description": "Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records",
           "enum": [
             "ipv6_then_ipv4"
           ],
           "type": "string"
         },
         {
-          "description": "Query for Ipv4 if that fails, query for Ipv6 (default)",
+          "description": "Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records",
           "enum": [
             "ipv4_then_ipv6"
           ],

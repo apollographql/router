@@ -13,15 +13,15 @@ pub(crate) struct Client {
 #[derive(PartialEq, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DnsResolutionStrategy {
-    /// Only query for A (Ipv4) records
+    /// Only query for `A` (IPv4) records
     Ipv4Only,
-    /// Only query for AAAA (Ipv6) records
+    /// Only query for `AAAA` (IPv6) records
     Ipv6Only,
-    /// Query for A and AAAA in parallel
+    /// Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel
     Ipv4AndIpv6,
-    /// Query for Ipv6 if that fails, query for Ipv4
+    /// Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records
     Ipv6ThenIpv4,
     #[default]
-    /// Query for Ipv4 if that fails, query for Ipv6 (default)
+    /// Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records
     Ipv4ThenIpv6,
 }
