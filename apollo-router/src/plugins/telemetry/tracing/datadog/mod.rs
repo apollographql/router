@@ -1,16 +1,16 @@
 //! Configuration for datadog tracing.
 
 mod agent_sampling;
-mod agent_span_processor;
+mod always_sampled_span_processor;
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::time::Duration;
 
 pub(crate) use agent_sampling::AgentSampling;
-pub(crate) use agent_span_processor::BatchSpanProcessor;
 use ahash::HashMap;
 use ahash::HashMapExt;
+pub(crate) use always_sampled_span_processor::BatchSpanProcessor;
 use futures::future::BoxFuture;
 use http::Uri;
 use opentelemetry::sdk;
@@ -228,7 +228,7 @@ impl TracingConfigurator for Config {
 
         Ok(
             if trace.preview_datadog_agent_sampling.unwrap_or_default() {
-                builder.with_span_processor(batch_processor.datadog_agent())
+                builder.with_span_processor(batch_processor.always_sampled())
             } else {
                 builder.with_span_processor(batch_processor)
             },

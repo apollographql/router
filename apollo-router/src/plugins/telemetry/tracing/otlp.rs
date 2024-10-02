@@ -33,7 +33,7 @@ impl TracingConfigurator for super::super::otlp::Config {
         .filtered();
         Ok(
             if common.preview_datadog_agent_sampling.unwrap_or_default() {
-                builder.with_span_processor(batch_span_processor.datadog_agent())
+                builder.with_span_processor(batch_span_processor.always_sampled())
             } else {
                 builder.with_span_processor(batch_span_processor)
             },

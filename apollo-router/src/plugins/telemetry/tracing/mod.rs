@@ -92,7 +92,7 @@ where
     Self: Sized + SpanProcessor,
 {
     fn filtered(self) -> ApolloFilterSpanProcessor<Self>;
-    fn datadog_agent(self) -> BatchSpanProcessor<Self>;
+    fn always_sampled(self) -> BatchSpanProcessor<Self>;
 }
 
 impl<T: SpanProcessor> SpanProcessorExt for T
@@ -105,7 +105,7 @@ where
 
     /// This span processor will always send spans to the exporter even if they are not sampled. This is useful for the datadog agent which
     /// uses spans for metrics.
-    fn datadog_agent(self) -> BatchSpanProcessor<Self> {
+    fn always_sampled(self) -> BatchSpanProcessor<Self> {
         BatchSpanProcessor::new(self)
     }
 }
