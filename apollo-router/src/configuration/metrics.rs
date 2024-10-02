@@ -212,6 +212,14 @@ impl InstrumentData {
             "$.subgraph..response"
         );
         populate_config_instrument!(
+            apollo.router.config.rhai,
+            "$.rhai",
+            opt.scripts,
+            "$[?(@.scripts)]",
+            opt.main,
+            "$[?(@.main)]"
+        );
+        populate_config_instrument!(
             apollo.router.config.persisted_queries,
             "$.persisted_queries[?(@.enabled == true)]",
             opt.log_unknown,
