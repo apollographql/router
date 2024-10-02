@@ -1,0 +1,71 @@
+---
+title: Native Query Planner
+subtitle: Run the Rust-native query planner in GraphOS Router
+minVersion: 1.49.0
+---
+
+<PreviewFeature />
+
+Learn to run the GraphOS Router with the Rust-native query planner and improve your query planning performance and scalability.
+
+## Background about query planner implementations
+
+In v1.49.0 the router introduced a [query planner](/graphos/routing/about-router#query-planning) implemented natively in Rust. This native query planner improves the overall performance and resource utilization of query planning. It exists alongside the legacy JavaScript implementation that uses the V8 JavaScript engine, and it will eventually replace the legacy implementation.
+
+### Comparing query planner implementations
+
+As part of the effort to ensure correctness and stability of the new query planner, starting in v1.53.0 the router enables both the new and legacy planners and runs them in parallel to compare their results by default. After their comparison, the router discards the native query planner's results and uses only the legacy planner to execute requests. The native query planner uses a single thread in the cold path of the router. It has a bounded queue of ten queries. If the queue is full, the router simply does not run the comparison to avoid excessive resource consumption.
+
+## Configuring query planning
+
+You can configure the `experimental_query_planner_mode` option in your `router.yaml` to set the query planner to run.
+
+The `experimental_query_planner_mode` option has the following supported modes:
+
+- `new`- enables only the new Rust-native query planner
+- `legacy` - enables only the legacy JavaScript query planner 
+- `both_best_effort` (default) - enables both new and legacy query planners for comparison. The legacy query planner is used for execution. 
+
+<MinVersion version="1.56.0">
+
+## Optimize native query planner
+
+</MinVersion>
+
+To run the native query planner with the best performance and resource utilization, configure your router with the following options:
+
+```yaml title="router.yaml"
+experimental_query_planner_mode: new
+experimental_introspection_mode: new
+```
+
+Setting `experimental_query_planner_mode: new` and `experimental_introspection_mode: new` not only enables native query planning and schema introspection, it also disables the V8 JavaScript runtime used by the legacy query planner. Disabling V8 frees up CPU and memory and improves native query planning performance.
+
+Additionally, to enable more optimal native query planning and faster throughput by reducing the size of queries sent to subgraphs, you can enable query fragment generation with the following option:
+
+```yaml title="router.yaml"
+supergraph:
+  generate_query_fragments: true
+```
+
+<Note>
+
+Regarding [fragment reuse and generation](/router/configuration/overview#fragment-reuse-and-generation), in the future the `generate_query_fragments` option will be the only option for handling fragments.
+
+</Note>
+
+## Metrics for native query planner
+
+When running both query planners for comparison with `experimental_query_planner_mode: both_best_effort`, the following metrics track mismatches and errors:
+
+- `apollo.router.operations.query_planner.both` with the following attributes:
+    - `generation.is_matched` (bool)
+    - `generation.js_error` (bool)
+    - `generation.rust_error` (bool)
+
+- `apollo.router.query_planning.plan.duration` with the following attributes to differentiate between planners:
+    - `planner` (rust | js)
+
+## Limitations of native query planner
+
+The native query planner doesn't implement `@context`. This is planned to be implemented in a future router release.
