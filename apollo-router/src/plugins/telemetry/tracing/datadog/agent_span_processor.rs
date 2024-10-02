@@ -25,6 +25,8 @@ impl<T: SpanProcessor> SpanProcessor for BatchSpanProcessor<T> {
     }
 
     fn on_end(&self, mut span: SpanData) {
+        // Note that the trace state for measuring and sampling priority is handled in the AgentSampler
+        // The only purpose of this span processor is to ensure that a span can pass through a batch processor.
         let new_trace_flags = span.span_context.trace_flags().with_sampled(true);
         span.span_context = SpanContext::new(
             span.span_context.trace_id(),
