@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::ApplyToError;
@@ -28,6 +30,8 @@ const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
 const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OPERATION";
 
+static LAST_DEBUG_ENABLED_VALUE: AtomicBool = AtomicBool::new(false);
+
 #[derive(Debug, Clone)]
 struct Connectors {
     debug_extensions: bool,
@@ -42,7 +46,15 @@ impl Plugin for Connectors {
         let debug_extensions = init.config.debug_extensions
             || std::env::var(CONNECTORS_DEBUG_ENV).as_deref() == Ok("true");
 
-        if debug_extensions {
+        let last_value = LAST_DEBUG_ENABLED_VALUE.load(Ordering::Relaxed);
+        let swap_result = LAST_DEBUG_ENABLED_VALUE.compare_exchange(
+            last_value,
+            debug_extensions,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+        // Ok means we swapped value, inner value is old value. Ok(false) means we went false -> true
+        if matches!(swap_result, Ok(false)) {
             tracing::warn!(
                 "Connector debugging is enabled, this may expose sensitive information."
             );

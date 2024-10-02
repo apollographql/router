@@ -13,7 +13,8 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use itertools::Itertools;
 
-use super::coordinates::connect_directive_selection_coordinate;
+use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::SelectionCoordinate;
 use super::require_value_is_str;
 use super::Code;
 use super::Message;
@@ -22,53 +23,45 @@ use super::Value;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::json_selection::NamedSelection;
+use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
+use crate::sources::connect::validation::graphql::GraphQLString;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
 pub(super) fn validate_selection(
-    field: &Component<FieldDefinition>,
-    connect_directive: &Node<Directive>,
-    parent_type: &Node<ObjectType>,
-    schema: &Schema,
+    coordinate: ConnectDirectiveCoordinate,
+    schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
-) -> Option<Message> {
-    let (selection_value, json_selection) =
-        match get_json_selection(connect_directive, parent_type, &field.name, &schema.sources) {
-            Ok(selection) => selection,
-            Err(err) => return Some(err),
-        };
+) -> Result<(), Message> {
+    let (selection_arg, json_selection) = get_json_selection(coordinate, &schema.sources)?;
+    let field = coordinate.field_coordinate.field;
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
         // TODO: Validate scalar return types
-        return None;
+        return Ok(());
     };
-    let Some(selection) = json_selection.next_subselection() else {
+    let Some(sub_selection) = json_selection.next_subselection() else {
         // TODO: Validate scalar selections
-        return None;
+        return Ok(());
     };
 
     let group = Group {
-        selection,
+        selection: sub_selection,
         ty: return_type,
         definition: field,
     };
 
     SelectionValidator {
-        root: PathPart::Root(parent_type),
+        root: PathPart::Root(coordinate.field_coordinate.object),
         schema,
         path: Vec::new(),
-        selection_coordinate: connect_directive_selection_coordinate(
-            &connect_directive.name,
-            parent_type,
-            &field.name,
-        ),
-        selection_location: selection_value.line_column_range(&schema.sources),
+        selection_arg,
         seen_fields,
     }
     .walk(group)
-    .err()
 }
 
 pub(super) fn validate_body_selection(
@@ -108,61 +101,49 @@ pub(super) fn validate_body_selection(
 }
 
 fn get_json_selection<'a>(
-    connect_directive: &'a Node<Directive>,
-    object: &Node<ObjectType>,
-    field_name: &Name,
-    source_map: &SourceMap,
-) -> Result<(&'a Node<Value>, JSONSelection), Message> {
+    connect_directive: ConnectDirectiveCoordinate<'a>,
+    source_map: &'a SourceMap,
+) -> Result<(SelectionArg<'a>, JSONSelection), Message> {
+    let coordinate = SelectionCoordinate::from(connect_directive);
     let selection_arg = connect_directive
+        .directive
         .arguments
         .iter()
         .find(|arg| arg.name == CONNECT_SELECTION_ARGUMENT_NAME)
         .ok_or_else(|| Message {
             code: Code::GraphQLError,
-            message: format!(
-                "{coordinate} is required.",
-                coordinate = connect_directive_selection_coordinate(
-                    &connect_directive.name,
-                    object,
-                    field_name
-                ),
-            ),
+            message: format!("{coordinate} is required."),
             locations: connect_directive
+                .directive
                 .line_column_range(source_map)
                 .into_iter()
                 .collect(),
         })?;
-    let selection_str = require_value_is_str(
-        &selection_arg.value,
-        &connect_directive_selection_coordinate(&connect_directive.name, object, field_name),
-        source_map,
-    )?;
+    let selection_str =
+        GraphQLString::new(&selection_arg.value, source_map).map_err(|_| Message {
+            code: Code::GraphQLError,
+            message: format!("{coordinate} must be a string."),
+            locations: selection_arg
+                .line_column_range(source_map)
+                .into_iter()
+                .collect(),
+        })?;
 
-    let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
-        code: Code::InvalidJsonSelection,
-        message: format!(
-            "{coordinate} is not a valid JSONSelection: {err}",
-            coordinate =
-                connect_directive_selection_coordinate(&connect_directive.name, object, field_name),
-        ),
-        locations: selection_arg
-            .value
-            .line_column_range(source_map)
-            .into_iter()
-            .collect(),
-    })?;
+    let (_rest, selection) =
+        JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
+            code: Code::InvalidJsonSelection,
+            message: format!("{coordinate} is not a valid JSONSelection: {err}",),
+            locations: selection_arg
+                .value
+                .line_column_range(source_map)
+                .into_iter()
+                .collect(),
+        })?;
 
     if selection.is_empty() {
         return Err(Message {
             code: Code::InvalidJsonSelection,
-            message: format!(
-                "{coordinate} is empty",
-                coordinate = connect_directive_selection_coordinate(
-                    &connect_directive.name,
-                    object,
-                    field_name
-                ),
-            ),
+            message: format!("{coordinate} is empty",),
             locations: selection_arg
                 .value
                 .line_column_range(source_map)
@@ -171,15 +152,25 @@ fn get_json_selection<'a>(
         });
     }
 
-    Ok((&selection_arg.value, selection))
+    Ok((
+        SelectionArg {
+            value: selection_str,
+            coordinate,
+        },
+        selection,
+    ))
+}
+
+struct SelectionArg<'schema> {
+    value: GraphQLString<'schema>,
+    coordinate: SelectionCoordinate<'schema>,
 }
 
 struct SelectionValidator<'schema, 'a> {
-    schema: &'schema Schema,
+    schema: &'schema SchemaInfo<'schema>,
     root: PathPart<'schema>,
     path: Vec<PathPart<'schema>>,
-    selection_location: Option<Range<LineColumn>>,
-    selection_coordinate: String,
+    selection_arg: SelectionArg<'schema>,
     seen_fields: &'a mut IndexSet<(Name, Name)>,
 }
 
@@ -189,7 +180,7 @@ impl SelectionValidator<'_, '_> {
         field: Field,
         object: &Node<ObjectType>,
     ) -> Result<(), Message> {
-        for seen_part in self.path_with_root() {
+        for (depth, seen_part) in self.path_with_root().enumerate() {
             let (seen_type, ancestor_field) = match seen_part {
                 PathPart::Root(root) => (root, None),
                 PathPart::Field { ty, definition } => (ty, Some(definition)),
@@ -200,20 +191,34 @@ impl SelectionValidator<'_, '_> {
                     code: Code::CircularReference,
                     message: format!(
                         "Circular reference detected in {coordinate}: type `{new_object_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        coordinate = &self.selection_coordinate,
+                        coordinate = &self.selection_arg.coordinate,
                         selection_path = self.path_string(field.definition),
                         new_object_name = object.name,
                     ),
-                    locations:
-                    self.selection_location.iter().cloned()
-                        // Root field includes the selection location, which duplicates the diagnostic
-                        .chain(ancestor_field.and_then(|def| def.line_column_range(&self.schema.sources)))
+                    // TODO: make a helper function for easier range collection
+                    locations: self.get_selection_location(field.selection)
+                        // Skip over fields which duplicate the location of the selection
+                        .chain(if depth > 1 {ancestor_field.and_then(|def| def.line_column_range(&self.schema.sources))} else {None})
                         .chain(field.definition.line_column_range(&self.schema.sources))
                         .collect(),
                 });
             }
         }
         Ok(())
+    }
+
+    fn get_selection_location<T>(
+        &self,
+        selection: &impl Ranged<T>,
+    ) -> impl Iterator<Item = Range<LineColumn>> {
+        selection
+            .range()
+            .and_then(|range| {
+                self.selection_arg
+                    .value
+                    .line_col_for_subslice(range, self.schema)
+            })
+            .into_iter()
     }
 }
 
@@ -283,25 +288,29 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
             definition: group.definition,
             ty: group.ty,
         });
-        group.selection.selections_iter().map(|selection| {
-            let field_name = selection.name();
-            let definition = group.ty.fields.get(field_name).ok_or_else(|| {
-                Message {
-                    code: Code::SelectedFieldNotFound,
-                    message: format!(
-                        "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                        coordinate = &self.selection_coordinate,
-                        parent_type = group.ty.name,
-                    ),
-                    locations: self.selection_location.iter().cloned().collect(),
+        group.selection.selections_iter().flat_map(|selection| {
+            let mut results = Vec::new();
+            for field_name in selection.names() {
+                if let Some(definition) = group.ty.fields.get(field_name) {
+                    results.push(Ok(Field {
+                        selection,
+                        definition,
+                    }));
+                } else {
+                    results.push(Err(Message {
+                        code: Code::SelectedFieldNotFound,
+                        message: format!(
+                            "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
+                            coordinate = &self.selection_arg.coordinate,
+                            parent_type = group.ty.name,
+                        ),
+                        locations: self.get_selection_location(selection).collect(),
+                    }));
                 }
-            })?;
-            Ok(Field {
-                selection,
-                definition,
-            })
+            }
+            results
         }).chain(
-            validate_star_selection(group, self.schema, &self.selection_coordinate, &self.selection_location).into_iter().map(Err)
+            self.validate_star_selection(group).into_iter().map(Err)
         ).collect()
     }
 
@@ -317,13 +326,13 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
     fn visit(&mut self, field: Field<'schema>) -> Result<(), Self::Error> {
         let field_name = field.definition.name.as_str();
         let type_name = field.definition.ty.inner_named_type();
+        let coordinate = self.selection_arg.coordinate;
         let field_type = self.schema.types.get(type_name).ok_or_else(|| Message {
             code: Code::GraphQLError,
             message: format!(
                 "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
-                coordinate = &self.selection_coordinate,
             ),
-            locations: self.selection_location.iter().cloned().collect(),
+            locations: self.get_selection_location(field.selection).collect(),
         })?;
         let is_group = field.selection.next_subselection().is_some();
 
@@ -337,10 +346,9 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                 code: Code::FieldWithArguments,
                 message: format!(
                     "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
-                    coordinate = &self.selection_coordinate,
                     parent_type = self.last_field().ty().name,
                 ),
-                locations: self.selection_location.iter().cloned().chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                locations: self.get_selection_location(field.selection).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
             });
         }
 
@@ -353,21 +361,19 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                     code: Code::GroupSelectionIsNotObject,
                     message: format!(
                         "{coordinate} selects a group `{field_name}{{}}`, but `{parent_type}.{field_name}` is of type `{type_name}` which is not an object.",
-                        coordinate = &self.selection_coordinate,
                         parent_type = self.last_field().ty().name,
                     ),
-                    locations: self.selection_location.iter().cloned().chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                    locations: self.get_selection_location(field.selection).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
                 })
             },
             (ExtendedType::Object(_), false) => {
                 Err(Message {
                     code: Code::GroupSelectionRequiredForObject,
                     message: format!(
-                        "`{parent_type}.{field_name}` is an object, so `{coordinate}` must select a group `{field_name}{{}}`.",
-                        coordinate = &self.selection_coordinate,
+                        "`{parent_type}.{field_name}` is an object, so {coordinate} must select a group `{field_name}{{}}`.",
                         parent_type = self.last_field().ty().name,
                     ),
-                    locations: self.selection_location.iter().cloned().chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                    locations: self.get_selection_location(field.selection).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
                 })
             },
             (_, false) => Ok(()),
@@ -393,103 +399,94 @@ impl SelectionValidator<'_, '_> {
     fn last_field(&self) -> &PathPart {
         self.path.last().unwrap_or(&self.root)
     }
-}
 
-/// When using `*`, it must be mapped to a field via an alias, and the field
-/// must be a non-list custom scalar.
-fn validate_star_selection<'schema>(
-    group: &Group<'schema>,
-    schema: &'schema Schema,
-    selection_coordinate: &str,
-    selection_location: &Option<Range<LineColumn>>,
-) -> Vec<Message> {
-    group
-        .selection
-        .star_iter()
-        .filter_map(|star| {
-            let Some(field_name) = star.alias().map(|a| a.name()) else {
-                return Some(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `*` without an alias. Use `fieldName: *` to map properties to a field.",
-                        coordinate = selection_coordinate,
-                    ),
-                    locations: selection_location.iter().cloned().collect(),
-                });
-            };
+    /// When using `*`, it must be mapped to a field via an alias, and the field
+    /// must be a non-list custom scalar.
+    fn validate_star_selection(&self, group: &Group) -> Vec<Message> {
+        let coordinate = self.selection_arg.coordinate;
+        group
+            .selection
+            .star_iter()
+            .filter_map(|star| {
+                let Some(alias) = star.alias() else {
+                    return Some(Message {
+                        code: Code::InvalidStarSelection,
+                        message: format!(
+                            "{coordinate} contains `*` without an alias. Use `fieldName: *` to map properties to a field.",
+                        ),
+                        locations: self.get_selection_location(star).collect(),
+                    });
+                };
+                let field_name = alias.name();
 
-            let Some(definition) = group.ty.fields.get(field_name) else {
-                return Some(Message {
-                    code: Code::SelectedFieldNotFound,
-                    message: format!(
-                        "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                        coordinate = selection_coordinate,
-                        parent_type = group.ty.name,
-                    ),
-                    locations: selection_location.iter().cloned().collect(),
-                });
-            };
+                let Some(definition) = group.ty.fields.get(field_name) else {
+                    return Some(Message {
+                        code: Code::SelectedFieldNotFound,
+                        message: format!(
+                            "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
+                            parent_type = group.ty.name,
+                        ),
+                        locations: self.get_selection_location(alias).collect(),
+                    });
+                };
 
-            let locations = selection_location.iter().cloned().chain(definition.line_column_range(&schema.sources)).collect();
+                let locations = self.get_selection_location(star).chain(definition.line_column_range(&self.schema.sources));
 
-            if definition.ty.is_list() {
-                return Some(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a list. It must be a non-list custom scalar.",
-                        coordinate = selection_coordinate,
-                        field_name = field_name,
-                        parent_type = group.ty.name,
-                        ty = definition.ty
-                    ),
-                    locations,
-                });
-            }
+                if definition.ty.is_list() {
+                    return Some(Message {
+                        code: Code::InvalidStarSelection,
+                        message: format!(
+                            "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a list. It must be a non-list custom scalar.",
+                            field_name = field_name,
+                            parent_type = group.ty.name,
+                            ty = definition.ty
+                        ),
+                        locations: locations.collect(),
+                    });
+                }
 
-            let Some(ty) = schema.types.get(definition.ty.inner_named_type()) else {
-                return Some(Message {
-                    code: Code::GraphQLError,
-                    message: format!(
-                        "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
-                        coordinate = selection_coordinate,
-                        type_name = definition.ty.inner_named_type()
-                    ),
-                    locations,
-                });
-            };
+                let Some(ty) = self.schema.types.get(definition.ty.inner_named_type()) else {
+                    return Some(Message {
+                        code: Code::GraphQLError,
+                        message: format!(
+                            "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
+                            type_name = definition.ty.inner_named_type()
+                        ),
+                        locations: locations.collect(),
+                    });
+                };
 
-            if !ty.is_scalar() {
-                return Some(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns {ty_kind} type. It must be a non-list custom scalar.",
-                        coordinate = selection_coordinate,
-                        field_name = field_name,
-                        parent_type = group.ty.name,
-                        ty = definition.ty,
-                        ty_kind = type_sentence_part(ty)
-                    ),
-                    locations,
-                });
-            }
+                if !ty.is_scalar() {
+                    return Some(Message {
+                        code: Code::InvalidStarSelection,
+                        message: format!(
+                            "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns {ty_kind} type. It must be a non-list custom scalar.",
+                            field_name = field_name,
+                            parent_type = group.ty.name,
+                            ty = definition.ty,
+                            ty_kind = type_sentence_part(ty)
+                        ),
+                        locations: locations.collect(),
+                    });
+                }
 
-            if ty.is_built_in() {
-                return Some(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a built-in scalar type. It must be a non-list custom scalar.",
-                        coordinate = selection_coordinate,
-                        field_name = field_name,
-                        parent_type = group.ty.name,
-                        ty = definition.ty
-                    ),
-                    locations,
-                });
-            }
+                if ty.is_built_in() {
+                    return Some(Message {
+                        code: Code::InvalidStarSelection,
+                        message: format!(
+                            "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a built-in scalar type. It must be a non-list custom scalar.",
+                            field_name = field_name,
+                            parent_type = group.ty.name,
+                            ty = definition.ty
+                        ),
+                        locations: locations.collect(),
+                    });
+                }
 
-            None
-        })
-        .collect()
+                None
+            })
+            .collect()
+    }
 }
 
 fn type_sentence_part(ty: &ExtendedType) -> String {

@@ -78,5 +78,5 @@ enum link__Purpose {
 type Query
   @join__type(graph: CONNECTORS)
 {
-  commits(owner: String!, repo: String!): [Commit] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/repos/{$args.owner}/{$args.repo}/commits"}, selection: "commit {\n  name_from_path: .author.name\n  by: {\n    name: .author.name\n    email: .author.email\n    owner: $args.owner\n  }\n}"})
+  commits(owner: String!, repo: String!): [Commit] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/repos/{$args.owner}/{$args.repo}/commits"}, selection: "commit {\n  name_from_path: author.name\n  by: {\n    name: author.name\n    email: author.email\n    owner: $args.owner\n  }\n}"})
 }

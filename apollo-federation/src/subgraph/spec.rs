@@ -722,7 +722,17 @@ impl Default for LinkSpecDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::database::federation_link_identity;
+    use crate::link::spec::Identity;
+    use crate::link::spec::APOLLO_SPEC_DOMAIN;
+
+    // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
+    // to define the ground work for that in `apollo-at-link` first.
+    fn federation_link_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("federation"),
+        }
+    }
 
     #[test]
     fn handle_unsupported_federation_version() {

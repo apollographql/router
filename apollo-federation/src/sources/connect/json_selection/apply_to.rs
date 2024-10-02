@@ -256,12 +256,56 @@ impl ApplyToInternal for NamedSelection {
                     ));
                 }
             }
-            Self::Path(alias, path_selection) => {
+            Self::Path(alias_opt, path_selection) => {
                 let (value_opt, apply_errors) =
                     path_selection.apply_to_path(data, vars, input_path);
                 errors.extend(apply_errors);
-                if let Some(value) = value_opt {
-                    output.insert(alias.name(), value);
+
+                if let Some(alias) = alias_opt {
+                    // Handle the NamedPathSelection case.
+                    if let Some(value) = value_opt {
+                        output.insert(alias.name(), value);
+                    }
+                } else if let Some(sub) = path_selection.next_subselection() {
+                    match value_opt {
+                        Some(JSON::Object(value)) => {
+                            // Handle the PathWithSubSelection case.
+                            // TODO Define merge semantics in case of key collisions?
+                            output.extend(value);
+                        }
+                        // To be consistent with NamedSelection::apply_to_path, we
+                        // also report errors accessing properties of the
+                        // non-object value, which are reported by
+                        // path_selection.apply_to_path above.
+                        Some(value) => {
+                            errors.push(ApplyToError::new(
+                                format!("Expected object, not {}", json_type_name(&value)),
+                                // Since the path_selection.apply_to_path
+                                // execution stack has been unwound by this
+                                // point, input_path does not include the path
+                                // itself, but may include ancestor path items.
+                                input_path.to_vec(),
+                                sub.range(),
+                            ));
+                        }
+                        None => {
+                            errors.push(ApplyToError::new(
+                                "Expected object, not nothing (see other errors)".to_string(),
+                                input_path.to_vec(),
+                                sub.range(),
+                            ));
+                        }
+                    };
+                } else {
+                    // This error case should never happen if the selection was
+                    // constructed by parsing, because the presence of the
+                    // SubSelection (in the absence of an Alias) is enforced by
+                    // NamedSelection::parse_path.
+                    errors.push(ApplyToError::new(
+                        "Path without alias must have subselection".to_string(),
+                        input_path.to_vec(),
+                        path_selection.range(),
+                    ));
                 }
             }
             Self::Group(alias, sub_selection) => {
@@ -378,13 +422,16 @@ impl ApplyToInternal for WithRange<PathList> {
                 .apply_to_path(data, vars, input_path)
                 .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path)),
             PathList::Method(method_name, method_args, tail) => {
+                let method_path =
+                    input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
+
                 if let Some(method) = lookup_arrow_method(method_name) {
                     method(
                         method_name,
                         method_args.as_ref(),
                         data,
                         vars,
-                        input_path,
+                        &method_path,
                         tail,
                     )
                 } else {
@@ -392,7 +439,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         None,
                         vec![ApplyToError::new(
                             format!("Method ->{} not found", method_name.as_ref()),
-                            input_path.to_vec(),
+                            method_path.to_vec(),
                             method_name.range(),
                         )],
                     )
@@ -615,10 +662,10 @@ mod tests {
             }),
         );
 
-        check_ok(selection!(".nested.hello"), json!("world"));
+        check_ok(selection!("nested.hello"), json!("world"));
         check_ok(selection!("$.nested.hello"), json!("world"));
 
-        check_ok(selection!(".nested.world"), json!("hello"));
+        check_ok(selection!("nested.world"), json!("hello"));
         check_ok(selection!("$.nested.world"), json!("hello"));
 
         check_ok(
@@ -655,7 +702,7 @@ mod tests {
         );
 
         check_ok(
-            selection!(".array { hello }"),
+            selection!("$.array { hello }"),
             json!([
                 { "hello": "world 0" },
                 { "hello": "world 1" },
@@ -664,7 +711,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("worlds: .array.hello"),
+            selection!("worlds: array.hello"),
             json!({
                 "worlds": [
                     "world 0",
@@ -686,7 +733,7 @@ mod tests {
         );
 
         check_ok(
-            selection!(".array.hello"),
+            selection!("array.hello"),
             json!(["world 0", "world 1", "world 2",]),
         );
 
@@ -696,7 +743,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("nested grouped: { hello worlds: .array.hello }"),
+            selection!("nested grouped: { hello worlds: array.hello }"),
             json!({
                 "nested": {
                     "hello": "world",
@@ -797,7 +844,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("englishAndGreekLetters { C: .c.en * { gr }}"),
+            selection!("englishAndGreekLetters { C: c.en * { gr }}"),
             json!({
                 "englishAndGreekLetters": {
                     "a": { "gr": "alpha" },
@@ -827,7 +874,7 @@ mod tests {
         );
 
         check_ok(
-            selection!(".'englishAndSpanishNumbers' { en rest: * }"),
+            selection!("$.'englishAndSpanishNumbers' { en rest: * }"),
             json!([
                 { "en": "one", "rest": { "es": "uno" } },
                 { "en": "two", "rest": { "es": "dos" } },
@@ -861,7 +908,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("asciiCharCodes { * } gee: .asciiCharCodes.G"),
+            selection!("asciiCharCodes { * } gee: asciiCharCodes.G"),
             json!({
                 "asciiCharCodes": data.get("asciiCharCodes").unwrap(),
                 "gee": 71,
@@ -937,16 +984,12 @@ mod tests {
             (Some(json!({})), make_yellow_errors_expected(0..6)),
         );
         assert_eq!(
-            selection!(".yellow").apply_to(&data),
-            (None, make_yellow_errors_expected(1..7)),
-        );
-        assert_eq!(
             selection!("$.yellow").apply_to(&data),
             (None, make_yellow_errors_expected(2..8)),
         );
 
         assert_eq!(
-            selection!(".nested.hello").apply_to(&data),
+            selection!("nested.hello").apply_to(&data),
             (Some(json!(123)), vec![],)
         );
 
@@ -963,8 +1006,12 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected(8..16),
+            selection!("nested.'yellow'").apply_to(&data),
+            make_quoted_yellow_expected(7..15),
+        );
+        assert_eq!(
+            selection!("nested.\"yellow\"").apply_to(&data),
+            make_quoted_yellow_expected(7..15),
         );
         assert_eq!(
             selection!("$.nested.'yellow'").apply_to(&data),
@@ -994,12 +1041,12 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".nested { hola yellow world }").apply_to(&data),
-            make_nested_path_expected((10, 14), (15, 21)),
-        );
-        assert_eq!(
             selection!("$.nested { hola yellow world }").apply_to(&data),
             make_nested_path_expected((11, 15), (16, 22)),
+        );
+        assert_eq!(
+            selection!(" $ . nested { hola yellow world } ").apply_to(&data),
+            make_nested_path_expected((14, 18), (19, 25)),
         );
 
         fn make_partial_array_expected(
@@ -1028,16 +1075,16 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!("partial: .array { hello goodbye }").apply_to(&data),
-            make_partial_array_expected((24, 31)),
-        );
-        assert_eq!(
             selection!("partial: $.array { hello goodbye }").apply_to(&data),
             make_partial_array_expected((25, 32)),
         );
+        assert_eq!(
+            selection!(" partial : $ . array { hello goodbye } ").apply_to(&data),
+            make_partial_array_expected((29, 36)),
+        );
 
         assert_eq!(
-            selection!("good: .array.hello bad: .array.smello").apply_to(&data),
+            selection!("good: array.hello bad: array.smello").apply_to(&data),
             (
                 Some(json!({
                     "good": [
@@ -1055,12 +1102,12 @@ mod tests {
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
-                        "range": [31, 37],
+                        "range": [29, 35],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
-                        "range": [31, 37],
+                        "range": [29, 35],
                     })),
                 ],
             )
@@ -1092,7 +1139,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(".nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("$.nested { grouped: { hello smelly world } }").apply_to(&data),
             (
                 Some(json!({
                     "grouped": {
@@ -1103,13 +1150,13 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
-                    "range": [27, 33],
+                    "range": [28, 34],
                 })),],
             )
         );
 
         assert_eq!(
-            selection!("alias: .nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("alias: $.nested { grouped: { hello smelly world } }").apply_to(&data),
             (
                 Some(json!({
                     "alias": {
@@ -1122,7 +1169,7 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
-                    "range": [34, 40],
+                    "range": [35, 41],
                 }))],
             )
         );
@@ -1175,8 +1222,8 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_expected((15, 16)),
+            selection!("arrayOfArrays.x").apply_to(&data),
+            make_array_of_arrays_x_expected((14, 15)),
         );
         assert_eq!(
             selection!("$.arrayOfArrays.x").apply_to(&data),
@@ -1214,8 +1261,8 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".arrayOfArrays.y").apply_to(&data),
-            make_array_of_arrays_y_expected((15, 16)),
+            selection!("arrayOfArrays.y").apply_to(&data),
+            make_array_of_arrays_y_expected((14, 15)),
         );
         assert_eq!(
             selection!("$.arrayOfArrays.y").apply_to(&data),
@@ -1332,8 +1379,8 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!("ys: .arrayOfArrays.y xs: .arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_y_expected((40, 41), (19, 20)),
+            selection!("ys: arrayOfArrays.y xs: arrayOfArrays.x").apply_to(&data),
+            make_array_of_arrays_x_y_expected((38, 39), (18, 19)),
         );
         assert_eq!(
             selection!("ys: $.arrayOfArrays.y xs: $.arrayOfArrays.x").apply_to(&data),
@@ -1663,6 +1710,520 @@ mod tests {
     }
 
     #[test]
+    fn test_inline_paths_with_subselections() {
+        let data = json!({
+            "id": 123,
+            "created": "2021-01-01T00:00:00Z",
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "The capital of Australia is Canberra.",
+                },
+            }, {
+                "index": 1,
+                "message": {
+                    "role": "assistant",
+                    "content": "The capital of Australia is Sydney.",
+                },
+            }],
+        });
+
+        {
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                    "role": "assistant",
+                    "content": "The capital of Australia is Canberra.",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    role: choices->first.message.role
+                    content: choices->first.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        role
+                        content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    choices->first.message {
+                        role
+                        content
+                    }
+                    created
+                    model
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+
+        {
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                    "role": "assistant",
+                    "message": "The capital of Australia is Sydney.",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    role: choices->last.message.role
+                    message: choices->last.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->last.message {
+                        role
+                        message: content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    created
+                    choices->last.message {
+                        message: content
+                        role
+                    }
+                    model
+                    id
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+
+        {
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                    "role": "assistant",
+                    "correct": "The capital of Australia is Canberra.",
+                    "incorrect": "The capital of Australia is Sydney.",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    role: choices->first.message.role
+                    correct: choices->first.message.content
+                    incorrect: choices->last.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        role
+                        correct: content
+                    }
+                    choices->last.message {
+                        incorrect: content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        role
+                        correct: content
+                    }
+                    incorrect: choices->last.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        correct: content
+                    }
+                    choices->last.message {
+                        role
+                        incorrect: content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    correct: choices->first.message.content
+                    choices->last.message {
+                        role
+                        incorrect: content
+                    }
+                    model
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+
+        {
+            let data = json!({
+                "from": "data",
+            });
+
+            let vars = {
+                let mut vars = IndexMap::default();
+                vars.insert(
+                    "$this".to_string(),
+                    json!({
+                        "id": 1234,
+                    }),
+                );
+                vars.insert(
+                    "$args".to_string(),
+                    json!({
+                        "input": {
+                            "title": "The capital of Australia",
+                            "body": "Canberra",
+                        },
+                        "extra": "extra",
+                    }),
+                );
+                vars
+            };
+
+            let expected = (
+                Some(json!({
+                    "id": 1234,
+                    "title": "The capital of Australia",
+                    "body": "Canberra",
+                    "from": "data",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id: $this.id
+                    $args.input {
+                        title
+                        body
+                    }
+                    from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    from
+                    $args.input { title body }
+                    id: $this.id
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    $args.input { body title }
+                    from
+                    id: $this.id
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id: $this.id
+                    $args { $.input { title body } }
+                    from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id: $this.id
+                    $args { $.input { title body } extra }
+                    from: $.from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                (
+                    Some(json!({
+                        "id": 1234,
+                        "title": "The capital of Australia",
+                        "body": "Canberra",
+                        "extra": "extra",
+                        "from": "data",
+                    })),
+                    vec![],
+                ),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    # Equivalent to id: $this.id
+                    $this { id }
+
+                    $args {
+                        __typename: $("Args")
+
+                        # Requiring $. instead of just . prevents .input from
+                        # parsing as a key applied to the $("Args") string.
+                        $.input { title body }
+
+                        extra
+                    }
+
+                    from: $.from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                (
+                    Some(json!({
+                        "id": 1234,
+                        "title": "The capital of Australia",
+                        "body": "Canberra",
+                        "__typename": "Args",
+                        "extra": "extra",
+                        "from": "data",
+                    })),
+                    vec![],
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn test_inline_path_errors() {
+        {
+            let data = json!({
+                "id": 123,
+                "created": "2021-01-01T00:00:00Z",
+                "model": "gpt-4o",
+                "choices": [{
+                    "message": "The capital of Australia is Canberra.",
+                }, {
+                    "message": "The capital of Australia is Sydney.",
+                }],
+            });
+
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                })),
+                vec![
+                    ApplyToError::new(
+                        "Property .role not found in string".to_string(),
+                        vec![
+                            json!("choices"),
+                            json!("->first"),
+                            json!("message"),
+                            json!("role"),
+                        ],
+                        Some(123..127),
+                    ),
+                    ApplyToError::new(
+                        "Property .content not found in string".to_string(),
+                        vec![
+                            json!("choices"),
+                            json!("->first"),
+                            json!("message"),
+                            json!("content"),
+                        ],
+                        Some(128..135),
+                    ),
+                    ApplyToError::new(
+                        "Expected object, not string".to_string(),
+                        vec![],
+                        // This is the range of the { role content } subselection.
+                        Some(121..137),
+                    ),
+                ],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message { role content }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+
+        assert_eq!(
+            selection!("id nested.path.nonexistent { name }").apply_to(&json!({
+                "id": 2345,
+                "nested": {
+                    "path": "nested path value",
+                },
+            })),
+            (
+                Some(json!({
+                    "id": 2345,
+                })),
+                vec![
+                    ApplyToError::new(
+                        "Property .nonexistent not found in string".to_string(),
+                        vec![json!("nested"), json!("path"), json!("nonexistent")],
+                        Some(15..26),
+                    ),
+                    ApplyToError::new(
+                        "Expected object, not nothing (see other errors)".to_string(),
+                        vec![],
+                        // This is the range of the { name } subselection.
+                        Some(27..35),
+                    ),
+                ],
+            ),
+        );
+
+        // We have to construct this invalid selection manually because we want
+        // to test an error case requiring a PathWithSubSelection that does not
+        // actually have a SubSelection, which should not be possible to
+        // construct through normal parsing.
+        let invalid_inline_path_selection = JSONSelection::Named(SubSelection {
+            selections: vec![NamedSelection::Path(
+                None,
+                PathSelection {
+                    path: PathList::Key(
+                        Key::field("some").into_with_range(),
+                        PathList::Key(
+                            Key::field("number").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                },
+            )],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            invalid_inline_path_selection.apply_to(&json!({
+                "some": {
+                    "number": 579,
+                },
+            })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Path without alias must have subselection".to_string(),
+                    vec![],
+                    // No range because this is a manually constructed selection.
+                    None,
+                ),],
+            ),
+        );
+    }
+
+    #[test]
     fn test_apply_to_non_identifier_properties() {
         let data = json!({
             "not an identifier": [
@@ -1697,12 +2258,17 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(".'not an identifier'.'also.not.an.identifier'").apply_to(&data),
+            selection!("'not an identifier'.'also.not.an.identifier'").apply_to(&data),
             (Some(json!([0, 1, 2])), vec![],),
         );
 
         assert_eq!(
-            selection!(".\"not an identifier\" { safe: \"also.not.an.identifier\" }")
+            selection!("$.'not an identifier'.'also.not.an.identifier'").apply_to(&data),
+            (Some(json!([0, 1, 2])), vec![],),
+        );
+
+        assert_eq!(
+            selection!("$.\"not an identifier\" { safe: \"also.not.an.identifier\" }")
                 .apply_to(&data),
             (
                 Some(json!([
@@ -1738,12 +2304,17 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(".another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
+            selection!("another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
             (Some(json!(true)), vec![],),
         );
 
         assert_eq!(
-            selection!(".another.'pesky string literal!'.\"identifier\"").apply_to(&data),
+            selection!("another.'pesky string literal!'.\"identifier\"").apply_to(&data),
+            (Some(json!(123)), vec![],),
+        );
+
+        assert_eq!(
+            selection!("$.another.'pesky string literal!'.\"identifier\"").apply_to(&data),
             (Some(json!(123)), vec![],),
         );
     }

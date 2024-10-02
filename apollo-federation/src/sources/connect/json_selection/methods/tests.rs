@@ -215,7 +215,7 @@ fn test_missing_method() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->bogus not found",
-                "path": ["nested", "path"],
+                "path": ["nested", "path", "->bogus"],
                 "range": [13, 18],
             }))],
         ),
@@ -362,6 +362,7 @@ fn test_match_methods() {
     );
 }
 
+#[test]
 fn test_arithmetic_methods() {
     assert_eq!(
         selection!("$->add(1)").apply_to(&json!(2)),
@@ -507,7 +508,7 @@ fn test_array_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(3) index out of bounds",
-                "path": [],
+                "path": ["->get"],
                 "range": [7, 8],
             }))]
         ),
@@ -519,7 +520,7 @@ fn test_array_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(-4) index out of bounds",
-                "path": [],
+                "path": ["->get"],
                 "range": [7, 9],
             }))]
         ),
@@ -531,7 +532,7 @@ fn test_array_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get requires an argument",
-                "path": [],
+                "path": ["->get"],
                 "range": [3, 6],
             }))]
         ),
@@ -543,7 +544,7 @@ fn test_array_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(\"bogus\") requires an object input",
-                "path": [],
+                "path": ["->get"],
                 "range": [3, 15],
             }))]
         ),
@@ -598,7 +599,7 @@ fn test_size_method_errors() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->size requires an array, string, or object input, not null",
-                "path": [],
+                "path": ["->size"],
                 "range": [3, 7],
             }))]
         ),
@@ -610,7 +611,7 @@ fn test_size_method_errors() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->size requires an array, string, or object input, not boolean",
-                "path": [],
+                "path": ["->size"],
                 "range": [3, 7],
             }))]
         ),
@@ -624,7 +625,7 @@ fn test_size_method_errors() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->size requires an array, string, or object input, not number",
-                "path": ["count"],
+                "path": ["count", "->size"],
                 "range": [7, 11],
             }))]
         ),
@@ -684,7 +685,7 @@ fn test_string_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(4) index out of bounds",
-                "path": [],
+                "path": ["->get"],
                 "range": [7, 8],
             }))]
         ),
@@ -695,7 +696,7 @@ fn test_string_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(-10) index out of bounds",
-                "path": [],
+                "path": ["->get"],
                 "range": [7, 26],
             }))],
         );
@@ -719,7 +720,7 @@ fn test_string_methods() {
                 None,
                 vec![ApplyToError::from_json(&json!({
                     "message": "Method ->get(-10) index out of bounds",
-                    "path": [],
+                    "path": ["->get"],
                     "range": [12, 42],
                 }))]
             )
@@ -733,7 +734,7 @@ fn test_string_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(true) requires an integer or string argument",
-                "path": [],
+                "path": ["->get"],
                 "range": [7, 11],
             }))]
         ),
@@ -889,7 +890,7 @@ fn test_object_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(\"d\") object key not found",
-                "path": [],
+                "path": ["->get"],
                 "range": [7, 10],
             }))]
         ),
@@ -935,7 +936,7 @@ fn test_object_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->keys requires an object input, not number",
-                "path": ["notAnObject"],
+                "path": ["notAnObject", "->keys"],
                 "range": [13, 17],
             }))]
         ),
@@ -963,7 +964,7 @@ fn test_object_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->values requires an object input, not null",
-                "path": ["notAnObject"],
+                "path": ["notAnObject", "->values"],
                 "range": [13, 19],
             }))]
         ),
@@ -1022,7 +1023,7 @@ fn test_object_methods() {
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->entries requires an object input, not boolean",
-                "path": ["notAnObject"],
+                "path": ["notAnObject", "->entries"],
                 "range": [13, 20],
             }))]
         ),

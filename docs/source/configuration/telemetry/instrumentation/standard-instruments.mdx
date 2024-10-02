@@ -78,7 +78,7 @@ The coprocessor operations metric has the following attributes:
 
 </Tip>
 
-- `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
+- `apollo_router_uplink_fetch_duration_seconds` - Uplink request duration, attributes:
   - `url`: The Uplink URL that was polled
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
@@ -115,7 +115,7 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
   - `report.type`: The type of report submitted: "traces" or "metrics"
-  - `report.protocol`: Either "apollo" or "otlp", depending on the experimental_otlp_tracing_sampler configuration.
+  - `report.protocol`: Either "apollo" or "otlp", depending on the otlp_tracing_sampler configuration.
 
 ### Deprecated
 

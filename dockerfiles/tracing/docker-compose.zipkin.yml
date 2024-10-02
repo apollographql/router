@@ -1,10 +1,9 @@
 version: "3.9"
 services:
-
   apollo-router:
     container_name: apollo-router
     build: ./router
-    image: ghcr.io/apollographql/router:v2.0.0-alpha.7
+    image: ghcr.io/apollographql/router:v2.0.0-preview.0
     volumes:
       - ./supergraph.graphql:/etc/config/supergraph.graphql
       - ./router/zipkin.router.yaml:/etc/config/configuration.yaml
@@ -15,7 +14,7 @@ services:
         "-s",
         "/etc/config/supergraph.graphql",
         "--log",
-        "info"
+        "info",
       ]
     ports:
       - 4000:4000

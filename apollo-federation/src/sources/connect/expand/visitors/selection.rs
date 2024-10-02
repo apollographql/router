@@ -39,85 +39,93 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
         ))?;
 
         // Get the type of the field so we know how to visit it
-        let field_name = Name::new(field.name())?;
-        let field = definition
-            .field(field_name.clone())
-            .get(self.original_schema.schema())?;
-        let field_type = self
-            .original_schema
-            .get_type(field.ty.inner_named_type().clone())?;
-        let extended_field_type = field_type.get(self.original_schema.schema())?;
+        for field_name in field.names() {
+            let field_name = Name::new(field_name)?;
+            let field = definition
+                .field(field_name.clone())
+                .get(self.original_schema.schema())?;
+            let field_type = self
+                .original_schema
+                .get_type(field.ty.inner_named_type().clone())?;
+            let extended_field_type = field_type.get(self.original_schema.schema())?;
 
-        // We only need to care about the type of the field if it isn't built-in
-        if !extended_field_type.is_built_in() {
-            match field_type {
-                TypeDefinitionPosition::Scalar(scalar) => {
-                    let def = scalar.get(self.original_schema.schema())?;
-                    let def = ScalarType {
-                        description: def.description.clone(),
-                        name: def.name.clone(),
-                        directives: filter_directives(self.directive_deny_list, &def.directives),
-                    };
+            // We only need to care about the type of the field if it isn't built-in
+            if !extended_field_type.is_built_in() {
+                match field_type {
+                    TypeDefinitionPosition::Scalar(scalar) => {
+                        let def = scalar.get(self.original_schema.schema())?;
+                        let def = ScalarType {
+                            description: def.description.clone(),
+                            name: def.name.clone(),
+                            directives: filter_directives(
+                                self.directive_deny_list,
+                                &def.directives,
+                            ),
+                        };
 
-                    try_pre_insert!(self.to_schema, scalar)?;
-                    try_insert!(self.to_schema, scalar, Node::new(def))?;
-                }
-                TypeDefinitionPosition::Enum(r#enum) => {
-                    let def = r#enum.get(self.original_schema.schema())?;
-                    let def = EnumType {
-                        description: def.description.clone(),
-                        name: def.name.clone(),
-                        directives: filter_directives(self.directive_deny_list, &def.directives),
-                        values: def.values.clone(),
-                    };
+                        try_pre_insert!(self.to_schema, scalar)?;
+                        try_insert!(self.to_schema, scalar, Node::new(def))?;
+                    }
+                    TypeDefinitionPosition::Enum(r#enum) => {
+                        let def = r#enum.get(self.original_schema.schema())?;
+                        let def = EnumType {
+                            description: def.description.clone(),
+                            name: def.name.clone(),
+                            directives: filter_directives(
+                                self.directive_deny_list,
+                                &def.directives,
+                            ),
+                            values: def.values.clone(),
+                        };
 
-                    try_pre_insert!(self.to_schema, r#enum)?;
-                    try_insert!(self.to_schema, r#enum, Node::new(def))?;
-                }
+                        try_pre_insert!(self.to_schema, r#enum)?;
+                        try_insert!(self.to_schema, r#enum, Node::new(def))?;
+                    }
 
-                // This will be handled by the rest of the visitor
-                TypeDefinitionPosition::Object(_) => {}
+                    // This will be handled by the rest of the visitor
+                    TypeDefinitionPosition::Object(_) => {}
 
-                // These will be handled later
-                TypeDefinitionPosition::Union(_) => {
-                    return Err(FederationError::internal(
-                        "unions are not yet handled for expansion",
-                    ))
-                }
+                    // These will be handled later
+                    TypeDefinitionPosition::Union(_) => {
+                        return Err(FederationError::internal(
+                            "unions are not yet handled for expansion",
+                        ))
+                    }
 
-                // Anything else is not supported
-                TypeDefinitionPosition::InputObject(input) => {
-                    return Err(FederationError::internal(format!(
-                        "expected field to be a leaf or object type, found: input {}",
-                        input.type_name,
-                    )))
-                }
-                TypeDefinitionPosition::Interface(interface) => {
-                    return Err(FederationError::internal(format!(
-                        "expected field to be a leaf or object type, found: interface {}",
-                        interface.type_name,
-                    )))
-                }
-            };
-        }
-
-        // Add the field to the currently processing object, making sure to not overwrite if it already
-        // exists (and verify that we didn't change the type)
-        let new_field = FieldDefinition {
-            description: field.description.clone(),
-            name: field.name.clone(),
-            arguments: field.arguments.clone(),
-            ty: field.ty.clone(),
-            directives: filter_directives(self.directive_deny_list, &field.directives),
-        };
-        if let Some(old_field) = r#type.fields.get(&field_name) {
-            if *old_field.deref().deref() != new_field {
-                return Err(FederationError::internal(
-                   format!( "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"),
-                ));
+                    // Anything else is not supported
+                    TypeDefinitionPosition::InputObject(input) => {
+                        return Err(FederationError::internal(format!(
+                            "expected field to be a leaf or object type, found: input {}",
+                            input.type_name,
+                        )))
+                    }
+                    TypeDefinitionPosition::Interface(interface) => {
+                        return Err(FederationError::internal(format!(
+                            "expected field to be a leaf or object type, found: interface {}",
+                            interface.type_name,
+                        )))
+                    }
+                };
             }
-        } else {
-            r#type.fields.insert(field_name, Component::new(new_field));
+
+            // Add the field to the currently processing object, making sure to not overwrite if it already
+            // exists (and verify that we didn't change the type)
+            let new_field = FieldDefinition {
+                description: field.description.clone(),
+                name: field.name.clone(),
+                arguments: field.arguments.clone(),
+                ty: field.ty.clone(),
+                directives: filter_directives(self.directive_deny_list, &field.directives),
+            };
+            if let Some(old_field) = r#type.fields.get(&field_name) {
+                if *old_field.deref().deref() != new_field {
+                    return Err(FederationError::internal(
+                    format!( "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"),
+                    ));
+                }
+            } else {
+                r#type.fields.insert(field_name, Component::new(new_field));
+            }
         }
 
         Ok(())
@@ -134,21 +142,26 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
         let (definition, _) = self.type_stack.last().ok_or(FederationError::internal(
             "tried to get fields on a group not yet visited",
         ))?;
-        let field_name = Name::new(field.name())?;
 
-        let field_type_name = definition
-            .field(field_name)
-            .get(self.original_schema.schema())?
-            .ty
-            .inner_named_type();
+        match field.names().first() {
+            Some(field_name) => {
+                let field_name = Name::new(field_name)?;
+                let field_type_name = definition
+                    .field(field_name)
+                    .get(self.original_schema.schema())?
+                    .ty
+                    .inner_named_type();
 
-        let TypeDefinitionPosition::Object(field_type) =
-            self.original_schema.get_type(field_type_name.clone())?
-        else {
-            return Ok(None);
-        };
+                let TypeDefinitionPosition::Object(field_type) =
+                    self.original_schema.get_type(field_type_name.clone())?
+                else {
+                    return Ok(None);
+                };
 
-        Ok(field.next_subselection().cloned().map(|s| (field_type, s)))
+                Ok(field.next_subselection().cloned().map(|s| (field_type, s)))
+            }
+            None => Ok(None),
+        }
     }
 
     fn enter_group(
@@ -169,7 +182,7 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
         self.type_stack.push((group_type.clone(), sub_type));
         Ok(group
             .selections_iter()
-            .sorted_by_key(|s| s.name())
+            .sorted_by_key(|s| s.names())
             .cloned()
             .chain(group.star_iter().map(|s| {
                 NamedSelection::Field(s.alias().cloned(), Key::field("").into_with_range(), None)

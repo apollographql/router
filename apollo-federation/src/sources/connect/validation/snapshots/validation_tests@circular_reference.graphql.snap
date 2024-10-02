@@ -8,8 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/circular_
         code: CircularReference,
         message: "Circular reference detected in `@connect(selection:)` on `Query.me`: type `User` appears more than once in `Query.me.friends`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
         locations: [
-            9:61..9:78,
-            8:5..9:79,
+            9:65..9:77,
             14:5..14:22,
         ],
     },
