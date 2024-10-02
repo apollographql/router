@@ -240,7 +240,9 @@ impl EventDynAttribute for ::tracing::Span {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
-                    None => eprintln!("no spanref, this is a bug"),
+                    None => {
+                        eprintln!("no spanref, this is a bug");
+                    }
                     Some(s) => {
                         if s.is_sampled() {
                             let mut extensions = s.extensions_mut();

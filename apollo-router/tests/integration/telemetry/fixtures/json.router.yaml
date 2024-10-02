@@ -68,6 +68,12 @@ telemetry:
             eq:
               - "log"
               - response_header: "x-log-request"
+        my.response_event.on_event:
+          message: "my response event message"
+          level: warn
+          on: event_response
+          attributes:
+            on_supergraph_response_event: on_supergraph_event
       subgraph:
         # Standard events
         request: info

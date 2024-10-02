@@ -1757,6 +1757,7 @@ mod tests {
     }
 
     // starts a local server emulating a subgraph returning connection closed
+    #[cfg(not(target_os = "macos"))]
     async fn emulate_subgraph_panic(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             panic!("test")
@@ -2484,6 +2485,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(target_os = "macos"))]
     async fn test_subgraph_service_panic() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();

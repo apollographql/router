@@ -69,7 +69,7 @@ pub(crate) struct QueryGraphNode {
 }
 
 impl QueryGraphNode {
-    pub fn is_root_node(&self) -> bool {
+    pub(crate) fn is_root_node(&self) -> bool {
         matches!(self.type_, QueryGraphNodeType::FederatedRootType(_))
     }
 }
@@ -528,10 +528,6 @@ impl QueryGraph {
             })
     }
 
-    pub(crate) fn non_trivial_followup_edges(&self) -> &IndexMap<EdgeIndex, Vec<EdgeIndex>> {
-        &self.non_trivial_followup_edges
-    }
-
     /// All outward edges from the given node (including self-key and self-root-type-resolution
     /// edges). Primarily used by `@defer`, when needing to re-enter a subgraph for a deferred
     /// section.
@@ -906,7 +902,10 @@ impl QueryGraph {
 
         ty.directives()
             .get_all(&key_directive_definition.name)
-            .filter_map(|key| key.argument_by_name("fields").and_then(|arg| arg.as_str()))
+            .filter_map(|key| {
+                key.specified_argument_by_name("fields")
+                    .and_then(|arg| arg.as_str())
+            })
             .map(|value| parse_field_set(schema, ty.name().clone(), value))
             .find_ok(|selection| {
                 !metadata
