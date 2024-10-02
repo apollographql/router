@@ -14,7 +14,7 @@ In v1.49.0 the router introduced a [query planner](/graphos/routing/about-router
 
 ### Comparing query planner implementations
 
-As part of the effort to ensure correctness and stability of the new query planner, starting in v1.53.0 the router can enable both the new and legacy planners and run them in parallel to compare their results by default. After their comparison, the router discards the native query planner's results and uses only the legacy planner to execute requests. The native query planner uses a single thread in the cold path of the router. It has a bounded queue of ten queries. If the queue is full, the router simply does not run the comparison to avoid excessive resource consumption.
+As part of the effort to ensure correctness and stability of the new query planner, starting in v1.53.0 the router enables both the new and legacy planners and runs them in parallel to compare their results by default. After their comparison, the router discards the native query planner's results and uses only the legacy planner to execute requests. The native query planner uses a single thread in the cold path of the router. It has a bounded queue of ten queries. If the queue is full, the router simply does not run the comparison to avoid excessive resource consumption.
 
 ## Configuring query planning
 
