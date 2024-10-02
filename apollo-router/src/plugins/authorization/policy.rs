@@ -111,7 +111,7 @@ fn policy_argument(
     opt_directive: Option<&impl AsRef<ast::Directive>>,
 ) -> impl Iterator<Item = String> + '_ {
     opt_directive
-        .and_then(|directive| directive.as_ref().argument_by_name("policies"))
+        .and_then(|directive| directive.as_ref().specified_argument_by_name("policies"))
         // outer array
         .and_then(|value| value.as_list())
         .into_iter()
@@ -205,7 +205,7 @@ fn policies_sets_argument(
     directive: &ast::Directive,
 ) -> impl Iterator<Item = HashSet<String>> + '_ {
     directive
-        .argument_by_name("policies")
+        .specified_argument_by_name("policies")
         // outer array
         .and_then(|value| value.as_list())
         .into_iter()

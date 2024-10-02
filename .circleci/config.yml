@@ -1,7 +1,5 @@
 version: 2.1
 
-# TODO Remove this line.
-
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
@@ -358,9 +356,9 @@ commands:
             equal: [ *arm_linux_test_executor, << parameters.platform >> ]
           steps:
             - run:
-                name: Install nightly Rust to build the fuzzers
+                name: Install nightly-2024-09-22 Rust to build the fuzzers
                 command: |
-                  rustup install nightly
+                  rustup install nightly-2024-09-22
 
   install_extra_tools:
     steps:
@@ -526,7 +524,7 @@ commands:
           path: ./target/nextest/ci/junit.xml
   fuzz_build:
     steps:
-      - run: cargo +nightly fuzz build
+      - run: cargo +nightly-2024-09-22 fuzz build
 
 jobs:
   lint:
