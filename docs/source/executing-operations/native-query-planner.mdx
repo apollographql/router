@@ -24,7 +24,7 @@ The `experimental_query_planner_mode` option has the following supported modes:
 
 - `new`- enables only the new Rust-native query planner
 - `legacy` - enables only the legacy JavaScript query planner 
-- `both_best_effort` - enables both new and legacy query planners for comparison. The legacy query planner is used for execution. 
+- `both_best_effort` (default) - enables both new and legacy query planners for comparison. The legacy query planner is used for execution. 
 
 <MinVersion version="1.56.0">
 
@@ -47,6 +47,12 @@ Additionally, to enable more optimal native query planning and faster throughput
 supergraph:
   generate_query_fragments: true
 ```
+
+<Note>
+
+Regarding [fragment reuse and generation](/router/configuration/overview#fragment-reuse-and-generation), in the future the `generate_query_fragments` option will be the only option for handling fragments.
+
+</Note>
 
 ## Metrics for native query planner
 
