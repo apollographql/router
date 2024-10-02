@@ -549,6 +549,11 @@ expression: "&schema"
     "Client": {
       "additionalProperties": false,
       "properties": {
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
@@ -2160,6 +2165,45 @@ expression: "&schema"
         },
         {
           "type": "boolean"
+        }
+      ]
+    },
+    "DnsResolutionStrategy": {
+      "oneOf": [
+        {
+          "description": "Only query for A (Ipv4) records",
+          "enum": [
+            "ipv4_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Only query for AAAA (Ipv6) records",
+          "enum": [
+            "ipv6_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for A and AAAA in parallel",
+          "enum": [
+            "ipv4_and_ipv6"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for Ipv6 if that fails, query for Ipv4",
+          "enum": [
+            "ipv6_then_ipv4"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for Ipv4 if that fails, query for Ipv6 (default)",
+          "enum": [
+            "ipv4_then_ipv6"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -6394,6 +6438,11 @@ expression: "&schema"
           "description": "Enable query deduplication",
           "nullable": true,
           "type": "boolean"
+        },
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
         },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",

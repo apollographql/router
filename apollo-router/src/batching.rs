@@ -476,7 +476,6 @@ mod tests {
     use super::Batch;
     use super::BatchQueryInfo;
     use crate::graphql;
-    use crate::plugins::traffic_shaping::Http2Config;
     use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::SubgraphRequest;
@@ -620,7 +619,7 @@ mod tests {
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",
             &Configuration::default(),
-            Http2Config::Disable,
+            crate::configuration::shared::Client::default(),
         );
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
@@ -659,7 +658,7 @@ mod tests {
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",
             &Configuration::default(),
-            Http2Config::Disable,
+            crate::configuration::shared::Client::default(),
         );
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
@@ -694,7 +693,7 @@ mod tests {
         let factory = HttpClientServiceFactory::from_config(
             "testbatch",
             &Configuration::default(),
-            Http2Config::Disable,
+            crate::configuration::shared::Client::default(),
         );
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
