@@ -22,6 +22,7 @@ use super::Selection;
 use super::SelectionId;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
@@ -376,12 +377,12 @@ impl FragmentSpread {
             }
             .into());
         };
-        debug_assert_eq!(
-            *schema, self.schema,
+        ensure!(
+            *schema == self.schema,
             "Fragment spread should only be rebased within the same subgraph"
         );
-        debug_assert_eq!(
-            *schema, named_fragment.schema,
+        ensure!(
+            *schema == named_fragment.schema,
             "Referenced named fragment should've been rebased for the subgraph"
         );
         if runtime_types_intersect(
