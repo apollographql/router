@@ -356,12 +356,12 @@ fn same_as_js_router798() {
     let planner = planner!(
         config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
         Subgraph1: r#"
-            interface Element { a: Int }
-            type Y implements Element { a: Int b: Int }
-            type Z implements Element { a: Int c: Int }
+            interface Interface { a: Int }
+            type Y implements Interface { a: Int b: Int }
+            type Z implements Interface { a: Int c: Int }
 
             type Query {
-                elementsByProject(projectId: Int!): Element
+                interfaces(id: Int!): Interface
             }
         "#,
     );
@@ -370,7 +370,7 @@ fn same_as_js_router798() {
         r#"
             query($var0: Boolean! = true) {
               ... @skip(if: $var0) {
-                field0: elementsByProject(projectId: 0) {
+                field0: interfaces(id: 0) {
                   field1: __typename
                 }
               }
@@ -382,7 +382,7 @@ fn same_as_js_router798() {
         Fetch(service: "Subgraph1") {
           {
             ... {
-              field0: elementsByProject(projectId: 0) {
+              field0: interfaces(id: 0) {
                 __typename
                 field1: __typename
               }

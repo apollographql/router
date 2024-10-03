@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: aa93183462e2b32e88609b0ccf81621fff86c4e9
+# Composed from subgraphs with hash: ee7fce9eb672edf9b036a25bcae0b056ccf5f451
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
@@ -22,7 +22,7 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-interface Element
+interface Interface
   @join__type(graph: SUBGRAPH1)
 {
   a: Int
@@ -53,19 +53,19 @@ enum link__Purpose {
 type Query
   @join__type(graph: SUBGRAPH1)
 {
-  elementsByProject(projectId: Int!): Element
+  interfaces(id: Int!): Interface
 }
 
-type Y implements Element
-  @join__implements(graph: SUBGRAPH1, interface: "Element")
+type Y implements Interface
+  @join__implements(graph: SUBGRAPH1, interface: "Interface")
   @join__type(graph: SUBGRAPH1)
 {
   a: Int
   b: Int
 }
 
-type Z implements Element
-  @join__implements(graph: SUBGRAPH1, interface: "Element")
+type Z implements Interface
+  @join__implements(graph: SUBGRAPH1, interface: "Interface")
   @join__type(graph: SUBGRAPH1)
 {
   a: Int
