@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use rhai::Engine;
@@ -32,6 +33,7 @@ use crate::plugin::DynPlugin;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
+use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
@@ -345,6 +347,20 @@ map
         *result.unwrap_err(),
         EvalAltResult::ErrorRuntime(..)
     ));
+}
+
+#[tokio::test]
+async fn it_can_process_router_request() {
+    let mut request = RhaiRouterFirstRequest::default();
+    request.request.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_str("application/json").unwrap(),
+    );
+    *request.request.method_mut() = http::Method::GET;
+
+    call_rhai_function_with_arg("process_router_request", request)
+        .await
+        .expect("test failed");
 }
 
 #[tokio::test]
