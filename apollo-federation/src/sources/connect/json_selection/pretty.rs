@@ -26,7 +26,7 @@ impl std::fmt::Display for JSONSelection {
 ///
 /// This trait marks a type as supporting pretty printing itself outside of a
 /// Display implementation, which might be more useful for snapshots.
-pub trait PrettyPrintable {
+pub(crate) trait PrettyPrintable {
     /// Pretty print the struct
     fn pretty_print(&self) -> String {
         self.pretty_print_with_indentation(true, 0)
@@ -129,6 +129,16 @@ impl PrettyPrintable for PathList {
             Self::Key(key, tail) => {
                 let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(key.dotted().as_str());
+                result.push_str(rest.as_str());
+            }
+            Self::Expr(expr, tail) => {
+                let rest = tail.pretty_print_with_indentation(true, indentation);
+                result.push_str("$(");
+                result.push_str(
+                    expr.pretty_print_with_indentation(true, indentation)
+                        .as_str(),
+                );
+                result.push(')');
                 result.push_str(rest.as_str());
             }
             Self::Method(method, args, tail) => {
@@ -275,10 +285,11 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str(sub.as_str());
                 }
             }
-            Self::Path(alias, path) => {
-                result.push_str(alias.name.as_str());
-                result.push_str(": ");
-
+            Self::Path(alias_opt, path) => {
+                if let Some(alias) = alias_opt {
+                    result.push_str(alias.name.as_str());
+                    result.push_str(": ");
+                }
                 let path = path.pretty_print_with_indentation(true, indentation);
                 result.push_str(path.trim_start());
             }
@@ -412,10 +423,16 @@ mod tests {
             "$this.a.b",
             "$this.id.first {\n  username\n}",
             // Key
-            ".first",
+            "$.first",
             "a.b.c.d.e",
             "one.two.three {\n  a\n  b\n}",
-            ".single {\n  x\n}",
+            "$.single {\n  x\n}",
+            "results->slice($(-1)->mul($args.suffixLength))",
+            "$(1234)->add($(5678)->mul(2))",
+            "$(true)->and($(false)->not)",
+            "$(12345678987654321)->div(111111111)->eq(111111111)",
+            "$(\"Product\")->slice(0, $(4)->mul(-1))->eq(\"Pro\")",
+            "$($args.unnecessary.parens)->eq(42)",
         ];
         for path in paths {
             let (unmatched, path_selection) = PathSelection::parse(Span::new(path)).unwrap();

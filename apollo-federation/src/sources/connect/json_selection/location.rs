@@ -3,14 +3,14 @@ use nom::combinator::map;
 use nom::IResult;
 use nom_locate::LocatedSpan;
 
-pub type Span<'a> = LocatedSpan<&'a str>;
+pub(crate) type Span<'a> = LocatedSpan<&'a str>;
 
 // Some parsed AST structures, like PathSelection and NamedSelection, can
 // produce a range directly from their children, so they do not need to be
 // wrapped as WithRange<PathSelection> or WithRange<NamedSelection>.
 // Additionally, AST nodes that are structs can store their own range as a
 // field, so they can implement Ranged<T> without the WithRange<T> wrapper.
-pub trait Ranged<T> {
+pub(crate) trait Ranged<T> {
     fn range(&self) -> OffsetRange;
 }
 
@@ -19,7 +19,7 @@ pub trait Ranged<T> {
 // of the first character, and the second element is the offset of the character
 // just past the end of the range. Offsets start at 0 for the first character in
 // the file, following nom_locate's span.location_offset() convention.
-pub type OffsetRange = Option<std::ops::Range<usize>>;
+pub(crate) type OffsetRange = Option<std::ops::Range<usize>>;
 
 // The most common implementation of the Ranged<T> trait is the WithRange<T>
 // struct, used to wrap any AST node that (a) needs its own location information
@@ -82,6 +82,7 @@ impl<T> WithRange<T> {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn take(self) -> T {
         *self.node
     }
@@ -119,7 +120,7 @@ where
 }
 
 #[cfg(test)]
-pub(super) mod strip_ranges {
+pub(crate) mod strip_ranges {
     use apollo_compiler::collections::IndexMap;
 
     use super::super::known_var::KnownVariable;
@@ -132,7 +133,7 @@ pub(super) mod strip_ranges {
     /// participating AST nodes to remove their own and their descendants'
     /// location information, thereby normalizing the AST for assert_eq!
     /// comparisons.
-    pub trait StripRanges {
+    pub(crate) trait StripRanges {
         fn strip_ranges(&self) -> Self;
     }
 
@@ -159,7 +160,10 @@ pub(super) mod strip_ranges {
                     key.strip_ranges(),
                     sub.as_ref().map(|s| s.strip_ranges()),
                 ),
-                Self::Path(alias, path) => Self::Path(alias.strip_ranges(), path.strip_ranges()),
+                Self::Path(alias, path) => {
+                    let stripped_alias = alias.as_ref().map(|a| a.strip_ranges());
+                    Self::Path(stripped_alias, path.strip_ranges())
+                }
                 Self::Group(alias, sub) => Self::Group(alias.strip_ranges(), sub.strip_ranges()),
             }
         }
@@ -182,6 +186,9 @@ pub(super) mod strip_ranges {
                     }
                     PathList::Key(key, rest) => {
                         PathList::Key(key.strip_ranges(), rest.strip_ranges())
+                    }
+                    PathList::Expr(expr, rest) => {
+                        PathList::Expr(expr.strip_ranges(), rest.strip_ranges())
                     }
                     PathList::Method(method, opt_args, rest) => PathList::Method(
                         method.strip_ranges(),

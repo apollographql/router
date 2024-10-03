@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/missing_c
         code: MutationFieldMissingConnect,
         message: "The field `Mutation.setMessage` has no `@connect` directive.",
         locations: [
-            LineColumn {
-                line: 9,
-                column: 3,
-            }..LineColumn {
-                line: 9,
-                column: 38,
-            },
+            9:3..9:38,
         ],
     },
 ]

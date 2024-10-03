@@ -12,6 +12,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::QueryPlan;
 
@@ -22,6 +23,7 @@ use super::FlattenNode;
 use crate::error::format_bridge_errors;
 use crate::executable::USING_CATCH_UNWIND;
 use crate::query_planner::bridge_query_planner::metric_query_planning_plan_duration;
+use crate::query_planner::bridge_query_planner::JS_QP_MODE;
 use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::render_diff;
@@ -38,9 +40,11 @@ const WORKER_THREAD_COUNT: usize = 1;
 
 pub(crate) struct BothModeComparisonJob {
     pub(crate) rust_planner: Arc<QueryPlanner>,
+    pub(crate) js_duration: f64,
     pub(crate) document: Arc<Valid<ExecutableDocument>>,
     pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
+    pub(crate) plan_options: QueryPlanOptions,
 }
 
 type Queue = crossbeam_channel::Sender<BothModeComparisonJob>;
@@ -86,9 +90,15 @@ impl BothModeComparisonJob {
             let start = Instant::now();
 
             // No question mark operator or macro from here …
-            let result = self.rust_planner.build_query_plan(&self.document, name);
+            let result =
+                self.rust_planner
+                    .build_query_plan(&self.document, name, self.plan_options);
 
-            metric_query_planning_plan_duration(RUST_QP_MODE, start);
+            let elapsed = start.elapsed().as_secs_f64();
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+
+            metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+            metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, self.js_duration);
 
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
@@ -143,7 +153,7 @@ impl BothModeComparisonJob {
                 let match_result = opt_plan_node_matches(js_root_node, &rust_root_node);
                 is_matched = match_result.is_ok();
                 match match_result {
-                    Ok(_) => tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉"),
+                    Ok(_) => tracing::trace!("JS and Rust query plans match{operation_desc}! 🎉"),
                     Err(err) => {
                         tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
                         tracing::debug!("{}", err.full_description());
@@ -167,6 +177,18 @@ impl BothModeComparisonJob {
             "generation.rust_error" = rust_result.is_err()
         );
     }
+}
+
+pub(crate) fn metric_query_planning_plan_both_comparison_duration(
+    planner: &'static str,
+    elapsed: f64,
+) {
+    f64_histogram!(
+        "apollo.router.operations.query_planner.both.duration",
+        "Comparing JS v.s. Rust query plan duration.",
+        elapsed,
+        "planner" = planner
+    );
 }
 
 // Specific comparison functions
@@ -364,7 +386,7 @@ fn vec_matches_result<T>(
             item_matches(this, other)
                 .map_err(|err| err.add_description(&format!("under item[{}]", index)))
         })?;
-    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok()));
+    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok())); // Note: looks redundant
     Ok(())
 }
 
@@ -380,12 +402,16 @@ fn vec_matches_sorted_by<T: Eq + Clone>(
     this: &[T],
     other: &[T],
     compare: impl Fn(&T, &T) -> std::cmp::Ordering,
-) -> bool {
+    item_matches: impl Fn(&T, &T) -> Result<(), MatchFailure>,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(this.len(), other.len());
     let mut this_sorted = this.to_owned();
     let mut other_sorted = other.to_owned();
     this_sorted.sort_by(&compare);
     other_sorted.sort_by(&compare);
-    vec_matches(&this_sorted, &other_sorted, T::eq)
+    std::iter::zip(&this_sorted, &other_sorted)
+        .try_fold((), |_acc, (this, other)| item_matches(this, other))?;
+    Ok(())
 }
 
 // performs a set comparison, ignoring order
@@ -679,14 +705,61 @@ fn same_ast_operation_definition(
 ) -> Result<(), MatchFailure> {
     // Note: Operation names are ignored, since parallel fetches may have different names.
     check_match_eq!(x.operation_type, y.operation_type);
-    check_match!(vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x
-        .name
-        .cmp(&y.name)));
+    vec_matches_sorted_by(
+        &x.variables,
+        &y.variables,
+        |a, b| a.name.cmp(&b.name),
+        |a, b| same_variable_definition(a, b),
+    )
+    .map_err(|err| err.add_description("under Variable definition"))?;
     check_match_eq!(x.directives, y.directives);
     check_match!(same_ast_selection_set_sorted(
         &x.selection_set,
         &y.selection_set
     ));
+    Ok(())
+}
+
+// Use this function, instead of `VariableDefinition`'s `PartialEq` implementation,
+// due to known differences.
+fn same_variable_definition(
+    x: &ast::VariableDefinition,
+    y: &ast::VariableDefinition,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(x.name, y.name);
+    check_match_eq!(x.ty, y.ty);
+    if x.default_value != y.default_value {
+        if let (Some(x), Some(y)) = (&x.default_value, &y.default_value) {
+            match (x.as_ref(), y.as_ref()) {
+                // Special case 1: JS QP may convert an enum value into string.
+                // - In this case, compare them as strings.
+                (ast::Value::String(ref x), ast::Value::Enum(ref y)) => {
+                    if x == y.as_str() {
+                        return Ok(());
+                    }
+                }
+
+                // Special case 2: Rust QP expands an empty object value by filling in its
+                // default field values.
+                // - If the JS QP value is an empty object, consider any object is a match.
+                // - Assuming the Rust QP object value has only default field values.
+                // - Warning: This is an unsound heuristic.
+                (ast::Value::Object(ref x), ast::Value::Object(_)) => {
+                    if x.is_empty() {
+                        return Ok(());
+                    }
+                }
+
+                _ => {} // otherwise, fall through
+            }
+        }
+
+        return Err(MatchFailure::new(format!(
+            "mismatch between default values:\nleft: {:?}\nright: {:?}",
+            x.default_value, y.default_value
+        )));
+    }
+    check_match_eq!(x.directives, y.directives);
     Ok(())
 }
 
@@ -785,6 +858,28 @@ mod ast_comparison_tests {
     }
 
     #[test]
+    fn test_query_variable_decl_enum_value_coercion() {
+        // Note: JS QP converts enum default values into strings.
+        let op_x = r#"query($qv1: E! = "default_value") { x(arg1: $qv1) }"#;
+        let op_y = r#"query($qv1: E! = default_value) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_object_value_coercion() {
+        // Note: Rust QP expands empty object default values by filling in its default field
+        // values.
+        let op_x = r#"query($qv1: T! = {}) { x(arg1: $qv1) }"#;
+        let op_y =
+            r#"query($qv1: T! = { field1: true, field2: "default_value" }) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
     fn test_entities_selection_order() {
         let op_x = r#"
             query subgraph1__1($representations: [_Any!]!) {
@@ -817,5 +912,33 @@ mod ast_comparison_tests {
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    fn test_metric_query_planning_plan_both_comparison_duration() {
+        let start = Instant::now();
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+        assert_histogram_exists!(
+            "apollo.router.operations.query_planner.both.duration",
+            f64,
+            "planner" = "rust"
+        );
+
+        let start = Instant::now();
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, elapsed);
+        assert_histogram_exists!(
+            "apollo.router.operations.query_planner.both.duration",
+            f64,
+            "planner" = "js"
+        );
     }
 }

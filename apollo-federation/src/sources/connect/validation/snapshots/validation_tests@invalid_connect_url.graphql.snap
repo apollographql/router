@@ -6,15 +6,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_c
 [
     Message {
         code: RelativeConnectUrlWithoutSource,
-        message: "`GET` in `@connect(http:)` on `Query.resources` specifies the relative URL \"127.0.0.1\", but no `source` is defined. Either use an absolute URL including scheme (http://), or add a `@connect__source`.",
+        message: "`GET` in `@connect(http:)` on `Query.resources` specifies the relative URL \"127.0.0.1\", but no `source` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@connect__source`.",
         locations: [
-            LineColumn {
-                line: 5,
-                column: 42,
-            }..LineColumn {
-                line: 5,
-                column: 58,
-            },
+            5:47..5:58,
         ],
     },
 ]

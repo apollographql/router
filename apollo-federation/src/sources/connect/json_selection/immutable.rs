@@ -2,7 +2,7 @@ use std::clone::Clone;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
-pub struct InputPath<T: Clone> {
+pub(crate) struct InputPath<T: Clone> {
     path: Path<T>,
 }
 
@@ -15,11 +15,11 @@ struct AppendPath<T: Clone> {
 }
 
 impl<T: Clone> InputPath<T> {
-    pub fn empty() -> InputPath<T> {
+    pub(crate) fn empty() -> InputPath<T> {
         InputPath { path: None }
     }
 
-    pub fn append(&self, last: T) -> Self {
+    pub(crate) fn append(&self, last: T) -> Self {
         Self {
             path: Some(Rc::new(AppendPath {
                 prefix: self.path.clone(),
@@ -28,7 +28,7 @@ impl<T: Clone> InputPath<T> {
         }
     }
 
-    pub fn to_vec(&self) -> Vec<T> {
+    pub(crate) fn to_vec(&self) -> Vec<T> {
         // This method needs to be iterative rather than recursive, to be
         // consistent with the paranoia of the drop method.
         let mut vec = Vec::new();

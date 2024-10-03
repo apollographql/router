@@ -8,20 +8,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/multiple_
         code: MultipleHttpMethods,
         message: "`@connect(http:)` on `Query.resources` cannot specify more than one HTTP method.",
         locations: [
-            LineColumn {
-                line: 12,
-                column: 15,
-            }..LineColumn {
-                line: 12,
-                column: 32,
-            },
-            LineColumn {
-                line: 12,
-                column: 34,
-            }..LineColumn {
-                line: 12,
-                column: 53,
-            },
+            12:20..12:32,
+            12:42..12:53,
         ],
     },
 ]

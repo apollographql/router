@@ -26,7 +26,7 @@ macro_rules! selection {
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
-pub fn spaces_or_comments(input: Span) -> IResult<Span, WithRange<&str>> {
+pub(crate) fn spaces_or_comments(input: Span) -> IResult<Span, WithRange<&str>> {
     let mut suffix = input;
     loop {
         let mut made_progress = false;
@@ -60,14 +60,15 @@ pub fn spaces_or_comments(input: Span) -> IResult<Span, WithRange<&str>> {
     }
 }
 
-pub fn span_is_all_spaces_or_comments(input: Span) -> bool {
+#[allow(unused)]
+pub(crate) fn span_is_all_spaces_or_comments(input: Span) -> bool {
     match spaces_or_comments(input) {
         Ok((remainder, _)) => remainder.fragment().is_empty(),
         _ => false,
     }
 }
 
-pub fn json_type_name(v: &JSON) -> &str {
+pub(crate) fn json_type_name(v: &JSON) -> &str {
     match v {
         JSON::Array(_) => "array",
         JSON::Object(_) => "object",
@@ -76,6 +77,11 @@ pub fn json_type_name(v: &JSON) -> &str {
         JSON::Bool(_) => "boolean",
         JSON::Null => "null",
     }
+}
+
+pub(crate) fn vec_push<T>(mut vec: Vec<T>, item: T) -> Vec<T> {
+    vec.push(item);
+    vec
 }
 
 #[cfg(test)]

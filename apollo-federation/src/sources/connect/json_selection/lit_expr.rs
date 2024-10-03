@@ -30,7 +30,7 @@ use super::parser::PathSelection;
 use super::ExternalVarPaths;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum LitExpr {
+pub(crate) enum LitExpr {
     String(String),
     Number(serde_json::Number),
     Bool(bool),
@@ -43,7 +43,7 @@ pub enum LitExpr {
 impl LitExpr {
     // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
-    pub fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
+    pub(crate) fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
         tuple((
             spaces_or_comments,
             alt((
@@ -229,10 +229,12 @@ impl LitExpr {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }
 
+    #[allow(unused)]
     pub(super) fn as_i64(&self) -> Option<i64> {
         match self {
             Self::Number(n) => n.as_i64(),
@@ -432,22 +434,30 @@ mod tests {
 
         {
             let expected = LitExpr::Path(PathSelection {
-                path: PathList::Key(
-                    Key::field("data").into_with_range(),
-                    PathList::Empty.into_with_range(),
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("data").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
                 )
                 .into_with_range(),
             });
-            check_parse(".data", expected.clone());
-            check_parse(" . data ", expected.clone());
+            check_parse("$.data", expected.clone());
+            check_parse(" $ . data ", expected.clone());
         }
 
         {
             let expected = LitExpr::Array(vec![
                 LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("a").into_with_range(),
-                        PathList::Empty.into_with_range(),
+                    path: PathList::Var(
+                        KnownVariable::Dollar.into_with_range(),
+                        PathList::Key(
+                            Key::field("a").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
                     )
                     .into_with_range(),
                 })
@@ -482,22 +492,22 @@ mod tests {
                 .into_with_range(),
             ]);
 
-            check_parse("[.a, b.c, .d.e.f]", expected.clone());
-            check_parse("[.a, b.c, .d.e.f,]", expected.clone());
-            check_parse("[ . a , b . c , . d . e . f ]", expected.clone());
-            check_parse("[ . a , b . c , . d . e . f , ]", expected.clone());
+            check_parse("[$.a, b.c, d.e.f]", expected.clone());
+            check_parse("[$.a, b.c, d.e.f,]", expected.clone());
+            check_parse("[ $ . a , b . c , d . e . f ]", expected.clone());
+            check_parse("[ $ . a , b . c , d . e . f , ]", expected.clone());
             check_parse(
                 r#"[
-                .a,
+                $.a,
                 b.c,
-                .d.e.f,
+                d.e.f,
             ]"#,
                 expected.clone(),
             );
             check_parse(
                 r#"[
-                . a ,
-                . b . c ,
+                $ . a ,
+                b . c ,
                 d . e . f ,
             ]"#,
                 expected.clone(),

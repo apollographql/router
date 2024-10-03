@@ -4,36 +4,30 @@ use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::parser::Parser;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::Schema;
 
 use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::coordinates::field_with_connect_directive_entity_true_coordinate;
 use super::extended_type::ObjectCategory;
+use super::resolvable_key_fields;
 use super::Code;
 use super::Message;
-use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
-use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 
 pub(super) fn validate_entity_arg(
     field: &Component<FieldDefinition>,
     connect_directive: &Node<Directive>,
     object: &Node<ObjectType>,
-    schema: &Schema,
-    source_map: &SourceMap,
+    schema: &SchemaInfo,
     category: ObjectCategory,
 ) -> Vec<Message> {
     let mut messages = vec![];
@@ -56,7 +50,7 @@ pub(super) fn validate_entity_arg(
                         "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
                         coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
                     ),
-                    locations: entity_arg.line_column_range(source_map)
+                    locations: entity_arg.line_column_range(&schema.sources)
                         .into_iter()
                         .collect(),
                 })
@@ -77,7 +71,7 @@ pub(super) fn validate_entity_arg(
                         )
                     ),
                     locations: entity_arg
-                        .line_column_range(source_map)
+                        .line_column_range(&schema.sources)
                         .into_iter()
                         .collect(),
                 })
@@ -99,50 +93,18 @@ pub(super) fn validate_entity_arg(
                             ),
                         ),
                         locations: entity_arg
-                            .line_column_range(source_map)
+                            .line_column_range(&schema.sources)
                             .into_iter()
                             .collect(),
                     });
                 } else if let Some(object_type) = schema.get_object(field.ty.inner_named_type()) {
-                    let key_fields = object_type
-                        .directives
-                        .iter()
-                        .filter(|directive| directive.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
-                        .filter(|directive| {
-                            directive
-                                .arguments
-                                .iter()
-                                .find(|arg| arg.name == FEDERATION_RESOLVABLE_ARGUMENT_NAME)
-                                .and_then(|arg| arg.value.to_bool())
-                                .unwrap_or(true)
-                        })
-                        .filter_map(|directive| {
-                            directive
-                                .arguments
-                                .iter()
-                                .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
-                        })
-                        .map(|fields| &*fields.value)
-                        .filter_map(|key_fields| key_fields.as_str())
-                        .filter_map(|fields| {
-                            Parser::new()
-                                .parse_field_set(
-                                    Valid::assume_valid_ref(schema),
-                                    object_type.name.clone(),
-                                    fields.to_string(),
-                                    "",
-                                )
-                                .ok()
-                        })
-                        .collect();
+                    let key_fields = resolvable_key_fields(object_type, schema).collect();
 
                     if let Some(message) = (ArgumentVisitor {
                         schema,
-                        connect_directive_name,
                         entity_arg,
                         entity_arg_value,
                         object,
-                        source_map,
                         field: &field.name,
                         key_fields,
                     })
@@ -194,12 +156,10 @@ struct Field<'schema> {
 /// Since input types may contain fields with subtypes, and the fields of those subtypes can be
 /// part of composite keys, this potentially requires visiting a tree.
 struct ArgumentVisitor<'schema> {
-    schema: &'schema Schema,
-    connect_directive_name: &'schema Name,
+    schema: &'schema SchemaInfo<'schema>,
     entity_arg: &'schema Node<Argument>,
     entity_arg_value: &'schema Node<Value>,
     object: &'schema Node<ObjectType>,
-    source_map: &'schema SourceMap,
     field: &'schema Name,
     key_fields: Vec<FieldSet>,
 }
@@ -263,7 +223,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
                 message: format!(
                     "{coordinate} has invalid arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
                     coordinate = field_with_connect_directive_entity_true_coordinate(
-                        self.connect_directive_name,
+                        self.schema.connect_directive_name,
                         self.entity_arg_value.as_ref(),
                         self.object,
                         self.field,
@@ -273,9 +233,9 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
                     entity_type = field.entity_type.name(),
                 ),
                 locations: field.node
-                    .line_column_range(self.source_map)
+                    .line_column_range(&self.schema.sources)
                     .into_iter()
-                    .chain(self.entity_arg.line_column_range(self.source_map))
+                    .chain(self.entity_arg.line_column_range(&self.schema.sources))
                     .collect(),
             })
         }
@@ -326,7 +286,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                         message: format!(
                             "{coordinate} has invalid arguments. Argument `{arg_name}` does not have a matching field `{arg_name}` on type `{entity_type}`.",
                             coordinate = field_with_connect_directive_entity_true_coordinate(
-                                self.connect_directive_name,
+                                self.schema.connect_directive_name,
                                 self.entity_arg_value.as_ref(),
                                 self.object,
                                 &field.name
@@ -335,9 +295,9 @@ impl<'schema> ArgumentVisitor<'schema> {
                             entity_type = entity_type.name,
                         ),
                         locations: arg
-                            .line_column_range(self.source_map)
+                            .line_column_range(&self.schema.sources)
                             .into_iter()
-                            .chain(self.entity_arg.line_column_range(self.source_map))
+                            .chain(self.entity_arg.line_column_range(&self.schema.sources))
                             .collect(),
                     }))
                 }
@@ -398,7 +358,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                         message: format!(
                             "{coordinate} has invalid arguments. Field `{name}` on `{input_type}` does not have a matching field `{name}` on `{entity_type}`.",
                             coordinate = field_with_connect_directive_entity_true_coordinate(
-                                self.connect_directive_name,
+                                self.schema.connect_directive_name,
                                 self.entity_arg_value.as_ref(),
                                 self.object,
                                 self.field,
@@ -407,9 +367,9 @@ impl<'schema> ArgumentVisitor<'schema> {
                             entity_type = entity_object_type.name,
                         ),
                         locations: input_field
-                            .line_column_range(self.source_map)
+                            .line_column_range(&self.schema.sources)
                             .into_iter()
-                            .chain(self.entity_arg.line_column_range(self.source_map))
+                            .chain(self.entity_arg.line_column_range(&self.schema.sources))
                             .collect(),
                     }))
                 }
@@ -453,16 +413,16 @@ impl<'schema> ArgumentVisitor<'schema> {
                         None => format!("Argument `{name}`"),
                     },
                     coordinate = field_with_connect_directive_entity_true_coordinate(
-                        self.connect_directive_name,
+                        self.schema.connect_directive_name,
                         self.entity_arg_value.as_ref(),
                         self.object,
                         self.field,
                     ),
                 ),
                 locations: node
-                    .line_column_range(self.source_map)
+                    .line_column_range(&self.schema.sources)
                     .into_iter()
-                    .chain(self.entity_arg.line_column_range(self.source_map))
+                    .chain(self.entity_arg.line_column_range(&self.schema.sources))
                     .collect(),
             })
         } else {

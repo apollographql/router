@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/absolute_
         code: AbsoluteConnectUrlWithSource,
         message: "`GET` in `@connect(http:)` on `Query.resources` contains the absolute URL \"http://127.0.0.1/resources\" while also specifying a `source`. Either remove the `source` argument or change the URL to a path.",
         locations: [
-            LineColumn {
-                line: 12,
-                column: 15,
-            }..LineColumn {
-                line: 12,
-                column: 48,
-            },
+            12:20..12:48,
         ],
     },
 ]

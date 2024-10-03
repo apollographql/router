@@ -32,6 +32,7 @@ fn some_name() {
 */
 
 mod debug_max_evaluated_plans_configuration;
+mod defer;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
@@ -44,11 +45,11 @@ mod merged_abstract_types_handling;
 mod mutations;
 mod named_fragments;
 mod named_fragments_preservation;
+mod overrides;
 mod provides;
 mod requires;
 mod shareable_root_fields;
 mod subscriptions;
-
 // TODO: port the rest of query-planner-js/src/__tests__/buildPlan.test.ts
 
 #[test]
@@ -1259,8 +1260,8 @@ fn handles_multiple_conditions_on_abstract_types() {
                     }
                   } =>
                   {
-                    ... on Book @skip(if: $title) {
-                      ... on Book @include(if: $title) {
+                    ... on Book @include(if: $title) {
+                      ... on Book @skip(if: $title) {
                         sku
                       }
                     }

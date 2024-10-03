@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::ApplyToError;
@@ -27,6 +30,8 @@ const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
 const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OPERATION";
 
+static LAST_DEBUG_ENABLED_VALUE: AtomicBool = AtomicBool::new(false);
+
 #[derive(Debug, Clone)]
 struct Connectors {
     debug_extensions: bool,
@@ -41,7 +46,15 @@ impl Plugin for Connectors {
         let debug_extensions = init.config.debug_extensions
             || std::env::var(CONNECTORS_DEBUG_ENV).as_deref() == Ok("true");
 
-        if debug_extensions {
+        let last_value = LAST_DEBUG_ENABLED_VALUE.load(Ordering::Relaxed);
+        let swap_result = LAST_DEBUG_ENABLED_VALUE.compare_exchange(
+            last_value,
+            debug_extensions,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+        // Ok means we swapped value, inner value is old value. Ok(false) means we went false -> true
+        if matches!(swap_result, Ok(false)) {
             tracing::warn!(
                 "Connector debugging is enabled, this may expose sensitive information."
             );
@@ -325,20 +338,33 @@ fn serialize_response(
 }
 
 fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<serde_json_bytes::Value> {
-    let mut aggregated = vec![];
-
-    for (key, group) in &errors
+    errors
         .iter()
-        .chunk_by(|e| (e.message(), e.path(), e.range()))
-    {
-        let group = group.collect_vec();
-        aggregated.push(json!({
-            "message": key.0,
-            "path": key.1,
-            "range": key.2,
-            "count": group.len(),
-        }));
-    }
+        .fold(
+            HashMap::default(),
+            |mut acc: HashMap<(&str, String), usize>, err| {
+                let path = err
+                    .path()
+                    .iter()
+                    .map(|p| match p.as_u64() {
+                        Some(_) => "@", // ignore array indices for grouping
+                        None => p.as_str().unwrap_or_default(),
+                    })
+                    .join(".");
 
-    aggregated
+                acc.entry((err.message(), path))
+                    .and_modify(|c| *c += 1)
+                    .or_insert(1);
+                acc
+            },
+        )
+        .iter()
+        .map(|(key, count)| {
+            json!({
+                "message": key.0,
+                "path": key.1,
+                "count": count,
+            })
+        })
+        .collect()
 }

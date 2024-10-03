@@ -40,7 +40,7 @@ type Country {
 
 input StoreInput {
     id: ID!
-    country: CountryInput
+    country: CountryInput!
 }
 
 enum Region {
@@ -49,5 +49,5 @@ enum Region {
 }
 input CountryInput {
     id: ID!
-    region: Region
+    region: Region!
 }

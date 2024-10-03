@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/empty_sou
         code: EmptySourceName,
         message: "The value for `@source(name:)` can't be empty.",
         locations: [
-            LineColumn {
-                line: 6,
-                column: 17,
-            }..LineColumn {
-                line: 6,
-                column: 19,
-            },
+            6:17..6:19,
         ],
     },
 ]

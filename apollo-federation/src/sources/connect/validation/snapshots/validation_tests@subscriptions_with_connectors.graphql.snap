@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/subscript
         code: SubscriptionInConnectors,
         message: "A subscription root type is not supported when using `@connect`.",
         locations: [
-            LineColumn {
-                line: 13,
-                column: 1,
-            }..LineColumn {
-                line: 15,
-                column: 2,
-            },
+            13:1..15:2,
         ],
     },
 ]

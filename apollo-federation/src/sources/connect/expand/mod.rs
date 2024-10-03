@@ -224,9 +224,11 @@ mod helpers {
     /// A helper struct for expanding a subgraph into one per connect directive.
     pub(super) struct Expander<'a> {
         /// The name of the connect directive, possibly aliased.
+        #[allow(unused)]
         connect_name: Name,
 
         /// The name of the connect directive, possibly aliased.
+        #[allow(unused)]
         source_name: Name,
 
         /// The name of the @key directive, as known in the subgraph
@@ -600,6 +602,11 @@ mod helpers {
                         ))
                     }
                 }?;
+            } else {
+                // TODO: if the type has @interfaceObject and it doesn't have a key at this point
+                // we'll need to add a key — this is a requirement for using @interfaceObject.
+                // most likely we'll just copy over keys from the original supergraph, but we
+                // need to think through the implications of that.
             }
 
             Ok(())
@@ -718,7 +725,7 @@ mod helpers {
                     name: name!("_"),
                     arguments: Vec::new(),
                     ty: ast::Type::Named(ast::NamedType::new("ID")?),
-                    directives: ast::DirectiveList(vec![Node::new(ast::Directive {
+                    directives: ast::DirectiveList(vec![Node::new(Directive {
                         name: name!("federation__inaccessible"),
                         arguments: Vec::new(),
                     })]),

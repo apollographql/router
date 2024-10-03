@@ -304,7 +304,7 @@ fn parse_defer(
         }
         let label = if condition != Condition::No {
             directive
-                .argument_by_name("label")
+                .specified_argument_by_name("label")
                 .and_then(|value| value.as_str())
                 .map(|str| str.to_owned())
         } else {
@@ -355,7 +355,7 @@ impl IncludeSkip {
 
 impl Condition {
     pub(crate) fn parse(directive: &executable::Directive) -> Option<Self> {
-        match directive.argument_by_name("if")?.as_ref() {
+        match directive.specified_argument_by_name("if")?.as_ref() {
             executable::Value::Boolean(true) => Some(Condition::Yes),
             executable::Value::Boolean(false) => Some(Condition::No),
             executable::Value::Variable(variable) => {

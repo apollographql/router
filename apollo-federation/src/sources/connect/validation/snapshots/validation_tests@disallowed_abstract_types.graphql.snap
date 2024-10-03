@@ -8,26 +8,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/disallowe
         code: UnsupportedAbstractType,
         message: "Abstract schema types, such as `interface`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported.",
         locations: [
-            LineColumn {
-                line: 21,
-                column: 1,
-            }..LineColumn {
-                line: 21,
-                column: 18,
-            },
+            21:1..21:18,
         ],
     },
     Message {
         code: UnsupportedAbstractType,
         message: "Abstract schema types, such as `union`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported.",
         locations: [
-            LineColumn {
-                line: 25,
-                column: 1,
-            }..LineColumn {
-                line: 25,
-                column: 12,
-            },
+            25:1..25:12,
         ],
     },
 ]

@@ -95,7 +95,6 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::demand_control;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -1411,7 +1410,13 @@ impl Telemetry {
                                     config.apollo.experimental_local_field_metrics,
                                     ctx.unsupported_executable_document(),
                                 ) {
-                                    local_stat_recorder.visit(&query, &response);
+                                    local_stat_recorder.visit(
+                                        &query,
+                                        &response,
+                                        &ctx.get_demand_control_context()
+                                            .map(|c| c.variables)
+                                            .unwrap_or_default(),
+                                    );
                                 }
 
                                 if operation_kind == OperationKind::Subscription {
@@ -1514,8 +1519,8 @@ impl Telemetry {
                 let traces = Self::subgraph_ftv1_traces(context);
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
+                let strategy = context.get_demand_control_context().map(|c| c.strategy);
                 let limits_stats = context.extensions().with_lock(|guard| {
-                    let strategy = guard.get::<demand_control::strategy::Strategy>();
                     let query_limits = guard.get::<OperationLimits<u32>>();
                     SingleLimitsStats {
                         strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),

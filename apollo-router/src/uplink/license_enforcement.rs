@@ -107,7 +107,7 @@ impl ParsedLinkSpec {
         link_directive: &Directive,
     ) -> Option<Result<ParsedLinkSpec, url::ParseError>> {
         link_directive
-            .argument_by_name(LINK_URL_ARGUMENT)
+            .specified_argument_by_name(LINK_URL_ARGUMENT)
             .and_then(|value| {
                 let url_string = value.as_str();
 
@@ -126,7 +126,7 @@ impl ParsedLinkSpec {
                     semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
 
                 let imported_as = link_directive
-                    .argument_by_name(LINK_AS_ARGUMENT)
+                    .specified_argument_by_name(LINK_AS_ARGUMENT)
                     .map(|as_arg| as_arg.as_str().unwrap_or_default().to_string());
 
                 Some(Ok(ParsedLinkSpec {
@@ -259,13 +259,13 @@ impl LicenseEnforcementReport {
             .directives
             .get_all("join__directive")
             .filter(|join| {
-                join.argument_by_name("name")
+                join.specified_argument_by_name("name")
                     .and_then(|name| name.as_str())
                     .map(|name| name == LINK_DIRECTIVE_NAME)
                     .unwrap_or_default()
             })
             .filter_map(|join| {
-                join.argument_by_name("args")
+                join.specified_argument_by_name("args")
                     .and_then(|arg| arg.as_object())
             })
             .filter_map(|link| {
@@ -337,7 +337,9 @@ impl LicenseEnforcementReport {
                                     }
                                     _ => vec![],
                                 })
-                                .any(|directive| directive.argument_by_name(argument).is_some())
+                                .any(|directive| {
+                                    directive.specified_argument_by_name(argument).is_some()
+                                })
                             {
                                 schema_violations.push(SchemaViolation::DirectiveArgument {
                                     url: link_spec.url.to_string(),

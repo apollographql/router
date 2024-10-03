@@ -15,7 +15,50 @@ export APOLLO_KEY=<YOUR_GRAPH_API_KEY>
 export APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT_NAME>
 ```
 
-For more information, see [Sending operation metrics to GraphOS](/graphos/metrics/sending-operation-metrics).
+<MinVersion version="1.49.0">
+
+### Usage reporting via OpenTelemetry Protocol (OTLP)
+
+</MinVersion>
+
+Prior to router v1.49.0, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format) called Apollo Usage Reporting protocol.
+
+As the ecosystem around OpenTelemetry (OTel) has rapidly expanded, Apollo evaluated migrating its internal tracing system to use an OTel-based protocol.
+
+Starting in v1.49.0, the router can use OpenTelemetry Protocol (OTLP) to report operation usage metrics to GraphOS. The benefits of reporting via OTLP include:
+
+- A comprehensive way to visualize the router execution path in GraphOS Studio.
+- Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
+- Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
+
+#### Configuring usage reporting via OTLP
+
+You can enable usage reporting via OTLP by an option that can also configure the ratio of traces sent via OTLP and Apollo Usage Reporting protocol:
+
+- In router v1.x, this is controlled using the `experimental_otlp_tracing_sampler` option and is disabled by default.
+
+- In router v2.x and later, this option is renamed to `otlp_tracing_sampler` and is enabled by default.
+
+The supported values of the OTLP sampler option are the following:
+
+- `always_off`: send all traces via Apollo Usage Reporting protocol. Default for v1.x.
+- `always_on`: send all traces via OTLP. Default for v2.x and later.
+- `0.0 - 1.0`: the ratio of traces to send via OTLP (for example, 0.6 = 60% OTLP, 40% Apollo Usage Reporting protocol).
+
+The OTLP sampler is applied _after_ the common tracing sampler. In the following example, the common sampler samples traces at 1% of all traffic. The OTLP sampler sets its ratio to 0.7. This results in 0.7% of all traffic having traces sent via OTLP, and the remaining 0.3% of all traffic having traces sent via Apollo Usage Reporting protocol:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    # Send 0.7 OTLP / 0.3 Apollo
+    otlp_tracing_sampler: 0.7
+
+  exporters:
+    tracing:
+      common:
+        # Sample traces at 1% of all traffic
+        sampler: 0.01
+```
 
 ## Reporting field-level traces
 

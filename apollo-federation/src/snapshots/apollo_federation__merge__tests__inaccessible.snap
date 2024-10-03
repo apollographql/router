@@ -76,7 +76,7 @@ input Input @join__type(graph: INACCESSIBLE) @inaccessible {
 scalar Scalar @join__type(graph: INACCESSIBLE) @inaccessible
 
 interface Interface @join__type(graph: INACCESSIBLE) @inaccessible {
-  b: Scalar
+  b: Scalar @inaccessible @join__field(graph: INACCESSIBLE)
 }
 
 union Union @join__type(graph: INACCESSIBLE) @inaccessible @join__unionMember(graph: INACCESSIBLE, member: "A") @join__unionMember(graph: INACCESSIBLE, member: "B") = A | B

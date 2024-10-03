@@ -612,34 +612,7 @@ async fn defer_if_condition() {
 
 #[tokio::test]
 async fn dependent_mutations() {
-    let schema = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1"),
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-      {
-        query: Query
-        mutation: Mutation
-      }
-
-      directive @core(feature: String!) repeatable on SCHEMA
-      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-      directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-      directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-      scalar join__FieldSet
-
-      enum join__Graph {
-        A @join__graph(name: "A" url: "http://localhost:4001")
-        B @join__graph(name: "B" url: "http://localhost:4004")
-      }
-
-      type Mutation {
-          mutationA: Mutation @join__field(graph: A)
-          mutationB: Boolean @join__field(graph: B)
-      }
-
-      type Query {
-          query: Boolean @join__field(graph: A)
-      }"#;
+    let schema = include_str!("../testdata/a_b_supergraph.graphql");
 
     let query_plan: QueryPlan = QueryPlan {
         // generated from:

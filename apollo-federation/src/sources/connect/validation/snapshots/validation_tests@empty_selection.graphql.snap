@@ -8,26 +8,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/empty_sel
         code: InvalidJsonSelection,
         message: "`@connect(selection:)` on `Query.resources` is empty",
         locations: [
-            LineColumn {
-                line: 13,
-                column: 18,
-            }..LineColumn {
-                line: 13,
-                column: 29,
-            },
+            13:18..13:29,
         ],
     },
     Message {
         code: InvalidJsonSelection,
         message: "`@connect(http: {body:})` on `Query.resources` is empty",
         locations: [
-            LineColumn {
-                line: 12,
-                column: 35,
-            }..LineColumn {
-                line: 12,
-                column: 45,
-            },
+            12:41..12:45,
         ],
     },
 ]

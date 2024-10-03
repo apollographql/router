@@ -8,26 +8,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/missing_s
         code: NoSourcesDefined,
         message: "`@connect(source: \"v2\")` on `Query.resources` specifies a source, but none are defined. Try adding `@connect__source(name: \"v2\")` to the schema.",
         locations: [
-            LineColumn {
-                line: 7,
-                column: 14,
-            }..LineColumn {
-                line: 7,
-                column: 26,
-            },
+            7:14..7:26,
         ],
     },
     Message {
         code: NoSourceImport,
         message: "The `@source` directive is not imported. Try adding `@source` to `import` for `@link(url: \"https://specs.apollo.dev/connect\")`",
         locations: [
-            LineColumn {
-                line: 2,
-                column: 3,
-            }..LineColumn {
-                line: 2,
-                column: 76,
-            },
+            2:3..2:76,
         ],
     },
 ]

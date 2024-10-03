@@ -49,11 +49,26 @@ The graph ref for the GraphOS graph and variant that the router fetches its supe
 
 The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
 
-**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router or when using `APOLLO_KEY_PATH`.
 
 </td>
 </tr>
+<tr class="required">
+<td style="min-width: 150px;">
 
+##### `APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+⚠️ **This is not available on Windows.**
+
+A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router or when using `APOLLO_KEY`.
+
+</td>
+</tr>
 <tr>
 </tr>
 </tbody>
@@ -113,6 +128,23 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 <td>
 
 The absolute or relative path to the router's optional [YAML configuration file](#yaml-config-file).
+
+</td>
+
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-key-path`
+
+`APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+⚠️ **This is not available on Windows.**
+
+The absolute or relative path to a file containing the Apollo graph API key for use with managed federation.
 
 </td>
 </tr>
@@ -546,6 +578,35 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 **If you have a GraphOS Enterprise plan:** 
 - You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
 - You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](./entity-caching/).
+
+<MinVersion version ="1.49.0">
+
+### Native query planner
+
+</MinVersion>
+
+Starting with v1.49.0, the router can run a Rust-native query planner. This native query planner can be run by itself to plan all queries, replacing the legacy JavaScript implementation.
+
+<Tip>
+
+Starting with v1.56.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following options in your `router.yaml`:
+
+```yaml title="router.yaml"
+experimental_query_planner_mode: new
+experimental_introspection_mode: new
+```
+
+You can also improve throughput by reducing the size of queries sent to subgraphs with the following option:
+
+```yaml title="router.yaml"
+supergraph:
+  generate_query_fragments: true
+```
+ 
+</Tip>
+
+Learn more in [Native Query Planner](/router/executing-operations/native-query-planner) docs.
+
 
 <MinVersion version="1.44.0">
 
@@ -1188,6 +1249,12 @@ Alternatively, the router can be configured to _generate_ fragments for subgraph
 supergraph:
   generate_query_fragments: true
 ```
+
+<Note>
+
+In the future, the `generate_query_fragments` option will be the only option for handling fragments.
+
+</Note>
 
 ### Reusing configuration
 

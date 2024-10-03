@@ -61,7 +61,10 @@ impl ConnectSpecDefinition {
     pub(crate) fn from_directive(
         directive: &Directive,
     ) -> Result<Option<&'static Self>, FederationError> {
-        let Some(url) = directive.argument_by_name("url").and_then(|a| a.as_str()) else {
+        let Some(url) = directive
+            .specified_argument_by_name("url")
+            .and_then(|a| a.as_str())
+        else {
             return Ok(None);
         };
 
@@ -83,16 +86,6 @@ impl ConnectSpecDefinition {
         let (link, _) = Link::for_identity(schema, &ConnectSpecDefinition::identity())?;
         let connect_spec = CONNECT_VERSIONS.find(&link.url.version)?;
         Some((connect_spec, link))
-    }
-
-    pub(crate) fn get_from_federation_schema(
-        schema: &FederationSchema,
-    ) -> Result<Option<&'static ConnectSpecDefinition>, FederationError> {
-        Ok(schema
-            .metadata()
-            .as_ref()
-            .and_then(|metadata| metadata.for_identity(&ConnectSpecDefinition::identity()))
-            .and_then(|link| CONNECT_VERSIONS.find(&link.url.version)))
     }
 
     pub(crate) fn check_or_add(schema: &mut FederationSchema) -> Result<(), FederationError> {

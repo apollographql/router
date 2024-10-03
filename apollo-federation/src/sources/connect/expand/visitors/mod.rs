@@ -3,7 +3,7 @@
 //! This module contains various helper visitors for traversing nested structures,
 //! adding needed types to a mutable schema.
 
-pub mod input;
+pub(crate) mod input;
 mod selection;
 
 use std::collections::VecDeque;
@@ -174,7 +174,7 @@ pub(crate) struct SchemaVisitor<'a, Group, GroupType> {
 }
 
 impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
-    pub fn new(
+    pub(crate) fn new(
         original_schema: &'a ValidFederationSchema,
         to_schema: &'a mut FederationSchema,
         directive_deny_list: &'a IndexSet<Name>,
@@ -198,6 +198,7 @@ mod tests {
     use crate::sources::connect::expand::visitors::GroupVisitor;
     use crate::sources::connect::json_selection::NamedSelection;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::Key;
     use crate::sources::connect::SubSelection;
 
     /// Visitor for tests.
@@ -235,10 +236,10 @@ mod tests {
         type Error = FederationError;
 
         fn visit<'a>(&mut self, field: NamedSelection) -> Result<(), Self::Error> {
-            self.visited.push((
-                self.last_depth().unwrap_or_default(),
-                field.name().to_string(),
-            ));
+            for name in field.names() {
+                self.visited
+                    .push((self.last_depth().unwrap_or_default(), name.to_string()));
+            }
 
             Ok(())
         }
@@ -260,8 +261,21 @@ mod tests {
             self.depth_stack.push(next_depth);
             Ok(group
                 .selections_iter()
-                .sorted_by_key(|s| s.name())
+                .sorted_by_key(|s| s.names())
                 .cloned()
+                .chain(
+                    group
+                        .star_iter()
+                        // We just need a field name here
+                        // This relies on validation to enforce the presence of an alias
+                        .map(|s| {
+                            NamedSelection::Field(
+                                s.alias().cloned(),
+                                Key::field("").into_with_range(),
+                                None,
+                            )
+                        }),
+                )
                 .collect())
         }
 
@@ -322,6 +336,23 @@ mod tests {
     }
 
     #[test]
+    fn it_iterates_rest() {
+        let mut visited = Vec::new();
+        let visitor = TestVisitor::new(&mut visited);
+        let (unmatched, selection) = JSONSelection::parse("a b rest: *").unwrap();
+        assert!(unmatched.is_empty());
+
+        visitor
+            .walk(selection.next_subselection().cloned().unwrap())
+            .unwrap();
+        assert_snapshot!(print_visited(visited), @r###"
+        a
+        b
+        rest
+        "###);
+    }
+
+    #[test]
     fn it_iterates_over_nested_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
@@ -338,6 +369,37 @@ mod tests {
         |  |  |  d
         |  |  |  |  e
         f
+        "###);
+    }
+
+    #[test]
+    fn it_iterates_over_paths() {
+        let mut visited = Vec::new();
+        let visitor = TestVisitor::new(&mut visited);
+        let (unmatched, selection) = JSONSelection::parse(
+            "a
+            $.b {
+                c
+                $.d {
+                    e
+                    f: g.h { i }
+                }
+            }
+            j",
+        )
+        .unwrap();
+        assert!(unmatched.is_empty());
+
+        visitor
+            .walk(selection.next_subselection().cloned().unwrap())
+            .unwrap();
+        assert_snapshot!(print_visited(visited), @r###"
+        a
+        c
+        e
+        f
+        |  i
+        j
         "###);
     }
 
