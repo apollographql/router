@@ -286,6 +286,20 @@ impl Plugin for Telemetry {
             .expect("otel error handler lock poisoned, fatal");
 
         let mut config = init.config;
+        // This code would have enabled datadog agent sampling by default, but for now we will leave it as opt-in.
+        // If the datadog exporter is enabled then enable the agent sampler.
+        // If users are using otlp export then they will need to set this explicitly in their config.
+        //
+        // if config.exporters.tracing.datadog.enabled()
+        //     && config
+        //         .exporters
+        //         .tracing
+        //         .common
+        //         .preview_datadog_agent_sampling
+        //         .is_none()
+        // {
+        //     config.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
+        // }
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
         config.exporters.logging.validate()?;
@@ -866,7 +880,21 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            otel::layer::configure(&self.sampling_filter_ratio);
+            // If the datadog agent sampling is enabled, then we cannot presample the spans
+            // Therefore we set presampling to always on and let the regular sampler do the work.
+            // Effectively, we are disabling the presampling.
+            if self
+                .config
+                .exporters
+                .tracing
+                .common
+                .preview_datadog_agent_sampling
+                .unwrap_or_default()
+            {
+                otel::layer::configure(&SamplerOption::Always(Sampler::AlwaysOn));
+            } else {
+                otel::layer::configure(&self.sampling_filter_ratio);
+            }
 
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
@@ -889,7 +917,8 @@ impl Telemetry {
 
             Self::checked_global_tracer_shutdown(last_provider);
 
-            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+            let propagator = Self::create_propagator(&self.config);
+            opentelemetry::global::set_text_map_propagator(propagator);
         }
 
         activation.reload_metrics();
@@ -934,9 +963,6 @@ impl Telemetry {
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
-        if propagation.datadog || tracing.datadog.enabled() {
-            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
-        }
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
         }
@@ -945,6 +971,9 @@ impl Telemetry {
                 from_request_header.to_string(),
                 propagation.request.format.clone(),
             )));
+        }
+        if propagation.datadog || tracing.datadog.enabled() {
+            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
 
         TextMapCompositePropagator::new(propagators)
@@ -957,9 +986,14 @@ impl Telemetry {
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
         let mut sampler = common.sampler.clone();
-        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
-        // should be accepted
-        common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+
+        // To enable pre-sampling to work we need to disable regular sampling.
+        // This is because the pre-sampler will sample the spans before they sent to the regular sampler
+        // If the datadog agent sampling is enabled, then we cannot pre-sample the spans because even if the sampling decision is made to drop
+        // DatadogAgentSampler will modify the decision to RecordAndSample and instead use the sampling.priority attribute to decide if the span should be sampled or not.
+        if !common.preview_datadog_agent_sampling.unwrap_or_default() {
+            common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+        }
 
         let mut builder =
             opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
@@ -2130,6 +2164,8 @@ mod tests {
     use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2187,6 +2223,7 @@ mod tests {
     use crate::plugins::demand_control::COST_STRATEGY_KEY;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
+    use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -2830,6 +2867,63 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/config.field_instrumentation_sampler.router.yaml"
+        ))
+        .await;
+
+        let ftv1_counter = Arc::new(AtomicUsize::new(0));
+        let ftv1_counter_cloned = ftv1_counter.clone();
+
+        let mut mock_request_service = MockSupergraphService::new();
+        mock_request_service
+            .expect_call()
+            .times(10)
+            .returning(move |req: SupergraphRequest| {
+                if req
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
+                {
+                    ftv1_counter_cloned.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .status_code(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .data(json!({"errors": [{"message": "nope"}]}))
+                    .build()
+                    .unwrap())
+            });
+        let mut request_supergraph_service =
+            plugin.supergraph_service(BoxService::new(mock_request_service));
+
+        for _ in 0..10 {
+            let supergraph_req = SupergraphRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .query("Query test { me {name} }")
+                .operation_name("test".to_string());
+            let _router_response = request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(supergraph_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+        }
+        // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
+        assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 
     #[tokio::test]

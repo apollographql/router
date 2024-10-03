@@ -677,13 +677,13 @@ pub(crate) fn configure(sampler: &SamplerOption) {
         },
     };
 
-    SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::Relaxed);
+    SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::SeqCst);
 }
 
 impl<S, T> OpenTelemetryLayer<S, T> {
     fn sample(&self) -> bool {
         let s: f64 = thread_rng().gen_range(0.0..=1.0);
-        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
+        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::SeqCst))
     }
 }
 

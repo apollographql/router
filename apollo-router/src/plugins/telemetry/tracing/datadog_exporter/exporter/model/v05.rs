@@ -8,6 +8,7 @@ use super::unified_tags::UnifiedTags;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::intern::StringInterner;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::DD_MEASURED_KEY;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::SAMPLING_PRIORITY_KEY;
+use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::datadog_exporter::Error;
 use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
@@ -129,10 +130,22 @@ fn write_unified_tag<'a>(
 }
 
 fn get_sampling_priority(span: &SpanData) -> f64 {
-    if span.span_context.trace_state().priority_sampling_enabled() {
-        1.0
-    } else {
-        0.0
+    match span
+        .span_context
+        .trace_state()
+        .sampling_priority()
+        .unwrap_or_else(|| {
+            // Datadog sampling has not been set, revert to traceflags
+            if span.span_context.trace_flags().is_sampled() {
+                SamplingPriority::AutoKeep
+            } else {
+                SamplingPriority::AutoReject
+            }
+        }) {
+        SamplingPriority::UserReject => -1.0,
+        SamplingPriority::AutoReject => 0.0,
+        SamplingPriority::AutoKeep => 1.0,
+        SamplingPriority::UserKeep => 2.0,
     }
 }
 
