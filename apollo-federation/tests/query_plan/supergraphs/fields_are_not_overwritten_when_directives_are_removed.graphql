@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 1b6580cb65329c0bfbad0268c29ad6ced603952d
+# Composed from subgraphs with hash: 654c7bcba86c6f5845a7cb520710cfa37b678e3d
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
@@ -25,14 +25,8 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 type Bar
   @join__type(graph: SUBGRAPHSKIP)
 {
-  baz: Baz
-  quax: Quax
-}
-
-type Baz
-  @join__type(graph: SUBGRAPHSKIP)
-{
   things: String
+  name: String
 }
 
 type Foo
@@ -61,12 +55,6 @@ enum link__Purpose {
   `EXECUTION` features provide metadata necessary for operation execution.
   """
   EXECUTION
-}
-
-type Quax
-  @join__type(graph: SUBGRAPHSKIP)
-{
-  name: String
 }
 
 type Query

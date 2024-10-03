@@ -241,15 +241,7 @@ fn fields_are_not_overwritten_when_directives_are_removed() {
           }
 
           type Bar {
-            baz: Baz
-            quax: Quax
-          }
-
-          type Baz {
             things: String
-          }
-
-          type Quax {
             name: String
           }
         "#,
@@ -257,26 +249,14 @@ fn fields_are_not_overwritten_when_directives_are_removed() {
     assert_plan!(
         &planner,
         r#"
-          fragment SimpleBaz on Foo {
-            ...Baz
-          }
-
-          fragment Baz on Foo {
-            bar @include(if: $b) {
-              baz {
-                things
-              }
-            }
-          }
-
           query Test($b: Boolean!) {
             foo @include(if: $b) {
               bar {
-                quax {
-                  name
-                }
+                name
               }
-              ...SimpleBaz
+              bar @include(if: $b) {
+                things
+              }
             }
           }
         "#,
@@ -287,12 +267,8 @@ fn fields_are_not_overwritten_when_directives_are_removed() {
                 {
                   foo {
                     bar {
-                      quax {
-                        name
-                      }
-                      baz {
-                        things
-                      }
+                      name
+                      things
                     }
                   }
                 }
@@ -304,26 +280,14 @@ fn fields_are_not_overwritten_when_directives_are_removed() {
     assert_plan!(
         &planner,
         r#"
-          fragment SimpleBaz on Foo {
-            ...Baz
-          }
-
-          fragment Baz on Foo {
-            bar @skip(if: $b) {
-              baz {
-                things
-              }
-            }
-          }
-
           query Test($b: Boolean!) {
             foo @skip(if: $b) {
               bar {
-                quax {
-                  name
-                }
+                name
               }
-              ...SimpleBaz
+              bar @skip(if: $b) {
+                things
+              }
             }
           }
         "#,
@@ -334,12 +298,8 @@ fn fields_are_not_overwritten_when_directives_are_removed() {
                 {
                   foo {
                     bar {
-                      quax {
-                        name
-                      }
-                      baz {
-                        things
-                      }
+                      name
+                      things
                     }
                   }
                 }
