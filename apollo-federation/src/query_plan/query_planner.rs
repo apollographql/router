@@ -12,11 +12,14 @@ use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
 
+use super::fetch_dependency_graph::FetchIdGenerator;
+use super::ConditionNode;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
+use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
@@ -407,37 +410,29 @@ impl QueryPlanner {
             &self.interface_types_with_interface_objects,
         )?;
 
-        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) = (
-            normalized_operation.without_defer(),
-            None,
-            None::<IndexMap<String, IndexSet<String>>>,
-            false,
-        );
-        /* TODO(TylerBloom): After defer is impl-ed and after the private preview, the call
-         * above needs to be replaced with this if-else expression.
-        if self.config.incremental_delivery.enable_defer {
-            let NormalizedDefer {
-                operation,
-                assigned_defer_labels,
-                defer_conditions,
-                has_defers,
-            } = normalized_operation.with_normalized_defer();
-            if has_defers && is_subscription {
-                return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
-            }
-            (
-                operation,
-                Some(assigned_defer_labels),
-                Some(defer_conditions),
-                has_defers,
-            )
-        } else {
-            // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
-            // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
-            // to end up passing through a @defer to a subgraph by mistake).
-            (normalized_operation.without_defer(), None, None, false)
-        };
-        */
+        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
+            if self.config.incremental_delivery.enable_defer {
+                let NormalizedDefer {
+                    operation,
+                    assigned_defer_labels,
+                    defer_conditions,
+                    has_defers,
+                } = normalized_operation.with_normalized_defer()?;
+                if has_defers && is_subscription {
+                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+                }
+                (
+                    operation,
+                    Some(assigned_defer_labels),
+                    Some(defer_conditions),
+                    has_defers,
+                )
+            } else {
+                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
+                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
+                // to end up passing through a @defer to a subgraph by mistake).
+                (normalized_operation.without_defer()?, None, None, false)
+            };
 
         if normalized_operation.selection_set.is_empty() {
             return Ok(QueryPlan::default());
@@ -503,11 +498,16 @@ impl QueryPlanner {
             override_conditions: EnabledOverrideConditions(HashSet::from_iter(
                 options.override_conditions,
             )),
+            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
         };
 
         let root_node = match defer_conditions {
             Some(defer_conditions) if !defer_conditions.is_empty() => {
-                compute_plan_for_defer_conditionals(&mut parameters, defer_conditions)?
+                compute_plan_for_defer_conditionals(
+                    &mut parameters,
+                    &mut processor,
+                    defer_conditions,
+                )?
             }
             _ => compute_plan_internal(&mut parameters, &mut processor, has_defers)?,
         };
@@ -621,7 +621,6 @@ fn compute_root_serial_dependency_graph(
     // We have to serially compute a plan for each top-level selection.
     let mut split_roots = operation.selection_set.clone().split_top_level_fields();
     let mut digest = Vec::new();
-    let mut starting_fetch_id = 0;
     let selection_set = split_roots
         .next()
         .ok_or_else(|| FederationError::internal("Empty top level fields"))?;
@@ -653,7 +652,7 @@ fn compute_root_serial_dependency_graph(
                 supergraph_schema.clone(),
                 federated_query_graph.clone(),
                 root_type.clone(),
-                starting_fetch_id,
+                fetch_dependency_graph.fetch_id_generation.clone(),
             );
             compute_root_fetch_groups(
                 operation.root_kind,
@@ -666,7 +665,6 @@ fn compute_root_serial_dependency_graph(
             // the current ID that is inside the fetch dep graph's ID generator, or to use the
             // starting ID. Because this method ensure uniqueness between IDs, this approach was
             // taken; however, it could be the case that this causes unforseen issues.
-            starting_fetch_id = fetch_dependency_graph.next_fetch_id();
             digest.push(std::mem::replace(
                 &mut fetch_dependency_graph,
                 new_dep_graph,
@@ -835,16 +833,45 @@ fn compute_plan_internal(
     }
 }
 
-// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
-    _parameters: &mut QueryPlanningParameters,
-    _defer_conditions: IndexMap<String, IndexSet<String>>,
+    parameters: &mut QueryPlanningParameters,
+    processor: &mut FetchDependencyGraphToQueryPlanProcessor,
+    defer_conditions: IndexMap<Name, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    Err(SingleFederationError::UnsupportedFeature {
-        message: String::from("@defer is currently not supported"),
-        kind: crate::error::UnsupportedFeatureKind::Defer,
+    generate_condition_nodes(
+        parameters.operation.clone(),
+        defer_conditions.iter(),
+        &mut |op| {
+            parameters.operation = op;
+            compute_plan_internal(parameters, processor, true)
+        },
+    )
+}
+
+fn generate_condition_nodes<'a>(
+    op: Arc<Operation>,
+    mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
+    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
+) -> Result<Option<PlanNode>, FederationError> {
+    match conditions.next() {
+        None => on_final_operation(op),
+        Some((cond, labels)) => {
+            let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels)?;
+            let if_op = op;
+            let node = ConditionNode {
+                condition_variable: cond.clone(),
+                if_clause: generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?
+                    .map(Box::new),
+                else_clause: generate_condition_nodes(
+                    Arc::new(else_op),
+                    conditions.clone(),
+                    on_final_operation,
+                )?
+                .map(Box::new),
+            };
+            Ok(Some(PlanNode::Condition(Box::new(node))))
+        }
     }
-    .into())
 }
 
 /// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
