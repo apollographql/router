@@ -294,7 +294,7 @@ impl TestExecution {
         for (name, subgraph) in &self.subgraphs {
             for SubgraphRequestMock { request, response } in &subgraph.requests {
                 let mut builder = match &request.body {
-                    Some(body) => Mock::given(body_partial_json(&body)),
+                    Some(body) => Mock::given(body_partial_json(body)),
                     None => Mock::given(wiremock::matchers::AnyMatcher),
                 };
 
