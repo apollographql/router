@@ -27,7 +27,10 @@ git-fetch-with-cli = true
 # output a note when they are encountered.
 
 # rustsec advisory exemptions
-ignore = ["RUSTSEC-2023-0071"]
+ignore = [
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2024-0376", # we do not use tonic::transport::Server
+]
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:

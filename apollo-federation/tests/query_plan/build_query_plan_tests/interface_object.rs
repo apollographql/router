@@ -790,7 +790,7 @@ fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
             },
             Parallel {
               Flatten(path: "i.i2") {
-                Fetch(service: "S4") {
+                Fetch(service: "S3") {
                   {
                     ... on T {
                       __typename
