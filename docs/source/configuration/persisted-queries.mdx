@@ -76,7 +76,7 @@ If used with the [`safelist`](#safelist) option, the router logs unregistered an
 
 <ExperimentalFeature />
 
-By default, the router [prewarms the query plan cache](./in-memory-caching#cache-warm-up) using all operations on the PQL when a new schema is loaded, but not at startup. Using the `experimental_prewarm_query_plan_cache` option, you can tell the router to prewarm the cache using the PQL on startup as well, or tell it not to prewarm the cache when reloading the schema. (This does not affect whether the router prewarms the query plan cache with recently-used operations from its in-memory cache.) Prewarming the cache means can reduce request latency by ensuring that operations are pre-planned when requests are received, but can make startup or schema reloads slower.
+By default, the router [prewarms the query plan cache](/router/configuration/in-memory-caching#cache-warm-up) using all operations on the PQL when a new schema is loaded, but not at startup. Using the `experimental_prewarm_query_plan_cache` option, you can tell the router to prewarm the cache using the PQL on startup as well, or tell it not to prewarm the cache when reloading the schema. (This does not affect whether the router prewarms the query plan cache with recently-used operations from its in-memory cache.) Prewarming the cache means can reduce request latency by ensuring that operations are pre-planned when requests are received, but can make startup or schema reloads slower.
 
 ```yaml title="router.yaml"
 persisted_queries:
