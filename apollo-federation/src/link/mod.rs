@@ -275,9 +275,9 @@ impl Link {
     }
 
     pub fn from_directive_application(directive: &Node<Directive>) -> Result<Link, LinkError> {
-        let (url, is_link) = if let Some(value) = directive.argument_by_name("url") {
+        let (url, is_link) = if let Some(value) = directive.specified_argument_by_name("url") {
             (value, true)
-        } else if let Some(value) = directive.argument_by_name("feature") {
+        } else if let Some(value) = directive.specified_argument_by_name("feature") {
             // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
             // removed when those are updated.
             (value, false)
@@ -303,11 +303,11 @@ impl Link {
         })?;
 
         let spec_alias = directive
-            .argument_by_name("as")
+            .specified_argument_by_name("as")
             .and_then(|arg| arg.as_str())
             .map(Name::new)
             .transpose()?;
-        let purpose = if let Some(value) = directive.argument_by_name("for") {
+        let purpose = if let Some(value) = directive.specified_argument_by_name("for") {
             Some(Purpose::from_value(value)?)
         } else {
             None
@@ -315,7 +315,7 @@ impl Link {
 
         let imports = if is_link {
             directive
-                .argument_by_name("import")
+                .specified_argument_by_name("import")
                 .and_then(|arg| arg.as_list())
                 .unwrap_or(&[])
                 .iter()

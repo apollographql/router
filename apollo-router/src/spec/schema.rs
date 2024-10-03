@@ -67,8 +67,10 @@ impl Schema {
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
             for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
                 let join_directive = value.directives.get("join__graph")?;
-                let name = join_directive.argument_by_name("name")?.as_str()?;
-                let url = join_directive.argument_by_name("url")?.as_str()?;
+                let name = join_directive
+                    .specified_argument_by_name("name")?
+                    .as_str()?;
+                let url = join_directive.specified_argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
                 if url.is_empty() {
@@ -220,7 +222,7 @@ impl Schema {
         for directive in &self.supergraph_schema().schema_definition.directives {
             let join_url = if directive.name == "core" {
                 let Some(feature) = directive
-                    .argument_by_name("feature")
+                    .specified_argument_by_name("feature")
                     .and_then(|value| value.as_str())
                 else {
                     continue;
@@ -229,7 +231,7 @@ impl Schema {
                 feature
             } else if directive.name == "link" {
                 let Some(url) = directive
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 else {
                     continue;
@@ -257,7 +259,7 @@ impl Schema {
             .filter(|dir| dir.name.as_str() == "link")
             .any(|link| {
                 if let Some(url_in_link) = link
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 {
                     let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
@@ -295,7 +297,7 @@ impl Schema {
             .filter(|dir| dir.name.as_str() == "link")
             .find(|link| {
                 if let Some(url_in_link) = link
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 {
                     let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
@@ -319,7 +321,7 @@ impl Schema {
                 }
             })
             .map(|link| {
-                link.argument_by_name("as")
+                link.specified_argument_by_name("as")
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| default.to_string())
             })

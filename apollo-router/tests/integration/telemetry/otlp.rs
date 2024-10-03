@@ -239,7 +239,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
         .await?;
     // ----------------------
     // Testing for a trace containing a tracestate m and psr with psr set to 1 for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
-    // But it should send the trace to subgraph as the tracestate contains a psr set to 1
+    // It should not send the trace to the subgraph as we didn't use the datadog propagator and therefore the trace will remain unsampled.
     let id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319e").unwrap();
     let headers: HashMap<String, String> = [
         (
@@ -252,7 +252,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
 
     let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
     Spec::builder()
-        .services(["router", "subgraph"].into())
+        .services(["router"].into())
         .priority_sampled("1")
         .build()
         .validate_trace(id, &mock_server)

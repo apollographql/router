@@ -238,17 +238,40 @@ async fn both_mode_integration() {
                     introspection: true
             ",
         )
-        .supergraph("../examples/graphql/local.graphql")
-        .log("error,apollo_router=info,apollo_router::query_planner=debug")
+        .supergraph("tests/fixtures/schema_to_introspect.graphql")
+        .log("error,apollo_router=info,apollo_router::query_planner=trace")
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
-    router
-        .execute_query(&json!({
-            "query": include_str!("../fixtures/introspect_full_schema.graphql"),
-        }))
-        .await;
+    let query = json!({
+        "query": include_str!("../fixtures/introspect_full_schema.graphql"),
+    });
+    let (_trace_id, response) = router.execute_query(&query).await;
+    insta::assert_json_snapshot!(response.json::<serde_json::Value>().await.unwrap());
     router.assert_log_contains("Introspection match! 🎉").await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test]
+async fn integration() {
+    let mut router = IntegrationTest::builder()
+        .config(
+            "
+                experimental_introspection_mode: new
+                supergraph:
+                    introspection: true
+            ",
+        )
+        .supergraph("tests/fixtures/schema_to_introspect.graphql")
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({
+        "query": include_str!("../fixtures/introspect_full_schema.graphql"),
+    });
+    let (_trace_id, response) = router.execute_query(&query).await;
+    insta::assert_json_snapshot!(response.json::<serde_json::Value>().await.unwrap());
     router.graceful_shutdown().await;
 }

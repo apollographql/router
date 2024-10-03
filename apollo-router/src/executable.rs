@@ -4,6 +4,8 @@ use std::cell::Cell;
 use std::env;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -210,6 +212,11 @@ pub struct Opt {
     /// Your Apollo key.
     #[clap(skip = std::env::var("APOLLO_KEY").ok())]
     apollo_key: Option<String>,
+
+    /// Key file location relative to the current directory.
+    #[cfg(unix)]
+    #[clap(long = "apollo-key-path", env = "APOLLO_KEY_PATH")]
+    apollo_key_path: Option<PathBuf>,
 
     /// Your Apollo graph reference.
     #[clap(skip = std::env::var("APOLLO_GRAPH_REF").ok())]
@@ -513,14 +520,19 @@ impl Executable {
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
         // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
-        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key) {
-            (Some(_), Some(_), _, _) | (Some(_), _, Some(_), _) => {
+        #[cfg(unix)]
+        let akp = &opt.apollo_key_path;
+        #[cfg(not(unix))]
+        let akp: &Option<PathBuf> = &None;
+
+        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key, akp) {
+            (Some(_), Some(_), _, _, _) | (Some(_), _, Some(_), _, _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
                 ))
             }
-            (Some(source), None, None,_) => source,
-            (_, Some(supergraph_path), _, _) => {
+            (Some(source), None, None,_,_) => source,
+            (_, Some(supergraph_path), _, _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
@@ -535,7 +547,7 @@ impl Executable {
                     delay: None,
                 }
             }
-            (_, _, Some(supergraph_urls), _) => {
+            (_, _, Some(supergraph_urls), _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
@@ -545,7 +557,67 @@ impl Executable {
                     period: opt.apollo_uplink_poll_interval
                 }
             }
-            (_, None, None, Some(_apollo_key)) => {
+            (_, None, None, _, Some(apollo_key_path)) => {
+                let apollo_key_path = if apollo_key_path.is_relative() {
+                    current_directory.join(apollo_key_path)
+                } else {
+                    apollo_key_path.clone()
+                };
+
+                if !apollo_key_path.exists() {
+                    tracing::error!(
+                        "Apollo key at path '{}' does not exist.",
+                        apollo_key_path.to_string_lossy()
+                    );
+                    return Err(anyhow!(
+                        "Apollo key at path '{}' does not exist.",
+                        apollo_key_path.to_string_lossy()
+                    ));
+                } else {
+                    // On unix systems, Check that the executing user is the only user who may
+                    // read the key file.
+                    // Note: We could, in future, add support for Windows.
+                    #[cfg(unix)]
+                    {
+                        let meta = std::fs::metadata(apollo_key_path.clone()).map_err(|err|
+                                anyhow!(
+                                    "Failed to read Apollo key file: {}",
+                                    err
+                                ))?;
+                        let mode = meta.mode();
+                        // If our mode isn't "safe", fail...
+                        // safe == none of the "group" or "other" bits set.
+                        if mode & 0o077 != 0 {
+                            return Err(
+                                anyhow!(
+                                    "Apollo key file permissions ({:#o}) are too permissive", mode & 0o000777
+                                ));
+                        }
+                        let euid = unsafe { libc::geteuid() };
+                        let owner = meta.uid();
+                        if euid != owner {
+                            return Err(
+                                anyhow!(
+                                    "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
+                                ));
+                        }
+                    }
+                    //The key file exists try and load it
+                    match std::fs::read_to_string(&apollo_key_path) {
+                        Ok(apollo_key) => {
+                            opt.apollo_key = Some(apollo_key.trim().to_string());
+                        }
+                        Err(err) => {
+                            return Err(anyhow!(
+                                "Failed to read Apollo key file: {}",
+                                err
+                            ));
+                        }
+                };
+                SchemaSource::Registry(opt.uplink_config()?)
+            }
+            }
+            (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
                 SchemaSource::Registry(opt.uplink_config()?)
@@ -585,7 +657,7 @@ impl Executable {
             }
         };
 
-        // Order of precedence:
+        // Order of precedence for licenses:
         // 1. explicit path from cli
         // 2. env APOLLO_ROUTER_LICENSE
         // 3. uplink

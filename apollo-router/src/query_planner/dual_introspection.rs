@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 
+use apollo_compiler::ast;
 use serde_json_bytes::Value;
 
 use crate::error::QueryPlannerError;
@@ -27,16 +28,16 @@ pub(crate) fn compare_introspection_responses(
             if let (Some(js_data), Some(rust_data)) =
                 (&mut js_response.data, &mut rust_response.data)
             {
-                json_sort_arrays(js_data);
-                json_sort_arrays(rust_data);
+                normalize_response(js_data);
+                normalize_response(rust_data);
             }
             is_matched = js_response.data == rust_response.data;
             if is_matched {
-                tracing::debug!("Introspection match! 🎉")
+                tracing::trace!("Introspection match! 🎉")
             } else {
                 tracing::debug!("Introspection mismatch");
                 tracing::trace!("Introspection query:\n{query}");
-                tracing::trace!("Introspection diff:\n{}", {
+                tracing::debug!("Introspection diff:\n{}", {
                     let rust = rust_response
                         .data
                         .as_ref()
@@ -67,20 +68,79 @@ pub(crate) fn compare_introspection_responses(
     );
 }
 
-fn json_sort_arrays(value: &mut Value) {
+fn normalize_response(value: &mut Value) {
     match value {
         Value::Array(array) => {
             for item in array.iter_mut() {
-                json_sort_arrays(item)
+                normalize_response(item)
             }
             array.sort_by(json_compare)
         }
         Value::Object(object) => {
-            for (_key, value) in object {
-                json_sort_arrays(value)
+            for (key, value) in object {
+                if let Some(new_value) = normalize_default_value(key.as_str(), value) {
+                    *value = new_value
+                } else {
+                    normalize_response(value)
+                }
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+/// When a default value is an input object, graphql-js seems to sort its fields by name
+fn normalize_default_value(key: &str, value: &Value) -> Option<Value> {
+    if key != "defaultValue" {
+        return None;
+    }
+    let default_value = value.as_str()?;
+    // We don’t have a parser entry point for a standalone GraphQL `Value`,
+    // so mint a document that contains that value.
+    let doc = format!("{{ field(arg: {default_value}) }}");
+    let doc = ast::Document::parse(doc, "").ok()?;
+    let parsed_default_value = &doc
+        .definitions
+        .first()?
+        .as_operation_definition()?
+        .selection_set
+        .first()?
+        .as_field()?
+        .arguments
+        .first()?
+        .value;
+    match parsed_default_value.as_ref() {
+        ast::Value::List(_) | ast::Value::Object(_) => {
+            let normalized = normalize_parsed_default_value(parsed_default_value);
+            Some(normalized.serialize().no_indent().to_string().into())
+        }
+        ast::Value::Null
+        | ast::Value::Enum(_)
+        | ast::Value::Variable(_)
+        | ast::Value::String(_)
+        | ast::Value::Float(_)
+        | ast::Value::Int(_)
+        | ast::Value::Boolean(_) => None,
+    }
+}
+
+fn normalize_parsed_default_value(value: &ast::Value) -> ast::Value {
+    match value {
+        ast::Value::List(items) => ast::Value::List(
+            items
+                .iter()
+                .map(|item| normalize_parsed_default_value(item).into())
+                .collect(),
+        ),
+        ast::Value::Object(fields) => {
+            let mut new_fields: Vec<_> = fields
+                .iter()
+                .map(|(name, value)| (name.clone(), normalize_parsed_default_value(value).into()))
+                .collect();
+            new_fields.sort_by(|(name_1, _value_1), (name_2, _value_2)| name_1.cmp(name_2));
+            ast::Value::Object(new_fields)
+        }
+        v => v.clone(),
     }
 }
 

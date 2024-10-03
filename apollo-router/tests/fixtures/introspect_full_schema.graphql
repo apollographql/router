@@ -19,6 +19,9 @@ query IntrospectionQuery {
       args(includeDeprecated: true) {
         ...InputValue
       }
+      nonDeprecatedArgs: args {
+        name
+      }
     }
   }
 }
@@ -32,14 +35,23 @@ fragment FullType on __Type {
     args(includeDeprecated: true) {
       ...InputValue
     }
+    nonDeprecatedArgs: args {
+      name
+    }
     type {
       ...TypeRef
     }
     isDeprecated
     deprecationReason
   }
+  nonDeprecatedFields: fields {
+    name
+  }
   inputFields(includeDeprecated: true) {
     ...InputValue
+  }
+  nonDeprecatedInputFields: inputFields {
+    name
   }
   interfaces {
     ...TypeRef
@@ -49,6 +61,9 @@ fragment FullType on __Type {
     description
     isDeprecated
     deprecationReason
+  }
+  nonDeprecatedEnumValues: enumValues {
+    name
   }
   possibleTypes {
     ...TypeRef

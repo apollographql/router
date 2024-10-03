@@ -13,10 +13,10 @@ pub(super) fn is_deferred_selection(directives: &executable::DirectiveList) -> b
 
 /// Options for the `.containment()` family of selection functions.
 #[derive(Debug, Clone, Copy)]
-pub struct ContainmentOptions {
+pub(crate) struct ContainmentOptions {
     /// If the right-hand side has a __typename selection but the left-hand side does not,
     /// still consider the left-hand side to contain the right-hand side.
-    pub ignore_missing_typename: bool,
+    pub(crate) ignore_missing_typename: bool,
 }
 
 // Currently Default *can* be derived, but if we add a new option
@@ -31,7 +31,7 @@ impl Default for ContainmentOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Containment {
+pub(crate) enum Containment {
     /// The left-hand selection does not fully contain right-hand selection.
     NotContained,
     /// The left-hand selection fully contains the right-hand selection, and more.
@@ -41,17 +41,21 @@ pub enum Containment {
 }
 impl Containment {
     /// Returns true if the right-hand selection set is strictly contained or equal.
-    pub fn is_contained(self) -> bool {
+    pub(crate) fn is_contained(self) -> bool {
         matches!(self, Containment::StrictlyContained | Containment::Equal)
     }
 
-    pub fn is_equal(self) -> bool {
+    pub(crate) fn is_equal(self) -> bool {
         matches!(self, Containment::Equal)
     }
 }
 
 impl Selection {
-    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match (self, other) {
             (Selection::Field(self_field), Selection::Field(other_field)) => {
                 self_field.containment(other_field, options)
@@ -69,13 +73,17 @@ impl Selection {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
+    pub(crate) fn contains(&self, other: &Selection) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }
 
 impl FieldSelection {
-    pub fn containment(&self, other: &FieldSelection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &FieldSelection,
+        options: ContainmentOptions,
+    ) -> Containment {
         if self.field.name() != other.field.name()
             || self.field.alias != other.field.alias
             || self.field.arguments != other.field.arguments
@@ -95,15 +103,14 @@ impl FieldSelection {
             }
         }
     }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &FieldSelection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl FragmentSpreadSelection {
-    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not
@@ -114,15 +121,14 @@ impl FragmentSpreadSelection {
             _ => Containment::NotContained,
         }
     }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl InlineFragmentSelection {
-    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not
@@ -136,15 +142,10 @@ impl InlineFragmentSelection {
             _ => Containment::NotContained,
         }
     }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl SelectionSet {
-    pub fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
         if other.selections.len() > self.selections.len() {
             // If `other` has more selections but we're ignoring missing __typename, then in the case where
             // `other` has a __typename but `self` does not, then we need the length of `other` to be at
@@ -194,7 +195,7 @@ impl SelectionSet {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Self) -> bool {
+    pub(crate) fn contains(&self, other: &Self) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }

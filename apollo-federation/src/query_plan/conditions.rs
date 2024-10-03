@@ -26,12 +26,6 @@ pub(crate) enum Conditions {
     Boolean(bool),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Condition {
-    Variable(VariableCondition),
-    Boolean(bool),
-}
-
 /// A list of variable conditions, represented as a map from variable names to whether that variable
 /// is negated in the condition. We maintain the invariant that there's at least one condition (i.e.
 /// the map is non-empty), and that there's at most one condition per variable name.
@@ -47,29 +41,12 @@ impl VariableConditions {
         Self(Arc::new(map))
     }
 
-    pub fn insert(&mut self, name: Name, negated: bool) {
-        Arc::make_mut(&mut self.0).insert(name, negated);
-    }
-
-    /// Returns true if there are no conditions.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Returns a variable condition by name.
-    pub fn get(&self, name: &str) -> Option<VariableCondition> {
-        self.0.get_key_value(name).map(|(variable, &negated)| {
-            let variable = variable.clone();
-            VariableCondition { variable, negated }
-        })
-    }
-
     /// Returns whether a variable condition is negated, or None if there is no condition for the variable name.
-    pub fn is_negated(&self, name: &str) -> Option<bool> {
+    pub(crate) fn is_negated(&self, name: &str) -> Option<bool> {
         self.0.get(name).copied()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&Name, bool)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Name, bool)> {
         self.0.iter().map(|(name, &negated)| (name, negated))
     }
 }
@@ -99,7 +76,7 @@ impl Conditions {
                 "skip" => true,
                 _ => continue,
             };
-            let value = directive.argument_by_name("if").ok_or_else(|| {
+            let value = directive.specified_argument_by_name("if").ok_or_else(|| {
                 FederationError::internal(format!(
                     "missing if argument on @{}",
                     if negated { "skip" } else { "include" },
@@ -185,13 +162,6 @@ impl Conditions {
     }
 }
 
-fn is_constant_condition(condition: &Conditions) -> bool {
-    match condition {
-        Conditions::Variables(_) => false,
-        Conditions::Boolean(_) => true,
-    }
-}
-
 pub(crate) fn remove_conditions_from_selection_set(
     selection_set: &SelectionSet,
     conditions: &Conditions,
@@ -223,12 +193,12 @@ pub(crate) fn remove_conditions_from_selection_set(
                             selection.with_updated_selection_set(Some(updated_selection_set))?
                         }
                     } else {
-                        Selection::from_element(updated_element, Some(updated_selection_set), None)?
+                        Selection::from_element(updated_element, Some(updated_selection_set))?
                     }
                 } else if updated_element == element {
                     selection.clone()
                 } else {
-                    Selection::from_element(updated_element, None, None)?
+                    Selection::from_element(updated_element, None)?
                 };
                 selection_map.insert(new_selection);
             }
@@ -247,7 +217,7 @@ pub(crate) fn remove_conditions_from_selection_set(
 /// "starting" fragments having the unneeded condition/directives removed.
 pub(crate) fn remove_unneeded_top_level_fragment_directives(
     selection_set: &SelectionSet,
-    unneded_directives: &DirectiveList,
+    unneeded_directives: &DirectiveList,
 ) -> Result<SelectionSet, FederationError> {
     let mut selection_map = SelectionMap::new();
 
@@ -265,7 +235,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     let needed_directives: Vec<Node<Directive>> = fragment
                         .directives
                         .iter()
-                        .filter(|directive| !unneded_directives.contains(directive))
+                        .filter(|directive| !unneeded_directives.contains(directive))
                         .cloned()
                         .collect();
 
@@ -273,7 +243,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     // at the "top-level" of the set.
                     let updated_selections = remove_unneeded_top_level_fragment_directives(
                         &inline_fragment.selection_set,
-                        unneded_directives,
+                        unneeded_directives,
                     )?;
                     if needed_directives.len() == fragment.directives.len() {
                         // We need all the directives that the fragment has. Return it unchanged.
@@ -346,7 +316,7 @@ fn matches_condition_for_kind(
         return false;
     }
 
-    let value = directive.argument_by_name("if");
+    let value = directive.specified_argument_by_name("if");
 
     let matches_if_negated = match kind {
         ConditionKind::Include => false,

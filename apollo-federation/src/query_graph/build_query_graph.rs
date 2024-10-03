@@ -1968,13 +1968,9 @@ impl FederatedQueryGraphBuilder {
         for edge in self.base.query_graph.graph.edge_indices() {
             let edge_weight = self.base.query_graph.edge_weight(edge)?;
             let (_, tail) = self.base.query_graph.edge_endpoints(edge)?;
-            let mut non_trivial_followups = IndexSet::default();
-            for followup_edge_ref in self
-                .base
-                .query_graph
-                .graph
-                .edges_directed(tail, Direction::Outgoing)
-            {
+            let out_edges = self.base.query_graph.out_edges(tail);
+            let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
+            for followup_edge_ref in out_edges {
                 let followup_edge_weight = followup_edge_ref.weight();
                 match edge_weight.transition {
                     QueryGraphEdgeTransition::KeyResolution => {
@@ -2035,7 +2031,7 @@ impl FederatedQueryGraphBuilder {
                     }
                     _ => {}
                 }
-                non_trivial_followups.insert(followup_edge_ref.id());
+                non_trivial_followups.push(followup_edge_ref.id());
             }
             self.base
                 .query_graph

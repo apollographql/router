@@ -181,7 +181,7 @@ impl Deref for DirectiveList {
 }
 
 impl Hash for DirectiveList {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u64(self.inner.as_ref().map_or(0, |inner| inner.hash))
     }
 }

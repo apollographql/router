@@ -247,7 +247,9 @@ impl Selection {
             (self.selection_set(), other.selection_set())
         {
             let common = self_sub_selection.intersection(other_sub_selection)?;
-            if !common.is_empty() {
+            if common.is_empty() {
+                return Ok(None);
+            } else {
                 return self
                     .with_updated_selections(
                         self_sub_selection.type_position.clone(),
@@ -1007,7 +1009,7 @@ impl SelectionSet {
                 &fragment,
                 /*directives*/ &Default::default(),
             );
-            optimized.add_local_selection(&fragment_selection.into(), false)?;
+            optimized.add_local_selection(&fragment_selection.into())?;
         }
 
         optimized.add_local_selection_set(&not_covered_so_far)?;
@@ -1600,32 +1602,6 @@ impl Operation {
     }
 }
 
-/// Returns a consistent GraphQL name for the given index.
-fn fragment_name(mut index: usize) -> Name {
-    /// https://spec.graphql.org/draft/#NameContinue
-    const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-    /// https://spec.graphql.org/draft/#NameStart
-    const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
-
-    if index < NAME_START_CHARS.len() {
-        Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
-    } else {
-        let mut s = String::new();
-
-        let i = index % NAME_START_CHARS.len();
-        s.push(NAME_START_CHARS.as_bytes()[i].into());
-        index /= NAME_START_CHARS.len();
-
-        while index > 0 {
-            let i = index % NAME_CHARS.len();
-            s.push(NAME_CHARS.as_bytes()[i].into());
-            index /= NAME_CHARS.len();
-        }
-
-        Name::new_unchecked(&s)
-    }
-}
-
 #[derive(Debug, Default)]
 struct FragmentGenerator {
     fragments: NamedFragments,
@@ -1634,10 +1610,6 @@ struct FragmentGenerator {
 }
 
 impl FragmentGenerator {
-    fn next_name(&self) -> Name {
-        fragment_name(self.fragments.len())
-    }
-
     // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
     // In the future, we will just use `.next_name()`.
     fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
@@ -1697,21 +1669,17 @@ impl FragmentGenerator {
                         self.visit_selection_set(selection_set)?;
                     }
                     new_selection_set
-                        .add_local_selection(&Selection::Field(Arc::clone(field.get())), false)?;
+                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
                 }
                 SelectionValue::FragmentSpread(frag) => {
-                    new_selection_set.add_local_selection(
-                        &Selection::FragmentSpread(Arc::clone(frag.get())),
-                        false,
-                    )?;
+                    new_selection_set
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
                 }
                 SelectionValue::InlineFragment(frag)
                     if !Self::is_worth_using(&frag.get().selection_set) =>
                 {
-                    new_selection_set.add_local_selection(
-                        &Selection::InlineFragment(Arc::clone(frag.get())),
-                        false,
-                    )?;
+                    new_selection_set
+                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
                 }
                 SelectionValue::InlineFragment(mut candidate) => {
                     self.visit_selection_set(candidate.get_selection_set_mut())?;
@@ -1729,10 +1697,9 @@ impl FragmentGenerator {
                     // we can't just transfer them to the generated fragment spread,
                     // so we have to keep this inline fragment.
                     let Ok(skip_include) = skip_include else {
-                        new_selection_set.add_local_selection(
-                            &Selection::InlineFragment(Arc::clone(candidate.get())),
-                            false,
-                        )?;
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
                         continue;
                     };
 
@@ -1741,10 +1708,9 @@ impl FragmentGenerator {
                     // there's any directives on it. This code duplicates the body from the
                     // previous condition so it's very easy to remove when we're ready :)
                     if !skip_include.is_empty() {
-                        new_selection_set.add_local_selection(
-                            &Selection::InlineFragment(Arc::clone(candidate.get())),
-                            false,
-                        )?;
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
                         continue;
                     }
 
@@ -1769,8 +1735,8 @@ impl FragmentGenerator {
                         });
                         self.fragments.get(&name).unwrap()
                     };
-                    new_selection_set.add_local_selection(
-                        &Selection::from(FragmentSpreadSelection {
+                    new_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
                             spread: FragmentSpread::new(FragmentSpreadData {
                                 schema: selection_set.schema.clone(),
                                 fragment_name: existing.name.clone(),
@@ -1780,9 +1746,8 @@ impl FragmentGenerator {
                                 selection_id: crate::operation::SelectionId::new(),
                             }),
                             selection_set: existing.selection_set.clone(),
-                        }),
-                        false,
-                    )?;
+                        },
+                    ))?;
                 }
             }
         }
@@ -1823,6 +1788,32 @@ mod tests {
             validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    /// Returns a consistent GraphQL name for the given index.
+    fn fragment_name(mut index: usize) -> Name {
+        /// https://spec.graphql.org/draft/#NameContinue
+        const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+        /// https://spec.graphql.org/draft/#NameStart
+        const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+        if index < NAME_START_CHARS.len() {
+            Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
+        } else {
+            let mut s = String::new();
+
+            let i = index % NAME_START_CHARS.len();
+            s.push(NAME_START_CHARS.as_bytes()[i].into());
+            index /= NAME_START_CHARS.len();
+
+            while index > 0 {
+                let i = index % NAME_CHARS.len();
+                s.push(NAME_CHARS.as_bytes()[i].into());
+                index /= NAME_CHARS.len();
+            }
+
+            Name::new_unchecked(&s)
+        }
     }
 
     #[test]
