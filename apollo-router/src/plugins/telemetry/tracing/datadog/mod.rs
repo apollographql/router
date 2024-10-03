@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-pub(crate) use agent_sampling::AgentSampling;
+pub(crate) use agent_sampling::DatadogAgentSampling;
 use ahash::HashMap;
 use ahash::HashMapExt;
 pub(crate) use always_sampled_span_processor::BatchSpanProcessor;

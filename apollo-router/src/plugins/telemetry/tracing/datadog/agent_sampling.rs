@@ -22,13 +22,13 @@ use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 /// The sampler can be configured to use parent-based sampling for consistent trace sampling.
 ///
 #[derive(Debug, Clone)]
-pub(crate) struct AgentSampling {
+pub(crate) struct DatadogAgentSampling {
     /// The underlying sampler used for initial sampling decisions
     pub(crate) sampler: opentelemetry::sdk::trace::Sampler,
     /// Flag to enable parent-based sampling for consistent trace sampling
     pub(crate) parent_based_sampler: bool,
 }
-impl AgentSampling {
+impl DatadogAgentSampling {
     /// Creates a new DatadogAgentSampling instance
     ///
     /// # Arguments
@@ -45,7 +45,7 @@ impl AgentSampling {
     }
 }
 
-impl ShouldSample for AgentSampling {
+impl ShouldSample for DatadogAgentSampling {
     fn should_sample(
         &self,
         parent_context: Option<&opentelemetry_api::Context>,
@@ -121,7 +121,7 @@ mod tests {
     use opentelemetry_api::Value;
     use opentelemetry_sdk::trace::ShouldSample;
 
-    use crate::plugins::telemetry::tracing::datadog::AgentSampling;
+    use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
     use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
     use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
@@ -154,7 +154,8 @@ mod tests {
         let sampler = StubSampler::builder()
             .decision(SamplingDecision::Drop)
             .build();
-        let datadog_sampler = AgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
 
         let result = datadog_sampler.should_sample(
             None,
@@ -188,7 +189,8 @@ mod tests {
         let sampler = StubSampler::builder()
             .decision(SamplingDecision::RecordOnly)
             .build();
-        let datadog_sampler = AgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
 
         let result = datadog_sampler.should_sample(
             None,
@@ -222,7 +224,8 @@ mod tests {
         let sampler = StubSampler::builder()
             .decision(SamplingDecision::RecordAndSample)
             .build();
-        let datadog_sampler = AgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), false);
 
         let result = datadog_sampler.should_sample(
             None,
@@ -257,7 +260,8 @@ mod tests {
             .decision(SamplingDecision::RecordAndSample)
             .build();
 
-        let datadog_sampler = AgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
 
         let result = datadog_sampler.should_sample(
             Some(&Context::new()),
@@ -292,7 +296,8 @@ mod tests {
             .decision(SamplingDecision::RecordAndSample)
             .build();
 
-        let datadog_sampler = AgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
 
         let result = datadog_sampler.should_sample(
             Some(&Context::new().with_remote_span_context(SpanContext::new(
@@ -333,7 +338,8 @@ mod tests {
             .decision(SamplingDecision::Drop)
             .build();
 
-        let datadog_sampler = AgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
+        let datadog_sampler =
+            DatadogAgentSampling::new(Sampler::ParentBased(Box::new(sampler)), true);
 
         let result = datadog_sampler.should_sample(
             Some(&Context::new().with_remote_span_context(SpanContext::new(
