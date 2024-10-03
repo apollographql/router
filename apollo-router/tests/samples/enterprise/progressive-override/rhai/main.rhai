@@ -11,5 +11,12 @@ fn process_request(request) {
 
     let override = request.context["apollo_override::labels_to_override"];
     print(`override: ${override}`);
+
+
+    if "x-override" in request.headers {
+        if request.headers["x-override"] == "true" {
+            request.context["apollo_override::labels_to_override"] += "bar";
+        }
+    }
 }
 
