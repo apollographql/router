@@ -19,6 +19,7 @@ use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
+use dotenv::dotenv;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
 use regex::Captures;
@@ -398,6 +399,8 @@ impl Executable {
         config: Option<ConfigurationSource>,
         cli_args: Option<Opt>,
     ) -> Result<()> {
+        dotenv().ok();
+
         let opt = cli_args.unwrap_or_else(Opt::parse);
 
         if opt.version {
