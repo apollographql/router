@@ -108,6 +108,26 @@
             }
         },
         {
+            "type": "ReloadConfiguration",
+            "configuration_path": "./configuration2.yaml"
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query progressive3 { percent100 { foo } }"
+            },
+            "headers": {
+                "apollo-expose-query-plan": "false"
+            },
+            "expected_response": {
+                "data": {
+                    "percent100": {
+                        "foo": 1
+                    }
+                }
+            }
+        },
+        {
             "type": "Stop"
         }
     ]
