@@ -146,7 +146,7 @@ fn merging_skip_and_include_directives_multiple_applications_differing_order() {
               hello: Hello!
               extraFieldToPreventSkipIncludeNodes: String!
           }
-    
+
           type Hello {
               world: String!
               goodbye: String!
@@ -222,6 +222,128 @@ fn merging_skip_and_include_directives_multiple_applications_differing_quantity(
                 }
                 extraFieldToPreventSkipIncludeNodes
               }
+            },
+          }
+        "###
+    );
+}
+
+#[test]
+fn fields_are_not_overwritten_when_directives_are_removed() {
+    let planner = planner!(
+        SubgraphSkip: r#"
+          type Query {
+            foo: Foo
+          }
+
+          type Foo {
+            bar: Bar
+          }
+
+          type Bar {
+            baz: Baz
+            quax: Quax
+          }
+
+          type Baz {
+            things: String
+          }
+
+          type Quax {
+            name: String
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          fragment SimpleBaz on Foo {
+            ...Baz
+          }
+
+          fragment Baz on Foo {
+            bar @include(if: $b) {
+              baz {
+                things
+              }
+            }
+          }
+
+          query Test($b: Boolean!) {
+            foo @include(if: $b) {
+              bar {
+                quax {
+                  name
+                }
+              }
+              ...SimpleBaz
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Include(if: $b) {
+              Fetch(service: "SubgraphSkip") {
+                {
+                  foo {
+                    bar {
+                      quax {
+                        name
+                      }
+                      baz {
+                        things
+                      }
+                    }
+                  }
+                }
+              },
+            },
+          }
+        "###
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          fragment SimpleBaz on Foo {
+            ...Baz
+          }
+
+          fragment Baz on Foo {
+            bar @skip(if: $b) {
+              baz {
+                things
+              }
+            }
+          }
+
+          query Test($b: Boolean!) {
+            foo @skip(if: $b) {
+              bar {
+                quax {
+                  name
+                }
+              }
+              ...SimpleBaz
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Skip(if: $b) {
+              Fetch(service: "SubgraphSkip") {
+                {
+                  foo {
+                    bar {
+                      quax {
+                        name
+                      }
+                      baz {
+                        things
+                      }
+                    }
+                  }
+                }
+              },
             },
           }
         "###
