@@ -61,7 +61,7 @@ supergraph:
     warmed_up_queries: 100
 ```
 
-(In addition, the router can use the contents of the [persisted query list](./persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](./persisted-queries#persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.)
+(In addition, the router can use the contents of the [persisted query list](/router/configuration/persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](/router/configuration/persisted-queries#persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.)
 
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
