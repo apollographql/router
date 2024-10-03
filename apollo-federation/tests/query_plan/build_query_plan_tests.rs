@@ -1294,3 +1294,33 @@ fn handles_multiple_conditions_on_abstract_types() {
       "###
     );
 }
+
+#[test]
+fn condition_order_router799() {
+    let planner = planner!(
+        books: r#"
+        type Query {
+            bookName: String!
+        }
+        type Mutation {
+            bookName(name: String!): Int!
+        }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          mutation($var0: Boolean! = true, $var1: Boolean!) {
+            ... on Mutation @skip(if: $var0) @include(if: $var1) {
+              field0: __typename
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            ...
+          }
+        "###
+    );
+}
