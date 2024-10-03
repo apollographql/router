@@ -386,7 +386,6 @@ fn vec_matches_result<T>(
             item_matches(this, other)
                 .map_err(|err| err.add_description(&format!("under item[{}]", index)))
         })?;
-    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok())); // Note: looks redundant
     Ok(())
 }
 
@@ -398,7 +397,7 @@ fn vec_matches_sorted<T: Ord + Clone>(this: &[T], other: &[T]) -> bool {
     vec_matches(&this_sorted, &other_sorted, T::eq)
 }
 
-fn vec_matches_sorted_by<T: Eq + Clone>(
+fn vec_matches_sorted_by<T: Clone>(
     this: &[T],
     other: &[T],
     compare: impl Fn(&T, &T) -> std::cmp::Ordering,
@@ -414,19 +413,20 @@ fn vec_matches_sorted_by<T: Eq + Clone>(
     Ok(())
 }
 
+// `this` vector includes `other` vector as a set
+fn vec_includes_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
+    other.iter().all(|other_node| {
+        this.iter()
+            .any(|this_node| item_matches(this_node, other_node))
+    })
+}
+
 // performs a set comparison, ignoring order
 fn vec_matches_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     // Set-inclusion test in both directions
     this.len() == other.len()
-        && this.iter().all(|this_node| {
-            other
-                .iter()
-                .any(|other_node| item_matches(this_node, other_node))
-        })
-        && other.iter().all(|other_node| {
-            this.iter()
-                .any(|this_node| item_matches(this_node, other_node))
-        })
+        && vec_includes_as_set(this, other, &item_matches)
+        && vec_includes_as_set(other, this, &item_matches)
 }
 
 fn vec_matches_result_as_set<T>(
@@ -457,7 +457,6 @@ fn vec_matches_result_as_set<T>(
             ));
         }
     }
-    assert!(vec_matches_as_set(this, other, item_matches));
     Ok(())
 }
 
@@ -720,6 +719,49 @@ fn same_ast_operation_definition(
     Ok(())
 }
 
+// `x` may be coerced to `y`.
+// - `x` should be a value from JS QP.
+// - `y` should be a value from Rust QP.
+// - Assume: x and y are already checked not equal.
+// Due to coercion differences, we need to compare AST values with special cases.
+fn ast_value_maybe_coerced_to(x: &ast::Value, y: &ast::Value) -> bool {
+    match (x, y) {
+        // Special case 1: JS QP may convert an enum value into string.
+        // - In this case, compare them as strings.
+        (ast::Value::String(ref x), ast::Value::Enum(ref y)) => {
+            if x == y.as_str() {
+                return true;
+            }
+        }
+
+        // Special case 2: Rust QP expands a object value by filling in its
+        // default field values.
+        // - If the Rust QP object value subsumes the JS QP object value, consider it a match.
+        // - Assuming the Rust QP object value has only default field values.
+        // - Warning: This is an unsound heuristic.
+        (ast::Value::Object(ref x), ast::Value::Object(ref y)) => {
+            if vec_includes_as_set(y, x, |(yy_name, yy_val), (xx_name, xx_val)| {
+                xx_name == yy_name
+                    && (xx_val == yy_val || ast_value_maybe_coerced_to(xx_val, yy_val))
+            }) {
+                return true;
+            }
+        }
+
+        // Recurse into list items.
+        (ast::Value::List(ref x), ast::Value::List(ref y)) => {
+            if vec_matches(x, y, |xx, yy| {
+                xx == yy || ast_value_maybe_coerced_to(xx, yy)
+            }) {
+                return true;
+            }
+        }
+
+        _ => {} // otherwise, fall through
+    }
+    false
+}
+
 // Use this function, instead of `VariableDefinition`'s `PartialEq` implementation,
 // due to known differences.
 fn same_variable_definition(
@@ -730,27 +772,8 @@ fn same_variable_definition(
     check_match_eq!(x.ty, y.ty);
     if x.default_value != y.default_value {
         if let (Some(x), Some(y)) = (&x.default_value, &y.default_value) {
-            match (x.as_ref(), y.as_ref()) {
-                // Special case 1: JS QP may convert an enum value into string.
-                // - In this case, compare them as strings.
-                (ast::Value::String(ref x), ast::Value::Enum(ref y)) => {
-                    if x == y.as_str() {
-                        return Ok(());
-                    }
-                }
-
-                // Special case 2: Rust QP expands an empty object value by filling in its
-                // default field values.
-                // - If the JS QP value is an empty object, consider any object is a match.
-                // - Assuming the Rust QP object value has only default field values.
-                // - Warning: This is an unsound heuristic.
-                (ast::Value::Object(ref x), ast::Value::Object(_)) => {
-                    if x.is_empty() {
-                        return Ok(());
-                    }
-                }
-
-                _ => {} // otherwise, fall through
+            if ast_value_maybe_coerced_to(x, y) {
+                return Ok(());
             }
         }
 
@@ -868,12 +891,34 @@ mod ast_comparison_tests {
     }
 
     #[test]
-    fn test_query_variable_decl_object_value_coercion() {
+    fn test_query_variable_decl_object_value_coercion_empty_case() {
         // Note: Rust QP expands empty object default values by filling in its default field
         // values.
         let op_x = r#"query($qv1: T! = {}) { x(arg1: $qv1) }"#;
         let op_y =
             r#"query($qv1: T! = { field1: true, field2: "default_value" }) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_object_value_coercion_non_empty_case() {
+        // Note: Rust QP expands an object default values by filling in its default field values.
+        let op_x = r#"query($qv1: T! = {field1: true}) { x(arg1: $qv1) }"#;
+        let op_y =
+            r#"query($qv1: T! = { field1: true, field2: "default_value" }) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_list_of_object_value_coercion() {
+        // Testing a combination of list and object value coercion.
+        let op_x = r#"query($qv1: [T!]! = [{}]) { x(arg1: $qv1) }"#;
+        let op_y =
+            r#"query($qv1: [T!]! = [{field1: true, field2: "default_value"}]) { x(arg1: $qv1) }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
