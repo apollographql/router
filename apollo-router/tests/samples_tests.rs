@@ -293,7 +293,10 @@ impl TestExecution {
 
         for (name, subgraph) in &self.subgraphs {
             for SubgraphRequestMock { request, response } in &subgraph.requests {
-                let mut builder = Mock::given(body_partial_json(&request.body));
+                let mut builder = match &request.body {
+                    Some(body) => Mock::given(body_partial_json(body)),
+                    None => Mock::given(wiremock::matchers::AnyMatcher),
+                };
 
                 if let Some(s) = request.method.as_deref() {
                     builder = builder.and(method(s));
@@ -460,6 +463,7 @@ impl TestExecution {
                 for request in requests {
                     writeln!(out, "\tmethod: {}", request.method).unwrap();
                     writeln!(out, "\tpath: {}", request.url).unwrap();
+                    writeln!(out, "\theaders: {:?}", request.headers).unwrap();
                     writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
                 }
             } else {
@@ -608,7 +612,7 @@ struct HttpRequest {
     path: Option<String>,
     #[serde(default)]
     headers: HashMap<String, String>,
-    body: Value,
+    body: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

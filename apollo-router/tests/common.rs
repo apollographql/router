@@ -1081,6 +1081,7 @@ fn merge_overrides(
     let overrides = subgraph_overrides
         .iter()
         .map(|(name, url)| (name.clone(), serde_json::Value::String(url.clone())));
+    let overrides2 = overrides.clone();
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("override_subgraph_url"))
@@ -1093,6 +1094,23 @@ fn merge_overrides(
         }
         Some(override_url) => {
             override_url.extend(overrides);
+        }
+    }
+    if let Some(sources) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("preview_connectors"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("subgraphs"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("connectors"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("sources"))
+        .and_then(|o| o.as_object_mut())
+    {
+        for (name, url) in overrides2 {
+            let mut obj = serde_json::Map::new();
+            obj.insert("override_url".to_string(), url.clone());
+            sources.insert(name.to_string(), Value::Object(obj));
         }
     }
 
