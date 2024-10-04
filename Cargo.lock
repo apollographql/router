@@ -361,6 +361,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "thiserror",
+ "threadpool",
  "tikv-jemallocator",
  "time",
  "tokio",

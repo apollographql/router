@@ -56,6 +56,7 @@ mod apollo_studio_interop;
 pub(crate) mod axum_factory;
 mod batching;
 mod cache;
+mod compute_task;
 mod configuration;
 mod context;
 mod error;
