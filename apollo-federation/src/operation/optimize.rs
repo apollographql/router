@@ -51,6 +51,7 @@ use super::Field;
 use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpreadSelection;
+use super::HasSelectionKey;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
@@ -60,7 +61,6 @@ use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
-use crate::operation::FragmentSpreadData;
 use crate::operation::SelectionValue;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -228,10 +228,7 @@ impl Selection {
             let diff = self_sub_selection.minus(other_sub_selection)?;
             if !diff.is_empty() {
                 return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        diff.into_iter().map(|(_, v)| v),
-                    )
+                    .with_updated_selections(self_sub_selection.type_position.clone(), diff)
                     .map(Some);
             }
         }
@@ -251,10 +248,7 @@ impl Selection {
                 return Ok(None);
             } else {
                 return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        common.into_iter().map(|(_, v)| v),
-                    )
+                    .with_updated_selections(self_sub_selection.type_position.clone(), common)
                     .map(Some);
             }
         }
@@ -268,9 +262,9 @@ impl SelectionSet {
     pub(crate) fn minus(&self, other: &SelectionSet) -> Result<SelectionSet, FederationError> {
         let iter = self
             .selections
-            .iter()
-            .map(|(k, v)| {
-                if let Some(other_v) = other.selections.get(k) {
+            .values()
+            .map(|v| {
+                if let Some(other_v) = other.selections.get(v.key()) {
                     v.minus(other_v)
                 } else {
                     Ok(Some(v.clone()))
@@ -297,9 +291,9 @@ impl SelectionSet {
 
         let iter = self
             .selections
-            .iter()
-            .map(|(k, v)| {
-                if let Some(other_v) = other.selections.get(k) {
+            .values()
+            .map(|v| {
+                if let Some(other_v) = other.selections.get(v.key()) {
                     v.intersection(other_v)
                 } else {
                     Ok(None)
@@ -413,7 +407,7 @@ impl FieldsConflictValidator {
         for selection_set in level {
             for field_selection in selection_set.field_selections() {
                 let response_name = field_selection.field.response_name();
-                let at_response_name = at_level.entry(response_name).or_default();
+                let at_response_name = at_level.entry(response_name.clone()).or_default();
                 let entry = at_response_name
                     .entry(field_selection.field.clone())
                     .or_default();
@@ -443,7 +437,7 @@ impl FieldsConflictValidator {
 
     fn for_field<'v>(&'v self, field: &Field) -> impl Iterator<Item = Arc<Self>> + 'v {
         self.by_response_name
-            .get(&field.response_name())
+            .get(field.response_name())
             .into_iter()
             .flat_map(|by_response_name| by_response_name.values())
             .flatten()
@@ -682,10 +676,11 @@ impl FragmentRestrictionAtType {
     // Using `F` in those cases is, while not 100% incorrect, at least not productive, and so we
     // skip it that case. This is essentially an optimization.
     fn is_useless(&self) -> bool {
-        match self.selections.selections.as_slice().split_first() {
-            None => true,
-            Some((first, rest)) => rest.is_empty() && first.0.is_typename_field(),
-        }
+        let mut iter = self.selections.iter();
+        let Some(first) = iter.next() else {
+            return true;
+        };
+        iter.next().is_none() && first.is_typename_field()
     }
 }
 
@@ -751,7 +746,7 @@ impl Fragment {
             return false;
         }
 
-        self.selection_set.selections.iter().any(|(_, selection)| {
+        self.selection_set.selections.values().any(|selection| {
             matches!(
                 selection,
                 Selection::FragmentSpread(fragment) if fragment.spread.fragment_name == *other_fragment_name
@@ -1384,7 +1379,7 @@ impl InlineFragmentSelection {
                         // case they should be kept on the spread.
                         // PORT_NOTE: We are assuming directives on fragment definitions are
                         //            carried over to their spread sites as JS version does, which
-                        //            is handled differently in Rust version (see `FragmentSpreadData`).
+                        //            is handled differently in Rust version (see `FragmentSpread`).
                         let directives: executable::DirectiveList = self
                             .inline_fragment
                             .directives
@@ -1662,7 +1657,7 @@ impl FragmentGenerator {
             selection_set.type_position.clone(),
         );
 
-        for (_key, selection) in Arc::make_mut(&mut selection_set.selections).iter_mut() {
+        for selection in Arc::make_mut(&mut selection_set.selections).values_mut() {
             match selection {
                 SelectionValue::Field(mut field) => {
                     if let Some(selection_set) = field.get_selection_set_mut() {
@@ -1751,14 +1746,14 @@ impl FragmentGenerator {
                     };
                     new_selection_set.add_local_selection(&Selection::from(
                         FragmentSpreadSelection {
-                            spread: FragmentSpread::new(FragmentSpreadData {
+                            spread: FragmentSpread {
                                 schema: selection_set.schema.clone(),
                                 fragment_name: existing.name.clone(),
                                 type_condition_position: existing.type_condition_position.clone(),
                                 directives: skip_include.into(),
                                 fragment_directives: existing.directives.clone(),
                                 selection_id: crate::operation::SelectionId::new(),
-                            }),
+                            },
                             selection_set: existing.selection_set.clone(),
                         },
                     ))?;
@@ -3507,14 +3502,14 @@ mod tests {
             match path.split_first() {
                 None => {
                     // Base case
-                    Arc::make_mut(&mut ss.selections).clear();
+                    ss.selections = Default::default();
                     Ok(())
                 }
 
                 Some((first, rest)) => {
-                    let result = Arc::make_mut(&mut ss.selections).get_mut(&SelectionKey::Field {
-                        response_name: (*first).clone(),
-                        directives: Default::default(),
+                    let result = Arc::make_mut(&mut ss.selections).get_mut(SelectionKey::Field {
+                        response_name: first,
+                        directives: &Default::default(),
                     });
                     let Some(mut value) = result else {
                         return Err(FederationError::internal("No matching field found"));
