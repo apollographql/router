@@ -90,6 +90,41 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 ## 🚀 Features
 
+### Entity cache invalidation preview ([PR #5889](https://github.com/apollographql/router/pull/5889))
+
+> ⚠️ This is a preview for an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).  If your organization doesn't currently have an Enterprise plan, you can test out this functionality with a [free Enterprise trial](https://studio.apollographql.com/signup?type=enterprise-trial).
+>
+> As a preview feature, it's subject to our [Preview launch stage](https://www.apollographql.com/docs/resources/product-launch-stages/#preview) expectations and configuration and performance may change in future releases.
+
+As a follow up to the Entity cache preview that was published in the router 1.46.0 release, we're introducing a new feature that allows you to invalidate cached entries.
+
+This introduces two ways to invalidate cached entries:
+- through an HTTP endpoint exposed by the router
+- via GraphQL response `extensions` returned from subgraph requests
+
+The invalidation endpoint can be defined in the router's configuration, as follows:
+
+```yaml
+preview_entity_cache:
+  enabled: true
+
+  # global invalidation configuration
+  invalidation:
+    # address of the invalidation endpoint
+    # this should only be exposed to internal networks
+    listen: "127.0.0.1:3000"
+    path: "/invalidation"
+```
+
+Invalidation requests can target cached entries by:
+- subgraph name
+- subgraph name and type name
+- subgraph name, type name and entity key
+
+You can learn more about invalidation in the [documentation](https://www.apollographql.com/docs/router/configuration/entity-caching#entity-cache-invalidation).
+
+By [@bnjjj](https://github.com/bnjjj),[@bryncooke](https://github.com/bryncooke), [@garypen](https://github.com/garypen), [@Geal](https://github.com/Geal), [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5889
+
 ### Support aliasing standard attributes for telemetry ([Issue #5930](https://github.com/apollographql/router/issues/5930))
 
 The router now supports creating aliases for standard attributes for telemetry.

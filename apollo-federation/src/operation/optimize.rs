@@ -1684,6 +1684,20 @@ impl FragmentGenerator {
                 SelectionValue::InlineFragment(mut candidate) => {
                     self.visit_selection_set(candidate.get_selection_set_mut())?;
 
+                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                    // JS federation does not consider fragments without a type condition.
+                    if candidate
+                        .get()
+                        .inline_fragment
+                        .type_condition_position
+                        .is_none()
+                    {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    }
+
                     let directives = &candidate.get().inline_fragment.directives;
                     let skip_include = directives
                         .iter()
