@@ -321,7 +321,7 @@ However, this will mean that the APM view will only show a small percentage of t
 Datadog Agent sampling is a mode where ALL traces are sent to the Datadog agent, but only a percentage of them are forwarded to Datadog. This makes the APM view accurate while keeping costs low
 at the cost of the Router having an effective sample rate of 100% under the hood.
 
-Here are some guides on how to configure the `sampler` and `preview_datadog_agent_sampling` to get the desired behavior:
+Use the following guidelines on how to configure the `sampler` and `preview_datadog_agent_sampling` to get the desired behavior:
 
 **I want the APM view to show metrics for 100% of traffic, and I am OK with the performance impact on the Router.**
 
@@ -340,7 +340,7 @@ telemetry:
 
 **I want the Datadog agent to be in control of the percentage of traces sent to Datadog.**
 
-Use the Datadog agent `probabalistic_sampling` option sampler and set the `sampler` to `1` to allow the Datadog agent to control the sampling rate.
+Use the Datadog agent `probabalistic_sampling` option sampler and set the `sampler` to `always_on` to allow the Datadog agent to control the sampling rate.
 
 Router config:
 ```yaml title="router.yaml"
