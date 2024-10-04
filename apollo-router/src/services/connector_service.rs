@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
-use tracing::warn;
+use tracing::error;
 use tracing::Instrument;
 
 use super::connect::BoxService;
@@ -183,7 +183,7 @@ async fn execute(
                 .insert(CONNECTOR_INFO_CONTEXT_KEY, ConnectorInfo::from(connector))
                 .is_err()
             {
-                warn!("Failed to store connector info in context - instruments may be inaccurate");
+                error!("Failed to store connector info in context - instruments may be inaccurate");
             }
             let original_subgraph_name = original_subgraph_name.clone();
             let request_limit = request_limit.clone();

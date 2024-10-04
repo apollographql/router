@@ -1,10 +1,19 @@
 use opentelemetry_api::Key;
 use opentelemetry_api::KeyValue;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
 use crate::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes;
 use crate::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector;
 use crate::plugins::telemetry::config_new::events::log_event;
@@ -105,25 +114,25 @@ impl Instrumented
             let headers = request.http_request.headers();
 
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.headers"),
+                HTTP_REQUEST_HEADERS,
                 opentelemetry::Value::String(format!("{:?}", headers).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.method"),
+                HTTP_REQUEST_METHOD,
                 opentelemetry::Value::String(format!("{}", request.http_request.method()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.uri"),
+                HTTP_REQUEST_URI,
                 opentelemetry::Value::String(format!("{}", request.http_request.uri()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.version"),
+                HTTP_REQUEST_VERSION,
                 opentelemetry::Value::String(
                     format!("{:?}", request.http_request.version()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.body"),
+                HTTP_REQUEST_BODY,
                 opentelemetry::Value::String(format!("{:?}", request.http_request.body()).into()),
             ));
             log_event(self.request.level(), "connector.http.request", attrs, "");
@@ -158,21 +167,21 @@ impl Instrumented
             let headers = response.http_response.headers();
 
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.headers"),
+                HTTP_RESPONSE_HEADERS,
                 opentelemetry::Value::String(format!("{:?}", headers).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.status"),
+                HTTP_RESPONSE_STATUS,
                 opentelemetry::Value::String(format!("{}", response.http_response.status()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.version"),
+                HTTP_RESPONSE_VERSION,
                 opentelemetry::Value::String(
                     format!("{:?}", response.http_response.version()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.body"),
+                HTTP_RESPONSE_BODY,
                 opentelemetry::Value::String(format!("{:?}", response.http_response.body()).into()),
             ));
             log_event(self.response.level(), "connector.http.response", attrs, "");
