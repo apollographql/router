@@ -1746,10 +1746,10 @@ impl SelectionSet {
         }
 
         impl TopLevelFieldSplitter {
-            fn new(selection: SelectionSet) -> Self {
+            fn new(selection_set: SelectionSet) -> Self {
                 Self {
-                    parent_type: selection.type_position,
-                    starting_set: Arc::unwrap_or_clone(selection.selections).into_iter(),
+                    parent_type: selection_set.type_position,
+                    starting_set: Arc::unwrap_or_clone(selection_set.selections).into_iter(),
                     stack: Vec::new(),
                 }
             }
