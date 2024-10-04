@@ -310,7 +310,83 @@ telemetry:
 | `resource_mapping`    | See [config](#resource_mapping)     | A map of span names to attribute names. |
 | `span_metrics`        | See [config](#span_metrics)         | A map of span names to boolean.         |
 
-## `preview_datadog_agent_sampling` (default: `false`)
+## Sampler configuration
+
+When using Datadog you will need to take into consideration if you want to use the Datadog APM view or rely on OTLP metrics to gain insight into the Router's performance.
+The Datadog APM vie is driven by traces, and for this to be accurate 100% of requests must be sampled and sent to the Datadog agent.
+
+Tracing is expensive both in terms of APM costs but also Router performance, and typically you will want to set the `sampler` to a low value ion production environments.
+However, this will mean that the APM view will only show a small percentage of traces.
+
+Datadog agent sampling is a mode where ALL traces are sent to the Datadog agent, but only a percentage of them are forwarded to Datadog. This makes the APM view accurate while keeping costs low
+at the cost of the Router having an effective sample rate of 100% under the hood.
+
+Here are some guides on how to configure the `sampler` and `preview_datadog_agent_sampling` to get the desired behavior:
+
+**I want the APM view to show metrics for 100% of traffic, and I am OK with the performance impact on the Router.**
+
+Set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        preview_datadog_agent_sampling: true
+        sampler: 0.1
+```
+
+**I want the Datadog agent to be in control of the percentage of traces sent to Datadog.**
+
+Use the Datadog agent `probabalistic_sampling` option sampler and set the `sampler` to `1` to allow the Datadog agent to control the sampling rate.
+
+Router config:
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        sampler: always_on
+```
+
+Datadog agent config:
+```yaml
+otlp_config:
+  traces:
+    probabilistic_sampling:
+      sampling_percentage: 10
+```
+
+**I want the most performance from the Router and am not concerned with the APM view. I use metrics and traces to monitor my application.**
+
+Set the `sample` to a low value to reduce the number of traces sent to Datadog. Leave `preview_datadog_agent_sampling` to `false`.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        sampler: 0.1
+        preview_datadog_agent_sampling: false
+```
+
+### `sampler` (default: `always_on`)
+
+The `sampler` configuration allows you to control the sampling decisions that the router will make on its own and decrease the rate at which you sample, which can have a direct impact on your Datadog bill.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded to the Datadog agent. Experiment to find a value that is good for you!
+        sampler: 0.1
+```
+
+If you are using the Datadog APM viw then you should set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+### `preview_datadog_agent_sampling` (default: `false`)
 
 The Datadog APM view relies on traces to generate metrics. For this to be accurate 100% of requests must be sampled and sent to the Datadog agent.
 To prevent ALL traces from then being sent to Datadog, you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
@@ -328,6 +404,8 @@ telemetry:
 <Note>
 
     Using `preview_datadog_agent_sampling` will send ALL spans to the Datadog agent, but only the `sampler` percentage of them will be forwarded to Datadog. This means that your APM view will be correct at the cost of
-    the router sending more spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
+    the Router sending more spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
+
+    If you are OK with your APM view only showing a subset of traces, then you can leave `preview_datadog_agent_sampling` to `false`, however it is recommended to rely on OTLP metrics to gain insight into the Router's performance.
 
 </Note>
