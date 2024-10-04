@@ -2476,6 +2476,11 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
+        "detached": {
+          "default": false,
+          "description": "Handles the request without waiting for the coprocessor to respond",
+          "type": "boolean"
+        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -2511,6 +2516,11 @@ expression: "&schema"
         "context": {
           "default": false,
           "description": "Send the context",
+          "type": "boolean"
+        },
+        "detached": {
+          "default": false,
+          "description": "Handles the response without waiting for the coprocessor to respond",
           "type": "boolean"
         },
         "headers": {
@@ -4931,6 +4941,11 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
+        "detached": {
+          "default": false,
+          "description": "Handles the request without waiting for the coprocessor to respond",
+          "type": "boolean"
+        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -4971,6 +4986,11 @@ expression: "&schema"
         "context": {
           "default": false,
           "description": "Send the context",
+          "type": "boolean"
+        },
+        "detached": {
+          "default": false,
+          "description": "Handles the response without waiting for the coprocessor to respond",
           "type": "boolean"
         },
         "headers": {
@@ -5927,6 +5947,11 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
+        "detached": {
+          "default": false,
+          "description": "Handles the request without waiting for the coprocessor to respond",
+          "type": "boolean"
+        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -5967,6 +5992,11 @@ expression: "&schema"
         "context": {
           "default": false,
           "description": "Send the context",
+          "type": "boolean"
+        },
+        "detached": {
+          "default": false,
+          "description": "Handles the response without waiting for the coprocessor to respond",
           "type": "boolean"
         },
         "headers": {
@@ -6679,6 +6709,11 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
+        "detached": {
+          "default": false,
+          "description": "Handles the request without waiting for the coprocessor to respond",
+          "type": "boolean"
+        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -6714,6 +6749,11 @@ expression: "&schema"
         "context": {
           "default": false,
           "description": "Send the context",
+          "type": "boolean"
+        },
+        "detached": {
+          "default": false,
+          "description": "Handles the response without waiting for the coprocessor to respond",
           "type": "boolean"
         },
         "headers": {
