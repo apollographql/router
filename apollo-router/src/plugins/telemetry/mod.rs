@@ -286,20 +286,6 @@ impl Plugin for Telemetry {
             .expect("otel error handler lock poisoned, fatal");
 
         let mut config = init.config;
-        // This code would have enabled datadog agent sampling by default, but for now we will leave it as opt-in.
-        // If the datadog exporter is enabled then enable the agent sampler.
-        // If users are using otlp export then they will need to set this explicitly in their config.
-        //
-        // if config.exporters.tracing.datadog.enabled()
-        //     && config
-        //         .exporters
-        //         .tracing
-        //         .common
-        //         .preview_datadog_agent_sampling
-        //         .is_none()
-        // {
-        //     config.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
-        // }
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
         config.exporters.logging.validate()?;
