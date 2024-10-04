@@ -15,6 +15,7 @@ mod tests {
     use router::body::RouterBody;
     use serde_json::json;
     use serde_json_bytes::Value;
+    use services::subgraph::SubgraphRequestId;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -378,7 +379,7 @@ mod tests {
                 );
 
                 // this should be the same as the initial request id
-                assert_eq!(req.id, "5678");
+                assert_eq!(&*req.id, "5678");
 
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
@@ -458,11 +459,11 @@ mod tests {
         );
 
         let mut request = subgraph::Request::fake_builder().build();
-        request.id = "5678".to_string();
+        request.id = SubgraphRequestId("5678".to_string());
 
         let response = service.oneshot(request).await.unwrap();
 
-        assert_eq!("5678", response.id);
+        assert_eq!("5678", &*response.id);
         assert_eq!(
             serde_json_bytes::json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
@@ -691,7 +692,7 @@ mod tests {
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
-                assert_eq!(req.id, "5678");
+                assert_eq!(&*req.id, "5678");
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
@@ -762,7 +763,7 @@ mod tests {
         );
 
         let mut request = subgraph::Request::fake_builder().build();
-        request.id = "5678".to_string();
+        request.id = SubgraphRequestId("5678".to_string());
 
         let response = service.oneshot(request).await.unwrap();
 
@@ -771,7 +772,7 @@ mod tests {
             response.response.headers().get("cookie").unwrap(),
             "tasty_cookie=strawberry"
         );
-        assert_eq!(response.id, "5678");
+        assert_eq!(&*response.id, "5678");
 
         assert_eq!(
             response

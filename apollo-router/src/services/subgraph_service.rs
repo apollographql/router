@@ -44,6 +44,7 @@ use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
+use super::subgraph::SubgraphRequestId;
 use super::Plugins;
 use crate::batching::assemble_batch;
 use crate::batching::BatchQuery;
@@ -809,7 +810,7 @@ fn http_response_to_graphql_response(
 pub(crate) async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
-    mut contexts: Vec<(Context, String)>,
+    mut contexts: Vec<(Context, SubgraphRequestId)>,
     mut request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
@@ -1101,7 +1102,7 @@ type BatchInfo = (
     (
         String,
         http::Request<RouterBody>,
-        Vec<(Context, String)>,
+        Vec<(Context, SubgraphRequestId)>,
         usize,
     ),
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,

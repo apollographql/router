@@ -454,6 +454,7 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use subgraph::SubgraphRequestId;
     use tower::BoxError;
 
     use super::*;
@@ -863,7 +864,7 @@ mod test {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
-            id: String::new(),
+            id: SubgraphRequestId(String::new()),
         };
         service.modify_request(&mut request);
         let headers = request
@@ -936,7 +937,7 @@ mod test {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
-            id: String::new(),
+            id: SubgraphRequestId(String::new()),
         };
         service.modify_request(&mut request);
         let headers = request
@@ -958,7 +959,7 @@ mod test {
             http::Response::default(),
             Context::new(),
             req.subgraph_name.unwrap_or_default(),
-            String::new(),
+            SubgraphRequestId(String::new()),
         ))
     }
 
@@ -1001,7 +1002,7 @@ mod test {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
-            id: String::new(),
+            id: SubgraphRequestId(String::new()),
         }
     }
 

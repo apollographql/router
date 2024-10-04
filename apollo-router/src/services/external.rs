@@ -27,6 +27,8 @@ use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::Context;
 
+use super::subgraph::SubgraphRequestId;
+
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Version of our externalised data. Rev this if it changes
@@ -103,7 +105,7 @@ pub(crate) struct Externalizable<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     query_plan: Option<Arc<QueryPlan>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) subgraph_request_id: Option<String>,
+    pub(crate) subgraph_request_id: Option<SubgraphRequestId>,
 }
 
 #[buildstructor::buildstructor]
@@ -247,7 +249,7 @@ where
         method: Option<String>,
         service_name: Option<String>,
         uri: Option<String>,
-        subgraph_request_id: Option<String>,
+        subgraph_request_id: Option<SubgraphRequestId>,
     ) -> Self {
         assert!(matches!(
             stage,

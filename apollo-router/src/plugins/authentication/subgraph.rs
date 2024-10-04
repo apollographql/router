@@ -508,6 +508,7 @@ mod test {
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
     use crate::query_planner::fetch::OperationKind;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::Context;
@@ -806,7 +807,7 @@ mod test {
             http::Response::default(),
             Context::new(),
             req.subgraph_name.unwrap_or_else(|| String::from("test")),
-            String::new(),
+            SubgraphRequestId(String::new()),
         ))
     }
 

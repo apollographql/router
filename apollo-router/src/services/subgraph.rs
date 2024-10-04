@@ -7,6 +7,8 @@ use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
 use multimap::MultiMap;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -35,6 +37,9 @@ pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send + Sync>>;
+/// unique id for a subgraph request and the related response
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SubgraphRequestId(pub String);
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
@@ -64,7 +69,7 @@ pub struct Request {
     pub(crate) executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
 
     /// unique id for this request
-    pub(crate) id: String,
+    pub(crate) id: SubgraphRequestId,
 }
 
 #[buildstructor::buildstructor]
@@ -93,10 +98,7 @@ impl Request {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
-            id: uuid::Uuid::new_v4()
-                .as_hyphenated()
-                .encode_lower(&mut uuid::Uuid::encode_buffer())
-                .to_string(),
+            id: SubgraphRequestId::new(),
         }
     }
 
@@ -166,6 +168,25 @@ impl Clone for Request {
     }
 }
 
+impl SubgraphRequestId {
+    pub fn new() -> Self {
+        SubgraphRequestId(
+            uuid::Uuid::new_v4()
+                .as_hyphenated()
+                .encode_lower(&mut uuid::Uuid::encode_buffer())
+                .to_string(),
+        )
+    }
+}
+
+impl std::ops::Deref for SubgraphRequestId {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
 assert_impl_all!(Response: Send);
 #[derive(Debug)]
 #[non_exhaustive]
@@ -176,7 +197,7 @@ pub struct Response {
     pub(crate) subgraph_name: Option<String>,
     pub context: Context,
     /// unique id matching the corresponding field in the request
-    pub(crate) id: String,
+    pub(crate) id: SubgraphRequestId,
 }
 
 #[buildstructor::buildstructor]
@@ -189,7 +210,7 @@ impl Response {
         response: http::Response<graphql::Response>,
         context: Context,
         subgraph_name: String,
-        id: String,
+        id: SubgraphRequestId,
     ) -> Response {
         Self {
             response,
@@ -214,7 +235,7 @@ impl Response {
         context: Context,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
-        id: Option<String>,
+        id: Option<SubgraphRequestId>,
     ) -> Response {
         // Build a response
         let res = graphql::Response::builder()
@@ -236,12 +257,7 @@ impl Response {
         // Warning: the id argument forthis builder is an Option to make that a non breaking change
         // but this means that if a subgraph response is created explicitely without an id, it will
         // be generated here and not match the id from the subgraph request
-        let id = id.unwrap_or_else(|| {
-            uuid::Uuid::new_v4()
-                .as_hyphenated()
-                .encode_lower(&mut uuid::Uuid::encode_buffer())
-                .to_string()
-        });
+        let id = id.unwrap_or_else(SubgraphRequestId::new);
 
         Self {
             response,
@@ -268,7 +284,7 @@ impl Response {
         context: Option<Context>,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
-        id: Option<String>,
+        id: Option<SubgraphRequestId>,
     ) -> Response {
         Response::new(
             label,
@@ -302,7 +318,7 @@ impl Response {
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         subgraph_name: Option<String>,
-        id: Option<String>,
+        id: Option<SubgraphRequestId>,
     ) -> Result<Response, BoxError> {
         Ok(Response::new(
             label,
@@ -327,7 +343,7 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Context,
         subgraph_name: Option<String>,
-        id: Option<String>,
+        id: Option<SubgraphRequestId>,
     ) -> Result<Response, BoxError> {
         Ok(Response::new(
             Default::default(),

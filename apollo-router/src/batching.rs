@@ -28,6 +28,7 @@ use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
+use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
@@ -426,7 +427,7 @@ pub(crate) async fn assemble_batch(
 ) -> Result<
     (
         String,
-        Vec<(Context, String)>,
+        Vec<(Context, SubgraphRequestId)>,
         http::Request<RouterBody>,
         Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     ),
@@ -446,7 +447,7 @@ pub(crate) async fn assemble_batch(
     let contexts = requests
         .iter()
         .map(|request| (request.context.clone(), request.id.clone()))
-        .collect::<Vec<(Context, String)>>();
+        .collect::<Vec<(Context, SubgraphRequestId)>>();
     // Grab the common info from the first request
     let first_request = requests
         .into_iter()
@@ -479,6 +480,7 @@ mod tests {
     use crate::plugins::traffic_shaping::Http2Config;
     use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::Configuration;
@@ -562,7 +564,7 @@ mod tests {
                     .unwrap(),
                 context: Context::new(),
                 subgraph_name: None,
-                id: String::new(),
+                id: SubgraphRequestId(String::new()),
             };
 
             tx.send(Ok(response)).unwrap();
