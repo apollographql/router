@@ -11,6 +11,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
+
 use apollo_router::SnapshotServer;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
@@ -242,7 +243,9 @@ impl TestExecution {
         self.subgraphs = subgraphs.clone();
         let (mut subgraphs_server, url) = self.start_subgraphs(out).await;
 
-        let subgraph_overrides = self.load_subgraph_mocks(&mut subgraphs_server, &url, path, out).await;
+        let subgraph_overrides = self
+            .load_subgraph_mocks(&mut subgraphs_server, &url, path, out)
+            .await;
         writeln!(out, "got subgraph mocks: {subgraph_overrides:?}")?;
 
         let config = open_file(&path.join(configuration_path), out)?;
@@ -358,17 +361,20 @@ impl TestExecution {
                     snapshot.update.unwrap_or(false),
                     Some(vec![CONTENT_TYPE.to_string(), CONTENT_LENGTH.to_string()]),
                 )
-                    .await;
+                .await;
                 let snapshot_url = snapshot_server.uri();
                 writeln!(
                     out,
                     "snapshot server for {name} listening on {snapshot_url}"
-                ).unwrap();
+                )
+                .unwrap();
                 subgraph_overrides
                     .entry(name.to_string())
                     .or_insert(snapshot_url.clone());
             } else {
-                for SubgraphRequestMock { request, response } in &subgraph.requests {
+                for SubgraphRequestMock { request, response } in
+                    subgraph.requests.as_ref().unwrap_or(&vec![])
+                {
                     let mut builder = match &request.body {
                         Some(body) => Mock::given(body_partial_json(body)),
                         None => Mock::given(wiremock::matchers::AnyMatcher),
@@ -788,7 +794,7 @@ struct Snapshot {
 #[serde(deny_unknown_fields)]
 struct Subgraph {
     snapshot: Option<Snapshot>,
-    requests: Vec<SubgraphRequestMock>,
+    requests: Option<Vec<SubgraphRequestMock>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -11,8 +11,7 @@
                     "snapshot": {
                         "path": "./http_snapshots.json",
                         "base_url": "https://jsonplaceholder.typicode.com/"
-                    },
-                    "requests": []
+                    }
                 }
             }
         },

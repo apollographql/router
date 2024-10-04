@@ -43,7 +43,6 @@ pub mod mocks;
 #[cfg(test)]
 pub(crate) mod http_client;
 
-#[cfg(any(feature = "snapshot", test))]
 pub(crate) mod http_snapshot;
 
 /// Builder for the part of an Apollo Router that handles GraphQL requests, as a [`tower::Service`].

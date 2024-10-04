@@ -14,7 +14,7 @@
 //! or as a standalone application by invoking [`standalone::main`]. In the latter case, there
 //! is a binary wrapper in `http_snapshot_main` that can be run like this:
 //!
-//! `cargo run --bin snapshot --features="snapshot" -- --snapshot-path <file> --url <base URL to snapshot> [--offline] [--update] [--port <port number>]`
+//! `cargo run --bin snapshot -- --snapshot-path <file> --url <base URL to snapshot> [--offline] [--update] [--port <port number>]`
 //!
 //! Any requests made to the snapshot server will be proxied on to the given base URL, and the
 //! responses will be saved to the given file. The next time the snapshot server receives the
@@ -314,7 +314,6 @@ impl SnapshotServer {
     }
 
     /// Start the server and block. Can be used to run the server as a standalone application.
-    #[cfg(feature = "snapshot")]
     pub(crate) async fn start<P: AsRef<Path>>(
         snapshot_path: P,
         base_url: Uri,
@@ -458,7 +457,6 @@ struct Response {
     body: Value,
 }
 
-#[cfg(feature = "snapshot")]
 /// Standalone snapshot server
 pub(crate) mod standalone {
     use std::net::TcpListener;

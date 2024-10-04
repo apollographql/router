@@ -99,9 +99,7 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
-#[cfg(feature = "snapshot")]
 pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
-#[cfg(feature = "snapshot")]
 pub use crate::test_harness::http_snapshot::SnapshotServer;
 pub use crate::test_harness::make_fake_batch;
 pub use crate::test_harness::MockedSubgraphs;
