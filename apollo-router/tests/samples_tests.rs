@@ -10,7 +10,7 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
-
+use std::str::FromStr;
 use apollo_router::SnapshotServer;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
@@ -201,7 +201,7 @@ impl TestExecution {
                 subgraphs,
                 update_url_overrides,
             } => {
-                self.reload_subgraphs(subgraphs, *update_url_overrides, out)
+                self.reload_subgraphs(subgraphs, *update_url_overrides, path, out)
                     .await
             }
             Action::Request {
@@ -242,8 +242,8 @@ impl TestExecution {
         self.subgraphs = subgraphs.clone();
         let (mut subgraphs_server, url) = self.start_subgraphs(out).await;
 
-        let subgraph_overrides = self.load_subgraph_mocks(&mut subgraphs_server, &url).await;
-        writeln!(out, "got subgraph mocks: {subgraph_overrides:?}").unwrap();
+        let subgraph_overrides = self.load_subgraph_mocks(&mut subgraphs_server, &url, path, out).await;
+        writeln!(out, "got subgraph mocks: {subgraph_overrides:?}")?;
 
         let config = open_file(&path.join(configuration_path), out)?;
         let schema_path = path.join(schema_path);
@@ -295,7 +295,7 @@ impl TestExecution {
 
         let subgraph_url = Self::subgraph_url(&subgraphs_server);
         let subgraph_overrides = self
-            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url, path, out)
             .await;
 
         let config = open_file(&path.join(configuration_path), out)?;
@@ -344,27 +344,29 @@ impl TestExecution {
         &mut self,
         subgraphs_server: &mut MockServer,
         url: &str,
+        path: &Path,
+        out: &mut String,
     ) -> HashMap<String, String> {
         let mut subgraph_overrides = HashMap::new();
 
         for (name, subgraph) in &self.subgraphs {
-            if let Some(snapshot_path) = subgraph.snapshot_path.as_ref() {
+            if let Some(snapshot) = subgraph.snapshot.as_ref() {
                 let snapshot_server = SnapshotServer::spawn(
-                    &path.join(snapshot_path),
-                    Uri::from_static("http://unused"),
+                    &path.join(&snapshot.path),
+                    Uri::from_str(&snapshot.base_url).unwrap(),
                     true,
-                    false,
+                    snapshot.update.unwrap_or(false),
                     Some(vec![CONTENT_TYPE.to_string(), CONTENT_LENGTH.to_string()]),
                 )
                     .await;
                 let snapshot_url = snapshot_server.uri();
-                subgraph_overrides
-                    .entry(name.to_string())
-                    .or_insert(snapshot_url.clone());
                 writeln!(
                     out,
                     "snapshot server for {name} listening on {snapshot_url}"
-                )?;
+                ).unwrap();
+                subgraph_overrides
+                    .entry(name.to_string())
+                    .or_insert(snapshot_url.clone());
             } else {
                 for SubgraphRequestMock { request, response } in &subgraph.requests {
                     let mut builder = match &request.body {
@@ -408,6 +410,7 @@ impl TestExecution {
         &mut self,
         subgraphs: &HashMap<String, Subgraph>,
         update_url_overrides: bool,
+        path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
         writeln!(out, "reloading subgraphs with: {subgraphs:?}").unwrap();
@@ -422,7 +425,7 @@ impl TestExecution {
 
         let subgraph_url = Self::subgraph_url(&subgraphs_server);
         let subgraph_overrides = self
-            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url, path, out)
             .await;
         self.subgraphs_server = Some(subgraphs_server);
 
@@ -775,9 +778,16 @@ enum Action {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct Snapshot {
+    path: String,
+    base_url: String,
+    update: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Subgraph {
-    snapshot_path: Option<String>,
+    snapshot: Option<Snapshot>,
     requests: Vec<SubgraphRequestMock>,
 }
 

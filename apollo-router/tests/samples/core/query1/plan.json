@@ -6,8 +6,24 @@
             "configuration_path": "./configuration.yaml",
             "subgraphs": {
                 "accounts": {
-                    "snapshot_path": "./http_snapshots.json",
-                    "requests": []
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"{me{name}}"}
+                            },
+                            "response": {
+                                "body": {"data": { "me": { "name": "test" } } }
+                            }
+                        },
+                        {
+                            "request": {
+                                "body": {"query":"{me{nom:name}}"}
+                            },
+                            "response": {
+                                "body": {"data": { "me": { "nom": "test" } } }
+                            }
+                        }
+                    ]
                 }
             }
         },
