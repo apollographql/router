@@ -1318,9 +1318,19 @@ fn condition_order_router799() {
           }
         "#,
         @r###"
-          QueryPlan {
-            ...
-          }
-        "###
+    QueryPlan {
+      Include(if: $var1) {
+        Skip(if: $var0) {
+          Fetch(service: "books") {
+            {
+              ... on Mutation {
+                field0: __typename
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
     );
 }
