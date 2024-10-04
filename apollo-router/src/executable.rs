@@ -19,7 +19,6 @@ use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
-use dotenv::dotenv;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
 use regex::Captures;
@@ -332,6 +331,8 @@ pub fn main() -> Result<()> {
     #[cfg(feature = "dhat-ad-hoc")]
     create_ad_hoc_profiler();
 
+    dotenvy::dotenv()?;
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
@@ -399,8 +400,6 @@ impl Executable {
         config: Option<ConfigurationSource>,
         cli_args: Option<Opt>,
     ) -> Result<()> {
-        dotenv().ok();
-
         let opt = cli_args.unwrap_or_else(Opt::parse);
 
         if opt.version {

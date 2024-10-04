@@ -272,7 +272,7 @@ bytesize = { version = "1.3.0", features = ["serde"] }
 ahash = "0.8.11"
 itoa = "1.0.9"
 ryu = "1.0.15"
-dotenv = "0.15.0"
+dotenvy = "0.15.7"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
