@@ -235,3 +235,26 @@ fn process_subgraph_response_om_missing_message(response) {
         status: 400,
     };
 }
+
+fn process_subgraph_response_on_log_error_not_defined(response){
+    throw #{
+        message: "This is an error to be logged",
+        status: 400,
+    };
+}
+
+fn process_subgraph_response_on_log_error_true(response){
+    throw #{
+        message: "This is an error to be logged",
+        status: 400,
+        log_error: true,
+    };
+}
+
+fn process_subgraph_response_on_log_error_false(response){
+    throw #{
+        message: "This is an error not to be logged",
+        status: 400,
+        log_error: false,
+    };
+}

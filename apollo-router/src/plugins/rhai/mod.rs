@@ -333,8 +333,10 @@ macro_rules! gen_map_request {
                     let result: Result<Dynamic, Box<EvalAltResult>> =
                         execute(&$rhai_service, &$callback, (shared_request.clone(),));
                     if let Err(error) = result {
-                        let error_details = process_error(error);
-                        tracing::error!("map_request callback failed: {error_details:#?}");
+                        let error_details = process_error(&error);
+                        if matches!(error_details.log_error, Some(true)) {
+                            tracing::error!("map_request callback failed: {error:#?}");
+                        }
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
                         return $base::request_failure(request_opt.unwrap().context, error_details);
@@ -381,8 +383,10 @@ macro_rules! gen_map_router_deferred_request {
                     let result = execute(&$rhai_service, &$callback, (shared_request.clone(),));
 
                     if let Err(error) = result {
-                        tracing::error!("map_request callback failed: {error}");
-                        let error_details = process_error(error);
+                        let error_details = process_error(&error);
+                        if matches!(error_details.log_error, Some(true)){
+                            tracing::error!("map_request callback failed: {error:#?}");
+                        }
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
                         return $base::request_failure(request_opt.unwrap().context, error_details);
@@ -468,8 +472,10 @@ macro_rules! gen_map_response {
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
 
                     if let Err(error) = result {
-                        tracing::error!("map_response callback failed: {error}");
-                        let error_details = process_error(error);
+                        let error_details = process_error(&error);
+                        if matches!(error_details.log_error, Some(true)) {
+                            tracing::error!("map_response callback failed: {error}");
+                        }
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
                         return $base::response_failure(
@@ -514,8 +520,10 @@ macro_rules! gen_map_router_deferred_response {
                     let result =
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
                     if let Err(error) = result {
-                        tracing::error!("map_response callback failed: {error}");
-                        let error_details = process_error(error);
+                        let error_details = process_error(&error);
+                        if matches!(error_details.log_error, Some(true)) {
+                            tracing::error!("map_response callback failed: {error}");
+                        }
                         let response_opt = shared_response.lock().unwrap().take();
                         return Ok($base::response_failure(
                             response_opt.unwrap().context,
@@ -610,7 +618,8 @@ macro_rules! gen_map_deferred_response {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
                             message: Some("rhai execution error: empty response".to_string()),
                             position: None,
-                            body: None
+                            body: None,
+                            log_error: None
                         };
                         return Ok($base::response_failure(
                             context,
@@ -631,8 +640,10 @@ macro_rules! gen_map_deferred_response {
                     let result =
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
                     if let Err(error) = result {
-                        tracing::error!("map_response callback failed: {error}");
-                        let error_details = process_error(error);
+                        let error_details = process_error(&error);
+                        if matches!(error_details.log_error, Some(true)) {
+                            tracing::error!("map_response callback failed: {error}");
+                        }
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
                         return Ok($base::response_failure(
@@ -666,8 +677,10 @@ macro_rules! gen_map_deferred_response {
                                 (shared_response.clone(),),
                             );
                             if let Err(error) = result {
-                                tracing::error!("map_response callback failed: {error}");
-                                let error_details = process_error(error);
+                                let error_details = process_error(&error);
+                                if matches!(error_details.log_error, Some(true)) {
+                                    tracing::error!("map_response callback failed: {error}");
+                                }
                                 let mut guard = shared_response.lock().unwrap();
                                 let response_opt = guard.take();
                                 let $base::DeferredResponse { mut response, .. } = response_opt.unwrap();
@@ -778,18 +791,20 @@ struct ErrorDetails {
     message: Option<String>,
     position: Option<Position>,
     body: Option<crate::graphql::Response>,
+    log_error: Option<bool>,
 }
 
 fn default_thrown_status_code() -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
-fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
+fn process_error(error: &Box<EvalAltResult>) -> ErrorDetails {
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         message: Some(format!("rhai execution error: '{error}'")),
         position: None,
         body: None,
+        log_error: Some(true),
     };
 
     let inner_error = error.unwrap_inner();
@@ -800,6 +815,10 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
                 error_details = temp_error_details;
             } else {
                 error_details.status = temp_error_details.status;
+            }
+
+            if error_details.log_error.is_none() {
+                error_details.log_error = Some(true);
             }
         }
         error_details.position = Some(pos.into());

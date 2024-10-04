@@ -583,7 +583,7 @@ async fn it_can_find_router_global_variables() {
 #[tokio::test]
 async fn it_can_process_om_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_om_forbidden").await {
-        let processed_error = process_error(error);
+        let processed_error = process_error(&error);
         assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
         assert_eq!(
             processed_error.message,
@@ -601,7 +601,7 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
         .await
         .unwrap_err();
 
-    let processed_error = process_error(error);
+    let processed_error = process_error(&error);
     assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
     assert_eq!(
         processed_error.body,
@@ -624,7 +624,7 @@ async fn it_can_process_om_subgraph_200_with_graphql_data() {
         .await
         .unwrap_err();
 
-    let processed_error = process_error(error);
+    let processed_error = process_error(&error);
     assert_eq!(processed_error.status, StatusCode::OK);
     assert_eq!(
         processed_error.body,
@@ -639,7 +639,7 @@ async fn it_can_process_om_subgraph_200_with_graphql_data() {
 #[tokio::test]
 async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
-        let processed_error = process_error(error);
+        let processed_error = process_error(&error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)'".to_string()));
     } else {
@@ -653,7 +653,7 @@ async fn it_can_process_ok_subgraph_forbidden() {
     let error = call_rhai_function("process_subgraph_response_om_ok")
         .await
         .unwrap_err();
-    let processed_error = process_error(error);
+    let processed_error = process_error(&error);
     assert_eq!(processed_error.status, StatusCode::OK);
     assert_eq!(
         processed_error.message,
@@ -664,7 +664,7 @@ async fn it_can_process_ok_subgraph_forbidden() {
 #[tokio::test]
 async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     if let Err(error) = call_rhai_function("process_subgraph_response_om_missing_message").await {
-        let processed_error = process_error(error);
+        let processed_error = process_error(&error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
         assert_eq!(
             processed_error.message,
@@ -677,6 +677,48 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         // Test failed
         panic!("error processed incorrectly");
     }
+}
+
+#[tokio::test]
+async fn it_can_process_subgraph_response_on_log_error_not_defined() {
+    let error = call_rhai_function("process_subgraph_response_on_log_error_not_defined")
+        .await
+        .unwrap_err();
+    let processed_error = process_error(&error);
+    assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        processed_error.message,
+        Some("This is an error to be logged".to_string())
+    );
+    assert_eq!(processed_error.log_error, Some(true));
+}
+
+#[tokio::test]
+async fn it_can_process_subgraph_response_on_log_error_true() {
+    let error = call_rhai_function("process_subgraph_response_on_log_error_true")
+        .await
+        .unwrap_err();
+    let processed_error = process_error(&error);
+    assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        processed_error.message,
+        Some("This is an error to be logged".to_string())
+    );
+    assert_eq!(processed_error.log_error, Some(true));
+}
+
+#[tokio::test]
+async fn it_can_process_subgraph_response_on_log_error_false() {
+    let error = call_rhai_function("process_subgraph_response_on_log_error_false")
+        .await
+        .unwrap_err();
+    let processed_error = process_error(&error);
+    assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        processed_error.message,
+        Some("This is an error not to be logged".to_string())
+    );
+    assert_eq!(processed_error.log_error, Some(false));
 }
 
 #[tokio::test]

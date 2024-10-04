@@ -121,6 +121,31 @@ Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, 
 
 If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 
+### Disable logging of thrown errors
+
+By default, the Router will log an error when a Rhai script uses a `throw` to throw an error. You can opt out of this on an individual `throw` by specifying `log_error: false`:
+
+```rhai
+fn supergraph_service(service) {
+    let f = |request| {
+        throw #{
+            status: 403,
+            log_error: false, // Do not log this error
+            body: #{
+                errors: [#{
+                    message: `I have raised a 403`,
+                    extensions: #{
+                        code: "ACCESS_DENIED"
+                    }
+                }]
+            }
+        };
+    };
+    // Map our request using our closure
+    service.map_request(f);
+}
+```
+
 ## Timing execution
 
 Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
