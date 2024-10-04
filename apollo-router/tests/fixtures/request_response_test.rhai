@@ -33,6 +33,9 @@ fn process_common_request(check_context_method_and_id, request) {
     if request.uri.path != "/" {
         throw(`query: expected: "/", actual: ${request.uri.path}`);
     }
+    if request.uri.port != () {
+        throw(`query: expected: (), actual: ${request.uri.host}`);
+    }
 }
 
 fn process_supergraph_request(request) {

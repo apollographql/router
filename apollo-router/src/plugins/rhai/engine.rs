@@ -1147,6 +1147,22 @@ mod router_plugin {
         Ok(())
     }
 
+    // Uri.port
+    #[rhai_fn(get = "port", pure, return_raw)]
+    pub(crate) fn uri_port_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.port_u16().map(|port| port.to_string()))
+    }
+
+    #[rhai_fn(set = "port", pure, return_raw)]
+    pub(crate) fn uri_port_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        let mut parts: Parts = x.clone().into_parts();
+        let host = x.host().unwrap_or_default();
+        parts.authority =
+            Some(Authority::from_str(&format!("{host}:{value}")).map_err(|e| e.to_string())?);
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     // Response.label
     #[rhai_fn(get = "label", pure)]
     pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
