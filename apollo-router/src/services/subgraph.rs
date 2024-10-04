@@ -187,6 +187,12 @@ impl std::ops::Deref for SubgraphRequestId {
     }
 }
 
+impl Default for SubgraphRequestId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 assert_impl_all!(Response: Send);
 #[derive(Debug)]
 #[non_exhaustive]

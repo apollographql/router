@@ -20,14 +20,13 @@ use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
 
+use super::subgraph::SubgraphRequestId;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::Context;
-
-use super::subgraph::SubgraphRequestId;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
