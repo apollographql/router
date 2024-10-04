@@ -43,6 +43,7 @@ telemetry:
     tracing:
       common:
         # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        preview_datadog_agent_sampling: true
         sampler: 0.1
 
       otlp:
@@ -55,11 +56,33 @@ telemetry:
           max_concurrent_exports: 100
 ```
 
-Adjusting the `sampler` will allow you to control the sampling decisions that the router will make on its own and decrease the rate at which you sample, which can have a direct impact on your your Datadog bill.
+Adjusting the `sampler` will allow you to control the sampling decisions that the router will make on its own and decrease the rate at which you sample, which can have a direct impact on your Datadog bill.
 
 <Note>
 
 Depending on the volume of spans being created in a router instance, it will be necessary to adjust the `batch_processor` settings in your `exporter` config.  If this is necessary, you will see warning messages from the router regarding the batch span processor.  This applies to both OTLP and the Datadog native exporter.
+
+</Note>
+
+### Enabling Datadog Agent sampling
+
+The Datadog APM view relies on traces to generate metrics. For this to be accurate 100% of requests must be sampled and sent to the Datadog agent.
+To prevent ALL traces from then being sent to Datadog, you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        preview_datadog_agent_sampling: true
+        sampler: 0.1
+```
+
+<Note>
+
+    Using `preview_datadog_agent_sampling` will send ALL spans to the Datadog agent, but only the `sampler` percentage of them will be forwarded to Datadog. This means that your APM view will be correct at the cost of
+    the router sending more spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
 
 </Note>
 
@@ -95,6 +118,7 @@ telemetry:
     tracing:
       common:
         # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        preview_datadog_agent_sampling: true
         sampler: 0.1
 
       datadog:
@@ -286,3 +310,24 @@ telemetry:
 | `resource_mapping`    | See [config](#resource_mapping)     | A map of span names to attribute names. |
 | `span_metrics`        | See [config](#span_metrics)         | A map of span names to boolean.         |
 
+## `preview_datadog_agent_sampling` (default: `false`)
+
+The Datadog APM view relies on traces to generate metrics. For this to be accurate 100% of requests must be sampled and sent to the Datadog agent.
+To prevent ALL traces from then being sent to Datadog, you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        preview_datadog_agent_sampling: true
+        sampler: 0.1
+```
+
+<Note>
+
+    Using `preview_datadog_agent_sampling` will send ALL spans to the Datadog agent, but only the `sampler` percentage of them will be forwarded to Datadog. This means that your APM view will be correct at the cost of
+    the router sending more spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
+
+</Note>
