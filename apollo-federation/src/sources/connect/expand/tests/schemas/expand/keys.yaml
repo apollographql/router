@@ -1,0 +1,37 @@
+# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/expand/keys.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/expand/keys.graphql
+federation_version: =2.10.0-alpha.3
+subgraphs:
+  one:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+        type Query {
+          t(id: ID!): T
+            @connect(                                                                                                   # expect `key: "id"`
+              http: { GET: "http://localhost/ts/{$$args.id}" }
+              selection: "id id2"
+              entity: true
+            )
+          t2(id: ID! id2: ID!): T
+            @connect(                                                                                                   # expect `key: "id id2"`
+              http: { GET: "http://localhost/ts/{$$args.id}?id2={$$args.id2}" }
+              selection: "id id2"
+              entity: true
+            )
+        }
+        type T @key(fields: "id") {
+          id: ID!
+          id2: ID!
+          r1: R @connect(http: { GET: "http://localhost/rs/{$$this.id}" }, selection: "id id2")                         # expect `key: "id"``
+          r2: R @connect(http: { GET: "http://localhost/rs/{$$this.id}?id2={$$this.id2}" }, selection: "id id2")        # expect `key: "id id2"`
+          r3: R @connect(http: { GET: "http://localhost/rs/{$$this.id}" }, selection: "id id2: $$this.id2")             # expect `key: "id id2"`
+          r4: R @connect(http: { POST: "http://localhost/rs" body: "id: $$this.id" }, selection: "id id2")              # expect `key: "id"`
+          r5: R @connect(http: { POST: "http://localhost/rs" body: "id: $$this.id" }, selection: "id id2: $$this.id2")  # expect `key: "id id2"`
+        }
+        type R {
+          id: ID!
+          id2: ID!
+        }

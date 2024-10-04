@@ -1,0 +1,36 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/federation/v2.8"
+    import: ["@key"]
+)
+@link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+)
+
+@source(name: "v2", http: { baseURL: "http://localhost" })
+
+type Query {
+    price(id: ID!): Price
+    @connect(source: "v2" http: { GET: "/price/{$args.id}" } selection: "id" entity: true)
+}
+
+type Sku {
+    id: ID!
+}
+
+type Product @key(fields: "sku { id }") {
+    sku: Sku!
+    price: Price
+    @connect(
+        source: "v2"
+        http: { GET: "/products/{$this.sku.id}" }
+        selection: """
+        id: default_price
+        """
+    )
+}
+
+type Price {
+    id: ID!
+}

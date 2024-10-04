@@ -20,6 +20,8 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
 enum link__Purpose {
@@ -34,6 +36,8 @@ enum link__Purpose {
 scalar link__Import
 
 scalar join__FieldSet
+
+scalar join__DirectiveArguments
 
 enum join__Graph {
   CONNECTOR_QUERY_USER_0 @join__graph(name: "connector_Query_user_0", url: "")

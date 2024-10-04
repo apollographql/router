@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_field_args_missing.graphql
+---
+[
+    Message {
+        code: EntityResolverArgumentMismatch,
+        message: "`Query.product` with `@connect(entity: true)` must have arguments. See https://preview-docs.apollographql.com/graphos/connectors/directives/#rules-for-entity-true",
+        locations: [
+            16:9..16:21,
+        ],
+    },
+]

@@ -9,6 +9,8 @@ include_subgraph_errors:
   all: true
 plugins:
   experimental.expose_query_plan: true
+preview_connectors:
+  debug_extensions: true
 sandbox:
   enabled: true
 supergraph:
@@ -18,4 +20,3 @@ telemetry:
     tracing:
       experimental_response_trace_id:
         enabled: true
-

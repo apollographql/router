@@ -1,0 +1,28 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/disallowed_federation_imports.graphql
+---
+[
+    Message {
+        code: UnsupportedFederationDirective,
+        message: "The directive `@context` is not supported when using connectors.",
+        locations: [
+            6:7..6:17,
+        ],
+    },
+    Message {
+        code: UnsupportedFederationDirective,
+        message: "The directive `@fromContext` is not supported when using connectors.",
+        locations: [
+            7:7..7:21,
+        ],
+    },
+    Message {
+        code: UnsupportedFederationDirective,
+        message: "The directive `@interfaceObject` is not supported when using connectors.",
+        locations: [
+            8:7..8:25,
+        ],
+    },
+]

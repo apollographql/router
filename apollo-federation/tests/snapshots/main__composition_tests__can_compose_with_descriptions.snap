@@ -10,6 +10,8 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
 """The foo directive description"""
 directive @foo(url: String) on FIELD
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
@@ -45,6 +47,8 @@ type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
     x: String!,
   ): String @join__field(graph: SUBGRAPH1)
 }
+
+scalar join__DirectiveArguments
 
 scalar join__FieldSet
 

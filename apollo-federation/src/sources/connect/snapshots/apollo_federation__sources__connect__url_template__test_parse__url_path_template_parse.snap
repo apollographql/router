@@ -1,0 +1,44 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"/users/{$config.user_id}?a=b\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            Component {
+                parts: [
+                    Text(
+                        "users",
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: Config,
+                            path: "user_id",
+                            location: 8..23,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: {
+            Component {
+                parts: [
+                    Text(
+                        "a",
+                    ),
+                ],
+            }: Component {
+                parts: [
+                    Text(
+                        "b",
+                    ),
+                ],
+            },
+        },
+    },
+)

@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_nested_paths_in_url_template_variables.graphql
+---
+[
+    Message {
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Query.scalar` contains `{$args.scalar.blah}`, but `String` does not have a field named `blah`.",
+        locations: [
+            10:62..10:66,
+        ],
+    },
+    Message {
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Query.object` contains `{$args.input.fieldThatDoesntExist}`, but `InputObject` does not have a field named `fieldThatDoesntExist`.",
+        locations: [
+            15:61..15:81,
+        ],
+    },
+    Message {
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Query.enum` contains `{$args.enum.cantHaveFields}`, but `Enum` does not have a field named `cantHaveFields`.",
+        locations: [
+            20:58..20:72,
+        ],
+    },
+    Message {
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Object.newField` contains `{$this.fieldThatDoesntExist}`, but Object does not have a field named `fieldThatDoesntExist`.",
+        locations: [
+            29:55..29:75,
+        ],
+    },
+]

@@ -55,7 +55,16 @@ improvements, we should adhere to the following principles:
    avoided because it limits the developer's ability to subselect fields of the
    opaque `JSON` value in GraphQL operations.
 
-3. Backwards compatibility should be maintained as we release new versions of
+3. `JSONSelection` syntax may be _subsetted_ arbitrarily, either by generating a
+   reduced `JSONSelection` that serves the needs of a particular GraphQL
+   operation, or by skipping unneeded selections during `ApplyTo` execution.
+   When this subsetting happens, it would be highly undesirable for the behavior
+   of the remaining selections to change unexpectedly. Equivalently, but in the
+   other direction, `JSONSelection` syntax should always be _composable_, in the
+   sense that two `NamedSelection` items should continue to work as before when
+   used together in the same `SubSelection`.
+
+4. Backwards compatibility should be maintained as we release new versions of
    the `JSONSelection` syntax along with new versions of the (forthcoming)
    `@link(url: "https://specs.apollo.dev/connect/vX.Y")` specification. Wherever
    possible, we should only add new functionality, not remove or change existing
@@ -72,34 +81,36 @@ worry if it doesn't seem helpful yet, as every rule will be explained in detail
 below.
 
 ```ebnf
-JSONSelection        ::= NakedSubSelection | PathSelection
+JSONSelection        ::= PathSelection | NakedSubSelection
 NakedSubSelection    ::= NamedSelection* StarSelection?
 SubSelection         ::= "{" NakedSubSelection "}"
-NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+NamedSelection       ::= NamedPathSelection | PathWithSubSelection | NamedFieldSelection | NamedGroupSelection
 NamedPathSelection   ::= Alias PathSelection
-NamedFieldSelection  ::= Alias? Identifier SubSelection?
-NamedQuotedSelection ::= Alias StringLiteral SubSelection?
+NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
-Alias                ::= Identifier ":"
-PathSelection        ::= (VarPath | KeyPath) SubSelection?
+Alias                ::= Key ":"
+Path                 ::= VarPath | KeyPath | AtPath | ExprPath
+PathSelection        ::= Path SubSelection?
+PathWithSubSelection ::= Path SubSelection
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
+AtPath               ::= "@" PathStep*
+ExprPath             ::= "$(" LitExpr ")" PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
-Key                  ::= Identifier | StringLiteral
+Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
-StringLiteral        ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
-MethodArgs           ::= "(" (JSLiteral ("," JSLiteral)*)? ")"
-JSLiteral            ::= JSPrimitive | JSObject | JSArray | PathSelection
-JSPrimitive          ::= StringLiteral | JSNumber | "true" | "false" | "null"
-JSNumber             ::= "-"? (UnsignedInt ("." [0-9]*)? | "." [0-9]+)
-UnsignedInt          ::= "0" | [1-9] NO_SPACE [0-9]*
-JSObject             ::= "{" (JSProperty ("," JSProperty)*)? "}"
-JSProperty           ::= Key ":" JSLiteral
-JSArray              ::= "[" (JSLiteral ("," JSLiteral)*)? "]"
+MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
+LitExpr              ::= LitPrimitive | LitObject | LitArray | PathSelection
+LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
+LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
+LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
+LitObject            ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
+LitProperty          ::= Key ":" LitExpr
+LitArray             ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
 StarSelection        ::= Alias? "*" SubSelection?
 NO_SPACE             ::= !SpacesOrComments
 SpacesOrComments     ::= (Spaces | Comment)+
-Spaces               ::= (" " | "\t" | "\r" | "\n")+
+Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
 
@@ -153,13 +164,12 @@ in a few key places:
 ```ebnf
 VarPath     ::= "$" (NO_SPACE Identifier)? PathStep*
 Identifier  ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
-UnsignedInt ::= "0" | [1-9] NO_SPACE [0-9]*
 ```
 
 These rules mean the `$` of a `$variable` cannot be separated from the
 identifier part (so `$ var` is invalid), and the first character of a
-multi-character `Identifier` or `UnsignedInt` must not be separated from the
-remaining characters.
+multi-character `Identifier` must not be separated from the remaining
+characters.
 
 Make sure you use `spaces_or_comments` generously when modifying or adding to
 the grammar implementation, or parsing may fail in cryptic ways when the input
@@ -170,7 +180,7 @@ contains seemingly harmless whitespace or comment characters.
 Since the `JSONSelection` syntax is meant to be embedded within GraphQL string
 literals, and GraphQL shares the same `'...'` and `"..."` string literal syntax
 as `JSONSelection`, it can be visually confusing to embed a `JSONSelection`
-string literal (denoted by the `StringLiteral` non-terminal) within a GraphQL
+string literal (denoted by the `LitString` non-terminal) within a GraphQL
 string.
 
 Fortunately, GraphQL also supports multi-line string literals, delimited by
@@ -211,10 +221,16 @@ feel free to take your time and enjoy the journey.
 
 The `JSONSelection` non-terminal is the top-level entry point for the grammar,
 and appears nowhere else within the rest of the grammar. It can be either a
-`NakedSubSelection` (for selecting multiple named items) or a `PathSelection`
-(for selecting a single anonymous value from a given path). When the
-`PathSelection` option is chosen at this level, the entire `JSONSelection` must
-be that single path, without any other named selections.
+`PathSelection` (for selecting a single anonymous value from a given path) or a
+`NakedSubSelection` (for selecting multiple named items).
+
+When the `PathSelection` syntax is chosen at this level, and the path does not
+have a trailing `SubSelection` (which ensures the result is an object with
+statically known properties), the entire `JSONSelection` must be that single
+path, without any other named selections. If the `PathSelection` does have a
+trailing `SubSelection`, it may be mixed together with other named selections,
+though in that case it will be parsed as a `PathWithSubSelection` within a
+`NakedSubSelection`, instead of a `PathSelection`.
 
 ### `NakedSubSelection ::=`
 
@@ -263,7 +279,7 @@ input object in a slightly different way.
 
 Since `PathSelection` returns an anonymous value extracted from the given path,
 if you want to use a `PathSelection` alongside other `NamedSelection` items, you
-have to prefix it with an `Alias`, turning it into a `NamedPathSelection`.
+can prefix it with an `Alias`, turning it into a `NamedPathSelection`.
 
 For example, you cannot omit the `pathName:` alias in the following
 `NakedSubSelection`, because `some.nested.path` has no output name by itself:
@@ -373,19 +389,27 @@ In addition to renaming, `Alias` can provide names to otherwise anonymous
 structures, such as those selected by `PathSelection`, `NamedGroupSelection`, or
 `StarSelection` syntax.
 
-Because we always want to generate GraphQL-safe output properties, an `Alias`
-must be a valid GraphQL identifier, rather than a quoted string.
+### `Path ::=`
+
+![Path](./grammar/Path.svg)
+
+A `Path` is a `VarPath`, `KeyPath`, `AtPath`, or `ExprPath`, which forms the
+prefix of both `PathSelection` and `PathWithSubSelection`.
+
+In the Rust implementation, there is no separate `Path` struct, as we represent
+both `PathSelection` and `PathWithSubSelection` using the `PathSelection` struct
+and `PathList` enum. The `Path` non-terminal is just a grammatical convenience,
+to avoid repetition between `PathSelection` and `PathWithSubSelection`.
 
 ### `PathSelection ::=`
 
 ![PathSelection](./grammar/PathSelection.svg)
 
-A `PathSelection` is a `VarPath` or `KeyPath` followed by an optional
-`SubSelection`. The purpose of a `PathSelection` is to extract a single
-anonymous value from the input JSON, without preserving the nested structure of
-the keys along the path.
+A `PathSelection` is a `Path` followed by an optional `SubSelection`. The
+purpose of a `PathSelection` is to extract a single anonymous value from the
+input JSON, without preserving the nested structure of the keys along the path.
 
-Since properties along the path may be either `Identifier` or `StringLiteral`
+Since properties along the path may be either `Identifier` or `LitString`
 values, you are not limited to selecting only properties that are valid GraphQL
 field names, e.g. `myID: people."Ben Newman".id`. This is a slight departure
 from JavaScript syntax, which would use `people["Ben Newman"].id` to achieve the
@@ -424,6 +448,43 @@ type Query {
   )
 }
 ```
+
+### `PathWithSubSelection ::=`
+
+![PathWithSubSelection](./grammar/PathWithSubSelection.svg)
+
+Although you can precede a `PathSelection` with an `Alias` to make it a
+`NamedPathSelection`, this syntax has the effect of grouping the value of the
+path under a single output key.
+
+If you want to select multiple properties from the same object-valued `Path`,
+you can use a `PathWithSubSelection`, which does not require an `Alias` but does
+require a trailing `SubSelection` to specify which properties to select:
+
+```graphql
+id
+created
+model
+
+# The { role content } SubSelection is mandatory so the output keys
+# can be statically determined:
+choices->first.message { role content }
+
+# Multiple PathWithSubSelections are allowed in the same SubSelection:
+choices->last.message { lastContent: content }
+```
+
+This selection results in an output object with the keys `id`, `created`,
+`model`, `role`, `content`, and `lastContent` all at the top level.
+
+Since the final `PathWithSubSelection` selects only one property, it is
+equivalent to `lastContent: choices->last.message.content`, which may be
+slightly easier to read, since the output property appears first.
+
+As with `PathSelection`, if `choices->first.message` happens not to select an
+object, `choices->first.message { role content }` will result in a runtime
+error, because the `role` and `content` properties cannot be selected from a
+non-object value.
 
 ### `VarPath ::=`
 
@@ -472,8 +533,7 @@ type User @key(fields: "id") {
 ```
 
 In addition to variables like `$this` and `$args`, a special `$` variable is
-always bound to the current value being processed, which allows you to transform
-input data that looks like this
+always bound to the value received by the closest enclosing `SubSelection`, which allows you to transform input data that looks like this
 
 ```json
 {
@@ -560,6 +620,109 @@ character (so `.data { id name }`, or even `.data.id` or `.data.name`) to mean
 the same thing as `$.`, but this is no longer recommended, since `.data` is easy
 to mistype and misread, compared to `$.data`.
 
+### `AtPath ::=`
+
+![AtPath](./grammar/AtPath.svg)
+
+Similar to the special `$` variable, the `@` character always represents the
+current value being processed, which is often equal to `$`, but may differ from
+the `$` variable when `@` is used within the arguments of `->` methods.
+
+For example, when you want to compute the logical conjunction of several
+properties of the current object, you can keep using `$` with different property
+selections:
+
+```graphql
+all: $.first->and($.second)->and($.third)
+```
+
+If the `$` variable were rebound to the input value received by the `->and`
+method, this style of method chaining would not work, because the `$.second`
+expression would attempt to select a `second` property from the value of
+`$.first`. Instead, the `$` remains bound to the same value received by the
+closest enclosing `{...}` selection set, or the root value when used at the top
+level of a `JSONSelection`.
+
+The `@` character becomes useful when you need to refer to the input value
+received by a `->` method, as when using the `->echo` method to wrap a given
+input value:
+
+```graphql
+wrapped: field->echo({ fieldValue: @ })
+children: parent->echo([@.child1, @.child2, @.child3])
+```
+
+The `->map` method has the special ability to apply its argument to each element
+of its input array, so `@` will take on the value of each of those elements,
+rather than referring to the array itself:
+
+```graphql
+doubled: numbers->map({ value: @->mul(2) })
+types: values->map(@->typeof)
+```
+
+This special behavior of `@` within `->map` is available to any method
+implementation, since method arguments are not evaluated before calling the
+method, but are passed in as expressions that the method may choose to evaluate
+(or even repeatedly reevaluate) however it chooses.
+
+### `ExprPath ::=`
+
+![ExprPath](./grammar/ExprPath.svg)
+
+Another syntax for beginning a `PathSelection` is the `ExprPath` rule, which is
+a `LitExpr` enclosed by `$(...)`, followed by zero or more `PathStep` items.
+
+This syntax is especially useful for embedding literal values, allowing
+
+```graphql
+__typename: $("Product")
+condition: $(true)
+
+# Probably incorrect because "Product" and true parse as field names:
+# __typename: "Product"
+# condition: true
+
+# Best alternative option without ExprPath:
+# __typename: $->echo("Product")
+# condition: $->echo(true)
+```
+
+In addition to embedding a single value, this syntax also makes it easier to use
+a literal expression as the input value for a `.key` or `->method` application,
+as in
+
+```graphql
+alphabetSlice: $("abcdefghijklmnopqrstuvwxyz")->slice($args.start, $args.end)
+
+# Instead of using $->echo(...):
+# alphabetSlice: $->echo("abcdefghijklmnopqrstuvwxyz")->slice($args.start, $args.end)
+```
+
+The `->echo` method is still useful when you want to do something with the input
+value (which is bound to `@` within the echoed expression), rather than ignoring
+the input value (using `@` nowhere in the expression).
+
+The `$(...)` syntax can be useful within a `LitExpr` as well:
+
+```graphql
+# $(-1) needs wrapping in order to apply the ->mul method
+suffix: results.slice($(-1)->mul($args.suffixLength))
+
+# Instead of something like this:
+# suffix: results.slice($->echo(-1)->mul($args.suffixLength))
+```
+
+In fairness, due to the commutavity of multiplication, this particular case
+could have been written as `suffix: results.slice($args.suffixLength->mul(-1))`,
+but not all methods allow reversing the input and arguments so easily, and this
+syntax works in part because it still parenthesizes the `-1` literal value,
+forcing `LitExpr` parsing, much like the new `ExprPath` syntax.
+
+When you don't need to apply a `.key` or `->method` to a literal value within a
+`LitExpr`, you do not need to wrap it with `$(...)`, so the `ExprPath` syntax is
+relatively uncommon within `LitExpr` expressions.
+
 ### `PathStep ::=`
 
 ![PathStep](./grammar/PathStep.svg)
@@ -567,32 +730,93 @@ to mistype and misread, compared to `$.data`.
 A `PathStep` is a single step along a `VarPath` or `KeyPath`, which can either
 select a nested key using `.` or invoke a method using `->`.
 
-Keys selected using `.` can be either `Identifier` or `StringLiteral` names, but
+Keys selected using `.` can be either `Identifier` or `LitString` names, but
 method names invoked using `->` must be `Identifier` names, and must be
 registered in the `JSONSelection` parser in order to be recognized.
 
 For the time being, only a fixed set of known methods are supported, though this
 list may grow and/or become user-configurable in the future:
 
-> Full disclosure: even this list is still aspirational, but suggestive of the
-> kinds of methods that are likely to be supported in the next version of the
-> `JSONSelection` parser.
-
 ```graphql
-list->first { id name }
-list->last.name
-list->slice($args.start, $args.end)
-list->reverse
-some.value->times(2)
-some.value->plus($addend)
-some.value->minus(100)
-some.value->div($divisor)
-isDog: kind->eq("dog")
-isNotCat: kind->neq("cat")
-__typename: kind->match({ "dog": "Dog", "cat": "Cat" })
-decoded: utf8Bytes->decode("utf-8")
-utf8Bytes: string->encode("utf-8")
-encoded: bytes->encode("base64")
+# The ->echo method returns its first input argument as-is, ignoring
+# the input data. Useful for embedding literal values, as in
+# $->echo("give me this string"), or wrapping the input value.
+__typename: $->echo("Book")
+wrapped: field->echo({ fieldValue: @ })
+
+# Returns the type of the data as a string, e.g. "object", "array",
+# "string", "number", "boolean", or "null". Note that `typeof null` is
+# "object" in JavaScript but "null" for our purposes.
+typeOfValue: value->typeof
+
+# When invoked against an array, ->map evaluates its first argument
+# against each element of the array, binding the element values to `@`,
+# and returns an array of the results. When invoked against a non-array,
+# ->map evaluates its first argument against that value and returns the
+# result without wrapping it in an array.
+doubled: numbers->map(@->mul(2))
+types: values->map(@->typeof)
+
+# Returns true if the data is deeply equal to the first argument, false
+# otherwise. Equality is solely value-based (all JSON), no references.
+isObject: value->typeof->eq("object")
+
+# Takes any number of pairs [candidate, value], and returns value for
+# the first candidate that equals the input data. If none of the
+# pairs match, a runtime error is reported, but a single-element
+# [<default>] array as the final argument guarantees a default value.
+__typename: kind->match(
+    ["dog", "Canine"],
+    ["cat", "Feline"],
+    ["Exotic"]
+)
+
+# Like ->match, but expects the first element of each pair to evaluate
+# to a boolean, returning the second element of the first pair whose
+# first element is true. This makes providing a final catch-all case
+# easy, since the last pair can be [true, <default>].
+__typename: kind->matchIf(
+    [@->eq("dog"), "Canine"],
+    [@->eq("cat"), "Feline"],
+    [true, "Exotic"]
+)
+
+# Arithmetic methods, supporting both integers and floating point values,
+# similar to JavaScript.
+sum: $.a->add($.b)->add($.c)
+difference: $.a->sub($.b)->sub($.c)
+product: $.a->mul($.b, $.c)
+quotient: $.a->div($.b)
+remainder: $.a->mod($.b)
+
+# Array/string methods
+first: list->first
+last: list->last
+index3: list->get(3)
+secondToLast: list->get(-2)
+slice: list->slice(0, 5)
+substring: string->slice(2, 5)
+arraySize: array->size
+stringLength: string->size
+
+# Object methods
+aValue: $->echo({ a: 123 })->get("a")
+hasKey: object->has("key")
+hasAB: object->has("a")->and(object->has("b"))
+numberOfProperties: object->size
+keys: object->keys
+values: object->values
+entries: object->entries
+keysFromEntries: object->entries.key
+valuesFromEntries: object->entries.value
+
+# Logical methods
+negation: $.condition->not
+bangBang: $.condition->not->not
+disjunction: $.a->or($.b)->or($.c)
+conjunction: $.a->and($.b, $.c)
+aImpliesB: $.a->not->or($.b)
+excludedMiddle: $.toBe->or($.toBe->not)->eq(true)
 ```
 
 ### `MethodArgs ::=`
@@ -600,8 +824,8 @@ encoded: bytes->encode("base64")
 ![MethodArgs](./grammar/MethodArgs.svg)
 
 When a `PathStep` invokes an `->operator` method, the method invocation may
-optionally take a sequence of comma-separated `JSLiteral` arguments in
-parentheses, as in `list->slice(0, 5)` or `kilometers: miles->times(1.60934)`.
+optionally take a sequence of comma-separated `LitExpr` arguments in
+parentheses, as in `list->slice(0, 5)` or `kilometers: miles->mul(1.60934)`.
 
 Methods do not have to take arguments, as in `list->first` or `list->last`,
 which is why `MethodArgs` is optional in `PathStep`.
@@ -611,7 +835,7 @@ which is why `MethodArgs` is optional in `PathStep`.
 ![Key](./grammar/Key.svg)
 
 A property name occurring along a dotted `PathSelection`, either an `Identifier`
-or a `StringLiteral`.
+or a `LitString`.
 
 ### `Identifier ::=`
 
@@ -624,9 +848,33 @@ In some languages, identifiers can include `$` characters, but `JSONSelection`
 syntax aims to match GraphQL grammar, which does not allow `$` in field names.
 Instead, the `$` is reserved for denoting variables in `VarPath` selections.
 
-### `StringLiteral ::=`
+### `LitExpr ::=`
 
-![StringLiteral](./grammar/StringLiteral.svg)
+![LitExpr](./grammar/LitExpr.svg)
+
+A `LitExpr` (short for _literal expression_) represents a JSON-like value that
+can be passed inline as part of `MethodArgs`.
+
+The `LitExpr` mini-language diverges from JSON by allowing symbolic
+`PathSelection` values (which may refer to variables or fields) in addition to
+the usual JSON primitives. This allows `->` methods to be parameterized in
+powerful ways, e.g. `page: list->slice(0, $limit)`.
+
+Also, as a minor syntactic convenience, `LitObject` literals can have
+`Identifier` or `LitString` keys, whereas JSON objects can have only
+double-quoted string literal keys.
+
+### `LitPrimitive ::=`
+
+![LitPrimitive](./grammar/LitPrimitive.svg)
+
+Analogous to a JSON primitive value, with the only differences being that
+`LitNumber` does not currently support the exponential syntax, and `LitString`
+values can be single-quoted as well as double-quoted.
+
+### `LitString ::=`
+
+![LitString](./grammar/LitString.svg)
 
 A string literal that can be single-quoted or double-quoted, and may contain any
 characters except the quote character that delimits the string. The backslash
@@ -642,71 +890,38 @@ You can avoid most of the headaches of escaping by choosing your outer quote
 characters wisely. If your string contains many double quotes, use single quotes
 to delimit the string, and vice versa, as in JavaScript.
 
-### `JSLiteral ::=`
+### `LitNumber ::=`
 
-![JSLiteral](./grammar/JSLiteral.svg)
-
-A `JSLiteral` represents a JSON-like value that can be passed inline as part of
-`MethodArgs`.
-
-The `JSLiteral` mini-language diverges from JSON by allowing symbolic
-`PathSelection` values (which may refer to variables or fields) in addition to
-the usual JSON primitives. This allows `->` methods to be parameterized in
-powerful ways, e.g. `page: list->slice(0, $limit)`.
-
-Also, as a minor syntactic convenience, `JSObject` literals can have
-`Identifier` or `StringLiteral` keys, whereas JSON objects can have only
-double-quoted string literal keys.
-
-### `JSPrimitive ::=`
-
-![JSPrimitive](./grammar/JSPrimitive.svg)
-
-Analogous to a JSON primitive value, with the only differences being that
-`JSNumber` does not currently support the exponential syntax, and
-`StringLiteral` values can be single-quoted as well as double-quoted.
-
-### `JSNumber ::=`
-
-![JSNumber](./grammar/JSNumber.svg)
+![LitNumber](./grammar/LitNumber.svg)
 
 A numeric literal that is possibly negative and may contain a fractional
 component. The integer component is required unless a fractional component is
 present, and the fractional component can have zero digits when the integer
 component is present (as in `-123.`), but the fractional component must have at
 least one digit when there is no integer component, since `.` is not a valid
-numeric literal by itself. Leading and trailing zeroes are essential for the
-fractional component, but leading zeroes are disallowed for the integer
-component, except when the integer component is exactly zero.
+numeric literal by itself.
 
-### `UnsignedInt ::=`
+### `LitObject ::=`
 
-![UnsignedInt](./grammar/UnsignedInt.svg)
+![LitObject](./grammar/LitObject.svg)
 
-The integer component of a `JSNumber`, which must be either `0` or an integer
-without any leading zeroes.
-
-### `JSObject ::=`
-
-![JSObject](./grammar/JSObject.svg)
-
-A sequence of `JSProperty` items within curly braces, as in JavaScript.
+A sequence of `LitProperty` items within curly braces, as in JavaScript.
 
 Trailing commas are not currently allowed, but could be supported in the future.
 
-### `JSProperty ::=`
+### `LitProperty ::=`
 
-![JSProperty](./grammar/JSProperty.svg)
+![LitProperty](./grammar/LitProperty.svg)
 
-A key-value pair within a `JSObject`. Note that the `Key` may be either an
-`Identifier` or a `StringLiteral`, as in JavaScript. This is a little different
+A key-value pair within a `LitObject`. Note that the `Key` may be either an
+`Identifier` or a `LitString`, as in JavaScript. This is a little different
 from JSON, which allows double-quoted strings only.
 
-### `JSArray ::=`
+### `LitArray ::=`
 
-![JSArray](./grammar/JSArray.svg)
+![LitArray](./grammar/LitArray.svg)
 
-A list of `JSLiteral` items within square brackets, as in JavaScript.
+A list of `LitExpr` items within square brackets, as in JavaScript.
 
 Trailing commas are not currently allowed, but could be supported in the future.
 

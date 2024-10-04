@@ -1,0 +1,56 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: raw_sdl
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/nested_inputs.graphql
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+enum join__Graph {
+  CONNECTORS_QUERY_FOO_0 @join__graph(name: "connectors_Query_foo_0", url: "none")
+}
+
+input QuuxInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
+  quaz: String
+}
+
+input BazInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
+  buzz: String
+  quux: QuuxInput
+}
+
+type Query @join__type(graph: CONNECTORS_QUERY_FOO_0) {
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0)
+}

@@ -579,6 +579,35 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 - You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
 - You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](./entity-caching/).
 
+<MinVersion version ="1.49.0">
+
+### Native query planner
+
+</MinVersion>
+
+Starting with v1.49.0, the router can run a Rust-native query planner. This native query planner can be run by itself to plan all queries, replacing the legacy JavaScript implementation.
+
+<Tip>
+
+Starting with v1.56.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following options in your `router.yaml`:
+
+```yaml title="router.yaml"
+experimental_query_planner_mode: new
+experimental_introspection_mode: new
+```
+
+You can also improve throughput by reducing the size of queries sent to subgraphs with the following option:
+
+```yaml title="router.yaml"
+supergraph:
+  generate_query_fragments: true
+```
+ 
+</Tip>
+
+Learn more in [Native Query Planner](/router/executing-operations/native-query-planner) docs.
+
+
 <MinVersion version="1.44.0">
 
 ### Query planner pools
@@ -1220,6 +1249,12 @@ Alternatively, the router can be configured to _generate_ fragments for subgraph
 supergraph:
   generate_query_fragments: true
 ```
+
+<Note>
+
+In the future, the `generate_query_fragments` option will be the only option for handling fragments.
+
+</Note>
 
 ### Reusing configuration
 

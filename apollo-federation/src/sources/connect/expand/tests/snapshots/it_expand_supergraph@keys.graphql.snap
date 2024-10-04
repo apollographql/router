@@ -1,0 +1,26 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/keys.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  t(id: ID!): T
+  t2(id: ID!, id2: ID!): T
+}
+
+type R {
+  id: ID!
+  id2: ID!
+}
+
+type T {
+  id: ID!
+  id2: ID!
+  r1: R
+  r2: R
+  r3: R
+  r4: R
+  r5: R
+}

@@ -6,15 +6,18 @@ type Query {
 
 interface I {
   id: ID!
+  f(x: ID, y: YInput): T
 }
 
 type A implements I {
   id: ID!
+  f(x: ID, y: YInput): T
   a: S
 }
 
 type B implements I {
   id: ID!
+  f(x: ID, y: YInput): T
   b: E
 }
 

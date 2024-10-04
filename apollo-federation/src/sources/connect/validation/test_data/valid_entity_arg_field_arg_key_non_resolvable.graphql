@@ -1,0 +1,23 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/federation/v2.8"
+    import: ["@key"]
+)
+@link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect"]
+)
+
+type Query {
+    product(id: ID!): Product
+    @connect(
+        http: { GET: "http://127.0.0.1:8000/v1/products/{$args.id}" }
+        entity: true
+        selection: "id name"
+    )
+}
+
+type Product @key(fields: "id", resolvable: false) {
+    id: ID!
+    name: String!
+}

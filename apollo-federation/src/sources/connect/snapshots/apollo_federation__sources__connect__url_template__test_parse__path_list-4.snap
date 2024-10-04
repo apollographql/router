@@ -1,0 +1,37 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"/abc/{$this.def.thing}/ghi\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            Component {
+                parts: [
+                    Text(
+                        "abc",
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: This,
+                            path: "def.thing",
+                            location: 6..21,
+                        },
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Text(
+                        "ghi",
+                    ),
+                ],
+            },
+        ],
+        query: {},
+    },
+)

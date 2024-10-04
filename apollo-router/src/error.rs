@@ -558,6 +558,10 @@ pub(crate) enum SchemaError {
     /// Api error(s): {0}
     #[from(ignore)]
     Api(String),
+
+    /// Connector error(s): {0}
+    #[from(ignore)]
+    Connector(FederationError),
 }
 
 /// Collection of schema validation errors.

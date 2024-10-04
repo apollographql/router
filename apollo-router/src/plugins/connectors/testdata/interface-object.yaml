@@ -1,0 +1,93 @@
+# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/interface-object.yaml > apollo-router/src/plugins/connectors/testdata/interface-object.graphql
+# the result is manually edited because 2.10 disallows interface object
+federation_version: =2.10.0-alpha.1 # switch to .3 or .4 when composition support for interfaceObject lands
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10",
+            import: [
+              "@key"
+              # "@interfaceObject"
+            ]
+          )
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(name: "json", http: { baseURL: "http://localhost:4001" })
+
+        type Query {
+          itfs: [Itf2]
+            @connect(
+              source: "json"
+              http: { GET: "/itfs" }
+              selection: "id c"
+            )
+
+          itf(id: ID!): Itf2
+            @connect(
+              source: "json"
+              http: { GET: "/itfs/{$$args.id}" }
+              selection: "id c d"
+              entity: true
+            )
+        }
+
+        # rename this to Itf when interfaceObject is supported
+        type Itf2 @key(fields: "id") @interfaceObject {
+          id: ID!
+          c: Int!
+          d: Int!
+          e: String
+            @connect(
+              source: "json"
+              http: { GET: "/itfs/{$$this.id}/e" }
+              selection: "$"
+            )
+        }
+  # connectors:
+  #   routing_url: none
+  #   schema:
+  #     sdl: |
+  #       extend schema
+  #         @link(url: "https://specs.apollo.dev/federation/v2.10",
+  #           import: [
+  #             "@key"
+  #             "@interfaceObject"
+  #           ]
+  #         )
+
+  #       type Query {
+  #         itfs: [Itf]
+  #         itf(id: ID!): Itf
+  #       }
+
+  #       type Itf @key(fields: "id") @interfaceObject {
+  #         id: ID!
+  #         c: Int!
+  #         d: Int!
+  #         e: String
+  #       }
+  graphql:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+
+        interface Itf @key(fields: "id") {
+          id: ID!
+        }
+
+        type T1 implements Itf @key(fields: "id") {
+          id: ID!
+          a: String
+        }
+
+        type T2 implements Itf @key(fields: "id") {
+          id: ID!
+          b: String
+        }

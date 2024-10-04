@@ -1,0 +1,26 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  me: User
+    @connect(
+      http: { GET: "http://127.0.0.1/something" }
+      selection: """
+      id
+      $.name {
+        firstName: first
+        lastName: last
+      }
+      $.address {
+        street { number name }
+      }
+      """
+    )
+}
+
+type User {
+  id: ID!
+  firstName: String
+  lastName: String
+  street: String
+}

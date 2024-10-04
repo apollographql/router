@@ -1,0 +1,21 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  user(id: ID!): User
+    @connect(
+      entity: true
+      http: { GET: "http://127.0.0.1/me" }
+      selection: "id name"
+    )
+}
+
+type User {
+  id: ID!
+  name: String
+  friends: [User!]!  # this can't ever work because `{ user(id: ID!) { friends { friends { ... } } } }` will always fail
+    @connect(
+      http: { GET: "http://127.0.0.1/users/{$this.id}/friends" }
+      selection: "id name"
+    )
+}

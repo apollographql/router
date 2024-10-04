@@ -1,0 +1,47 @@
+# rover supergraph compose --config src/sources/connect/tests/schemas/simple.yaml > src/sources/connect/tests/schemas/simple.graphql
+federation_version: =2.7.3-testing.0
+subgraphs:
+  connectors:
+    routing_url: http://unused
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+              headers: [
+                { name: "AuthToken", from: "X-Auth-Token" }
+                { name: "user-agent", value: "Firefox" }
+              ]
+            }
+          )
+
+        type Query {
+          users: [User]
+            @connect(
+              source: "json"
+              http: { GET: "/users" }
+              selection: "id name"
+            )
+
+          posts: [Post]
+            @connect(
+              source: "json"
+              http: { GET: "/posts" }
+              selection: "id title body"
+            )
+        }
+
+        type User @key(fields: "id", resolvable: false) {
+          id: ID!
+          name: String
+        }
+
+        type Post {
+          id: ID!
+          title: String
+          body: String
+        }

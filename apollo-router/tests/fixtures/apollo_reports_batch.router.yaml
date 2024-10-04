@@ -30,7 +30,7 @@ telemetry:
       scheduled_delay: 10ms
     experimental_local_field_metrics: false
     experimental_otlp_endpoint: "http://127.0.0.1"
-    experimental_otlp_tracing_sampler: always_off
+    otlp_tracing_sampler: always_off
     experimental_otlp_tracing_protocol: http
     field_level_instrumentation_sampler: always_on
     send_headers:

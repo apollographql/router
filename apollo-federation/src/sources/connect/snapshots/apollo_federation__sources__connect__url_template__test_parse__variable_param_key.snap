@@ -1,0 +1,33 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"?{$args.filter.field}={$args.filter.value}\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [],
+        query: {
+            Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: Args,
+                            path: "filter.field",
+                            location: 2..20,
+                        },
+                    ),
+                ],
+            }: Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: Args,
+                            path: "filter.value",
+                            location: 23..41,
+                        },
+                    ),
+                ],
+            },
+        },
+    },
+)

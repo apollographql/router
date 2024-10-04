@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/source_directive_rename.graphql
+---
+[
+    Message {
+        code: InvalidUrl,
+        message: "The value \"blahblahblah\" for `@api(baseURL:)` is not a valid URL: relative URL without a base.",
+        locations: [
+            6:40..6:54,
+        ],
+    },
+]

@@ -1,0 +1,128 @@
+# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/realistic.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/realistic.graphql
+# this is currently manually edited to add Status enum and EmailAddress scalars to the input type
+federation_version: =2.10.0-alpha.0
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.10"
+            import: ["@key"]
+          )
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "example", http: { baseURL: "http://example" })
+
+        type Query {
+          filterUsersByEmailDomain(email: EmailAddress!): [User]
+            @connect(source: "example", http: { GET: "/filter/users", body: "emailDomain: $$args.email" }, selection: """
+              id
+              name
+            """)
+
+          usersByCompany(company: CompanyInput!): [User]
+            @connect(source: "example", http: { GET: "/by-company/{$$args.company.name}" }, selection: """
+              id
+              name
+              company {
+                name
+                catchPhrase
+                bs
+              }""")
+
+          user(id: ID!): User
+            @connect(source: "example", http: { GET: "/{$$args.id}" }, selection: """
+              id
+              name
+              username
+              email
+              address {
+                street
+                suite
+                city
+                zipcode
+                geo {
+                  lat
+                  lng
+                }
+              }
+              phone
+              website
+              company {
+                name
+                catchPhrase
+                bs
+                email
+              }""", entity: true)
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String
+          username: String
+          email: EmailAddress
+          address: Address
+          phone: String
+          website: String
+          company: CompanyInfo
+          status: String # Status
+        }
+
+        type Address {
+          street: String
+          suite: String
+          city: String
+          zipcode: String
+          geo: AddressGeo
+        }
+
+        type AddressGeo {
+          lat: Float
+          lng: Float
+        }
+
+        type CompanyInfo {
+          name: String
+          catchPhrase: String
+          bs: String
+          email: String # EmailAddress
+        }
+
+        input CompanyInput {
+          name: String!
+          catchPhrase: String
+        }
+
+        scalar EmailAddress
+
+        enum Status {
+          ACTIVE
+          INACTIVE
+        }
+
+        type Mutation {
+          createUser(input: CreateUserInput!): User
+            @connect(source: "example", http: { POST: "/create/user", body: "$$args.input { name username email status address { street suite city zipcode geo { lat lng } } }" }, selection: "id")
+        }
+
+        input CreateUserInput {
+          name: String!
+          username: String!
+          email: String # EmailAddress!
+          status: String # Status!
+          address: AddressInput
+        }
+
+        input AddressInput {
+          street: String
+          suite: String
+          city: String
+          zipcode: String
+          geo: AddressGeoInput
+        }
+
+        input AddressGeoInput {
+          lat: Float
+          lng: Float
+        }

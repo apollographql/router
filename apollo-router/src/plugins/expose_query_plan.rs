@@ -9,6 +9,8 @@ use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt as TowerServiceExt;
 
+use super::connectors::query_plans::replace_connector_service_names;
+use super::connectors::query_plans::replace_connector_service_names_text;
 use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -56,14 +58,17 @@ impl Plugin for ExposeQueryPlan {
                     .flatten()
                     .is_some()
                 {
+                    let plan =
+                        replace_connector_service_names(req.query_plan.root.clone(), &req.context);
+
+                    let text = replace_connector_service_names_text(
+                        req.query_plan.formatted_query_plan.clone(),
+                        &req.context,
+                    );
+
+                    req.context.insert(QUERY_PLAN_CONTEXT_KEY, plan).unwrap();
                     req.context
-                        .insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone())
-                        .unwrap();
-                    req.context
-                        .insert(
-                            FORMATTED_QUERY_PLAN_CONTEXT_KEY,
-                            req.query_plan.formatted_query_plan.clone(),
-                        )
+                        .insert(FORMATTED_QUERY_PLAN_CONTEXT_KEY, text)
                         .unwrap();
                 }
 

@@ -285,10 +285,10 @@ impl TraceIdFormat {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ApolloSignatureNormalizationAlgorithm {
     /// Use the algorithm that matches the JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
     /// edge cases from the JS implementation that affected normalization.
+    #[default]
     Enhanced,
 }
 
@@ -297,9 +297,9 @@ pub(crate) enum ApolloSignatureNormalizationAlgorithm {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsReferenceMode {
     /// Use the extended mode to report input object fields and enum value references as well as object fields.
+    #[default]
     Extended,
     /// Use the standard mode that only reports referenced object fields.
-    #[default]
     Standard,
 }
 

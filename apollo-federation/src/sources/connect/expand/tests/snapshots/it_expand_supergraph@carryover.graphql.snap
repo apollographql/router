@@ -1,0 +1,26 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/carryover.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  ts: [T]
+  t(id: ID): T
+}
+
+type R {
+  id: ID!
+}
+
+type T {
+  id: ID!
+  tagged: String
+  custom: String
+  authenticated: String
+  requiresScopes: String
+  policy: String
+  overridden: String
+  r: R
+}

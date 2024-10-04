@@ -793,7 +793,7 @@ macro_rules! register_plugin {
         };
     };
 
-    ($group: literal, $name: literal, $plugin_type: ident) => {
+    ($group: literal, $name: expr, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
             use $crate::_private::once_cell::sync::Lazy;

@@ -1,0 +1,27 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/steelthread.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Contact {
+  phone: String
+  email: String
+}
+
+scalar JSON
+
+type Query {
+  users: [User]
+  user(id: ID!): User
+}
+
+type User {
+  id: ID!
+  name: String
+  username: String
+  rest: JSON
+  c: String
+  d: String
+}
