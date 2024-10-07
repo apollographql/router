@@ -182,6 +182,7 @@ version = "1.56.0"
 dependencies = [
  "apollo-compiler",
  "derive_more",
+ "either",
  "hex",
  "indexmap 2.2.6",
  "insta",
