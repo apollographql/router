@@ -124,6 +124,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 "apollo.connector.source.detail" = tracing::field::Empty,
                 "apollo_private.sent_time_offset" = fetch_time_offset,
             );
+            // TODO: I think we should get rid of these attributes by default and only add it from custom telemetry. We just need to double check it's not required for Studio.
+
+            // These additionnal attributes will be added to custom telemetry feature
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set

@@ -83,6 +83,7 @@ pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
+use super::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
@@ -864,6 +865,7 @@ impl PluginPrivate for Telemetry {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
         let static_connector_instruments = self.connector_custom_instruments.read().clone();
         ServiceBuilder::new()
             .map_future_with_request_data(
@@ -882,9 +884,17 @@ impl PluginPrivate for Telemetry {
                             .events
                             .new_connector_http_events();
                         custom_events.on_request(http_request);
+
+                        let custom_span_attributes = req_fn_config
+                            .instrumentation
+                            .spans
+                            .connector
+                            .attributes
+                            .on_request(http_request);
+
                         (
                             http_request.context.clone(),
-                            Some((custom_instruments, custom_events)),
+                            Some((custom_instruments, custom_events, custom_span_attributes)),
                         )
                     } else {
                         (http_request.context.clone(), None)
@@ -892,27 +902,54 @@ impl PluginPrivate for Telemetry {
                 },
                 move |(context, custom_telemetry): (
                     Context,
-                    Option<(ConnectorHttpInstruments, ConnectorHttpEvents)>,
+                    Option<(ConnectorHttpInstruments, ConnectorHttpEvents, Vec<KeyValue>)>,
                 ),
                       f: BoxFuture<
                     'static,
                     Result<crate::services::http::HttpResponse, BoxError>,
                 >| {
+                    let conf = res_fn_config.clone();
                     async move {
-                        let result = f.await;
-                        if let Some((custom_instruments, custom_events)) = custom_telemetry {
-                            match &result {
-                                Ok(resp) => {
-                                    custom_instruments.on_response(resp);
-                                    custom_events.on_response(resp);
+                        match custom_telemetry {
+                            Some((custom_instruments, custom_events, custom_span_attributes)) => {
+                                let span = Span::current();
+                                span.set_span_dyn_attributes_for_span_name(
+                                    CONNECT_SPAN_NAME,
+                                    custom_span_attributes,
+                                );
+                                let result = f.await;
+
+                                match &result {
+                                    Ok(resp) => {
+                                        span.set_span_dyn_attributes_for_span_name(
+                                            CONNECT_SPAN_NAME,
+                                            conf.instrumentation
+                                                .spans
+                                                .connector
+                                                .attributes
+                                                .on_response(resp),
+                                        );
+                                        custom_instruments.on_response(resp);
+                                        custom_events.on_response(resp);
+                                    }
+                                    Err(err) => {
+                                        span.set_span_dyn_attributes_for_span_name(
+                                            CONNECT_SPAN_NAME,
+                                            conf.instrumentation
+                                                .spans
+                                                .connector
+                                                .attributes
+                                                .on_error(err, &context),
+                                        );
+                                        custom_instruments.on_error(err, &context);
+                                        custom_events.on_error(err, &context);
+                                    }
                                 }
-                                Err(err) => {
-                                    custom_instruments.on_error(err, &context);
-                                    custom_events.on_error(err, &context);
-                                }
+
+                                result
                             }
+                            None => f.await,
                         }
-                        result
                     }
                 },
             )
