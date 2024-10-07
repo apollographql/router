@@ -99,6 +99,9 @@ where
 
                     match receiver.recv().await {
                         Ok(value) => {
+                            tracing::info!(
+                                monotonic_counter.apollo_router_deduplicated_queries_total = 1u64,
+                            );
                             return value
                                 .map(|response| {
                                     SubgraphResponse::new_from_response(
@@ -107,7 +110,7 @@ where
                                         request.subgraph_name.unwrap_or_default(),
                                     )
                                 })
-                                .map_err(|e| e.into())
+                                .map_err(|e| e.into());
                         }
                         // there was an issue with the broadcast channel, retry fetching
                         Err(_) => continue,
