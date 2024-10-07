@@ -5,6 +5,7 @@ use http_body::Body as HttpBody;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
+use tracing::Span;
 
 use crate::error::FetchError;
 use crate::graphql;
@@ -14,6 +15,9 @@ use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::connect::Response;
 use crate::services::fetch::AddSubgraphNameExt;
 
@@ -67,6 +71,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                                     .lock()
                                     .push_invalid_response(debug_request, &parts, body);
                             }
+                            Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             // TODO this stops processing all responses
                             return Err(InvalidResponseBody(format!(
                                 "couldn't deserialize response body: {e}"
@@ -216,6 +221,15 @@ pub(crate) async fn handle_responses<T: HttpBody>(
     } else {
         Value::Object(data)
     };
+
+    Span::current().record(
+        OTEL_STATUS_CODE,
+        if errors.is_empty() {
+            OTEL_STATUS_CODE_OK
+        } else {
+            OTEL_STATUS_CODE_ERROR
+        },
+    );
 
     Ok(Response {
         response: http::Response::builder()

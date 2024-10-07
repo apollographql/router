@@ -841,7 +841,10 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes: []
+            attributes:
+              - key: http.response.status_code
+                value:
+                  stringValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -849,7 +852,7 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
         schemaUrl: ""
     schemaUrl: ""
   - resource:
@@ -1153,7 +1156,10 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes: []
+            attributes:
+              - key: http.response.status_code
+                value:
+                  stringValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1161,7 +1167,7 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
         schemaUrl: ""
     schemaUrl: ""
   - resource:
@@ -1465,7 +1471,10 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes: []
+            attributes:
+              - key: http.response.status_code
+                value:
+                  stringValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1473,7 +1482,7 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
         schemaUrl: ""
     schemaUrl: ""
   - resource:
@@ -2038,7 +2047,10 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes: []
+            attributes:
+              - key: http.response.status_code
+                value:
+                  stringValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -2046,7 +2058,7 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
         schemaUrl: ""
     schemaUrl: ""
   - resource:
@@ -2350,7 +2362,10 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes: []
+            attributes:
+              - key: http.response.status_code
+                value:
+                  stringValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -2358,7 +2373,7 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
         schemaUrl: ""
     schemaUrl: ""
   - resource:
@@ -2662,7 +2677,10 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes: []
+            attributes:
+              - key: http.response.status_code
+                value:
+                  stringValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -2670,6 +2688,6 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
         schemaUrl: ""
     schemaUrl: ""
