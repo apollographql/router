@@ -99,8 +99,10 @@ where
 
                     match receiver.recv().await {
                         Ok(value) => {
-                            tracing::info!(
-                                monotonic_counter.apollo_router_deduplicated_queries_total = 1u64,
+                            u64_counter!(
+                                "apollo.router.deduplicated.queries.total",
+                                "Total subgraph queries deduplicated",
+                                1
                             );
                             return value
                                 .map(|response| {
