@@ -288,13 +288,6 @@ impl DirectiveList {
             .iter()
     }
 
-    /// Iterate the directives in a consistent sort order.
-    pub(crate) fn iter_sorted(&self) -> DirectiveIterSorted<'_> {
-        self.inner
-            .as_ref()
-            .map_or_else(DirectiveIterSorted::empty, |inner| inner.iter_sorted())
-    }
-
     /// Remove one directive application by name.
     ///
     /// To remove a repeatable directive, you may need to call this multiple times.
@@ -336,7 +329,7 @@ impl DirectiveList {
 }
 
 /// Iterate over a [`DirectiveList`] in a consistent sort order.
-pub(crate) struct DirectiveIterSorted<'a> {
+struct DirectiveIterSorted<'a> {
     directives: &'a [Node<executable::Directive>],
     inner: std::slice::Iter<'a, usize>,
 }
@@ -351,15 +344,6 @@ impl<'a> Iterator for DirectiveIterSorted<'a> {
 impl ExactSizeIterator for DirectiveIterSorted<'_> {
     fn len(&self) -> usize {
         self.inner.len()
-    }
-}
-
-impl DirectiveIterSorted<'_> {
-    fn empty() -> Self {
-        Self {
-            directives: &[],
-            inner: [].iter(),
-        }
     }
 }
 
