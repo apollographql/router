@@ -69,6 +69,11 @@ impl DynAttributeLayer {
 pub(crate) trait SpanDynAttribute {
     fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
     fn set_span_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
+    fn set_span_dyn_attributes_for_span_name(
+        &self,
+        span_name: &str,
+        attributes: impl IntoIterator<Item = KeyValue>,
+    );
 }
 
 impl SpanDynAttribute for ::tracing::Span {
@@ -133,6 +138,91 @@ impl SpanDynAttribute for ::tracing::Span {
                 match reg.span(id) {
                     None => eprintln!("no spanref, this is a bug"),
                     Some(s) => {
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => {
+                                    if otel_data.builder.attributes.is_none() {
+                                        otel_data.builder.attributes = Some(
+                                            attributes
+                                                .inspect(|attr| {
+                                                    update_otel_data(
+                                                        otel_data,
+                                                        &attr.key,
+                                                        &attr.value,
+                                                    )
+                                                })
+                                                .collect(),
+                                        );
+                                    } else {
+                                        let attributes: Vec<KeyValue> = attributes
+                                            .inspect(|attr| {
+                                                update_otel_data(otel_data, &attr.key, &attr.value)
+                                            })
+                                            .collect();
+                                        otel_data
+                                            .builder
+                                            .attributes
+                                            .as_mut()
+                                            .unwrap()
+                                            .extend(attributes);
+                                    }
+                                }
+                                None => {
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no OtelData, this is a bug");
+                                }
+                            }
+                        } else {
+                            let mut attributes = attributes
+                                .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                                .peekable();
+                            if attributes.peek().is_none() {
+                                return;
+                            }
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<LogAttributes>() {
+                                Some(registered_attributes) => {
+                                    registered_attributes.extend(attributes);
+                                }
+                                None => {
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no LogAttributes, this is a bug");
+                                }
+                            }
+                        }
+                    }
+                };
+            } else {
+                ::tracing::error!("no Registry, this is a bug");
+            }
+        });
+    }
+
+    fn set_span_dyn_attributes_for_span_name(
+        &self,
+        span_name: &str,
+        attributes: impl IntoIterator<Item = KeyValue>,
+    ) {
+        let mut attributes = attributes.into_iter().peekable();
+        if attributes.peek().is_none() {
+            return;
+        }
+        self.with_subscriber(move |(id, dispatch)| {
+            if let Some(reg) = dispatch.downcast_ref::<Registry>() {
+                match reg.span(id) {
+                    None => eprintln!("no spanref, this is a bug"),
+                    Some(mut s) => {
+                        if s.name() != span_name {
+                            while let Some(parent_span) = s.parent() {
+                                if parent_span.name() == span_name {
+                                    s = parent_span;
+                                    break;
+                                }
+                                s = parent_span;
+                            }
+                        }
+
                         if s.is_sampled() {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<OtelData>() {
