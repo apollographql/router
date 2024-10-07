@@ -10,8 +10,10 @@ use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
+use crate::operation::NamedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
+use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::OpPathElement;
 
@@ -176,37 +178,37 @@ pub(crate) fn remove_conditions_from_selection_set(
             Ok(selection_set.clone())
         }
         Conditions::Variables(variable_conditions) => {
-            let mut selection_map = SelectionMap::new();
-
-            for selection in selection_set.selections.values() {
+            selection_set.lazy_map(&NamedFragments::default(), |selection| {
                 let element = selection.element()?;
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
                     remove_conditions_of_element(element.clone(), variable_conditions);
-                let new_selection = if let Some(selection_set) = selection.selection_set() {
+                if let Some(selection_set) = selection.selection_set() {
                     let updated_selection_set =
                         remove_conditions_from_selection_set(selection_set, conditions)?;
                     if updated_element == element {
                         if *selection_set == updated_selection_set {
-                            selection.clone()
+                            Ok(SelectionMapperReturn::Selection(selection.clone()))
                         } else {
-                            selection.with_updated_selection_set(Some(updated_selection_set))?
+                            Ok(SelectionMapperReturn::Selection(
+                                selection
+                                    .with_updated_selection_set(Some(updated_selection_set))?,
+                            ))
                         }
                     } else {
-                        Selection::from_element(updated_element, Some(updated_selection_set))?
+                        Ok(SelectionMapperReturn::Selection(Selection::from_element(
+                            updated_element,
+                            Some(updated_selection_set),
+                        )?))
                     }
                 } else if updated_element == element {
-                    selection.clone()
+                    Ok(SelectionMapperReturn::Selection(selection.clone()))
                 } else {
-                    Selection::from_element(updated_element, None)?
-                };
-                selection_map.insert(new_selection);
-            }
-
-            Ok(SelectionSet {
-                schema: selection_set.schema.clone(),
-                type_position: selection_set.type_position.clone(),
-                selections: Arc::new(selection_map),
+                    Ok(SelectionMapperReturn::Selection(Selection::from_element(
+                        updated_element,
+                        None,
+                    )?))
+                }
             })
         }
     }
