@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: fbbe470b5e40af130de42043f74772ec30ee60ff
+# Composed from subgraphs with hash: 9be0826e3b911556466c2c410f7df8b53c241774
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
@@ -22,11 +22,24 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Hello
-  @join__type(graph: SUBGRAPHSKIP)
+type A implements T
+  @join__implements(graph: SUBGRAPH1, interface: "T")
+  @join__implements(graph: SUBGRAPH2, interface: "T")
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
 {
-  world: String!
-  goodbye: String!
+  id: ID!
+  f: Int! @join__field(graph: SUBGRAPH2)
+}
+
+type B implements T
+  @join__implements(graph: SUBGRAPH1, interface: "T")
+  @join__implements(graph: SUBGRAPH2, interface: "T")
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+{
+  id: ID!
+  f: Int! @join__field(graph: SUBGRAPH2)
 }
 
 scalar join__DirectiveArguments
@@ -34,7 +47,8 @@ scalar join__DirectiveArguments
 scalar join__FieldSet
 
 enum join__Graph {
-  SUBGRAPHSKIP @join__graph(name: "SubgraphSkip", url: "none")
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
 }
 
 scalar link__Import
@@ -52,8 +66,16 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: SUBGRAPHSKIP)
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
 {
-  hello: Hello!
-  extraFieldToPreventSkipIncludeNodes: String!
+  test: T @join__field(graph: SUBGRAPH1)
+}
+
+interface T
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+{
+  id: ID!
+  f: Int! @join__field(graph: SUBGRAPH2)
 }
