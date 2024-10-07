@@ -304,11 +304,12 @@ impl Query {
         )
         .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
 
-        Ok(Arc::new(ParsedDocumentInner {
+        ParsedDocumentInner::new(
             ast,
-            executable: Arc::new(executable_document),
-            hash: Arc::new(QueryHash(hash)),
-        }))
+            Arc::new(executable_document),
+            operation_name,
+            Arc::new(QueryHash(hash)),
+        )
     }
 
     #[cfg(test)]

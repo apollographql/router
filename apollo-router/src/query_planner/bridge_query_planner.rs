@@ -543,11 +543,9 @@ impl BridgeQueryPlanner {
             IntrospectionMode::Rust => {
                 let schema = self.schema.clone();
                 let response = Box::new(
-                    tokio::task::spawn_blocking(move || {
-                        Self::rust_introspection(&schema, &key, &doc)
-                    })
-                    .await
-                    .expect("Introspection panicked")?,
+                    tokio::task::spawn_blocking(move || Self::rust_introspection(&schema, &doc))
+                        .await
+                        .expect("Introspection panicked")?,
                 );
                 return Ok(QueryPlannerContent::Response { response });
             }
@@ -582,7 +580,7 @@ impl BridgeQueryPlanner {
                 let schema = self.schema.clone();
                 let js_result_clone = js_result.clone();
                 tokio::task::spawn_blocking(move || {
-                    let rust_result = match Self::rust_introspection(&schema, &key, &doc) {
+                    let rust_result = match Self::rust_introspection(&schema, &doc) {
                         Ok(response) => {
                             if response.errors.is_empty() {
                                 Ok(response)
@@ -619,11 +617,10 @@ impl BridgeQueryPlanner {
 
     fn rust_introspection(
         schema: &Schema,
-        key: &QueryKey,
         doc: &ParsedDocument,
     ) -> Result<graphql::Response, QueryPlannerError> {
         let schema = schema.api_schema();
-        let operation = doc.get_operation(key.operation_name.as_deref())?;
+        let operation = &doc.operation;
         let variable_values = Default::default();
         let variable_values =
             apollo_compiler::execution::coerce_variable_values(schema, operation, &variable_values)
@@ -798,11 +795,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         operation_name.as_deref(),
                     )
                     .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-                    doc = Arc::new(ParsedDocumentInner {
-                        executable: Arc::new(executable_document),
-                        ast: modified_query,
-                        hash: Arc::new(QueryHash(hash)),
-                    });
+                    doc = ParsedDocumentInner::new(
+                        modified_query,
+                        Arc::new(executable_document),
+                        operation_name.as_deref(),
+                        Arc::new(QueryHash(hash)),
+                    )?;
                     context
                         .extensions()
                         .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
@@ -901,20 +899,11 @@ impl BridgeQueryPlanner {
                 .operations
                 .get(key.operation_name.as_deref())
                 .ok();
-            let mut has_root_typename = false;
-            let mut has_schema_introspection = false;
-            let mut has_other_root_fields = false;
             if let Some(operation) = operation {
-                for field in operation.root_fields(&doc.executable) {
-                    match field.name.as_str() {
-                        "__typename" => has_root_typename = true,
-                        "__schema" | "__type" if operation.is_query() => {
-                            has_schema_introspection = true
-                        }
-                        _ => has_other_root_fields = true,
-                    }
-                }
-                if has_root_typename && !has_schema_introspection && !has_other_root_fields {
+                if doc.has_root_typename
+                    && !doc.has_schema_introspection
+                    && !doc.has_explicit_root_fields
+                {
                     // Fast path for __typename alone
                     if operation
                         .selection_set
@@ -947,8 +936,8 @@ impl BridgeQueryPlanner {
                 // Should be unreachable as QueryAnalysisLayer would have returned an error
             }
 
-            if has_schema_introspection {
-                if has_other_root_fields {
+            if doc.has_schema_introspection {
+                if doc.has_explicit_root_fields {
                     let error = graphql::Error::builder()
                         .message("Mixed queries with both schema introspection and concrete fields are not supported")
                         .extension_code("MIXED_INTROSPECTION")
@@ -1001,11 +990,12 @@ impl BridgeQueryPlanner {
                 key.operation_name.as_deref(),
             )
             .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-            doc = Arc::new(ParsedDocumentInner {
-                executable: Arc::new(executable_document),
-                ast: new_doc,
-                hash: Arc::new(QueryHash(hash)),
-            });
+            doc = ParsedDocumentInner::new(
+                new_doc,
+                Arc::new(executable_document),
+                key.operation_name.as_deref(),
+                Arc::new(QueryHash(hash)),
+            )?;
             selections.unauthorized.paths = unauthorized_paths;
         }
 
@@ -1268,10 +1258,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let result = plan(EXAMPLE_SCHEMA, "", "", None, PlanOptions::default()).await;
+        let query = "";
+        let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default()).await;
 
         assert_eq!(
-            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
+            "spec error: parsing error: syntax error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
@@ -1654,8 +1645,7 @@ mod tests {
             operation_name.as_deref(),
             &planner.schema(),
             &configuration,
-        )
-        .unwrap();
+        )?;
 
         planner
             .get(
