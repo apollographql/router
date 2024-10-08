@@ -1572,8 +1572,8 @@ impl FederatedQueryGraphBuilder {
                     Selection::Field(field_selection) => {
                         let existing_edge_info = base
                             .query_graph
-                            .graph
-                            .edges_directed(node, Direction::Outgoing)
+                            .out_edges_with_federation_self_edges(node)
+                            .into_iter()
                             .find_map(|edge_ref| {
                                 let edge_weight = edge_ref.weight();
                                 let QueryGraphEdgeTransition::FieldCollection {
@@ -1697,8 +1697,8 @@ impl FederatedQueryGraphBuilder {
                             // construction.
                             let (edge, tail) = base
                                 .query_graph
-                                .graph
-                                .edges_directed(node, Direction::Outgoing)
+                                .out_edges_with_federation_self_edges(node)
+                                .into_iter()
                                 .find_map(|edge_ref| {
                                     let edge_weight = edge_ref.weight();
                                     let QueryGraphEdgeTransition::Downcast {
