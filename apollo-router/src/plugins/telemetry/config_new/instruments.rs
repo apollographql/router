@@ -38,8 +38,11 @@ use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::connector::http::instruments::ConnectorHttpInstruments;
-use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsKind;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
+use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorValue;
 use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -84,7 +87,10 @@ pub(crate) struct InstrumentsConfig {
         Instrument<SubgraphAttributes, SubgraphSelector, SubgraphValue>,
     >,
     /// Connector service instruments.
-    pub(crate) connector: ConnectorInstrumentsKind,
+    pub(crate) connector: Extendable<
+        ConnectorInstrumentsConfig,
+        Instrument<ConnectorAttributes, ConnectorSelector, ConnectorValue>,
+    >,
     /// GraphQL response field instruments.
     pub(crate) graphql: Extendable<
         GraphQLInstrumentsConfig,
@@ -133,7 +139,7 @@ impl InstrumentsConfig {
                 format!("error for custom cache instrument {name:?} in condition: {err}")
             })?;
         }
-        for (name, custom) in &self.connector.http.custom {
+        for (name, custom) in &self.connector.custom {
             custom.condition.validate(None).map_err(|err| {
                 format!("error for custom connector instrument {name:?} in condition: {err}")
             })?;
@@ -154,7 +160,6 @@ impl InstrumentsConfig {
         self.graphql
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.connector
-            .http
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 
@@ -700,15 +705,15 @@ impl InstrumentsConfig {
     pub(crate) fn new_connector_instruments(
         &self,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
-    ) -> ConnectorHttpInstruments {
-        ConnectorHttpInstruments::new(&self.connector.http, static_instruments)
+    ) -> ConnectorInstruments {
+        ConnectorInstruments::new(&self.connector, static_instruments)
     }
 
     pub(crate) fn new_builtin_connector_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
-        let mut static_instruments = ConnectorHttpInstruments::new_builtin(&self.connector.http);
+        let mut static_instruments = ConnectorInstruments::new_builtin(&self.connector);
 
-        for (instrument_name, instrument) in &self.connector.http.custom {
+        for (instrument_name, instrument) in &self.connector.custom {
             match instrument.ty {
                 InstrumentType::Counter => {
                     static_instruments.insert(

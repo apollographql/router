@@ -48,10 +48,9 @@ telemetry:
         http.client.request.duration: true # (default false)
         http.client.response.body.size: true # (default false)
       connector:
-        http:
-          http.client.request.body.size: true # (default false)
-          http.client.request.duration: true # (default false)
-          http.client.response.body.size: true # (default false)
+        http.client.request.body.size: true # (default false)
+        http.client.request.duration: true # (default false)
+        http.client.response.body.size: true # (default false)
 ```
 
 They can be customized by attaching or removing attributes. See [attributes](#attributes) to learn more about configuring attributes.
@@ -70,10 +69,9 @@ telemetry:
           attributes:
             subgraph.name: true
       connector:
-        http:
-          http.client.request.duration:
-            attributes:
-              connector.source.name: true
+        http.client.request.duration:
+          attributes:
+            connector.source.name: true
 ```
 
 ### Apollo standard instruments
@@ -130,20 +128,19 @@ telemetry:
           description: "my description"
 
       connector:
-        http:
-          acme.user.not.found:
-            value: unit
-            type: counter
-            unit: count
-            description: "Count of 404 responses from the user API"
-            condition:
-              all:
-                - eq:
-                    - 404
-                    - connector_http_response_status: code
-                - eq:
-                    - "user_api"
-                    - connector_source: name
+        acme.user.not.found:
+          value: unit
+          type: counter
+          unit: count
+          description: "Count of 404 responses from the user API"
+          condition:
+            all:
+              - eq:
+                  - 404
+                  - connector_http_response_status: code
+              - eq:
+                  - "user_api"
+                  - connector_source: name
 
       graphql:
         acme.graphql.list.lengths:

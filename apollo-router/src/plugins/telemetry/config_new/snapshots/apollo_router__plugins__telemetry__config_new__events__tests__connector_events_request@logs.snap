@@ -3,7 +3,7 @@ source: apollo-router/src/plugins/telemetry/config_new/events.rs
 expression: yaml
 ---
 - fields:
-    kind: connector.http.request
+    kind: connector.request
   level: INFO
   message: ""
 - fields:

@@ -624,7 +624,7 @@ expression: "&schema"
         }
       ]
     },
-    "Condition_for_ConnectorHttpSelector": {
+    "Condition_for_ConnectorSelector": {
       "oneOf": [
         {
           "additionalProperties": false,
@@ -632,8 +632,8 @@ expression: "&schema"
           "properties": {
             "eq": {
               "items": {
-                "$ref": "#/definitions/SelectorOrValue_for_ConnectorHttpSelector",
-                "description": "#/definitions/SelectorOrValue_for_ConnectorHttpSelector"
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
               },
               "maxItems": 2,
               "minItems": 2,
@@ -651,8 +651,8 @@ expression: "&schema"
           "properties": {
             "gt": {
               "items": {
-                "$ref": "#/definitions/SelectorOrValue_for_ConnectorHttpSelector",
-                "description": "#/definitions/SelectorOrValue_for_ConnectorHttpSelector"
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
               },
               "maxItems": 2,
               "minItems": 2,
@@ -670,8 +670,8 @@ expression: "&schema"
           "properties": {
             "lt": {
               "items": {
-                "$ref": "#/definitions/SelectorOrValue_for_ConnectorHttpSelector",
-                "description": "#/definitions/SelectorOrValue_for_ConnectorHttpSelector"
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
               },
               "maxItems": 2,
               "minItems": 2,
@@ -688,8 +688,8 @@ expression: "&schema"
           "description": "A condition to check a selection against a selector.",
           "properties": {
             "exists": {
-              "$ref": "#/definitions/ConnectorHttpSelector",
-              "description": "#/definitions/ConnectorHttpSelector"
+              "$ref": "#/definitions/ConnectorSelector",
+              "description": "#/definitions/ConnectorSelector"
             }
           },
           "required": [
@@ -703,8 +703,8 @@ expression: "&schema"
           "properties": {
             "all": {
               "items": {
-                "$ref": "#/definitions/Condition_for_ConnectorHttpSelector",
-                "description": "#/definitions/Condition_for_ConnectorHttpSelector"
+                "$ref": "#/definitions/Condition_for_ConnectorSelector",
+                "description": "#/definitions/Condition_for_ConnectorSelector"
               },
               "type": "array"
             }
@@ -720,8 +720,8 @@ expression: "&schema"
           "properties": {
             "any": {
               "items": {
-                "$ref": "#/definitions/Condition_for_ConnectorHttpSelector",
-                "description": "#/definitions/Condition_for_ConnectorHttpSelector"
+                "$ref": "#/definitions/Condition_for_ConnectorSelector",
+                "description": "#/definitions/Condition_for_ConnectorSelector"
               },
               "type": "array"
             }
@@ -736,8 +736,8 @@ expression: "&schema"
           "description": "The sub-condition must not be true",
           "properties": {
             "not": {
-              "$ref": "#/definitions/Condition_for_ConnectorHttpSelector",
-              "description": "#/definitions/Condition_for_ConnectorHttpSelector"
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
             }
           },
           "required": [
@@ -1917,17 +1917,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ConnectorEventsKind": {
-      "additionalProperties": false,
-      "properties": {
-        "http": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::events::ConnectorHttpEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes,_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::events::ConnectorHttpEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes, apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector>"
-        }
-      },
-      "type": "object"
-    },
-    "ConnectorHttpAttributes": {
+    "ConnectorAttributes": {
       "additionalProperties": false,
       "properties": {
         "connector.http.method": {
@@ -1953,43 +1943,43 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ConnectorHttpEventsConfig": {
+    "ConnectorEventsConfig": {
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
         },
         "request": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
         },
         "response": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
         }
       },
       "type": "object"
     },
-    "ConnectorHttpInstrumentsConfig": {
+    "ConnectorInstrumentsConfig": {
       "additionalProperties": false,
       "properties": {
         "http.client.request.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         },
         "http.client.request.duration": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         },
         "http.client.response.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         }
       },
       "type": "object"
     },
-    "ConnectorHttpSelector": {
+    "ConnectorSelector": {
       "anyOf": [
         {
           "additionalProperties": false,
@@ -2120,28 +2110,6 @@ expression: "&schema"
         }
       ]
     },
-    "ConnectorHttpValue": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
-        },
-        {
-          "$ref": "#/definitions/ConnectorHttpSelector",
-          "description": "#/definitions/ConnectorHttpSelector"
-        }
-      ]
-    },
-    "ConnectorInstrumentsKind": {
-      "additionalProperties": false,
-      "properties": {
-        "http": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::instruments::ConnectorHttpInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes,_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector,_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpValue>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::instruments::ConnectorHttpInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes, apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector, apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpValue>"
-        }
-      },
-      "type": "object"
-    },
     "ConnectorSource": {
       "oneOf": [
         {
@@ -2150,6 +2118,18 @@ expression: "&schema"
             "name"
           ],
           "type": "string"
+        }
+      ]
+    },
+    "ConnectorValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
         }
       ]
     },
@@ -2476,7 +2456,7 @@ expression: "&schema"
         }
       ]
     },
-    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector": {
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
       "anyOf": [
         {
           "type": "null"
@@ -2488,8 +2468,8 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "attributes": {
-              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
             }
           },
           "required": [
@@ -2742,16 +2722,16 @@ expression: "&schema"
         }
       ]
     },
-    "Event_for_ConnectorHttpAttributes_and_ConnectorHttpSelector": {
+    "Event_for_ConnectorAttributes_and_ConnectorSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         },
         "condition": {
-          "$ref": "#/definitions/Condition_for_ConnectorHttpSelector",
-          "description": "#/definitions/Condition_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/Condition_for_ConnectorSelector",
+          "description": "#/definitions/Condition_for_ConnectorSelector"
         },
         "level": {
           "$ref": "#/definitions/EventLevel",
@@ -2903,8 +2883,8 @@ expression: "&schema"
       "description": "Events are",
       "properties": {
         "connector": {
-          "$ref": "#/definitions/ConnectorEventsKind",
-          "description": "#/definitions/ConnectorEventsKind"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>"
         },
         "router": {
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
@@ -3828,16 +3808,16 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Instrument_for_ConnectorHttpAttributes_and_ConnectorHttpSelector_and_ConnectorHttpValue": {
+    "Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         },
         "condition": {
-          "$ref": "#/definitions/Condition_for_ConnectorHttpSelector",
-          "description": "#/definitions/Condition_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/Condition_for_ConnectorSelector",
+          "description": "#/definitions/Condition_for_ConnectorSelector"
         },
         "description": {
           "description": "The description of the instrument.",
@@ -3852,8 +3832,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/ConnectorHttpValue",
-          "description": "#/definitions/ConnectorHttpValue"
+          "$ref": "#/definitions/ConnectorValue",
+          "description": "#/definitions/ConnectorValue"
         }
       },
       "required": [
@@ -4035,8 +4015,8 @@ expression: "&schema"
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
         },
         "connector": {
-          "$ref": "#/definitions/ConnectorInstrumentsKind",
-          "description": "#/definitions/ConnectorInstrumentsKind"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>"
         },
         "default_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
@@ -5801,15 +5781,15 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "SelectorOrValue_for_ConnectorHttpSelector": {
+    "SelectorOrValue_for_ConnectorSelector": {
       "anyOf": [
         {
           "$ref": "#/definitions/AttributeValue",
           "description": "#/definitions/AttributeValue"
         },
         {
-          "$ref": "#/definitions/ConnectorHttpSelector",
-          "description": "#/definitions/ConnectorHttpSelector"
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
         }
       ]
     },
@@ -6006,7 +5986,7 @@ expression: "&schema"
         }
       ]
     },
-    "StandardEventConfig_for_ConnectorHttpSelector": {
+    "StandardEventConfig_for_ConnectorSelector": {
       "anyOf": [
         {
           "$ref": "#/definitions/EventLevel",
@@ -6015,8 +5995,8 @@ expression: "&schema"
         {
           "properties": {
             "condition": {
-              "$ref": "#/definitions/Condition_for_ConnectorHttpSelector",
-              "description": "#/definitions/Condition_for_ConnectorHttpSelector"
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
             },
             "level": {
               "$ref": "#/definitions/EventLevel",
@@ -8435,10 +8415,10 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
       "additionalProperties": {
-        "$ref": "#/definitions/ConnectorHttpSelector",
-        "description": "#/definitions/ConnectorHttpSelector"
+        "$ref": "#/definitions/ConnectorSelector",
+        "description": "#/definitions/ConnectorSelector"
       },
       "properties": {
         "connector.http.method": {
@@ -8464,44 +8444,44 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::events::ConnectorHttpEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes,_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Event_for_ConnectorHttpAttributes_and_ConnectorHttpSelector",
-        "description": "#/definitions/Event_for_ConnectorHttpAttributes_and_ConnectorHttpSelector"
+        "$ref": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector",
+        "description": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
         },
         "request": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
         },
         "response": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorHttpSelector"
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
         }
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::instruments::ConnectorHttpInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes,_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector,_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpValue>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_ConnectorHttpAttributes_and_ConnectorHttpSelector_and_ConnectorHttpValue",
-        "description": "#/definitions/Instrument_for_ConnectorHttpAttributes_and_ConnectorHttpSelector_and_ConnectorHttpValue"
+        "$ref": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue",
+        "description": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue"
       },
       "properties": {
         "http.client.request.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         },
         "http.client.request.duration": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         },
         "http.client.response.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes_apollo_router::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         }
       },
       "type": "object"
