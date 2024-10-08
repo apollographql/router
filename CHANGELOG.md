@@ -24,7 +24,7 @@ type Query {
 }
 ```
 
-Apollo Connectors are available to Enterprise and free GraphOS Trial accounts. Get started with the [Connectors Quickstart](https://go.apollo.dev/connectors/quickstart) and visit the ["connectors" tag on the community forums](https://community.apollographql.com/tag/connectors) to leave feedback during the preview.
+Apollo Connectors are available for Enterprise and free GraphOS Trial accounts. Get started with the [Connectors Quickstart](https://go.apollo.dev/connectors/quickstart) and visit the ["connectors" tag on the community forums](https://community.apollographql.com/tag/connectors) to leave feedback during the preview.
 
 ### Apollo operation usage reporting via OTLP
 
