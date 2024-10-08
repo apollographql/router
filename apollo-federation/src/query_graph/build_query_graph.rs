@@ -1810,11 +1810,7 @@ impl FederatedQueryGraphBuilder {
         new_node_weight.has_reachable_cross_subgraph_edges = has_reachable_cross_subgraph_edges;
 
         let mut new_edges = Vec::new();
-        for edge_ref in base
-            .query_graph
-            .graph
-            .edges_directed(node, Direction::Outgoing)
-        {
+        for edge_ref in base.query_graph.out_edges_with_federation_self_edges(node) {
             let edge_tail = edge_ref.target();
             let edge_weight = edge_ref.weight();
             new_edges.push(QueryGraphEdgeData {
