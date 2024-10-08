@@ -79,9 +79,6 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 #[derive(Eq, PartialEq)]
 pub(crate) enum Mode {
     Upgrade,
-
-    // This is used only in testing to ensure that we don't allow old config in our tests.
-    #[cfg(test)]
     NoUpgrade,
 }
 
