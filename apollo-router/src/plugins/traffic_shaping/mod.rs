@@ -59,6 +59,8 @@ trait Merge {
 struct Shaping {
     /// Enable query deduplication
     deduplicate_query: Option<bool>,
+    // List of header names to ignore when calculating which subgraph requests can be deduplicated
+    deduplicate_query_ignored_headers: Option<Vec<String>>,
     /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
     /// Enable global rate limiting
@@ -92,6 +94,11 @@ impl Merge for Shaping {
             None => self.clone(),
             Some(fallback) => Shaping {
                 deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
+                deduplicate_query_ignored_headers: self
+                    .deduplicate_query_ignored_headers
+                    .as_ref()
+                    .or(fallback.deduplicate_query_ignored_headers.as_ref())
+                    .cloned(),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
                 global_rate_limit: self
@@ -395,8 +402,9 @@ impl TrafficShaping {
 
             Either::A(ServiceBuilder::new()
 
-                .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
-                  QueryDeduplicationLayer::default
+                .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(||{
+                  QueryDeduplicationLayer::new(config.shaping.deduplicate_query_ignored_headers)
+                }
                 ))
                     .map_future_with_request_data(
                         |req: &subgraph::Request| req.context.clone(),

@@ -24,7 +24,18 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
 #[derive(Default)]
-pub(crate) struct QueryDeduplicationLayer;
+pub(crate) struct QueryDeduplicationLayer {
+    deduplicate_query_ignored_headers: Option<Vec<String>>,
+}
+
+impl QueryDeduplicationLayer {
+    /// Create new rate limit layer.
+    pub(crate) fn new(deduplicate_query_ignored_headers: Option<Vec<String>>) -> Self {
+        QueryDeduplicationLayer {
+            deduplicate_query_ignored_headers,
+        }
+    }
+}
 
 impl<S> Layer<S> for QueryDeduplicationLayer
 where
@@ -33,7 +44,7 @@ where
     type Service = QueryDeduplicationService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        QueryDeduplicationService::new(service)
+        QueryDeduplicationService::new(service, self.deduplicate_query_ignored_headers.clone())
     }
 }
 
@@ -57,23 +68,47 @@ impl Clone for CloneSubgraphResponse {
 pub(crate) struct QueryDeduplicationService<S: Clone> {
     service: S,
     wait_map: WaitMap,
+    deduplicate_query_ignored_headers: Option<Vec<String>>,
 }
 
 impl<S> QueryDeduplicationService<S>
 where
     S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError> + Clone,
 {
-    fn new(service: S) -> Self {
+    fn new(service: S, deduplicate_query_ignored_headers: Option<Vec<String>>) -> Self {
         QueryDeduplicationService {
             service,
             wait_map: Arc::new(Mutex::new(HashMap::new())),
+            deduplicate_query_ignored_headers,
         }
+    }
+
+    fn get_cache_key(
+        request: SubgraphRequest,
+        deduplicate_query_ignored_headers: Option<Vec<String>>,
+    ) -> (http_ext::Request<Request>, Arc<CacheKeyMetadata>) {
+        let authorization_cache_key = request.authorization.clone();
+        let cache_key: (http_ext::Request<Request>, Arc<CacheKeyMetadata>) =
+            if let Some(headers) = deduplicate_query_ignored_headers {
+                let mut cloned_request = request.clone();
+                for header in headers {
+                    cloned_request.subgraph_request.headers_mut().remove(header);
+                }
+                (
+                    (cloned_request.subgraph_request).into(),
+                    authorization_cache_key,
+                )
+            } else {
+                ((&request.subgraph_request).into(), authorization_cache_key)
+            };
+        cache_key
     }
 
     async fn dedup(
         service: S,
         wait_map: WaitMap,
         request: SubgraphRequest,
+        deduplicate_query_ignored_headers: Option<Vec<String>>,
     ) -> Result<SubgraphResponse, BoxError> {
         // Check if the request is part of a batch. If it is, completely bypass dedup since it
         // will break any request batches which this request is part of.
@@ -88,8 +123,8 @@ where
         }
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            let authorization_cache_key = request.authorization.clone();
-            let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
+            let cache_key =
+                Self::get_cache_key(request.clone(), deduplicate_query_ignored_headers.clone());
 
             match locked_wait_map.get_mut(&cache_key) {
                 Some(waiter) => {
@@ -120,8 +155,11 @@ where
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let authorization_cache_key = request.authorization.clone();
-                    let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
+                    let cache_key = Self::get_cache_key(
+                        request.clone(),
+                        deduplicate_query_ignored_headers.clone(),
+                    );
+
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -191,8 +229,17 @@ where
 
         if request.operation_kind == OperationKind::Query {
             let wait_map = self.wait_map.clone();
+            let deduplicate_query_ignored_headers = self.deduplicate_query_ignored_headers.clone();
 
-            Box::pin(async move { Self::dedup(service, wait_map, request).await })
+            Box::pin(async move {
+                Self::dedup(
+                    service,
+                    wait_map,
+                    request,
+                    deduplicate_query_ignored_headers,
+                )
+                .await
+            })
         } else {
             Box::pin(async move { service.oneshot(request).await })
         }
