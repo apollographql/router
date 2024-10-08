@@ -1,4 +1,4 @@
-### Fix variout edge cases for `__typename` field ([PR #6009](https://github.com/apollographql/router/pull/6009))
+### Fix various edge cases for `__typename` field ([PR #6009](https://github.com/apollographql/router/pull/6009))
 
 The router now correctly handles the `__typename` field used on operation root types, even when the subgraph's root type has a name that differs from the supergraph's root type.
 
