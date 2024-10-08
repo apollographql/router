@@ -59,7 +59,7 @@ trait Merge {
 struct Shaping {
     /// Enable query deduplication
     deduplicate_query: Option<bool>,
-    // List of header names to ignore when calculating which subgraph requests can be deduplicated
+    /// List of header names to ignore when calculating which subgraph requests can be deduplicated
     deduplicate_query_ignored_headers: Option<Vec<String>>,
     /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
