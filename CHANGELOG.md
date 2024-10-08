@@ -4,6 +4,47 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.0.0-preview.0] - 2024-10-01
+
+Learn more about [migrating from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1).
+
+## 🚀 Features
+
+### Apollo Connectors Public Preview
+
+[Apollo Connectors](https://go.apollo.dev/connectors) are a new declarative programming model for GraphQL, allowing you to plug your existing REST services directly into your graph.
+
+```graphql
+type Query {
+  posts(first: Int): [Post]
+    @connect(
+      http: { GET: "https://my.api/posts?limit={$args.first}" }
+      selection: "$.results { id title body }"
+    )
+}
+```
+
+Apollo Connectors are available to Enterprise and free GraphOS Trial accounts. Get started with the [Connectors Quickstart](https://go.apollo.dev/connectors/quickstart) and visit the ["connectors" tag on the community forums](https://community.apollographql.com/tag/connectors) to leave feedback during the preview.
+
+### Apollo operation usage reporting via OTLP
+
+The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
+
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a private tracing format. In v1.49.0, we introduced support for using OTEL to perform this reporting. In v1.x, this is controlled using the experimental_otlp_tracing_sampler flag, and it's disabled by default.
+
+Now in v2.x, this flag is renamed to otlp_tracing_sampler, and it's enabled by default.
+
+Learn more about configuring [usage reporting via OTLP](https://www.apollographql.com/docs/graphos/routing/graphos-reporting#usage-reporting-via-opentelemetry-protocol-otlp).
+
+## 📃 Configuration
+
+### Metrics reporting defaults
+
+Default values of some GraphOS reporting metrics have been changed from v1.x to the following in v2.x:
+
+* `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
+* `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
+
 # [1.56.0] - 2024-10-01
 
 > [!IMPORTANT]
