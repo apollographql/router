@@ -508,19 +508,19 @@ impl BridgeQueryPlanner {
             operation_name,
         )?;
 
-        let (fragments, operations, defer_stats, schema_aware_hash) =
+        let (fragments, operation, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
-            &operations,
+            &operation,
             &fragments.map,
             &defer_stats,
         )?;
         Ok(Query {
             string: query,
             fragments,
-            operations,
+            operation,
             filtered_query: None,
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
@@ -878,10 +878,7 @@ impl BridgeQueryPlanner {
             )
             .await?;
 
-        if selections
-            .operation(key.operation_name.as_deref())
-            .is_some_and(|op| op.selection_set.is_empty())
-        {
+        if selections.operation.selection_set.is_empty() {
             // All selections have @skip(true) or @include(false)
             // Return an empty response now to avoid dealing with an empty query plan later
             return Ok(QueryPlannerContent::Response {
@@ -893,61 +890,48 @@ impl BridgeQueryPlanner {
             });
         }
 
-        {
-            let operation = doc
-                .executable
-                .operations
-                .get(key.operation_name.as_deref())
-                .ok();
-            if let Some(operation) = operation {
-                if doc.has_root_typename
-                    && !doc.has_schema_introspection
-                    && !doc.has_explicit_root_fields
-                {
-                    // Fast path for __typename alone
-                    if operation
-                        .selection_set
-                        .selections
-                        .iter()
-                        .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
-                    {
-                        let root_type_name: serde_json_bytes::ByteString =
-                            operation.object_type().as_str().into();
-                        let data = Value::Object(
-                            operation
-                                .root_fields(&doc.executable)
-                                .filter(|field| field.name == "__typename")
-                                .map(|field| {
-                                    (
-                                        field.response_key().as_str().into(),
-                                        Value::String(root_type_name.clone()),
-                                    )
-                                })
-                                .collect(),
-                        );
-                        return Ok(QueryPlannerContent::Response {
-                            response: Box::new(graphql::Response::builder().data(data).build()),
-                        });
-                    } else {
-                        // fragments might use @include or @skip
-                    }
-                }
+        if doc.has_root_typename && !doc.has_schema_introspection && !doc.has_explicit_root_fields {
+            // Fast path for __typename alone
+            if doc
+                .operation
+                .selection_set
+                .selections
+                .iter()
+                .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
+            {
+                let root_type_name: serde_json_bytes::ByteString =
+                    doc.operation.object_type().as_str().into();
+                let data = Value::Object(
+                    doc.operation
+                        .root_fields(&doc.executable)
+                        .filter(|field| field.name == "__typename")
+                        .map(|field| {
+                            (
+                                field.response_key().as_str().into(),
+                                Value::String(root_type_name.clone()),
+                            )
+                        })
+                        .collect(),
+                );
+                return Ok(QueryPlannerContent::Response {
+                    response: Box::new(graphql::Response::builder().data(data).build()),
+                });
             } else {
-                // Should be unreachable as QueryAnalysisLayer would have returned an error
+                // fragments might use @include or @skip
             }
+        }
 
-            if doc.has_schema_introspection {
-                if doc.has_explicit_root_fields {
-                    let error = graphql::Error::builder()
+        if doc.has_schema_introspection {
+            if doc.has_explicit_root_fields {
+                let error = graphql::Error::builder()
                         .message("Mixed queries with both schema introspection and concrete fields are not supported")
                         .extension_code("MIXED_INTROSPECTION")
                         .build();
-                    return Ok(QueryPlannerContent::Response {
-                        response: Box::new(graphql::Response::builder().error(error).build()),
-                    });
-                }
-                return self.introspection(key, doc).await;
+                return Ok(QueryPlannerContent::Response {
+                    response: Box::new(graphql::Response::builder().error(error).build()),
+                });
             }
+            return self.introspection(key, doc).await;
         }
 
         let filter_res = if self.enable_authorization_directives {

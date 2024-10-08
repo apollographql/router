@@ -297,8 +297,8 @@ impl ParsedDocumentInner {
     }
 }
 
-fn get_operation(
-    executable: &Valid<ExecutableDocument>,
+pub(crate) fn get_operation(
+    executable: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<Node<Operation>, SpecError> {
     if let Ok(operation) = executable.operations.get(operation_name) {
