@@ -32,6 +32,7 @@ fn some_name() {
 */
 
 mod debug_max_evaluated_plans_configuration;
+mod defer;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
@@ -1259,8 +1260,8 @@ fn handles_multiple_conditions_on_abstract_types() {
                     }
                   } =>
                   {
-                    ... on Book @skip(if: $title) {
-                      ... on Book @include(if: $title) {
+                    ... on Book @include(if: $title) {
+                      ... on Book @skip(if: $title) {
                         sku
                       }
                     }
@@ -1291,5 +1292,45 @@ fn handles_multiple_conditions_on_abstract_types() {
           },
         }
       "###
+    );
+}
+
+#[test]
+fn condition_order_router799() {
+    let planner = planner!(
+        books: r#"
+        type Query {
+            bookName: String!
+        }
+        type Mutation {
+            bookName(name: String!): Int!
+        }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          mutation($var0: Boolean! = true, $var1: Boolean!) {
+            ... on Mutation @skip(if: $var0) @include(if: $var1) {
+              field0: __typename
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Include(if: $var1) {
+        Skip(if: $var0) {
+          Fetch(service: "books") {
+            {
+              ... on Mutation {
+                field0: __typename
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
     );
 }
