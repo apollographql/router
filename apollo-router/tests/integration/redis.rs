@@ -318,7 +318,7 @@ async fn apq() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn entity_cache() -> Result<(), BoxError> {
+async fn entity_cache_basic() -> Result<(), BoxError> {
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -406,6 +406,10 @@ async fn entity_cache() -> Result<(), BoxError> {
                         }
                     }
                 }
+            },
+            "rhai": {
+                "scripts": "tests/fixtures",
+                "main": "entity_cache_keys.rhai",
             },
             "include_subgraph_errors": {
                 "all": true
