@@ -31,6 +31,7 @@ use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::cache::storage::CacheStorage;
+use crate::compute_task;
 use crate::configuration::IntrospectionMode as IntrospectionConfig;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
@@ -292,7 +293,7 @@ impl PlannerMode {
             PlannerMode::Rust(rust_planner) => {
                 let doc = doc.clone();
                 let rust_planner = rust_planner.clone();
-                let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
+                let (plan, mut root_node) = compute_task::execute(move || {
                     let start = Instant::now();
 
                     let query_plan_options = QueryPlanOptions {
@@ -543,11 +544,9 @@ impl BridgeQueryPlanner {
             IntrospectionMode::Rust => {
                 let schema = self.schema.clone();
                 let response = Box::new(
-                    tokio::task::spawn_blocking(move || {
-                        Self::rust_introspection(&schema, &key, &doc)
-                    })
-                    .await
-                    .expect("Introspection panicked")?,
+                    compute_task::execute(move || Self::rust_introspection(&schema, &key, &doc))
+                        .await
+                        .expect("Introspection panicked")?,
                 );
                 return Ok(QueryPlannerContent::Response { response });
             }
@@ -581,7 +580,7 @@ impl BridgeQueryPlanner {
                     .map_err(QueryPlannerError::Introspection);
                 let schema = self.schema.clone();
                 let js_result_clone = js_result.clone();
-                tokio::task::spawn_blocking(move || {
+                compute_task::execute(move || {
                     let rust_result = match Self::rust_introspection(&schema, &key, &doc) {
                         Ok(response) => {
                             if response.errors.is_empty() {

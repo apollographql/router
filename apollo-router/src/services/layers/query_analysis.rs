@@ -13,10 +13,10 @@ use http::StatusCode;
 use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
-use tokio::task;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::compute_task;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
@@ -85,11 +85,11 @@ impl QueryAnalysisLayer {
         let schema = self.schema.clone();
         let conf = self.configuration.clone();
 
-        // Must be created *outside* of the spawn_blocking or the span is not connected to the
+        // Must be created *outside* of the compute_task or the span is not connected to the
         // parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
-        task::spawn_blocking(move || {
+        compute_task::execute(move || {
             span.in_scope(|| {
                 let doc = Query::parse_document(
                     &query,
