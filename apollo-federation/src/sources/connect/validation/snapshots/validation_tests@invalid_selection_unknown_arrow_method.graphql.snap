@@ -1,0 +1,28 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_selection_unknown_arrow_method.graphql
+---
+[
+    Message {
+        code: UnknownMethod,
+        message: "`@connect(selection:)` on `Query.me` has a call to an unknown method `doesnotexist`",
+        locations: [
+            13:40..13:52,
+        ],
+    },
+    Message {
+        code: UnresolvedField,
+        message: "No connector resolves field `User.id`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            19:5..19:12,
+        ],
+    },
+    Message {
+        code: UnresolvedField,
+        message: "No connector resolves field `User.invalid`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            20:5..20:20,
+        ],
+    },
+]

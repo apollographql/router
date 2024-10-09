@@ -763,12 +763,12 @@ isObject: value->typeof->eq("object")
 
 # Takes any number of pairs [candidate, value], and returns value for
 # the first candidate that equals the input data. If none of the
-# pairs match, a runtime error is reported, but a single-element
-# [<default>] array as the final argument guarantees a default value.
+# pairs match, a runtime error is reported, but a last array whose
+# candidate is `@` guarantees a default value.
 __typename: kind->match(
     ["dog", "Canine"],
     ["cat", "Feline"],
-    ["Exotic"]
+    [@, "Exotic"]
 )
 
 # Like ->match, but expects the first element of each pair to evaluate
