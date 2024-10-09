@@ -120,11 +120,19 @@ spec:
               path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?live"}}
               port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
             initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
+            periodSeconds: {{ ((.Values.probes).liveness).periodSeconds | default 10 }}
+            timeoutSeconds: {{ ((.Values.probes).liveness).timeoutSeconds | default 1 }}
+            successThreshold: {{ ((.Values.probes).liveness).successThreshold | default 1 }}
+            failureThreshold: {{ ((.Values.probes).liveness).failureThreshold | default 3 }}
           readinessProbe:
             httpGet:
               path:  {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
               port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
             initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
+            periodSeconds: {{ ((.Values.probes).readiness).periodSeconds | default 10 }}
+            timeoutSeconds: {{ ((.Values.probes).readiness).timeoutSeconds | default 1 }}
+            successThreshold: {{ ((.Values.probes).readiness).successThreshold | default 1 }}
+            failureThreshold: {{ ((.Values.probes).readiness).failureThreshold | default 3 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}

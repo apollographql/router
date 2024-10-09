@@ -247,9 +247,17 @@ probes:
   # -- Configure readiness probe
   readiness:
     initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 1
+    successThreshold: 1
+    failureThreshold: 3
   # -- Configure liveness probe
   liveness:
     initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 1
+    successThreshold: 1
+    failureThreshold: 3
 
 # -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
 topologySpreadConstraints: []
