@@ -47,7 +47,7 @@ impl HttpClientServiceFactory {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &crate::Configuration,
-        http2: crate::plugins::traffic_shaping::Http2Config,
+        client_config: crate::configuration::shared::Client,
     ) -> Self {
         use indexmap::IndexMap;
 
@@ -55,7 +55,7 @@ impl HttpClientServiceFactory {
             service,
             configuration,
             &rustls::RootCertStore::empty(),
-            http2,
+            client_config,
         )
         .unwrap();
 
