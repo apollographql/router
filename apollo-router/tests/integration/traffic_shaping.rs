@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
@@ -231,5 +232,55 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
     router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_RATE_LIMITED",otel_scope_name="apollo/router"} 1"#, None).await;
 
     router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_query_deduplication_metrics() -> Result<(), BoxError> {
+    let mut router: IntegrationTest = IntegrationTest::builder()
+        .config(format!(
+            r#"
+            {PROMETHEUS_CONFIG}
+            include_subgraph_errors:
+                all: true
+            traffic_shaping:
+                all:
+                    deduplicate_query: true
+            "#,
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let router = Arc::new(tokio::sync::Mutex::new(router));
+    let router_clone = router.clone();
+    tokio::task::spawn_local(async move {
+        let (_, response) = router_clone.lock().await.execute_default_query().await;
+        assert_eq!(response.status(), 200);
+    });
+    let router_clone = router.clone();
+    tokio::task::spawn_local(async move {
+        let (_, response) = router_clone.lock().await.execute_default_query().await;
+        assert_eq!(response.status(), 200);
+    });
+
+    let router_clone = router.clone();
+    tokio::task::spawn_local(async move {
+        let (_, response) = router_clone.lock().await.execute_default_query().await;
+        assert_eq!(response.status(), 200);
+    });
+
+    router
+        .lock()
+        .await
+        .assert_metrics_contains(
+            r#"apollo_router_deduplicated_queries_total{otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+
+    router.lock().await.graceful_shutdown().await;
     Ok(())
 }

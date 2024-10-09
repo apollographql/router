@@ -90,7 +90,6 @@ where
             let mut locked_wait_map = wait_map.lock().await;
             let authorization_cache_key = request.authorization.clone();
             let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
-
             match locked_wait_map.get_mut(&cache_key) {
                 Some(waiter) => {
                     // Register interest in key
@@ -193,7 +192,6 @@ where
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let service = self.service.clone();
-
         if request.operation_kind == OperationKind::Query {
             let wait_map = self.wait_map.clone();
 

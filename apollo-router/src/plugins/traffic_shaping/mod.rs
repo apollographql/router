@@ -462,6 +462,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use futures::future::join_all;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
@@ -487,7 +488,6 @@ mod test {
     use crate::services::SupergraphResponse;
     use crate::spec::Schema;
     use crate::Configuration;
-    use futures::future::join_all;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
@@ -931,29 +931,21 @@ mod test {
             .is_empty());
     }
 
-    async fn build_mock_router_with_query_dedup_optimization(
-        plugin: Box<dyn DynPlugin>,
-    ) -> router::BoxService {
-        let mut extensions = Object::new();
-        extensions.insert("test", Value::String(ByteString::from("value")));
-
-        let account_mocks = vec![
-            (
-                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"}]}}"#,
-                r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"}]}}"#
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_collects_metric_for_query_deduplication() {
+        async {
+            let config = serde_yaml::from_str::<serde_json::Value>(
+                r#"
+        all:
+            deduplicate_query: true
+        "#,
             )
-        ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
-        let account_service = MockSubgraph::new(account_mocks);
+            .unwrap();
+            // Build a traffic shaping plugin
+            let plugin = get_traffic_shaping_plugin(&config).await;
 
-        let review_mocks = vec![
-            (
-                r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","operationName":"TopProducts__reviews__1","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
-                r#"{"data":{"_entities":[{"reviews":[{"id":"1","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"1"}},{"id":"4","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"2"}}]},{"reviews":[{"id":"2","product":{"__typename":"Product","upc":"2"},"author":{"__typename":"User","id":"1"}}]}]}}"#
-            )
-            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
-        let review_service = MockSubgraph::new(review_mocks);
-
-        let product_mocks = vec![
+            let mut tasks = Vec::new();
+            let product_mocks = vec![
             (
                 r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","operationName":"TopProducts__products__0","variables":{"first":2}}"#,
                 r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
@@ -963,90 +955,27 @@ mod test {
                 r#"{"data":{"_entities":[{"name":"Table"},{"name":"Couch"}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+            let product_service = MockSubgraph::new(product_mocks).with_delay(std::time::Duration::from_millis(50));
 
-        let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
-
-        let schema = include_str!(
-            "../../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql"
-        );
-
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-        traffic_shaping:
-            deduplicate_query: true
-        "#,
-        )
-        .unwrap();
-
-        let config = Arc::new(config);
-        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.clone(),
-            config.clone(),
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
-        let subgraph_schemas = planner.subgraph_schemas();
-
-        let mut builder =
-            PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
-
-        let plugins = Arc::new(
-            create_plugins(
-                &config,
-                &schema,
-                subgraph_schemas,
-                None,
-                Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
-            )
-            .await
-            .expect("create plugins should work"),
-        );
-        builder = builder.with_plugins(plugins);
-
-        let builder = builder
-            .with_subgraph_service("accounts", account_service.clone())
-            .with_subgraph_service("reviews", review_service.clone())
-            .with_subgraph_service("products", product_service.clone());
-
-        let supergraph_creator = builder.build().await.expect("should build");
-
-        RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
-            Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
-        )
-        .await
-        .unwrap()
-        .make()
-        .boxed()
-    }
-
-    #[tokio::test]
-    async fn it_collects_metric_for_query_deduplication() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        deduplicate_query: true
-        "#,
-        )
-        .unwrap();
-        // Build a traffic shaping plugin
-        let plugin = get_traffic_shaping_plugin(&config).await;
-        let router = build_mock_router_with_query_dedup_optimization(plugin).await;
-
-        async {
-            let mut tasks = Vec::new();
-
+            let tf_plugin = plugin.as_any().downcast_ref::<TrafficShaping>().unwrap();
+            let sub_plugin = tf_plugin.subgraph_service_internal("products", product_service.clone());
             for _ in 0..5 {
-                tasks.push(async {
-                    execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
+                let mut sub_service  = sub_plugin.clone();
+                tasks.push(async move {
+                    let request = SubgraphRequest::fake_builder().build();
+
+                    let _response = sub_service
+                        .ready()
+                        .await
+                        .unwrap()
+                        .call(request)
+                        .await
+                        .unwrap();
                 });
             }
-
             join_all(tasks).await;
+
+            assert_counter!("apollo.router.deduplicated.queries.total", 4);
         }
         .with_metrics()
         .await

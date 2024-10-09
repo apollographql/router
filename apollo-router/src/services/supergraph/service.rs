@@ -912,7 +912,7 @@ impl SupergraphCreator {
             .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
             .expect("traffic shaping should always be part of the plugin list");
-
+        println!("creating supergraph");
         let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
             .layer(shaping.supergraph_service_internal(supergraph_service));
 
