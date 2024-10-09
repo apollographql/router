@@ -18,6 +18,7 @@ use hyper_rustls::HttpsConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
+use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -30,6 +31,7 @@ use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionBody;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
+use tracing::Span;
 
 use super::HttpRequest;
 use super::HttpResponse;
@@ -38,6 +40,9 @@ use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -267,6 +272,8 @@ impl tower::Service<HttpRequest> for HttpClientService {
             "net.transport" = "ip_tcp",
             //"apollo.subgraph.name" = %service_name,
             //"graphql.operation.name" = %operation_name,
+            "otel.status_code" = tracing::field::Empty,
+            "http.response.status_code" = tracing::field::Empty,
         );
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
@@ -351,6 +358,17 @@ async fn do_fetch(
         })
         .await?
         .into_parts();
+    let span = Span::current();
+    span.record(HTTP_RESPONSE_STATUS_CODE.as_str(), parts.status.as_u16());
+
+    // Some status codes intentionally do not result in the span being marked as success or error,
+    // in which case the OTEL status will just be "unset".
+    if parts.status.is_client_error() || parts.status.is_server_error() {
+        span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+    } else if parts.status.is_success() {
+        span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+    }
+
     Ok(http::Response::from_parts(
         parts,
         RouterBody::wrap_stream(BodyStream { inner: body }),
