@@ -1,0 +1,20 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      connector:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+            connector.source:
+              connector_source: name
+            connector.http.method: true
+            connector.url.template: true
+            custom.request.header.attribute:
+              connector_http_request_header: "custom_request_header"
+            custom.response.header.attribute:
+              connector_http_response_header: "custom_response_header"
+            custom.response.status.attribute:
+              connector_http_response_status: code
+            custom.static.attribute:
+              static: "custom_value"

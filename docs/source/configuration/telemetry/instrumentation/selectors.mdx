@@ -22,7 +22,7 @@ telemetry:
 
 ## Selector configuration reference
 
-Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its own available selectors.
+Each service of the router pipeline (`router`, `supergraph`, `subgraph`, `connector`) has its own available selectors.
 You can also extract GraphQL metrics from the response data the router returns to clients.
 
 ### Router
@@ -95,6 +95,28 @@ The subgraph service executes multiple times during query execution, with each e
 | `static`                    | No          |                  | A static string value                                                          |
 | `error`                     | No          | `reason`         | A string value containing error reason when it's a critical error              |
 | `cache`                     | No          | `hit`\|`miss`    | Returns the number of cache hit or miss for this subgraph request              |
+
+### Connector
+
+#### HTTP
+
+Apollo Connectors for REST APIs make HTTP calls to the upstream HTTP API. These selectors let you extract metrics from these HTTP requests and responses.
+
+| Selector                         | Defaultable | Values           | Description                                                       |
+|----------------------------------|-------------|------------------|-------------------------------------------------------------------|
+| `subgraph_name`                  | No          | `true`\|`false`  | The name of the subgraph containing the connector                 |
+| `connector_source `              | No          | `name`           | The name of the `@source` associated with this connector, if any  |
+| `connector_http_request_header`  | Yes         |                  | The name of a connector request header                            |
+| `connector_http_response_header` | Yes         |                  | The name of a connector response header                           |
+| `connector_http_response_status` | No          | `code`\|`reason` | The status of a connector response                                |
+| `connector_http_method`          | No          | `true`\|`false`  | The HTTP method of a connector request                            |
+| `connector_url_template `        | No          | `true`\|`false`  | The URL template of a connector request                           |
+| `static`                         | No          |                  | A static string value                                             |
+| `error`                          | No          | `reason`         | A string value containing error reason when it's a critical error |
+
+<Note>
+The above Apollo Connectors selectors are not currently supported for Spans, only for Instruments, Events, and Conditions.
+</Note>
 
 ### GraphQL
 

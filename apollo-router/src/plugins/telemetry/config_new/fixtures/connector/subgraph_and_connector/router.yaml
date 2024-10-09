@@ -1,0 +1,12 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+      connector:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true

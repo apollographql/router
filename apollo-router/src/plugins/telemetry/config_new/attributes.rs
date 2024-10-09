@@ -65,6 +65,16 @@ const NETWORK_LOCAL_PORT: Key = Key::from_static_str("network.local.port");
 const NETWORK_PEER_ADDRESS: Key = Key::from_static_str("network.peer.address");
 const NETWORK_PEER_PORT: Key = Key::from_static_str("network.peer.port");
 
+pub(super) const HTTP_REQUEST_HEADERS: Key = Key::from_static_str("http.request.headers");
+pub(super) const HTTP_REQUEST_URI: Key = Key::from_static_str("http.request.uri");
+pub(super) const HTTP_REQUEST_VERSION: Key = Key::from_static_str("http.request.version");
+pub(super) const HTTP_REQUEST_BODY: Key = Key::from_static_str("http.request.body");
+
+pub(super) const HTTP_RESPONSE_HEADERS: Key = Key::from_static_str("http.response.headers");
+pub(super) const HTTP_RESPONSE_STATUS: Key = Key::from_static_str("http.response.status");
+pub(super) const HTTP_RESPONSE_VERSION: Key = Key::from_static_str("http.response.version");
+pub(super) const HTTP_RESPONSE_BODY: Key = Key::from_static_str("http.response.body");
+
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default, Copy)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum DefaultAttributeRequirementLevel {

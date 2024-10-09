@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/events.rs
+expression: yaml
+---
+- fields:
+    kind: connector.request
+  level: INFO
+  message: ""
+- fields:
+    kind: my.request.event
+  level: INFO
+  message: my request event message

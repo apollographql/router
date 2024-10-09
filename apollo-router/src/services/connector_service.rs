@@ -10,8 +10,11 @@ use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use parking_lot::Mutex;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
+use tracing::error;
 use tracing::Instrument;
 
 use super::connect::BoxService;
@@ -48,6 +51,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_NAME: Key =
     Key::from_static_str("apollo.connector.source.name");
 pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
     Key::from_static_str("apollo.connector.source.detail");
+pub(crate) const CONNECTOR_INFO_CONTEXT_KEY: &str = "apollo_router::connector::info";
 
 /// A service for executing connector requests.
 #[derive(Clone)]
@@ -57,6 +61,26 @@ pub(crate) struct ConnectorService {
     pub(crate) _subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+}
+
+/// Serializable information about a connector.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ConnectorInfo {
+    pub(crate) subgraph_name: String,
+    pub(crate) source_name: Option<String>,
+    pub(crate) http_method: String,
+    pub(crate) url_template: String,
+}
+
+impl From<&Connector> for ConnectorInfo {
+    fn from(connector: &Connector) -> Self {
+        Self {
+            subgraph_name: connector.id.subgraph_name.to_string(),
+            source_name: connector.id.source_name.clone(),
+            http_method: connector.transport.method.as_str().to_string(),
+            url_template: connector.transport.connect_template.to_string(),
+        }
+    }
 }
 
 impl tower::Service<ConnectRequest> for ConnectorService {
@@ -155,6 +179,12 @@ async fn execute(
             // inner result fails just that one task, but an `Err` on the outer result cancels all the
             // tasks and fails the whole operation.
             let context = context.clone();
+            if context
+                .insert(CONNECTOR_INFO_CONTEXT_KEY, ConnectorInfo::from(connector))
+                .is_err()
+            {
+                error!("Failed to store connector info in context - instruments may be inaccurate");
+            }
             let original_subgraph_name = original_subgraph_name.clone();
             let request_limit = request_limit.clone();
             async move {
