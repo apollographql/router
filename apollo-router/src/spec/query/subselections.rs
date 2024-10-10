@@ -100,7 +100,7 @@ const MAX_DEFER_VARIABLES: usize = 4;
 
 pub(crate) fn collect_subselections(
     configuration: &Configuration,
-    operations: &[Operation],
+    operation: &Operation,
     fragments: &HashMap<String, Fragment>,
     defer_stats: &DeferStats,
 ) -> Result<HashMap<SubSelectionKey, SubSelectionValue>, SpecError> {
@@ -122,29 +122,27 @@ pub(crate) fn collect_subselections(
     };
     for defer_conditions in variable_combinations(defer_stats) {
         shared.defer_conditions = defer_conditions;
-        for operation in operations {
-            let type_name = operation.type_name.clone();
-            let primary = collect_from_selection_set(
-                &mut shared,
-                // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
-                #[allow(clippy::unwrap_used)]
-                &FieldType::new_named((&type_name).try_into().unwrap()),
-                &operation.selection_set,
-            )
-            .map_err(|err| SpecError::TransformError(err.to_owned()))?;
-            debug_assert!(shared.path.is_empty());
-            if !primary.is_empty() {
-                shared.subselections.insert(
-                    SubSelectionKey {
-                        defer_label: None,
-                        defer_conditions,
-                    },
-                    SubSelectionValue {
-                        selection_set: primary,
-                        type_name,
-                    },
-                );
-            }
+        let type_name = operation.type_name.clone();
+        let primary = collect_from_selection_set(
+            &mut shared,
+            // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+            #[allow(clippy::unwrap_used)]
+            &FieldType::new_named((&type_name).try_into().unwrap()),
+            &operation.selection_set,
+        )
+        .map_err(|err| SpecError::TransformError(err.to_owned()))?;
+        debug_assert!(shared.path.is_empty());
+        if !primary.is_empty() {
+            shared.subselections.insert(
+                SubSelectionKey {
+                    defer_label: None,
+                    defer_conditions,
+                },
+                SubSelectionValue {
+                    selection_set: primary,
+                    type_name,
+                },
+            );
         }
     }
     Ok(shared.subselections)
