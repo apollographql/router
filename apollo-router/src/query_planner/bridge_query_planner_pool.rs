@@ -21,11 +21,9 @@ use tower::ServiceExt;
 
 use super::bridge_query_planner::BridgeQueryPlanner;
 use super::QueryPlanResult;
-use crate::cache::storage::CacheStorage;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
-use crate::graphql::Response;
-use crate::introspection::default_cache_storage;
+use crate::introspection::IntrospectionCache;
 use crate::metrics::meter_provider;
 use crate::query_planner::PlannerMode;
 use crate::services::QueryPlannerRequest;
@@ -49,7 +47,7 @@ pub(crate) struct BridgeQueryPlannerPool {
     v8_heap_used_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_total: Arc<AtomicU64>,
     v8_heap_total_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
-    introspection_cache: CacheStorage<String, Response>,
+    introspection_cache: Arc<IntrospectionCache>,
 }
 
 impl BridgeQueryPlannerPool {
@@ -72,7 +70,7 @@ impl BridgeQueryPlannerPool {
 
         // All query planners in the pool now share the same introspection cache.
         // This allows meaningful gauges, and it makes sense that queries should be cached across all planners.
-        let introspection_cache = default_cache_storage().await;
+        let introspection_cache = Arc::new(IntrospectionCache::new(&configuration));
 
         for _ in 0..size.into() {
             let schema = schema.clone();

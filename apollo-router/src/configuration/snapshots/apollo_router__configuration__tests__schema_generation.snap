@@ -3562,32 +3562,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "IntrospectionMode": {
-      "description": "Which implementation of GraphQL schema introspection to use, if enabled",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
@@ -4477,11 +4451,6 @@ expression: "&schema"
         "experimental_reuse_query_plans": {
           "default": false,
           "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
-          "type": "boolean"
-        },
-        "legacy_introspection_caching": {
-          "default": true,
-          "description": "Activates introspection response caching Historically, the Router has executed introspection queries in the query planner, and cached their response in its cache because they were expensive. This will change soon as introspection will be removed from the query planner. In the meantime, since storing introspection responses can fill up the cache, this option can be used to deactivate it. Default: true",
           "type": "boolean"
         },
         "warmed_up_queries": {
@@ -8266,10 +8235,6 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
-    },
-    "experimental_introspection_mode": {
-      "$ref": "#/definitions/IntrospectionMode",
-      "description": "#/definitions/IntrospectionMode"
     },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",

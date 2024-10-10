@@ -256,8 +256,6 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) operation: Node<Operation>,
-    /// `__typename`
-    pub(crate) has_root_typename: bool,
     /// `__schema` or `__type`
     pub(crate) has_schema_introspection: bool,
     /// Non-meta fields explicitly defined in the schema
@@ -275,12 +273,11 @@ impl ParsedDocumentInner {
         hash: Arc<QueryHash>,
     ) -> Result<Arc<Self>, SpecError> {
         let operation = get_operation(&executable, operation_name)?;
-        let mut has_root_typename = false;
         let mut has_schema_introspection = false;
         let mut has_explicit_root_fields = false;
         for field in operation.root_fields(&executable) {
             match field.name.as_str() {
-                "__typename" => has_root_typename = true,
+                "__typename" => {} // turns out we have no conditional on `has_root_typename`
                 "__schema" | "__type" if operation.is_query() => has_schema_introspection = true,
                 _ => has_explicit_root_fields = true,
             }
@@ -290,7 +287,6 @@ impl ParsedDocumentInner {
             executable,
             hash,
             operation,
-            has_root_typename,
             has_schema_introspection,
             has_explicit_root_fields,
         }))
