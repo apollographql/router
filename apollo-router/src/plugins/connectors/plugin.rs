@@ -15,14 +15,19 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt as TowerServiceExt;
 
 use crate::layers::ServiceExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
+use crate::plugins::authentication::subgraph::make_signing_params;
+use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
-use crate::register_plugin;
+use crate::services::connector_service::ConnectorInfo;
+use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
+use crate::services::http::HttpRequest;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
 
@@ -32,14 +37,15 @@ const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OP
 
 static LAST_DEBUG_ENABLED_VALUE: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Connectors {
     debug_extensions: bool,
     max_requests: Option<usize>,
+    signing_params: Arc<HashMap<(String, String), Arc<SigningParamsConfig>>>,
 }
 
 #[async_trait::async_trait]
-impl Plugin for Connectors {
+impl PluginPrivate for Connectors {
     type Config = ConnectorsConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -67,9 +73,25 @@ impl Plugin for Connectors {
                 .ok()
                 .and_then(|v| v.parse().ok()));
 
+        let mut signing_params: HashMap<(String, String), Arc<SigningParamsConfig>> =
+            Default::default();
+        for (subgraph_name, subgraph_config) in init.config.subgraphs {
+            for (source_name, source_config) in subgraph_config.sources {
+                if let Some(auth_config) = source_config.authentication {
+                    signing_params.insert(
+                        (subgraph_name.clone(), source_name.clone()),
+                        make_signing_params(&auth_config, subgraph_name.as_str())
+                            .await
+                            .map(Arc::new)?,
+                    );
+                }
+            }
+        }
+
         Ok(Connectors {
             debug_extensions,
             max_requests,
+            signing_params: Arc::new(signing_params),
         })
     }
 
@@ -143,11 +165,41 @@ impl Plugin for Connectors {
             )
             .boxed()
     }
+
+    fn http_client_service(
+        &self,
+        subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        let signing_params = self.signing_params.clone();
+        let subgraph_name = subgraph_name.to_string();
+        ServiceBuilder::new()
+            .map_request(move |req: HttpRequest| {
+                if let Ok(Some(connector_info)) = req
+                    .context
+                    .get::<&str, ConnectorInfo>(CONNECTOR_INFO_CONTEXT_KEY)
+                {
+                    if let Some(source_name) = connector_info.source_name {
+                        if let Some(signing_params) = signing_params
+                            .get(&(subgraph_name.clone(), source_name.to_string()))
+                            .cloned()
+                        {
+                            req.context
+                                .extensions()
+                                .with_lock(|mut lock| lock.insert(signing_params));
+                        }
+                    }
+                }
+                req
+            })
+            .service(service)
+            .boxed()
+    }
 }
 
 pub(crate) const PLUGIN_NAME: &str = "preview_connectors";
 
-register_plugin!("apollo", PLUGIN_NAME, Connectors);
+register_private_plugin!("apollo", "preview_connectors", Connectors);
 
 // === Structs for collecting debugging information ============================
 
