@@ -41,3 +41,4 @@ pub(crate) mod telemetry;
 #[cfg(test)]
 pub(crate) mod test;
 pub(crate) mod traffic_shaping;
+mod subgraph_circuit_breaker;
