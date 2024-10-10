@@ -218,9 +218,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9692c1bfa7e0628e5c46bd0538571dd469138a0f062290fd4bf90e20e46f05da"
+checksum = "b64257011a999f2e22275cf7a118f651e58dc9170e11b775d435de768fad0387"
 dependencies = [
  "memchr",
  "rowan",
