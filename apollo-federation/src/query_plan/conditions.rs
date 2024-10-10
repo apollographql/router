@@ -9,6 +9,7 @@ use indexmap::map::Entry;
 use serde::Serialize;
 
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::operation::DirectiveList;
 use crate::operation::NamedFragments;
 use crate::operation::Selection;
@@ -70,42 +71,52 @@ impl Conditions {
         }
     }
 
+    /// Parse @skip and @include conditions from a directive list.
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
         let mut variables = IndexMap::default();
-        for directive in directives.iter() {
-            let negated = match directive.name.as_str() {
-                "include" => false,
-                "skip" => true,
-                _ => continue,
+
+        if let Some(skip) = directives.get("skip") {
+            let Some(value) = skip.specified_argument_by_name("if") else {
+                internal_error!("missing @skip(if:) argument");
             };
-            let value = directive.specified_argument_by_name("if").ok_or_else(|| {
-                FederationError::internal(format!(
-                    "missing if argument on @{}",
-                    if negated { "skip" } else { "include" },
-                ))
-            })?;
-            match &**value {
-                Value::Boolean(false) if !negated => return Ok(Self::Boolean(false)),
-                Value::Boolean(true) if negated => return Ok(Self::Boolean(false)),
+
+            match value.as_ref() {
+                // Constant @skip(if: true) can never match
+                Value::Boolean(true) => return Ok(Self::Boolean(false)),
+                // Constant @skip(if: false) always matches
                 Value::Boolean(_) => {}
-                Value::Variable(name) => match variables.entry(name.clone()) {
-                    Entry::Occupied(entry) => {
-                        let previous_negated = *entry.get();
-                        if previous_negated != negated {
-                            return Ok(Self::Boolean(false));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(negated);
-                    }
-                },
+                Value::Variable(name) => {
+                    variables.insert(name.clone(), true);
+                }
                 _ => {
-                    return Err(FederationError::internal(format!(
-                        "expected boolean or variable `if` argument, got {value}",
-                    )))
+                    internal_error!("expected boolean or variable `if` argument, got {value}");
                 }
             }
         }
+
+        if let Some(include) = directives.get("include") {
+            let Some(value) = include.specified_argument_by_name("if") else {
+                internal_error!("missing @include(if:) argument");
+            };
+
+            match value.as_ref() {
+                // Constant @include(if: false) can never match
+                Value::Boolean(false) => return Ok(Self::Boolean(false)),
+                // Constant @include(if: true) always matches
+                Value::Boolean(true) => {}
+                // If both @skip(if: $var) and @include(if: $var) exist, the condition can also
+                // never match
+                Value::Variable(name) => {
+                    if variables.insert(name.clone(), false) == Some(true) {
+                        return Ok(Self::Boolean(false));
+                    }
+                }
+                _ => {
+                    internal_error!("expected boolean or variable `if` argument, got {value}");
+                }
+            }
+        }
+
         Ok(Self::from_variables(variables))
     }
 
