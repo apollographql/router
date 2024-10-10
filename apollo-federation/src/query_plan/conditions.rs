@@ -54,7 +54,7 @@ pub(crate) struct VariableConditions(
     // TODO(@goto-bus-stop): does it really make sense for this to be an indexmap? we normally only
     // have 1 or 2. Can we ever get so many conditions on the same node that it makes sense to use
     // a map over a vec?
-    Arc<IndexMap<Name, ConditionKind>>
+    Arc<IndexMap<Name, ConditionKind>>,
 );
 
 impl VariableConditions {
@@ -149,7 +149,9 @@ impl Conditions {
                 // If both @skip(if: $var) and @include(if: $var) exist, the condition can also
                 // never match
                 Value::Variable(name) => {
-                    if variables.insert(name.clone(), ConditionKind::Include) == Some(ConditionKind::Skip) {
+                    if variables.insert(name.clone(), ConditionKind::Include)
+                        == Some(ConditionKind::Skip)
+                    {
                         return Ok(Self::Boolean(false));
                     }
                 }
