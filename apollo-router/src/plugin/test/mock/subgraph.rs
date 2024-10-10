@@ -9,6 +9,7 @@ use std::task::Poll;
 use apollo_compiler::ast::Definition;
 use apollo_compiler::ast::Document;
 use futures::future;
+use futures::FutureExt;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -35,6 +36,7 @@ pub struct MockSubgraph {
     map_request_fn:
         Option<Arc<dyn (Fn(SubgraphRequest) -> SubgraphRequest) + Send + Sync + 'static>>,
     headers: HeaderMap,
+    delay: Option<std::time::Duration>,
 }
 
 impl MockSubgraph {
@@ -53,6 +55,7 @@ impl MockSubgraph {
             subscription_stream: None,
             map_request_fn: None,
             headers: HeaderMap::new(),
+            delay: None,
         }
     }
 
@@ -81,6 +84,12 @@ impl MockSubgraph {
         self.map_request_fn = Some(Arc::new(map_request_fn));
         self
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_delay(mut self, delay: std::time::Duration) -> Self {
+        self.delay = Some(delay);
+        self
+    }
 }
 
 /// Builder for `MockSubgraph`
@@ -90,6 +99,7 @@ pub struct MockSubgraphBuilder {
     extensions: Option<Object>,
     subscription_stream: Option<Handle<String, graphql::Response>>,
     headers: HeaderMap,
+    delay: Option<std::time::Duration>,
 }
 impl MockSubgraphBuilder {
     pub fn with_extensions(mut self, extensions: Object) -> Self {
@@ -121,6 +131,11 @@ impl MockSubgraphBuilder {
         self
     }
 
+    pub fn with_delay(mut self, delay: std::time::Duration) -> Self {
+        self.delay = Some(delay);
+        self
+    }
+
     pub fn build(self) -> MockSubgraph {
         MockSubgraph {
             mocks: Arc::new(self.mocks),
@@ -128,6 +143,7 @@ impl MockSubgraphBuilder {
             subscription_stream: self.subscription_stream,
             map_request_fn: None,
             headers: self.headers,
+            delay: self.delay,
         }
     }
 }
@@ -153,7 +169,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
 
     type Error = BoxError;
 
-    type Future = future::Ready<Result<Self::Response, Self::Error>>;
+    type Future = future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -224,6 +240,13 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 .context(req.context)
                 .build()
         };
-        future::ok(response)
+        let delay = self.delay;
+        async move {
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
+            Ok(response)
+        }
+        .boxed()
     }
 }
