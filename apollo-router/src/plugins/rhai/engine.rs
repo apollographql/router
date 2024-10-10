@@ -1487,11 +1487,30 @@ macro_rules! register_rhai_router_interface {
 
             $engine.register_get(
                 "uri",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Uri, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.uri().clone()))
+                }
+            ).register_get(
+                "uri",
                 |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.router_request.uri().clone()))
                 }
             );
+
             $engine.register_set(
+                "uri",
+                |obj: &mut SharedMut<$base::FirstRequest>, uri: Uri| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, headers);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            obj.with_mut(|request| *request.request.uri_mut() = uri);
+                            Ok(())
+                        }
+                    }
+                }
+            ).register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
                     if_subgraph! {
@@ -1503,6 +1522,13 @@ macro_rules! register_rhai_router_interface {
                             Ok(())
                         }
                     }
+                }
+            );
+
+            $engine.register_get(
+                "method",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Method, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.method().clone()))
                 }
             );
         )*
