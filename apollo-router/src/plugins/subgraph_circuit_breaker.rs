@@ -226,6 +226,6 @@ impl Plugin for SubgraphCircuitBreakerPlugin {
 
 register_plugin!(
     "experimental",
-    "expose_query_plan",
+    "subgraph_circuit_breaker",
     SubgraphCircuitBreakerPlugin
 );
