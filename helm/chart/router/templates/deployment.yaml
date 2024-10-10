@@ -72,10 +72,10 @@ spec:
             - /app/configuration.yaml
             {{- end }}
           {{- end }}
-          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
           env:
             - name: APOLLO_OFFICIAL_ROUTER_HELM_CHART
               value: "true"
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
             {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
             - name: APOLLO_KEY
               valueFrom:
