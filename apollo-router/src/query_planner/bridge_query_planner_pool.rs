@@ -18,6 +18,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use tower::Service;
 use tower::ServiceExt;
+use tracing_futures::Instrument;
 
 use super::bridge_query_planner::BridgeQueryPlanner;
 use super::QueryPlanResult;
@@ -38,10 +39,7 @@ static CHANNEL_SIZE: usize = 1_000;
 #[derive(Clone)]
 pub(crate) struct BridgeQueryPlannerPool {
     js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
-    sender: Sender<(
-        QueryPlannerRequest,
-        oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
-    )>,
+    sender: Sender<BridgeQueryPlannerRequest>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pool_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
@@ -50,6 +48,26 @@ pub(crate) struct BridgeQueryPlannerPool {
     v8_heap_total: Arc<AtomicU64>,
     v8_heap_total_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     introspection_cache: CacheStorage<String, Response>,
+}
+
+pub(crate) struct BridgeQueryPlannerRequest {
+    pub(crate) request: QueryPlannerRequest,
+    pub(crate) span: tracing::Span,
+    pub(crate) response_sender: oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
+}
+
+impl BridgeQueryPlannerRequest {
+    pub(crate) fn new(
+        request: QueryPlannerRequest,
+        span: tracing::Span,
+        response_sender: oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
+    ) -> Self {
+        Self {
+            request,
+            span,
+            response_sender,
+        }
+    }
 }
 
 impl BridgeQueryPlannerPool {
@@ -63,10 +81,7 @@ impl BridgeQueryPlannerPool {
 
         let mut join_set = JoinSet::new();
 
-        let (sender, receiver) = bounded::<(
-            QueryPlannerRequest,
-            oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
-        )>(CHANNEL_SIZE);
+        let (sender, receiver) = bounded::<BridgeQueryPlannerRequest>(CHANNEL_SIZE);
 
         let mut old_js_planners_iterator = old_js_planners.into_iter();
 
@@ -119,19 +134,24 @@ impl BridgeQueryPlannerPool {
             let receiver = receiver.clone();
 
             tokio::spawn(async move {
-                while let Ok((request, res_sender)) = receiver.recv().await {
+                while let Ok(BridgeQueryPlannerRequest {
+                    request,
+                    span,
+                    response_sender,
+                }) = receiver.recv().await
+                {
                     let svc = match planner.ready().await {
                         Ok(svc) => svc,
                         Err(e) => {
-                            let _ = res_sender.send(Err(e));
+                            let _ = response_sender.send(Err(e));
 
                             continue;
                         }
                     };
 
-                    let res = svc.call(request).await;
+                    let res = svc.call(request).instrument(span).await;
 
-                    let _ = res_sender.send(res);
+                    let _ = response_sender.send(res);
                 }
             });
         }
@@ -273,10 +293,16 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
             } else {
                 None
             };
-
+        let current_span = tracing::Span::current();
         Box::pin(async move {
             let start = Instant::now();
-            let _ = sender.send((req, response_sender)).await;
+            let _ = sender
+                .send(BridgeQueryPlannerRequest::new(
+                    req,
+                    current_span,
+                    response_sender,
+                ))
+                .await;
 
             let res = response_receiver
                 .await

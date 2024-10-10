@@ -384,6 +384,7 @@ impl PlannerMode {
                         .map(|success| success.data.clone())
                         .map_err(|e| e.errors.clone()),
                     plan_options: query_plan_options,
+                    span: Some(tracing::Span::current()),
                 }
                 .schedule();
 
