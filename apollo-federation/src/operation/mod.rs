@@ -995,6 +995,7 @@ mod field_selection {
     use apollo_compiler::Name;
     use serde::Serialize;
 
+    use super::TYPENAME_FIELD;
     use crate::error::FederationError;
     use crate::operation::ArgumentList;
     use crate::operation::DirectiveList;
@@ -1159,6 +1160,13 @@ mod field_selection {
 
         pub(crate) fn data(&self) -> &FieldData {
             &self.data
+        }
+
+        // Is this a plain simple __typename without any directive or alias?
+        pub(crate) fn is_plain_typename_field(&self) -> bool {
+            *self.data.field_position.field_name() == TYPENAME_FIELD
+                && self.data.directives.is_empty()
+                && self.data.alias.is_none()
         }
 
         pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
@@ -2103,7 +2111,7 @@ impl SelectionSet {
         for (key, entry) in mutable_selection_map.iter_mut() {
             match entry {
                 SelectionValue::Field(mut field_selection) => {
-                    if field_selection.get().field.name() == &TYPENAME_FIELD
+                    if field_selection.get().field.is_plain_typename_field()
                         && !is_interface_object
                         && typename_field_key.is_none()
                     {
@@ -4121,9 +4129,13 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
         for normalized_selection in val.selections.values() {
             let selection: executable::Selection = normalized_selection.try_into()?;
             if let executable::Selection::Field(field) = &selection {
-                if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME && field.alias.is_none() {
-                    // Move unaliased __typename to the start of the selection set.
+                if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
+                    && field.directives.is_empty()
+                    && field.alias.is_none()
+                {
+                    // Move the plain __typename to the start of the selection set.
                     // This looks nicer, and matches existing tests.
+                    // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
                     // PORT_NOTE: JS does this in `selectionsInPrintOrder`
                     flattened.insert(0, selection);
                     continue;
