@@ -6407,6 +6407,14 @@ expression: "&schema"
           "nullable": true,
           "type": "boolean"
         },
+        "deduplicate_query_ignored_headers": {
+          "description": "List of header names to ignore when calculating which subgraph requests can be deduplicated",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true,
+          "type": "array"
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
