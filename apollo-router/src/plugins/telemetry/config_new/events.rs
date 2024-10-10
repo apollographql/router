@@ -29,8 +29,10 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
 use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::connector::events::ConnectorEventsKind;
-use crate::plugins::telemetry::config_new::connector::http::events::ConnectorHttpEvents;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -52,7 +54,7 @@ pub(crate) struct Events {
     /// Supergraph service events
     subgraph: Extendable<SubgraphEventsConfig, Event<SubgraphAttributes, SubgraphSelector>>,
     /// Connector events
-    connector: ConnectorEventsKind,
+    connector: Extendable<ConnectorEventsConfig, Event<ConnectorAttributes, ConnectorSelector>>,
 }
 
 impl Events {
@@ -143,8 +145,8 @@ impl Events {
         }
     }
 
-    pub(crate) fn new_connector_http_events(&self) -> ConnectorHttpEvents {
-        super::connector::http::events::new_connector_http_events(&self.connector.http)
+    pub(crate) fn new_connector_events(&self) -> ConnectorEvents {
+        super::connector::events::new_connector_events(&self.connector)
     }
 
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -177,12 +179,12 @@ impl Events {
             condition.validate(Some(Stage::Response))?;
         }
         if let StandardEventConfig::Conditional { condition, .. } =
-            &self.connector.http.attributes.request
+            &self.connector.attributes.request
         {
             condition.validate(Some(Stage::Request))?;
         }
         if let StandardEventConfig::Conditional { condition, .. } =
-            &self.connector.http.attributes.response
+            &self.connector.attributes.response
         {
             condition.validate(Some(Stage::Response))?;
         }
@@ -201,7 +203,7 @@ impl Events {
                 format!("configuration error for subgraph custom event {name:?}: {err}")
             })?;
         }
-        for (name, custom_event) in &self.connector.http.custom {
+        for (name, custom_event) in &self.connector.custom {
             custom_event.validate().map_err(|err| {
                 format!("configuration error for connector HTTP custom event {name:?}: {err}")
             })?;

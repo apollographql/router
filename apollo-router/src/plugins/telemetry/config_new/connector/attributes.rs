@@ -1,5 +1,3 @@
-//! Attributes for HTTP connectors.
-
 use opentelemetry_api::Key;
 use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
@@ -9,13 +7,13 @@ use tower::BoxError;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
+use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
+use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::connector_service::ConnectorInfo;
 use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
-use crate::services::http::HttpRequest;
-use crate::services::http::HttpResponse;
 use crate::Context;
 
 const CONNECTOR_HTTP_METHOD: Key = Key::from_static_str("connector.http.method");
@@ -24,7 +22,7 @@ const CONNECTOR_URL_TEMPLATE: Key = Key::from_static_str("connector.url.template
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct ConnectorHttpAttributes {
+pub(crate) struct ConnectorAttributes {
     /// The name of the subgraph containing the connector
     /// Examples:
     ///
@@ -63,7 +61,7 @@ pub(crate) struct ConnectorHttpAttributes {
     connector_url_template: Option<StandardAttribute>,
 }
 
-impl DefaultForLevel for ConnectorHttpAttributes {
+impl DefaultForLevel for ConnectorAttributes {
     fn defaults_for_level(
         &mut self,
         requirement_level: DefaultAttributeRequirementLevel,
@@ -94,9 +92,9 @@ impl DefaultForLevel for ConnectorHttpAttributes {
     }
 }
 
-impl Selectors for ConnectorHttpAttributes {
-    type Request = HttpRequest;
-    type Response = HttpResponse;
+impl Selectors for ConnectorAttributes {
+    type Request = ConnectorRequest;
+    type Response = ConnectorResponse;
     type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {

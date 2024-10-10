@@ -146,55 +146,54 @@ telemetry:
               subgraph_response_data: "$.*"
               default: "missing"
       connector:
-        http:
-          # Standard events
-          request:
-            level: info
-            condition:
-              eq:
-                - connector_http_request_header: x-log-request
+        # Standard events
+        request:
+          level: info
+          condition:
+            eq:
+              - connector_http_request_header: x-log-request
+              - "log"
+        response:
+          level: warn
+          condition:
+            all:
+              - eq:
+                - connector_http_response_header: x-log-response
                 - "log"
-          response:
-            level: warn
-            condition:
-              all:
-                - eq:
-                    - connector_http_response_header: x-log-response
-                    - "log"
-                - eq:
-                    - subgraph_name: true
-                    - "subgraph"
+              - eq:
+                - subgraph_name: true
+                - "subgraph"
           error: error
 
-          # Custom events
-          my.disabled_request.event:
-            message: "my disabled event message"
-            level: off
-            on: request
-          my.request.event:
-            message: "my request event message"
-            level: info
-            on: request
-            condition:
-              eq:
-                - connector_http_request_header: x-log-request
-                - "log"
-          my.response.event:
-            message: "my response event message"
-            level: error
-            on: response
-            condition:
-              all:
-                - eq:
-                    - connector_http_response_header: x-log-response
-                    - "log"
-                - eq:
-                    - 200
-                    - connector_http_response_status: code
-                - eq:
-                    - subgraph_name: true
-                    - "subgraph"
-            attributes:
-              subgraph.name: true
-              response_status:
-                connector_http_response_status: code
+        # Custom events
+        my.disabled_request.event:
+          message: "my disabled event message"
+          level: off
+          on: request
+        my.request.event:
+          message: "my request event message"
+          level: info
+          on: request
+          condition:
+            eq:
+              - connector_http_request_header: x-log-request
+              - "log"
+        my.response.event:
+          message: "my response event message"
+          level: error
+          on: response
+          condition:
+            all:
+              - eq:
+                  - connector_http_response_header: x-log-response
+                  - "log"
+              - eq:
+                  - 200
+                  - connector_http_response_status: code
+              - eq:
+                  - subgraph_name: true
+                  - "subgraph"
+          attributes:
+            subgraph.name: true
+            response_status:
+              connector_http_response_status: code

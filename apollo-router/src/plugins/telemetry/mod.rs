@@ -10,7 +10,7 @@ use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
 use config_new::cache::CacheInstruments;
-use config_new::connector::http::instruments::ConnectorHttpInstruments;
+use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::Selectors;
@@ -103,7 +103,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::config_new::connector::http::events::ConnectorHttpEvents;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
@@ -139,6 +139,7 @@ use crate::query_planner::OperationKind;
 use crate::router_factory::Endpoint;
 use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
 use crate::services::execution;
+use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::subgraph::Request;
@@ -869,7 +870,7 @@ impl PluginPrivate for Telemetry {
         let static_connector_instruments = self.connector_custom_instruments.read().clone();
         ServiceBuilder::new()
             .map_future_with_request_data(
-                move |http_request: &crate::services::http::HttpRequest| {
+                move |http_request: &HttpRequest| {
                     if http_request
                         .context
                         .contains_key(CONNECTOR_INFO_CONTEXT_KEY)
@@ -879,10 +880,8 @@ impl PluginPrivate for Telemetry {
                             .instruments
                             .new_connector_instruments(static_connector_instruments.clone());
                         custom_instruments.on_request(http_request);
-                        let custom_events = req_fn_config
-                            .instrumentation
-                            .events
-                            .new_connector_http_events();
+                        let custom_events =
+                            req_fn_config.instrumentation.events.new_connector_events();
                         custom_events.on_request(http_request);
 
                         let custom_span_attributes = req_fn_config
@@ -902,7 +901,7 @@ impl PluginPrivate for Telemetry {
                 },
                 move |(context, custom_telemetry): (
                     Context,
-                    Option<(ConnectorHttpInstruments, ConnectorHttpEvents, Vec<KeyValue>)>,
+                    Option<(ConnectorInstruments, ConnectorEvents, Vec<KeyValue>)>,
                 ),
                       f: BoxFuture<
                     'static,
@@ -918,19 +917,18 @@ impl PluginPrivate for Telemetry {
                                     custom_span_attributes,
                                 );
                                 let result = f.await;
-
                                 match &result {
-                                    Ok(resp) => {
+                                    Ok(http_response) => {
                                         span.set_span_dyn_attributes_for_span_name(
                                             CONNECT_SPAN_NAME,
                                             conf.instrumentation
                                                 .spans
                                                 .connector
                                                 .attributes
-                                                .on_response(resp),
+                                                .on_response(http_response),
                                         );
-                                        custom_instruments.on_response(resp);
-                                        custom_events.on_response(resp);
+                                        custom_instruments.on_response(http_response);
+                                        custom_events.on_response(http_response);
                                     }
                                     Err(err) => {
                                         span.set_span_dyn_attributes_for_span_name(
@@ -945,10 +943,9 @@ impl PluginPrivate for Telemetry {
                                         custom_events.on_error(err, &context);
                                     }
                                 }
-
                                 result
                             }
-                            None => f.await,
+                            _ => f.await,
                         }
                     }
                 },

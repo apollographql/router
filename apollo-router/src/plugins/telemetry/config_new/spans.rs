@@ -2,7 +2,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::conditional::Conditional;
-use super::connector::http::selectors::ConnectorHttpSelector;
 use super::connector::spans::ConnectorSpans;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;

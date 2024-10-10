@@ -3,7 +3,7 @@ source: apollo-router/src/plugins/telemetry/config_new/events.rs
 expression: yaml
 ---
 - fields:
-    kind: connector.http.response
+    kind: connector.response
   level: WARN
   message: ""
 - fields:

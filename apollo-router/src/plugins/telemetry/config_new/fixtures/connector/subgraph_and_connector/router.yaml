@@ -7,7 +7,6 @@ telemetry:
           attributes:
             subgraph.name: true
       connector:
-        http:
-          http.client.request.duration:
-            attributes:
-              subgraph.name: true
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true

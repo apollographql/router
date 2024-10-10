@@ -370,39 +370,38 @@ subgraph:
         default: "missing"
 
 connector:
-  http:
-    # Standard events
-    request: info
-    response: warn
-    error: error
+  # Standard events
+  request: info
+  response: warn
+  error: error
 
-    # Custom events
-    my.connector.request.event:
-      message: "my request event message"
-      level: info
-      on: request
-      attributes:
-        subgraph.name: true
-        connector_source:
-          connector_source: name
-        http_method:
-          connector_http_method: true
-        url_template:
-          connector_url_template: true
-    my.connector.response.event:
-      message: "my response event message"
-      level: error
-      on: response
-      attributes:
-        subgraph.name: true
-        connector_source:
-          connector_source: name
-        http_method:
-          connector_http_method: true
-        url_template:
-          connector_url_template: true
-        response_status:
-          connector_http_response_status: code"#;
+  # Custom events
+  my.connector.request.event:
+    message: "my request event message"
+    level: info
+    on: request
+    attributes:
+      subgraph.name: true
+      connector_source:
+        connector_source: name
+      http_method:
+        connector_http_method: true
+      url_template:
+        connector_url_template: true
+  my.connector.response.event:
+    message: "my response event message"
+    level: error
+    on: response
+    attributes:
+      subgraph.name: true
+      connector_source:
+        connector_source: name
+      http_method:
+        connector_http_method: true
+      url_template:
+        connector_url_template: true
+      response_status:
+        connector_http_response_status: code"#;
 
     #[derive(Default, Clone)]
     struct LogBuffer(Arc<Mutex<Vec<u8>>>);
@@ -846,7 +845,7 @@ connector:
                     http_request,
                     context,
                 };
-                let connector_events = event_config.new_connector_http_events();
+                let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&http_request);
 
                 let http_response = HttpResponse {
@@ -1016,7 +1015,7 @@ connector:
                     http_request,
                     context,
                 };
-                let connector_events = event_config.new_connector_http_events();
+                let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&http_request);
 
                 let http_response = HttpResponse {

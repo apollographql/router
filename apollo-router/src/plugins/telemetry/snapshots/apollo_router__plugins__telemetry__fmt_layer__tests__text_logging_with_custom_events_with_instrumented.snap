@@ -15,7 +15,7 @@ expression: buff.to_string()
 [timestamp] ERROR  my.custom.attribute=["{"id":1234,"name":"first_name"}","{"id":567,"name":"second_name"}"] response_status=200 subgraph.name=subgraph my response event message kind=my.subgraph.response.event
 [timestamp] INFO  my event message kind=my.subgraph.request.event
 [timestamp] ERROR  my.custom.attribute=[[{"id":1234,"name":"first_name"},{"id":567,"name":"second_name"}],{"foo":"bar"}] response_status=200 subgraph.name=subgraph_bis my response event message kind=my.subgraph.response.event
-[timestamp] INFO  http.request.body=Body(Empty) http.request.headers={"x-log-request": "log"} http.request.method=GET http.request.uri=/ http.request.version=HTTP/1.1  kind=connector.http.request
+[timestamp] INFO  http.request.body=Body(Empty) http.request.headers={"x-log-request": "log"} http.request.method=GET http.request.uri=/ http.request.version=HTTP/1.1  kind=connector.request
 [timestamp] INFO  connector_source=source http_method=GET subgraph.name=connector_subgraph url_template=/test my request event message kind=my.connector.request.event
-[timestamp] WARN  http.response.body=Body(Empty) http.response.headers={"x-log-response": "log"} http.response.status=200 OK http.response.version=HTTP/1.1  kind=connector.http.response
+[timestamp] WARN  http.response.body=Body(Empty) http.response.headers={"x-log-response": "log"} http.response.status=200 OK http.response.version=HTTP/1.1  kind=connector.response
 [timestamp] ERROR  connector_source=source http_method=GET response_status=200 subgraph.name=connector_subgraph url_template=/test my response event message kind=my.connector.response.event

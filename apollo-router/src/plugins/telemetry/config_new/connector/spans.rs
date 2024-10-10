@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditional::Conditional;
-use crate::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes;
-use crate::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
@@ -13,7 +13,7 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ConnectorSpans {
     /// Custom attributes that are attached to the connector span.
-    pub(crate) attributes: Extendable<ConnectorHttpAttributes, Conditional<ConnectorHttpSelector>>,
+    pub(crate) attributes: Extendable<ConnectorAttributes, Conditional<ConnectorSelector>>,
 }
 
 impl DefaultForLevel for ConnectorSpans {

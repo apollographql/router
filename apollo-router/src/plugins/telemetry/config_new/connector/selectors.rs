@@ -1,5 +1,3 @@
-//! Selectors for HTTP connectors.
-
 use derivative::Derivative;
 use opentelemetry_api::Value;
 use schemars::JsonSchema;
@@ -7,6 +5,8 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
+use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
@@ -15,8 +15,6 @@ use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::services::connector_service::ConnectorInfo;
 use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
-use crate::services::http::HttpRequest;
-use crate::services::http::HttpResponse;
 use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -28,24 +26,23 @@ pub(crate) enum ConnectorSource {
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum ConnectorHttpValue {
+pub(crate) enum ConnectorValue {
     Standard(Standard),
-    Custom(ConnectorHttpSelector),
+    Custom(ConnectorSelector),
 }
 
-impl From<&ConnectorHttpValue> for InstrumentValue<ConnectorHttpSelector> {
-    fn from(value: &ConnectorHttpValue) -> Self {
+impl From<&ConnectorValue> for InstrumentValue<ConnectorSelector> {
+    fn from(value: &ConnectorValue) -> Self {
         match value {
-            ConnectorHttpValue::Standard(s) => InstrumentValue::Standard(s.clone()),
-            ConnectorHttpValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            ConnectorValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            ConnectorValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
         }
     }
 }
-
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 #[derivative(Debug, PartialEq)]
-pub(crate) enum ConnectorHttpSelector {
+pub(crate) enum ConnectorSelector {
     SubgraphName {
         /// The subgraph name
         subgraph_name: bool,
@@ -54,7 +51,7 @@ pub(crate) enum ConnectorHttpSelector {
         /// The connector source.
         connector_source: ConnectorSource,
     },
-    ConnectorRequestHeader {
+    HttpRequestHeader {
         /// The name of a connector HTTP request header.
         connector_http_request_header: String,
         #[serde(skip)]
@@ -96,9 +93,9 @@ pub(crate) enum ConnectorHttpSelector {
     },
 }
 
-impl Selector for ConnectorHttpSelector {
-    type Request = HttpRequest;
-    type Response = HttpResponse;
+impl Selector for ConnectorSelector {
+    type Request = ConnectorRequest;
+    type Response = ConnectorResponse;
     type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) -> Option<Value> {
@@ -106,33 +103,31 @@ impl Selector for ConnectorHttpSelector {
             .context
             .get::<&str, ConnectorInfo>(CONNECTOR_INFO_CONTEXT_KEY);
         match self {
-            ConnectorHttpSelector::SubgraphName { subgraph_name } if *subgraph_name => {
-                connector_info
-                    .ok()
-                    .flatten()
-                    .map(|info| info.subgraph_name.clone())
-                    .map(opentelemetry::Value::from)
-            }
-            ConnectorHttpSelector::ConnectorSource { .. } => connector_info
+            ConnectorSelector::SubgraphName { subgraph_name } if *subgraph_name => connector_info
+                .ok()
+                .flatten()
+                .map(|info| info.subgraph_name.clone())
+                .map(opentelemetry::Value::from),
+            ConnectorSelector::ConnectorSource { .. } => connector_info
                 .ok()
                 .flatten()
                 .and_then(|info| info.source_name.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorHttpMethod {
+            ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
             } if *connector_http_method => connector_info
                 .ok()
                 .flatten()
                 .map(|info| info.http_method.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorUrlTemplate {
+            ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
             } if *connector_url_template => connector_info
                 .ok()
                 .flatten()
                 .map(|info| info.url_template.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorRequestHeader {
+            ConnectorSelector::HttpRequestHeader {
                 connector_http_request_header: connector_request_header,
                 default,
                 ..
@@ -143,7 +138,7 @@ impl Selector for ConnectorHttpSelector {
                 .and_then(|h| Some(h.to_str().ok()?.to_string()))
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -153,33 +148,31 @@ impl Selector for ConnectorHttpSelector {
             .context
             .get::<&str, ConnectorInfo>(CONNECTOR_INFO_CONTEXT_KEY);
         match self {
-            ConnectorHttpSelector::SubgraphName { subgraph_name } if *subgraph_name => {
-                connector_info
-                    .ok()
-                    .flatten()
-                    .map(|info| info.subgraph_name.clone())
-                    .map(opentelemetry::Value::from)
-            }
-            ConnectorHttpSelector::ConnectorSource { .. } => connector_info
+            ConnectorSelector::SubgraphName { subgraph_name } if *subgraph_name => connector_info
+                .ok()
+                .flatten()
+                .map(|info| info.subgraph_name.clone())
+                .map(opentelemetry::Value::from),
+            ConnectorSelector::ConnectorSource { .. } => connector_info
                 .ok()
                 .flatten()
                 .and_then(|info| info.source_name.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorHttpMethod {
+            ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
             } if *connector_http_method => connector_info
                 .ok()
                 .flatten()
                 .map(|info| info.http_method.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorUrlTemplate {
+            ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
             } if *connector_url_template => connector_info
                 .ok()
                 .flatten()
                 .map(|info| info.url_template.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorResponseHeader {
+            ConnectorSelector::ConnectorResponseHeader {
                 connector_http_response_header: connector_response_header,
                 default,
                 ..
@@ -190,7 +183,7 @@ impl Selector for ConnectorHttpSelector {
                 .and_then(|h| Some(h.to_str().ok()?.to_string()))
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorResponseStatus {
+            ConnectorSelector::ConnectorResponseStatus {
                 connector_http_response_status: response_status,
             } => match response_status {
                 ResponseStatus::Code => {
@@ -202,7 +195,7 @@ impl Selector for ConnectorHttpSelector {
                     .canonical_reason()
                     .map(|reason| reason.into()),
             },
-            ConnectorHttpSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -210,41 +203,39 @@ impl Selector for ConnectorHttpSelector {
     fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
         let connector_info = ctx.get::<&str, ConnectorInfo>(CONNECTOR_INFO_CONTEXT_KEY);
         match self {
-            ConnectorHttpSelector::SubgraphName { subgraph_name } if *subgraph_name => {
-                connector_info
-                    .ok()
-                    .flatten()
-                    .map(|info| info.subgraph_name.clone())
-                    .map(opentelemetry::Value::from)
-            }
-            ConnectorHttpSelector::ConnectorSource { .. } => connector_info
+            ConnectorSelector::SubgraphName { subgraph_name } if *subgraph_name => connector_info
+                .ok()
+                .flatten()
+                .map(|info| info.subgraph_name.clone())
+                .map(opentelemetry::Value::from),
+            ConnectorSelector::ConnectorSource { .. } => connector_info
                 .ok()
                 .flatten()
                 .and_then(|info| info.source_name.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorHttpMethod {
+            ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
             } if *connector_http_method => connector_info
                 .ok()
                 .flatten()
                 .map(|info| info.http_method.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::ConnectorUrlTemplate {
+            ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
             } if *connector_url_template => connector_info
                 .ok()
                 .flatten()
                 .map(|info| info.url_template.clone())
                 .map(opentelemetry::Value::from),
-            ConnectorHttpSelector::Error { .. } => Some(error.to_string().into()),
-            ConnectorHttpSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::Error { .. } => Some(error.to_string().into()),
+            ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
 
     fn on_drop(&self) -> Option<Value> {
         match self {
-            ConnectorHttpSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -253,35 +244,35 @@ impl Selector for ConnectorHttpSelector {
         match stage {
             Stage::Request => matches!(
                 self,
-                ConnectorHttpSelector::ConnectorRequestHeader { .. }
-                    | ConnectorHttpSelector::SubgraphName { .. }
-                    | ConnectorHttpSelector::ConnectorSource { .. }
-                    | ConnectorHttpSelector::ConnectorHttpMethod { .. }
-                    | ConnectorHttpSelector::ConnectorUrlTemplate { .. }
-                    | ConnectorHttpSelector::StaticField { .. }
+                ConnectorSelector::HttpRequestHeader { .. }
+                    | ConnectorSelector::SubgraphName { .. }
+                    | ConnectorSelector::ConnectorSource { .. }
+                    | ConnectorSelector::ConnectorHttpMethod { .. }
+                    | ConnectorSelector::ConnectorUrlTemplate { .. }
+                    | ConnectorSelector::StaticField { .. }
             ),
             Stage::Response => matches!(
                 self,
-                ConnectorHttpSelector::ConnectorResponseHeader { .. }
-                    | ConnectorHttpSelector::ConnectorResponseStatus { .. }
-                    | ConnectorHttpSelector::SubgraphName { .. }
-                    | ConnectorHttpSelector::ConnectorSource { .. }
-                    | ConnectorHttpSelector::ConnectorHttpMethod { .. }
-                    | ConnectorHttpSelector::ConnectorUrlTemplate { .. }
-                    | ConnectorHttpSelector::StaticField { .. }
+                ConnectorSelector::ConnectorResponseHeader { .. }
+                    | ConnectorSelector::ConnectorResponseStatus { .. }
+                    | ConnectorSelector::SubgraphName { .. }
+                    | ConnectorSelector::ConnectorSource { .. }
+                    | ConnectorSelector::ConnectorHttpMethod { .. }
+                    | ConnectorSelector::ConnectorUrlTemplate { .. }
+                    | ConnectorSelector::StaticField { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
             Stage::Error => matches!(
                 self,
-                ConnectorHttpSelector::Error { .. }
-                    | ConnectorHttpSelector::SubgraphName { .. }
-                    | ConnectorHttpSelector::ConnectorSource { .. }
-                    | ConnectorHttpSelector::ConnectorHttpMethod { .. }
-                    | ConnectorHttpSelector::ConnectorUrlTemplate { .. }
-                    | ConnectorHttpSelector::StaticField { .. }
+                ConnectorSelector::Error { .. }
+                    | ConnectorSelector::SubgraphName { .. }
+                    | ConnectorSelector::ConnectorSource { .. }
+                    | ConnectorSelector::ConnectorHttpMethod { .. }
+                    | ConnectorSelector::ConnectorUrlTemplate { .. }
+                    | ConnectorSelector::StaticField { .. }
             ),
-            Stage::Drop => matches!(self, ConnectorHttpSelector::StaticField { .. }),
+            Stage::Drop => matches!(self, ConnectorSelector::StaticField { .. }),
         }
     }
 }
@@ -291,8 +282,10 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use http::StatusCode;
 
+    use super::ConnectorSelector;
     use super::ConnectorSource;
-    use crate::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector;
+    use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
+    use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::services::connector_service::ConnectorInfo;
@@ -325,14 +318,14 @@ mod tests {
         context
     }
 
-    fn http_request(context: Context) -> HttpRequest {
+    fn http_request(context: Context) -> ConnectorRequest {
         HttpRequest {
             http_request: http::Request::builder().body("".into()).unwrap(),
             context,
         }
     }
 
-    fn http_request_with_header(context: Context) -> HttpRequest {
+    fn http_request_with_header(context: Context) -> ConnectorRequest {
         HttpRequest {
             http_request: http::Request::builder()
                 .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)
@@ -342,7 +335,7 @@ mod tests {
         }
     }
 
-    fn http_response(context: Context, status_code: StatusCode) -> HttpResponse {
+    fn http_response(context: Context, status_code: StatusCode) -> ConnectorResponse {
         HttpResponse {
             http_response: http::Response::builder()
                 .status(status_code)
@@ -352,7 +345,7 @@ mod tests {
         }
     }
 
-    fn http_response_with_header(context: Context, status_code: StatusCode) -> HttpResponse {
+    fn http_response_with_header(context: Context, status_code: StatusCode) -> ConnectorResponse {
         HttpResponse {
             http_response: http::Response::builder()
                 .status(status_code)
@@ -365,7 +358,7 @@ mod tests {
 
     #[test]
     fn connector_on_request_static_field() {
-        let selector = ConnectorHttpSelector::StaticField {
+        let selector = ConnectorSelector::StaticField {
             r#static: TEST_STATIC.into(),
         };
         assert_eq!(
@@ -376,7 +369,7 @@ mod tests {
 
     #[test]
     fn connector_on_request_subgraph_name() {
-        let selector = ConnectorHttpSelector::SubgraphName {
+        let selector = ConnectorSelector::SubgraphName {
             subgraph_name: true,
         };
         assert_eq!(
@@ -387,7 +380,7 @@ mod tests {
 
     #[test]
     fn connector_on_request_connector_source() {
-        let selector = ConnectorHttpSelector::ConnectorSource {
+        let selector = ConnectorSelector::ConnectorSource {
             connector_source: ConnectorSource::Name,
         };
         assert_eq!(
@@ -398,7 +391,7 @@ mod tests {
 
     #[test]
     fn connector_on_request_url_template() {
-        let selector = ConnectorHttpSelector::ConnectorUrlTemplate {
+        let selector = ConnectorSelector::ConnectorUrlTemplate {
             connector_url_template: true,
         };
         assert_eq!(
@@ -409,7 +402,7 @@ mod tests {
 
     #[test]
     fn connector_on_request_header_defaulted() {
-        let selector = ConnectorHttpSelector::ConnectorRequestHeader {
+        let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
             redact: None,
             default: Some("defaulted".into()),
@@ -422,7 +415,7 @@ mod tests {
 
     #[test]
     fn connector_on_request_header_with_value() {
-        let selector = ConnectorHttpSelector::ConnectorRequestHeader {
+        let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
             redact: None,
             default: None,
@@ -435,7 +428,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_static_field() {
-        let selector = ConnectorHttpSelector::StaticField {
+        let selector = ConnectorSelector::StaticField {
             r#static: TEST_STATIC.into(),
         };
         assert_eq!(
@@ -446,7 +439,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_subgraph_name() {
-        let selector = ConnectorHttpSelector::SubgraphName {
+        let selector = ConnectorSelector::SubgraphName {
             subgraph_name: true,
         };
         assert_eq!(
@@ -457,7 +450,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_connector_source() {
-        let selector = ConnectorHttpSelector::ConnectorSource {
+        let selector = ConnectorSelector::ConnectorSource {
             connector_source: ConnectorSource::Name,
         };
         assert_eq!(
@@ -468,7 +461,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_url_template() {
-        let selector = ConnectorHttpSelector::ConnectorUrlTemplate {
+        let selector = ConnectorSelector::ConnectorUrlTemplate {
             connector_url_template: true,
         };
         assert_eq!(
@@ -479,7 +472,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_header_defaulted() {
-        let selector = ConnectorHttpSelector::ConnectorResponseHeader {
+        let selector = ConnectorSelector::ConnectorResponseHeader {
             connector_http_response_header: TEST_HEADER_NAME.to_string(),
             redact: None,
             default: Some("defaulted".into()),
@@ -492,7 +485,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_header_with_value() {
-        let selector = ConnectorHttpSelector::ConnectorResponseHeader {
+        let selector = ConnectorSelector::ConnectorResponseHeader {
             connector_http_response_header: TEST_HEADER_NAME.to_string(),
             redact: None,
             default: None,
@@ -508,7 +501,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_status_code() {
-        let selector = ConnectorHttpSelector::ConnectorResponseStatus {
+        let selector = ConnectorSelector::ConnectorResponseStatus {
             connector_http_response_status: ResponseStatus::Code,
         };
         assert_eq!(
@@ -519,7 +512,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_status_reason_ok() {
-        let selector = ConnectorHttpSelector::ConnectorResponseStatus {
+        let selector = ConnectorSelector::ConnectorResponseStatus {
             connector_http_response_status: ResponseStatus::Reason,
         };
         assert_eq!(
@@ -530,7 +523,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_status_code_not_found() {
-        let selector = ConnectorHttpSelector::ConnectorResponseStatus {
+        let selector = ConnectorSelector::ConnectorResponseStatus {
             connector_http_response_status: ResponseStatus::Reason,
         };
         assert_eq!(
@@ -544,7 +537,7 @@ mod tests {
 
     #[test]
     fn connector_on_response_http_method() {
-        let selector = ConnectorHttpSelector::ConnectorHttpMethod {
+        let selector = ConnectorSelector::ConnectorHttpMethod {
             connector_http_method: true,
         };
         assert_eq!(
@@ -555,7 +548,7 @@ mod tests {
 
     #[test]
     fn connector_on_drop_static_field() {
-        let selector = ConnectorHttpSelector::StaticField {
+        let selector = ConnectorSelector::StaticField {
             r#static: TEST_STATIC.into(),
         };
         assert_eq!(Some(TEST_STATIC.into()), selector.on_drop());
