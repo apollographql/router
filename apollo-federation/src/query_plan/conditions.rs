@@ -114,6 +114,9 @@ impl Conditions {
     }
 
     /// Parse @skip and @include conditions from a directive list.
+    ///
+    /// # Errors
+    /// Returns an error if a @skip/@include directive is invalid (per GraphQL validation rules).
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
         let mut variables = IndexMap::default();
 
