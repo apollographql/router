@@ -892,13 +892,10 @@ impl BridgeQueryPlanner {
 
         if doc.has_root_typename && !doc.has_schema_introspection && !doc.has_explicit_root_fields {
             // Fast path for __typename alone
-            if doc
-                .operation
-                .selection_set
-                .selections
-                .iter()
-                .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
-            {
+            if doc.operation.selection_set.selections.iter().all(|sel| {
+                sel.as_field()
+                    .is_some_and(|f| f.name == "__typename" && f.directives.is_empty())
+            }) {
                 let root_type_name: serde_json_bytes::ByteString =
                     doc.operation.object_type().as_str().into();
                 let data = Value::Object(
@@ -917,7 +914,8 @@ impl BridgeQueryPlanner {
                     response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
-                // fragments might use @include or @skip
+                // We have fragments which might use @skip or @include,
+                // or field directives which might be @skip or @include.
             }
         }
 
