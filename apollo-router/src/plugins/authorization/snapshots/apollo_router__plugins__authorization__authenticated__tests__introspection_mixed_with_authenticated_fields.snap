@@ -5,7 +5,7 @@ expression: first_response
 {
   "errors": [
     {
-      "message": "Mixed queries with both schema introspection and concrete fields are not supported",
+      "message": "Mixed queries with both schema introspection and concrete fields are not supported yet: https://github.com/apollographql/router/issues/2789",
       "extensions": {
         "code": "MIXED_INTROSPECTION"
       }

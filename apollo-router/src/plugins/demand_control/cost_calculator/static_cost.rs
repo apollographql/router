@@ -585,7 +585,7 @@ mod tests {
     use tower::Service;
 
     use super::*;
-    use crate::introspection::default_cache_storage;
+    use crate::introspection::IntrospectionCache;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::QueryPlannerContent;
@@ -677,7 +677,7 @@ mod tests {
             config.clone(),
             None,
             None,
-            default_cache_storage().await,
+            Arc::new(IntrospectionCache::new(&config)),
         )
         .await
         .unwrap();
