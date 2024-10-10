@@ -84,8 +84,8 @@ where
     }
 
     fn get_cache_key(
-        request: SubgraphRequest,
-        deduplicate_query_ignored_headers: Option<Vec<String>>,
+        request: &SubgraphRequest,
+        deduplicate_query_ignored_headers: &Option<Vec<String>>,
     ) -> (http_ext::Request<Request>, Arc<CacheKeyMetadata>) {
         let authorization_cache_key = request.authorization.clone();
         let cache_key: (http_ext::Request<Request>, Arc<CacheKeyMetadata>) =
@@ -121,10 +121,10 @@ where
         {
             return service.ready_oneshot().await?.call(request).await;
         }
+
+        let cache_key = Self::get_cache_key(&request, &deduplicate_query_ignored_headers);
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            let cache_key =
-                Self::get_cache_key(request.clone(), deduplicate_query_ignored_headers.clone());
 
             match locked_wait_map.get_mut(&cache_key) {
                 Some(waiter) => {
@@ -155,10 +155,8 @@ where
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let cache_key = Self::get_cache_key(
-                        request.clone(),
-                        deduplicate_query_ignored_headers.clone(),
-                    );
+                    let cache_key =
+                        Self::get_cache_key(&request, &deduplicate_query_ignored_headers);
 
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
