@@ -5,6 +5,8 @@ Schema introspection now runs natively without involving JavaScript code. We hav
 In Router YAML configuration:
 
 * The `experimental_introspection_mode` key is removed, `new` is now the only behavior
-* The `supergraph.query_planning.legacy_introspection_caching` key is removed (with a migration to support configuration files that still have it), the behavior is now similar to what was `false`: introspection responses are not part of the query plan cache but instead in a separate, small, in-memory only cache.
+* The `supergraph.query_planning.legacy_introspection_caching` key is removed, the behavior is now similar to what was `false`: introspection responses are not part of the query plan cache but instead in a separate, small, in-memory only cache.
+
+Migrations ensure that existing configuration files will keep working.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6139
