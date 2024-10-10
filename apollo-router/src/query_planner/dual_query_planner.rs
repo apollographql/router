@@ -268,7 +268,7 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFa
     check_match_eq!(*operation_kind, other.operation_kind);
     check_match_eq!(*id, other.id);
     check_match_eq!(*authorization, other.authorization);
-    check_match!(same_selection_set_sorted(requires, &other.requires));
+    check_match!(same_requires(requires, &other.requires));
     check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
     check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
     check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
@@ -661,6 +661,10 @@ fn same_selection_set_sorted(x: &[Selection], y: &[Selection]) -> bool {
         .all(|(x, y)| same_selection(x, y))
 }
 
+fn same_requires(x: &[Selection], y: &[Selection]) -> bool {
+    vec_matches_as_set(x, y, same_selection)
+}
+
 fn same_rewrites(x: &Option<Vec<DataRewrite>>, y: &Option<Vec<DataRewrite>>) -> bool {
     match (x, y) {
         (None, None) => true,
@@ -982,6 +986,54 @@ mod ast_comparison_tests {
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod qp_selection_comparison_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_requires_comparison_with_same_selection_key() {
+        let requires_json = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "id",
+                    },
+                  ]
+            },
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "id",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "job",
+                    }
+                  ]
+            },
+        ]);
+
+        // The only difference between requires1 and requires2 is the order of selections.
+        // But, their items all have the same SelectionKey.
+        let requires1: Vec<Selection> = serde_json::from_value(requires_json).unwrap();
+        let requires2: Vec<Selection> = requires1.iter().rev().cloned().collect();
+
+        // `same_selection_set_sorted` fails to match, since it doesn't account for
+        // two items with the same SelectionKey but in different order.
+        assert!(!same_selection_set_sorted(&requires1, &requires2));
+        // `same_requires` should succeed.
+        assert!(same_requires(&requires1, &requires2));
     }
 }
 
