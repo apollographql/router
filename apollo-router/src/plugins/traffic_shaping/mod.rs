@@ -975,7 +975,7 @@ mod test {
             }
             join_all(tasks).await;
 
-            assert_counter!("apollo.router.deduplicated.queries.total", 4);
+            assert_counter!("apollo.router.deduplicated.queries", 4);
         }
         .with_metrics()
         .await

@@ -99,7 +99,7 @@ where
                     match receiver.recv().await {
                         Ok(value) => {
                             u64_counter!(
-                                "apollo.router.deduplicated.queries.total",
+                                "apollo.router.deduplicated.queries",
                                 "Total subgraph queries deduplicated",
                                 1
                             );
