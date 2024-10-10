@@ -859,7 +859,7 @@ impl Default for Apq {
 }
 
 /// Query planning cache configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -900,32 +900,6 @@ pub(crate) struct QueryPlanning {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
     pub(crate) experimental_parallelism: AvailableParallelism,
-
-    /// Activates introspection response caching
-    /// Historically, the Router has executed introspection queries in the query planner, and cached their
-    /// response in its cache because they were expensive. This will change soon as introspection will be
-    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
-    /// the cache, this option can be used to deactivate it.
-    /// Default: true
-    pub(crate) legacy_introspection_caching: bool,
-}
-
-impl Default for QueryPlanning {
-    fn default() -> Self {
-        Self {
-            cache: QueryPlanCache::default(),
-            warmed_up_queries: Default::default(),
-            experimental_plans_limit: Default::default(),
-            experimental_parallelism: Default::default(),
-            experimental_paths_limit: Default::default(),
-            experimental_reuse_query_plans: Default::default(),
-            legacy_introspection_caching: default_legacy_introspection_caching(),
-        }
-    }
-}
-
-const fn default_legacy_introspection_caching() -> bool {
-    true
 }
 
 impl QueryPlanning {

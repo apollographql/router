@@ -731,7 +731,7 @@ impl BridgeQueryPlanner {
         {
             ControlFlow::Continue(()) => (),
             ControlFlow::Break(response) => {
-                return Ok(QueryPlannerContent::Response {
+                return Ok(QueryPlannerContent::CachedIntrospectionResponse {
                     response: Box::new(response),
                 })
             }
@@ -1057,7 +1057,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Response { response } = result {
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -1078,7 +1078,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Response { response } = result {
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query","__typename":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()

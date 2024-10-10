@@ -81,7 +81,6 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode: ConfigMode,
-    legacy_introspection_caching: bool,
 }
 
 fn init_query_plan_from_redis(
@@ -148,10 +147,6 @@ where
             plugins: Arc::new(plugins),
             enable_authorization_directives,
             config_mode,
-            legacy_introspection_caching: configuration
-                .supergraph
-                .query_planning
-                .legacy_introspection_caching,
         })
     }
 
@@ -534,8 +529,12 @@ where
                         }) => {
                             if let Some(content) = content.clone() {
                                 let can_cache = match &content {
-                                    QueryPlannerContent::Plan { .. } => true,
-                                    _ => self.legacy_introspection_caching,
+                                    // Already cached in an introspection-specific, small-size,
+                                    // in-memory-only cache.
+                                    QueryPlannerContent::CachedIntrospectionResponse { .. } => {
+                                        false
+                                    }
+                                    _ => true,
                                 };
 
                                 if can_cache {
@@ -692,7 +691,10 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
             Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
-            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
+            Ok(QueryPlannerContent::Response { response })
+            | Ok(QueryPlannerContent::CachedIntrospectionResponse { response }) => {
+                Some(estimate_size(response))
+            }
             Ok(QueryPlannerContent::IntrospectionDisabled) => None,
             Err(e) => Some(estimate_size(e)),
         }
@@ -926,7 +928,7 @@ mod tests {
             .returning(|| {
                 let mut planner = MockMyQueryPlanner::new();
                 planner.expect_sync_call().returning(|_| {
-                    let qp_content = QueryPlannerContent::Response {
+                    let qp_content = QueryPlannerContent::CachedIntrospectionResponse {
                         response: Box::new(
                             crate::graphql::Response::builder()
                                 .data(Object::new())
@@ -942,16 +944,7 @@ mod tests {
                 planner
             });
 
-        let configuration = Arc::new(crate::Configuration {
-            supergraph: crate::configuration::Supergraph {
-                query_planning: crate::configuration::QueryPlanning {
-                    legacy_introspection_caching: false,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ..Default::default()
-        });
+        let configuration = Default::default();
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
