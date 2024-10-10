@@ -504,6 +504,7 @@ Properties of the JSON body are divided into two high-level categories:
   "stage": "SubgraphRequest",
   "control": "continue",
   "id": "666d677225c1bc6d7c54a52b409dbd4e",
+  "subgraphRequestId": "b5964998b2394b64a864ef802fb5a4b3",
 
   // Data properties
   "headers": {},
@@ -580,6 +581,7 @@ Properties of the JSON body are divided into two high-level categories:
   "version": 1,
   "stage": "SubgraphResponse",
   "id": "b7810c6f7f95640fd6c6c8781e3953c0",
+  "subgraphRequestId": "b5964998b2394b64a864ef802fb5a4b3",
   "control": "continue",
 
   // Data properties
@@ -749,6 +751,23 @@ For details, see [Terminating a client request](#terminating-a-client-request).
 <td>
 
 A unique ID corresponding to the client request associated with this coprocessor request.
+
+**Do not return a _different_ value for this property.** If you do, the router treats the coprocessor request as if it failed.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `subgraphRequestId`
+
+`string`
+
+</td>
+<td>
+
+A unique ID corresponding to the subgraph request associated with this coprocessor request (only available at the `SubgraphRequest` and `SubgraphResponse` stages).
 
 **Do not return a _different_ value for this property.** If you do, the router treats the coprocessor request as if it failed.
 

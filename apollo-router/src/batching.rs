@@ -28,6 +28,7 @@ use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
+use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
@@ -426,7 +427,7 @@ pub(crate) async fn assemble_batch(
 ) -> Result<
     (
         String,
-        Vec<Context>,
+        Vec<(Context, SubgraphRequestId)>,
         http::Request<RouterBody>,
         Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     ),
@@ -445,8 +446,8 @@ pub(crate) async fn assemble_batch(
     // Retain the various contexts for later use
     let contexts = requests
         .iter()
-        .map(|x| x.context.clone())
-        .collect::<Vec<Context>>();
+        .map(|request| (request.context.clone(), request.id.clone()))
+        .collect::<Vec<(Context, SubgraphRequestId)>>();
     // Grab the common info from the first request
     let first_request = requests
         .into_iter()
@@ -479,6 +480,7 @@ mod tests {
     use crate::plugins::traffic_shaping::Http2Config;
     use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::Configuration;
@@ -523,7 +525,7 @@ mod tests {
 
         let output_context_ids = contexts
             .iter()
-            .map(|r| r.id.clone())
+            .map(|r| r.0.id.clone())
             .collect::<Vec<String>>();
         // Make sure all of our contexts are preserved during assembly
         assert_eq!(input_context_ids, output_context_ids);
@@ -562,6 +564,7 @@ mod tests {
                     .unwrap(),
                 context: Context::new(),
                 subgraph_name: None,
+                id: SubgraphRequestId(String::new()),
             };
 
             tx.send(Ok(response)).unwrap();
