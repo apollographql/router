@@ -179,6 +179,14 @@ pub struct Response {
     pub context: Context,
 }
 
+impl std::fmt::Debug for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Response")
+            .field("context", &self.context)
+            .finish()
+    }
+}
+
 #[buildstructor::buildstructor]
 impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..

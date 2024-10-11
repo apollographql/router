@@ -13,9 +13,8 @@ use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
 
-use tower::util::Oneshot;
+use futures::future::BoxFuture;
 use tower::Service;
-use tower::ServiceExt;
 
 use self::future::ResponseFuture;
 pub(crate) use self::layer::TimeoutLayer;
@@ -40,21 +39,26 @@ impl<T: Clone> Timeout<T> {
 impl<S, Request> Service<Request> for Timeout<S>
 where
     S: Service<Request> + Clone,
-    S::Error: Into<tower::BoxError>,
+    S::Error: Into<tower::BoxError> + Send + Sync,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = tower::BoxError;
-    type Future = ResponseFuture<Oneshot<S, Request>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        let service = self.inner.clone();
+        let inner = self.inner.clone();
+        let mut service = std::mem::replace(&mut self.inner, inner);
 
-        let response = service.oneshot(request);
+        let response = service.call(request);
 
-        ResponseFuture::new(response, Box::pin(tokio::time::sleep(self.timeout)))
+        Box::pin(ResponseFuture::new(
+            response,
+            Box::pin(tokio::time::sleep(self.timeout)),
+        ))
     }
 }

@@ -295,6 +295,7 @@ dependencies = [
  "libc",
  "libtest-mimic",
  "linkme",
+ "little-loadshedder",
  "lru",
  "maplit",
  "mediatype",
@@ -3882,6 +3883,16 @@ name = "linux-raw-sys"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
+
+[[package]]
+name = "little-loadshedder"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1edea14a875dba8659cb864480c27e8eb2d099542b657729a7567625a2c1d65a"
+dependencies = [
+ "tokio",
+ "tower",
+]
 
 [[package]]
 name = "lock_api"

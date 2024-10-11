@@ -40,6 +40,7 @@ impl Service<Name> for AsyncHyperResolver {
 
     fn call(&mut self, name: Name) -> Self::Future {
         let resolver = self.0.clone();
+        let resolver = std::mem::replace(&mut self.0, resolver);
 
         Box::pin(async move {
             Ok(resolver
