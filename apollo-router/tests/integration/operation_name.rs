@@ -16,7 +16,7 @@ async fn empty_document() {
         {
           "message": "Syntax Error: Unexpected <EOF>.",
           "extensions": {
-            "code": "GRAPHQL_PARSE_FAILED"
+            "code": "PARSING_ERROR"
           }
         }
       ]

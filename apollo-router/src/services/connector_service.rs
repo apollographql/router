@@ -183,7 +183,7 @@ async fn execute(
                 .insert(CONNECTOR_INFO_CONTEXT_KEY, ConnectorInfo::from(connector))
                 .is_err()
             {
-                error!("Failed to store connector info in context - instruments may be inaccurate");
+                error!("Failed to store connector info in context");
             }
             let original_subgraph_name = original_subgraph_name.clone();
             let request_limit = request_limit.clone();
