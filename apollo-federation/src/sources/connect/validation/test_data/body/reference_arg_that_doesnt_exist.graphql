@@ -1,0 +1,13 @@
+extend schema
+@link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+@link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+@source(name: "v2", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+    args: String
+    @connect(
+        source: "v2"
+        http: { POST: "/", body: "$args" }
+        selection: "$"
+    )
+}

@@ -17,14 +17,13 @@ use super::coordinates::HttpHeadersCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
+use super::http::validate_body;
 use super::resolvable_key_fields;
-use super::selection::validate_body_selection;
 use super::selection::validate_selection;
 use super::source_name::validate_source_name_arg;
 use super::source_name::SourceName;
 use super::Code;
 use super::Message;
-use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -250,15 +249,8 @@ fn validate_field(
             }
         };
 
-        if let Some((_, body)) = http_arg
-            .iter()
-            .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
-        {
-            if let Err(err) =
-                validate_body_selection(connect_directive, object, field, schema, body)
-            {
-                errors.push(err);
-            }
+        if let Err(err) = validate_body(http_arg, connect_coordinate, schema) {
+            errors.push(err);
         }
 
         if let Some(source_name) = connect_directive

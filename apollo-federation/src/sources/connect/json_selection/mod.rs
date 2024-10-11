@@ -15,6 +15,7 @@ pub use apply_to::*;
 // remove the `#[cfg(test)]`.
 pub(crate) use known_var::*;
 pub(crate) use location::Ranged;
+pub(crate) use location::WithRange;
 pub use parser::*;
 #[cfg(test)]
 pub(crate) use pretty::*;
