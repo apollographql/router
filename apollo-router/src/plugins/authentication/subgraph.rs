@@ -806,6 +806,7 @@ mod test {
             http::Response::default(),
             Context::new(),
             req.subgraph_name.unwrap_or_else(|| String::from("test")),
+            String::new(),
         ))
     }
 

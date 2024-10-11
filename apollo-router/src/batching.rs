@@ -426,7 +426,7 @@ pub(crate) async fn assemble_batch(
 ) -> Result<
     (
         String,
-        Vec<Context>,
+        Vec<(Context, String)>,
         http::Request<RouterBody>,
         Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     ),
@@ -445,8 +445,8 @@ pub(crate) async fn assemble_batch(
     // Retain the various contexts for later use
     let contexts = requests
         .iter()
-        .map(|x| x.context.clone())
-        .collect::<Vec<Context>>();
+        .map(|request| (request.context.clone(), request.id.clone()))
+        .collect::<Vec<(Context, String)>>();
     // Grab the common info from the first request
     let first_request = requests
         .into_iter()
@@ -523,7 +523,7 @@ mod tests {
 
         let output_context_ids = contexts
             .iter()
-            .map(|r| r.id.clone())
+            .map(|r| r.0.id.clone())
             .collect::<Vec<String>>();
         // Make sure all of our contexts are preserved during assembly
         assert_eq!(input_context_ids, output_context_ids);
@@ -562,6 +562,7 @@ mod tests {
                     .unwrap(),
                 context: Context::new(),
                 subgraph_name: None,
+                id: String::new(),
             };
 
             tx.send(Ok(response)).unwrap();
