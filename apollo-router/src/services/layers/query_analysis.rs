@@ -79,7 +79,7 @@ impl QueryAnalysisLayer {
         &self,
         query: &str,
         operation_name: Option<&str>,
-    ) -> Result<(ParsedDocument, Node<Operation>), SpecError> {
+    ) -> Result<ParsedDocument, SpecError> {
         let query = query.to_string();
         let operation_name = operation_name.map(|o| o.to_string());
         let schema = self.schema.clone();
@@ -91,14 +91,12 @@ impl QueryAnalysisLayer {
 
         compute_task::execute(move || {
             span.in_scope(|| {
-                let doc = Query::parse_document(
+                Query::parse_document(
                     &query,
                     operation_name.as_deref(),
                     schema.as_ref(),
                     conf.as_ref(),
-                )?;
-                let operation = doc.get_operation(operation_name.as_deref())?.clone();
-                Ok((doc, operation))
+                )
             })
         })
         .await
@@ -161,7 +159,7 @@ impl QueryAnalysisLayer {
                     );
                     Err(errors)
                 }
-                Ok((doc, operation)) => {
+                Ok(doc) => {
                     let context = Context::new();
 
                     if self.enable_authorization_directives {
@@ -174,9 +172,9 @@ impl QueryAnalysisLayer {
                     }
 
                     context
-                        .insert(OPERATION_NAME, operation.name.clone())
+                        .insert(OPERATION_NAME, doc.operation.name.clone())
                         .expect("cannot insert operation name into context; this is a bug");
-                    let operation_kind = OperationKind::from(operation.operation_type);
+                    let operation_kind = OperationKind::from(doc.operation.operation_type);
                     context
                         .insert(OPERATION_KIND, operation_kind)
                         .expect("cannot insert operation kind in the context; this is a bug");
@@ -257,25 +255,63 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
+    pub(crate) operation: Node<Operation>,
+    /// `__typename`
+    pub(crate) has_root_typename: bool,
+    /// `__schema` or `__type`
+    pub(crate) has_schema_introspection: bool,
+    /// Non-meta fields explicitly defined in the schema
+    pub(crate) has_explicit_root_fields: bool,
 }
 
+#[derive(Debug)]
+pub(crate) struct RootFieldKinds {}
+
 impl ParsedDocumentInner {
-    pub(crate) fn get_operation(
-        &self,
+    pub(crate) fn new(
+        ast: ast::Document,
+        executable: Arc<Valid<ExecutableDocument>>,
         operation_name: Option<&str>,
-    ) -> Result<&Node<Operation>, SpecError> {
-        if let Ok(operation) = self.executable.operations.get(operation_name) {
-            Ok(operation)
-        } else if let Some(name) = operation_name {
-            Err(SpecError::UnknownOperation(name.to_owned()))
-        } else if self.executable.operations.is_empty() {
-            // Maybe not reachable?
-            // A valid document is non-empty and has no unused fragments
-            Err(SpecError::NoOperation)
-        } else {
-            debug_assert!(self.executable.operations.len() > 1);
-            Err(SpecError::MultipleOperationWithoutOperationName)
+        hash: Arc<QueryHash>,
+    ) -> Result<Arc<Self>, SpecError> {
+        let operation = get_operation(&executable, operation_name)?;
+        let mut has_root_typename = false;
+        let mut has_schema_introspection = false;
+        let mut has_explicit_root_fields = false;
+        for field in operation.root_fields(&executable) {
+            match field.name.as_str() {
+                "__typename" => has_root_typename = true,
+                "__schema" | "__type" if operation.is_query() => has_schema_introspection = true,
+                _ => has_explicit_root_fields = true,
+            }
         }
+        Ok(Arc::new(Self {
+            ast,
+            executable,
+            hash,
+            operation,
+            has_root_typename,
+            has_schema_introspection,
+            has_explicit_root_fields,
+        }))
+    }
+}
+
+pub(crate) fn get_operation(
+    executable: &ExecutableDocument,
+    operation_name: Option<&str>,
+) -> Result<Node<Operation>, SpecError> {
+    if let Ok(operation) = executable.operations.get(operation_name) {
+        Ok(operation.clone())
+    } else if let Some(name) = operation_name {
+        Err(SpecError::UnknownOperation(name.to_owned()))
+    } else if executable.operations.is_empty() {
+        // Maybe not reachable?
+        // A valid document is non-empty and has no unused fragments
+        Err(SpecError::NoOperation)
+    } else {
+        debug_assert!(executable.operations.len() > 1);
+        Err(SpecError::MultipleOperationWithoutOperationName)
     }
 }
 

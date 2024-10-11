@@ -822,6 +822,9 @@ impl Selection {
         }
     }
 
+    /// # Errors
+    /// Returns an error if the selection contains a fragment spread, or if any of the
+    /// @skip/@include directives are invalid (per GraphQL validation rules).
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         let self_conditions = Conditions::from_directives(self.directives())?;
         if let Conditions::Boolean(false) = self_conditions {
@@ -1735,38 +1738,63 @@ impl SelectionSet {
         }
     }
 
-    // TODO: Ideally, this method returns a proper, recursive iterator. As is, there is a lot of
-    // overhead due to indirection, both from over allocation and from v-table lookups.
-    pub(crate) fn split_top_level_fields(self) -> Box<dyn Iterator<Item = SelectionSet>> {
-        let parent_type = self.type_position.clone();
-        let selections: IndexMap<SelectionKey, Selection> = (**self.selections).clone();
-        Box::new(selections.into_values().flat_map(move |sel| {
-            let digest: Box<dyn Iterator<Item = SelectionSet>> = if sel.is_field() {
-                Box::new(std::iter::once(SelectionSet::from_selection(
-                    parent_type.clone(),
-                    sel.clone(),
-                )))
-            } else {
-                let Some(ele) = sel.element().ok() else {
-                    let digest: Box<dyn Iterator<Item = SelectionSet>> =
-                        Box::new(std::iter::empty());
-                    return digest;
-                };
-                Box::new(
-                    sel.selection_set()
-                        .cloned()
-                        .into_iter()
-                        .flat_map(SelectionSet::split_top_level_fields)
-                        .filter_map(move |set| {
-                            let parent_type = ele.parent_type_position();
-                            Selection::from_element(ele.clone(), Some(set))
-                                .ok()
-                                .map(|sel| SelectionSet::from_selection(parent_type, sel))
-                        }),
-                )
-            };
-            digest
-        }))
+    pub(crate) fn split_top_level_fields(self) -> impl Iterator<Item = SelectionSet> {
+        // NOTE: Ideally, we could just use a generator but, instead, we have to manually implement
+        // one :(
+        struct TopLevelFieldSplitter {
+            parent_type: CompositeTypeDefinitionPosition,
+            starting_set: <SelectionMap as IntoIterator>::IntoIter,
+            stack: Vec<(OpPathElement, Self)>,
+        }
+
+        impl TopLevelFieldSplitter {
+            fn new(selection_set: SelectionSet) -> Self {
+                Self {
+                    parent_type: selection_set.type_position,
+                    starting_set: Arc::unwrap_or_clone(selection_set.selections).into_iter(),
+                    stack: Vec::new(),
+                }
+            }
+        }
+
+        impl Iterator for TopLevelFieldSplitter {
+            type Item = SelectionSet;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                loop {
+                    match self.stack.last_mut() {
+                        None => {
+                            let selection = self.starting_set.next()?.1;
+                            if selection.is_field() {
+                                return Some(SelectionSet::from_selection(
+                                    self.parent_type.clone(),
+                                    selection,
+                                ));
+                            } else if let Ok(element) = selection.element() {
+                                if let Some(set) = selection.selection_set().cloned() {
+                                    self.stack.push((element, Self::new(set)));
+                                }
+                            }
+                        }
+                        Some((element, top)) => {
+                            match top.find_map(|set| {
+                                let parent_type = element.parent_type_position();
+                                Selection::from_element(element.clone(), Some(set))
+                                    .ok()
+                                    .map(|sel| SelectionSet::from_selection(parent_type, sel))
+                            }) {
+                                Some(set) => return Some(set),
+                                None => {
+                                    self.stack.pop();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        TopLevelFieldSplitter::new(self)
     }
 
     /// PORT_NOTE: JS calls this `newCompositeTypeSelectionSet`
@@ -2163,6 +2191,9 @@ impl SelectionSet {
         }
     }
 
+    /// # Errors
+    /// Returns an error if the selection set contains a fragment spread, or if any of the
+    /// @skip/@include directives are invalid (per GraphQL validation rules).
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         // If the conditions of all the selections within the set are the same,
         // then those are conditions of the whole set and we return it.

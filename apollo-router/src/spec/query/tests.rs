@@ -131,7 +131,6 @@ impl FormatTest {
 
         query.format_response(
             &mut response,
-            self.operation,
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
@@ -3506,10 +3505,8 @@ fn it_statically_includes() {
         &Default::default(),
     )
     .expect("could not parse query");
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3530,14 +3527,12 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3561,10 +3556,8 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3597,14 +3590,12 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3655,10 +3646,8 @@ fn it_statically_skips() {
         &Default::default(),
     )
     .expect("could not parse query");
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3679,14 +3668,12 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3710,10 +3697,8 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3746,14 +3731,12 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -5132,7 +5115,6 @@ fn fragment_on_interface_on_query() {
 
     query.format_response(
         &mut response,
-        None,
         Default::default(),
         api_schema,
         BooleanValues { bits: 0 },
@@ -5666,7 +5648,6 @@ fn test_error_path_works_across_inline_fragments() {
     .unwrap();
 
     assert!(query.contains_error_path(
-        None,
         &None,
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField"),
         BooleanValues { bits: 0 }
@@ -5713,7 +5694,7 @@ fn test_query_not_named_query() {
     )
     .unwrap();
     let query = Query::parse("{ example }", None, &schema, &config).unwrap();
-    let selection = &query.operations[0].selection_set[0];
+    let selection = &query.operation.selection_set[0];
     assert!(
         matches!(
             selection,
@@ -5784,12 +5765,12 @@ fn filtered_defer_fragment() {
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operations, defer_stats, schema_aware_hash) =
+    let (fragments, operation, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
-        &operations,
+        &operation,
         &fragments.map,
         &defer_stats,
     )
@@ -5797,7 +5778,7 @@ fn filtered_defer_fragment() {
     let mut query = Query {
         string: query.to_string(),
         fragments,
-        operations,
+        operation,
         filtered_query: None,
         subselections,
         defer_stats,
@@ -5810,12 +5791,12 @@ fn filtered_defer_fragment() {
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operations, defer_stats, schema_aware_hash) =
+    let (fragments, operation, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
-        &operations,
+        &operation,
         &fragments.map,
         &defer_stats,
     )
@@ -5824,7 +5805,7 @@ fn filtered_defer_fragment() {
     let filtered = Query {
         string: filtered_query.to_string(),
         fragments,
-        operations,
+        operation,
         filtered_query: None,
         subselections,
         defer_stats,
@@ -5845,7 +5826,6 @@ fn filtered_defer_fragment() {
 
     query.filtered_query.as_ref().unwrap().format_response(
         &mut response,
-        None,
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
@@ -5855,7 +5835,6 @@ fn filtered_defer_fragment() {
 
     query.format_response(
         &mut response,
-        None,
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
