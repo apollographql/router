@@ -1626,6 +1626,7 @@ expression: "&schema"
             "$ref": "#/definitions/AuthConfig",
             "description": "#/definitions/AuthConfig"
           },
+          "default": {},
           "description": "Create a configuration that will apply only to a specific subgraph.",
           "type": "object"
         }
@@ -5434,6 +5435,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for a `@source` directive",
       "properties": {
+        "authentication": {
+          "$ref": "#/definitions/AuthConfig",
+          "description": "#/definitions/AuthConfig",
+          "nullable": true
+        },
         "max_requests_per_operation": {
           "default": null,
           "description": "The maximum number of requests for this source",
