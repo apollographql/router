@@ -459,13 +459,37 @@ impl Query {
                 _ => Ok(()),
             },
             executable::Type::Named(name) if name == "Int" => {
+                let mut has_error = false;
                 let opt = if input.is_i64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                    let conversion_result = input.as_i64().and_then(|i| i32::try_from(i).ok());
+
+                    if conversion_result.is_none() {
+                        has_error = true;
+                    }
+
+                    conversion_result
                 } else if input.is_u64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                    let conversion_result = input.as_i64().and_then(|i| i32::try_from(i).ok());
+
+                    if conversion_result.is_none() {
+                        has_error = true;
+                    }
+
+                    conversion_result
                 } else {
                     None
                 };
+
+                // According to the spec, if we try to provide a > 32 bit integer as a Int value, we should raise a field error
+                // See: https://github.com/graphql/graphql-spec/blob/main/spec/Section%203%20--%20Type%20System.md#int
+                if has_error {
+                    let error_message = format!("Cannot represent value {} as a i32", input);
+                    parameters.errors.push(Error {
+                        message: error_message,
+                        path: Some(Path::from_response_slice(path)),
+                        ..Error::default()
+                    });
+                }
 
                 // if the value is invalid, we do not insert it in the output object
                 // which is equivalent to inserting null
