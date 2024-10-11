@@ -5965,3 +5965,76 @@ fn filtered_defer_fragment() {
 
     assert_json_snapshot!(response);
 }
+
+#[test]
+fn it_errors_on_larger_than_32_int() {
+    let schema = "type Query {
+        me: User
+    }
+
+    type User {
+        id: String!
+        name: String
+        someNumber: Int
+        someOtherNumber: Int!
+    }
+    ";
+
+    let query = "query  { me { id name someNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {{
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": 51049694213 as i64
+            },
+        }})
+        .expected(json! {{
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": null,
+            },
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot represent value 51049694213 as a i32",
+                    "path": ["me", "someNumber"]
+                }
+            ]
+        }})
+        .test();
+
+    let query2 = "query  { me { id name someOtherNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query2)
+        .response(json! {{
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someOtherNumber": 51049694213 as i64
+            },
+        }})
+        .expected(json! {{
+            "me": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot represent value 51049694213 as a i32",
+                    "path": ["me", "someOtherNumber"]
+                },
+                {
+                    "message":"Cannot return null for non-nullable field User.someOtherNumber",
+                    "path":["me","someOtherNumber"]
+                },
+            ]
+        }})
+        .test();
+}
