@@ -57,7 +57,7 @@ struct SupergraphQueryVisitor<'a> {
 // directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 fn join_field_is_queryable(directive: &Directive) -> bool {
     let is_external = directive
-        .argument_by_name("external")
+        .specified_argument_by_name("external")
         .is_some_and(|arg| **arg == Value::Boolean(true));
     !is_external
 }
@@ -78,14 +78,14 @@ impl SupergraphQueryVisitor<'_> {
             .directives
             .get_all("join__field")
             .filter(|directive| join_field_is_queryable(directive))
-            .filter_map(|directive| directive.argument_by_name("graph"))
+            .filter_map(|directive| directive.specified_argument_by_name("graph"))
             .filter_map(|value| value.as_enum().cloned())
             .collect::<Vec<_>>();
         let in_subgraphs = if in_subgraphs.is_empty() {
             parent_type
                 .directives()
                 .get_all("join__type")
-                .filter_map(|directive| directive.argument_by_name("graph"))
+                .filter_map(|directive| directive.specified_argument_by_name("graph"))
                 .filter_map(|value| value.as_enum().cloned())
                 .collect::<Vec<_>>()
         } else {
@@ -114,7 +114,7 @@ impl SupergraphQueryVisitor<'_> {
 
         let mut path = path.to_vec();
         path.push(SupergraphQueryElement {
-            path: FetchDataPathElement::Key(field.response_key().clone()),
+            path: FetchDataPathElement::Key(field.response_key().clone(), vec![]),
             parent_type: parent_type.name().clone(),
             in_subgraphs,
         });
@@ -171,7 +171,7 @@ impl SupergraphQueryVisitor<'_> {
 }
 
 /// Returns the paths executed by a supergraph query.
-pub fn simulate_supergraph_query(
+pub fn supergraph_query_paths(
     supergraph: &ValidFederationSchema,
     operation_document: &Valid<ExecutableDocument>,
     operation_name: Option<&str>,
@@ -279,7 +279,7 @@ impl QueryPlanVisitor<'_> {
             .find_map(|existing_path| {
                 let matches = path
                     .iter()
-                    .filter(|element| matches!(element, FetchDataPathElement::Key(_)))
+                    .filter(|element| matches!(element, FetchDataPathElement::Key(_, _)))
                     .enumerate()
                     .all(|(index, element)| {
                         let existing_element = &existing_path[index];
@@ -288,7 +288,7 @@ impl QueryPlanVisitor<'_> {
                 matches.then(|| {
                     let len = path
                         .iter()
-                        .filter(|element| matches!(element, FetchDataPathElement::Key(_)))
+                        .filter(|element| matches!(element, FetchDataPathElement::Key(_, _)))
                         .count();
                     &existing_path[0..len]
                 })
@@ -311,7 +311,7 @@ impl QueryPlanVisitor<'_> {
                 Selection::Field(field) => {
                     let mut path = path.to_vec();
                     path.push(SubgraphQueryElement {
-                        path: FetchDataPathElement::Key(field.response_key().clone()),
+                        path: FetchDataPathElement::Key(field.response_key().clone(), vec![]),
                         parent_type: parent_type.name().clone(),
                         in_subgraph: in_subgraph.clone(),
                     });
@@ -447,7 +447,7 @@ impl QueryPlanVisitor<'_> {
 }
 
 /// Determine the paths executed by a query plan.
-pub fn simulate_query_plan(
+pub fn query_plan_paths(
     supergraph: &ValidFederationSchema,
     plan: &QueryPlan,
 ) -> Result<Vec<Vec<SubgraphQueryElement>>, FederationError> {
@@ -485,7 +485,7 @@ pub fn compare_paths(
         // path for it.
         let is_root_typename = matches!(
             &supergraph_path[..],
-            [single_item] if single_item.path == FetchDataPathElement::Key(name!(__typename)),
+            [single_item] if single_item.path == FetchDataPathElement::Key(name!(__typename), vec![]),
         );
         if is_root_typename {
             continue;

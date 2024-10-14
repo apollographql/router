@@ -359,7 +359,11 @@ impl QueryPlanner {
             .get(operation_name.as_ref().map(|name| name.as_str()))?;
 
         #[cfg(test)]
-        let supergraph_paths = crate::simulation::simulate_supergraph_query(&self.supergraph_schema, document, operation_name.as_deref())?;
+        let supergraph_paths = crate::correctness::supergraph_query_paths(
+            &self.supergraph_schema,
+            document,
+            operation_name.as_deref(),
+        )?;
 
         if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
@@ -558,8 +562,8 @@ impl QueryPlanner {
 
         #[cfg(test)]
         {
-            let plan_paths = crate::simulation::simulate_query_plan(&self.supergraph_schema, &plan)?;
-            crate::simulation::compare_paths(&supergraph_paths, &plan_paths)?;
+            let plan_paths = crate::correctness::query_plan_paths(&self.supergraph_schema, &plan)?;
+            crate::correctness::compare_paths(&supergraph_paths, &plan_paths)?;
         }
 
         Ok(plan)

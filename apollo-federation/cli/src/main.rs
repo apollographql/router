@@ -105,7 +105,7 @@ enum Command {
         planner: QueryPlannerArgs,
     },
     /// Plan and test a query.
-    Simulate {
+    PlanCheck {
         query: PathBuf,
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
@@ -162,7 +162,7 @@ fn main() -> ExitCode {
             operations_dir,
             planner,
         } => cmd_bench(&supergraph_schema, &operations_dir, planner),
-        Command::Simulate {
+        Command::PlanCheck {
             query,
             schemas,
             planner,
@@ -347,16 +347,19 @@ fn cmd_plan_correctness(
 
     println!("supergraph paths");
     println!("================");
-    let supergraph_paths =
-        apollo_federation::simulation::simulate_supergraph_query(&supergraph.schema, &query_doc, None)?;
+    let supergraph_paths = apollo_federation::correctness::supergraph_query_paths(
+        &supergraph.schema,
+        &query_doc,
+        None,
+    )?;
 
     let planner = QueryPlanner::new(&supergraph, config)?;
     let plan = planner.build_query_plan(&query_doc, None)?;
 
     println!("plan paths");
     println!("==========");
-    let plan_paths = apollo_federation::simulation::simulate_query_plan(&supergraph.schema, &plan)?;
-    apollo_federation::simulation::compare_paths(&supergraph_paths, &plan_paths)?;
+    let plan_paths = apollo_federation::correctness::query_plan_paths(&supergraph.schema, &plan)?;
+    apollo_federation::correctness::compare_paths(&supergraph_paths, &plan_paths)?;
 
     Ok(())
 }
