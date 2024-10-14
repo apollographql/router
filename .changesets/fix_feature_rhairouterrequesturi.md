@@ -1,4 +1,4 @@
-### Add uri and method properties on router request in rhai ([PR #6114](https://github.com/apollographql/router/pull/6114))
+### Add uri and method properties on router request in Rhai ([PR #6114](https://github.com/apollographql/router/pull/6114))
 
 Previously, when trying to access `request.uri` and `request.method` on a Router Request in Rhai, Router would error saying the properties are undefined.
 
