@@ -73,7 +73,7 @@ spec:
             {{- end }}
           {{- end }}
           env:
-            - name: APOLLO_OFFICIAL_ROUTER_HELM_CHART
+            - name: APOLLO_ROUTER_OFFICIAL_HELM_CHART
               value: "true"
           {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
             {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
