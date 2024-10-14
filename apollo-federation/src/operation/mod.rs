@@ -1235,7 +1235,7 @@ impl SelectionSet {
         // one :(
         struct TopLevelFieldSplitter {
             parent_type: CompositeTypeDefinitionPosition,
-            starting_set: <SelectionMap as IntoIterator>::IntoIter,
+            starting_set: selection_map::IntoValues,
             stack: Vec<(OpPathElement, Self)>,
         }
 
@@ -1243,7 +1243,7 @@ impl SelectionSet {
             fn new(selection_set: SelectionSet) -> Self {
                 Self {
                     parent_type: selection_set.type_position,
-                    starting_set: Arc::unwrap_or_clone(selection_set.selections).into_iter(),
+                    starting_set: Arc::unwrap_or_clone(selection_set.selections).into_values(),
                     stack: Vec::new(),
                 }
             }
@@ -1256,7 +1256,7 @@ impl SelectionSet {
                 loop {
                     match self.stack.last_mut() {
                         None => {
-                            let selection = self.starting_set.next()?.1;
+                            let selection = self.starting_set.next()?;
                             if selection.is_field() {
                                 return Some(SelectionSet::from_selection(
                                     self.parent_type.clone(),
