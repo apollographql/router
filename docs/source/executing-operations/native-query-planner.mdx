@@ -36,10 +36,9 @@ To run the native query planner with the best performance and resource utilizati
 
 ```yaml title="router.yaml"
 experimental_query_planner_mode: new
-experimental_introspection_mode: new
 ```
 
-Setting `experimental_query_planner_mode: new` and `experimental_introspection_mode: new` not only enables native query planning and schema introspection, it also disables the V8 JavaScript runtime used by the legacy query planner. Disabling V8 frees up CPU and memory and improves native query planning performance.
+Setting `experimental_query_planner_mode: new` not only enables native query planning and schema introspection, it also disables the V8 JavaScript runtime used by the legacy query planner. Disabling V8 frees up CPU and memory and improves native query planning performance.
 
 Additionally, to enable more optimal native query planning and faster throughput by reducing the size of queries sent to subgraphs, you can enable query fragment generation with the following option:
 
