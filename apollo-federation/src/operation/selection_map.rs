@@ -378,7 +378,10 @@ impl SelectionMap {
                 let selection = &mut self.selections[index];
                 Entry::Occupied(OccupiedEntry(selection))
             }
-            Err(vacant) => Entry::Vacant(VacantEntry {
+            // We're not using `hashbrown`'s VacantEntry API here, because we have some custom
+            // insertion logic, it's easier to use `SelectionMap::raw_insert` to implement
+            // `VacantEntry::or_insert`.
+            Err(_) => Entry::Vacant(VacantEntry {
                 map: self,
                 hash,
                 key,
@@ -526,6 +529,8 @@ impl<'a> SelectionValue<'a> {
         }
     }
 
+    // This is used in operation::optimize tests
+    #[cfg(test)]
     pub(super) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         match self {
             SelectionValue::Field(field) => field.get_selection_set_mut(),
@@ -568,6 +573,7 @@ impl<'a> FragmentSpreadSelectionValue<'a> {
         self.0
     }
 
+    #[cfg(test)]
     pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
         &mut Arc::make_mut(self.0).selection_set
     }

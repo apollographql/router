@@ -630,13 +630,6 @@ mod field_selection {
                 selection_set,
             }
         }
-
-        pub(crate) fn with_updated_directives(&self, directives: impl Into<DirectiveList>) -> Self {
-            Self {
-                field: self.field.with_updated_directives(directives),
-                selection_set: self.selection_set.clone(),
-            }
-        }
     }
 
     // SiblingTypename indicates how the sibling __typename field should be restored.
@@ -692,6 +685,7 @@ mod field_selection {
 
     impl Field {
         /// Create a trivial field selection without any arguments or directives.
+        #[cfg(test)]
         pub(crate) fn from_position(
             schema: &ValidFederationSchema,
             field_position: FieldDefinitionPosition,
@@ -740,10 +734,6 @@ mod field_selection {
             *self.field_position.field_name() == TYPENAME_FIELD
                 && self.directives.is_empty()
                 && self.alias.is_none()
-        }
-
-        pub(super) fn directives_mut(&mut self) -> &mut DirectiveList {
-            &mut self.directives
         }
 
         pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
@@ -898,12 +888,6 @@ mod fragment_spread_selection {
     }
 
     impl Eq for FragmentSpread {}
-
-    impl FragmentSpread {
-        pub(super) fn directives_mut(&mut self) -> &mut DirectiveList {
-            &mut self.directives
-        }
-    }
 
     impl HasSelectionKey for FragmentSpread {
         fn key(&self) -> SelectionKey<'_> {
