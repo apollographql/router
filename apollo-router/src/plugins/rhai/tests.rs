@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use rhai::Engine;
@@ -32,6 +33,7 @@ use crate::plugin::DynPlugin;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
+use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
@@ -348,6 +350,20 @@ map
 }
 
 #[tokio::test]
+async fn it_can_process_router_request() {
+    let mut request = RhaiRouterFirstRequest::default();
+    request.request.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_str("application/json").unwrap(),
+    );
+    *request.request.method_mut() = http::Method::GET;
+
+    call_rhai_function_with_arg("process_router_request", request)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
 async fn it_can_process_supergraph_request() {
     let request = SupergraphRequest::canned_builder()
         .operation_name("canned")
@@ -641,7 +657,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 226, position 5)'".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 232, position 5)'".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -669,7 +685,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         assert_eq!(
             processed_error.message,
             Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 237, position 5)'"
+                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 243, position 5)'"
                     .to_string()
             )
         );
