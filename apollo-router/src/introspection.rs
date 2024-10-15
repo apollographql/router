@@ -57,7 +57,7 @@ impl IntrospectionCache {
             if doc.has_explicit_root_fields && doc.has_schema_introspection {
                 ControlFlow::Break(Self::mixed_fields_error())?;
             } else if !doc.has_explicit_root_fields {
-                ControlFlow::Break(self.cached_intropsection(schema, key, doc).await)?
+                ControlFlow::Break(self.cached_introspection(schema, key, doc).await)?
             }
         }
         ControlFlow::Continue(())
@@ -104,7 +104,7 @@ impl IntrospectionCache {
         graphql::Response::builder().error(error).build()
     }
 
-    async fn cached_intropsection(
+    async fn cached_introspection(
         &self,
         schema: &Arc<spec::Schema>,
         key: &QueryKey,
@@ -131,14 +131,14 @@ impl IntrospectionCache {
         let schema = schema.clone();
         let doc = doc.clone();
         let response =
-            tokio::task::spawn_blocking(move || Self::execute_intropsection(&schema, &doc))
+            tokio::task::spawn_blocking(move || Self::execute_introspection(&schema, &doc))
                 .await
                 .expect("Introspection panicked");
         storage.insert(cache_key, response.clone()).await;
         response
     }
 
-    fn execute_intropsection(schema: &spec::Schema, doc: &ParsedDocument) -> graphql::Response {
+    fn execute_introspection(schema: &spec::Schema, doc: &ParsedDocument) -> graphql::Response {
         let schema = schema.api_schema();
         let operation = &doc.operation;
         let variable_values = Default::default();
