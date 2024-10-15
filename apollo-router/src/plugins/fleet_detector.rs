@@ -1,9 +1,12 @@
-use crate::plugin::{Plugin, PluginInit};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
 use tower::BoxError;
-use tracing::{debug, info};
+use tracing::debug;
+use tracing::info;
+
+use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 
 #[derive(Debug)]
 struct FleetDetector {}
