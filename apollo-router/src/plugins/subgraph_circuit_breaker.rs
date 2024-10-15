@@ -118,9 +118,9 @@ struct SubgraphCircuitBreakerPlugin {
 }
 
 impl SubgraphCircuitBreakerPlugin {
-    fn checkpoint(&self, subgraph_name: &str) -> ControlFlow<(), Arc<SubgraphCircuitBreaker>> {
+    fn checkpoint(&self, subgraph_name: &str) -> Option<Arc<SubgraphCircuitBreaker>> {
         if !&self.configuration.enabled {
-            return ControlFlow::Break(());
+            return None;
         }
 
         let subgraph = subgraph_name.to_string();
@@ -130,12 +130,8 @@ impl SubgraphCircuitBreakerPlugin {
             Target::Only(only) if only.contains(&subgraph) => Some(subgraph),
             Target::OnlyWithOverrides(only) if only.contains_key(&subgraph) => Some(subgraph),
             Target::Except(except) if !except.contains(&subgraph) => Some(subgraph),
-            _ => None,
-        }
-        .map_or_else(
-            || ControlFlow::Break(()),
-            |subgraph_name| ControlFlow::Continue(self.get_circuit_breaker(&subgraph_name)),
-        )
+            _ => None
+        }.map(|subgraph_name| self.get_circuit_breaker(&subgraph_name))
     }
 
     fn get_circuit_breaker(&self, subgraph_name: &str) -> Arc<SubgraphCircuitBreaker> {
@@ -183,44 +179,49 @@ impl Plugin for SubgraphCircuitBreakerPlugin {
     }
 
     fn subgraph_service(&self, subgraph_name: &str, service: BoxService) -> BoxService {
-        match self.checkpoint(subgraph_name) {
-            ControlFlow::Break(_) => service,
-            ControlFlow::Continue(circuit_breaker) => {
-                let is_call_permitted = circuit_breaker.is_call_permitted();
-                ServiceBuilder::new()
-                    .checkpoint(move |req: Request| {
-                        if is_call_permitted {
-                            return Ok(ControlFlow::Continue(req));
-                        }
-                        Ok(ControlFlow::Break(
-                            Response::builder()
-                                .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                                .error(
-                                    GraphQLError::builder()
-                                        .message("Circuit breaker open")
-                                        .extension_code(ERROR_EXTENSION_CODE)
-                                        .build(),
-                                )
-                                .extensions(Map::new())
-                                .context(req.context)
-                                .build(),
-                        ))
-                    })
-                    .map_response(move |res: Response| {
-                        match circuit_breaker.call(|| {
-                            if res.response.status().is_success() {
-                                Ok(res.response.status())
-                            } else {
-                                Err(res.response.status())
-                            }
-                        }) {
-                            _ => res,
-                        }
-                    })
-                    .service(service)
-                    .boxed()
-            }
-        }
+        let checkpoint = self.checkpoint(subgraph_name);
+
+        let circuit_breaker = checkpoint.unwrap();
+        let service_name = subgraph_name.to_string();
+
+        let is_call_permitted = circuit_breaker.is_call_permitted();
+        ServiceBuilder::new()
+            .checkpoint(move |req: Request| {
+                if is_call_permitted {
+                    return Ok(ControlFlow::Continue(req));
+                }
+                Ok(ControlFlow::Break(
+                    Response::builder()
+                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                        .error(
+                            GraphQLError::builder()
+                                .message("Circuit breaker open")
+                                .extension_code(ERROR_EXTENSION_CODE)
+                                .extensions({
+                                    let mut extensions = Map::new();
+                                    extensions.insert("subgraph", service_name.clone().into());
+                                    extensions
+                                })
+                                .build()
+                        )
+                        .context(req.context)
+                        .extensions(Map::new())
+                        .build()
+                ))
+            })
+            .map_response(move |res: Response| {
+                match circuit_breaker.call(|| {
+                    if res.response.status().is_success() {
+                        Ok(res.response.status())
+                    } else {
+                        Err(res.response.status())
+                    }
+                }) {
+                    _ => res
+                }
+            })
+            .service(service)
+            .boxed()
     }
 }
 
