@@ -3,8 +3,8 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
 
-use super::Field;
 use super::normalize_operation;
+use super::Field;
 use super::Name;
 use super::NamedFragments;
 use super::Operation;
@@ -1360,11 +1360,7 @@ mod lazy_map_tests {
     }
 }
 
-fn field_element(
-    schema: &ValidFederationSchema,
-    object: Name,
-    field: Name,
-) -> OpPathElement {
+fn field_element(schema: &ValidFederationSchema, object: Name, field: Name) -> OpPathElement {
     OpPathElement::Field(Field {
         schema: schema.clone(),
         field_position: ObjectTypeDefinitionPosition::new(object)

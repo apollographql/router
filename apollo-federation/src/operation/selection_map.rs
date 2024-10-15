@@ -287,7 +287,8 @@ impl SelectionMap {
     fn raw_insert(&mut self, hash: u64, value: Selection) -> &mut Selection {
         let index = self.selections.len();
 
-        self.table.insert_unique(hash, Bucket { index, hash }, |existing| existing.hash);
+        self.table
+            .insert_unique(hash, Bucket { index, hash }, |existing| existing.hash);
 
         self.selections.push(value);
         &mut self.selections[index]
@@ -302,7 +303,8 @@ impl SelectionMap {
         self.table.clear();
         for (index, selection) in self.selections.iter().enumerate() {
             let hash = self.hash(selection.key());
-            self.table.insert_unique(hash, Bucket { index, hash }, |existing| existing.hash);
+            self.table
+                .insert_unique(hash, Bucket { index, hash }, |existing| existing.hash);
         }
     }
 
@@ -333,7 +335,10 @@ impl SelectionMap {
         Some((bucket.index, selection))
     }
 
-    pub(crate) fn retain(&mut self, mut predicate: impl FnMut(SelectionKey<'_>, &Selection) -> bool) {
+    pub(crate) fn retain(
+        &mut self,
+        mut predicate: impl FnMut(SelectionKey<'_>, &Selection) -> bool,
+    ) {
         self.selections.retain(|selection| {
             let key = selection.key();
             predicate(key, selection)
