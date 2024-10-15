@@ -180,6 +180,9 @@ impl Plugin for SubgraphCircuitBreakerPlugin {
 
     fn subgraph_service(&self, subgraph_name: &str, service: BoxService) -> BoxService {
         let checkpoint = self.checkpoint(subgraph_name);
+        if checkpoint.is_none() {
+            return service
+        }
 
         let circuit_breaker = checkpoint.unwrap();
         let service_name = subgraph_name.to_string();
