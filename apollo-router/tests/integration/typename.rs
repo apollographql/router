@@ -106,10 +106,11 @@ async fn aliased() {
     "###);
 }
 
-/* FIXME: should be fixed in query planner, failing with:
-   > value retrieval failed: empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
-
+// FIXME: bellow test panic because of bug in query planner, failing with:
+// "value retrieval failed: empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction."
+// See: https://github.com/apollographql/router/issues/6154
 #[tokio::test]
+#[should_panic]
 async fn inside_inline_fragment() {
     let request = Request::fake_builder()
         .query("{ ... { __typename } }")
@@ -126,6 +127,7 @@ async fn inside_inline_fragment() {
 }
 
 #[tokio::test]
+#[should_panic] // See above FIXME
 async fn inside_fragment() {
     let query = r#"
        { ...SomeFragment }
@@ -146,6 +148,7 @@ async fn inside_fragment() {
 }
 
 #[tokio::test]
+#[should_panic] // See above FIXME
 async fn deeply_nested_inside_fragments() {
     let query = r#"
        { ...SomeFragment }
@@ -170,7 +173,6 @@ async fn deeply_nested_inside_fragments() {
     }
     "###);
 }
-*/
 
 #[tokio::test]
 async fn mutation() {
