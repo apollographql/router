@@ -43,7 +43,7 @@ impl FleetDetector {
     }
 
     #[cfg(target_os = "linux")]
-    fn detect_cgroup_cpu(&self, system: &System) -> u64 {
+    fn detect_cpu_count(&self, system: &System) -> u64 {
         use std::collections::HashSet;
         use std::fs;
 
