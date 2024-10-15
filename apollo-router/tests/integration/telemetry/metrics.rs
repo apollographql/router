@@ -233,7 +233,22 @@ async fn test_gauges_on_reload() {
     router.execute_default_query().await;
     router.update_config(PROMETHEUS_CONFIG).await;
     router.assert_reloaded().await;
+
+    // Regular query
     router.execute_default_query().await;
+
+    // Introspection query
+    router
+        .execute_query(&json!({"query":"{__schema {types {name}}}","variables":{}}))
+        .await;
+
+    // Persisted query
+    router
+        .execute_query(
+            &json!({"query": "{__typename}", "variables":{}, "extensions": {"persistedQuery":{"version" : 1, "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}})
+        )
+        .await;
+
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
@@ -252,6 +267,24 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(
             r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 3"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;

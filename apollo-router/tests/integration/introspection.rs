@@ -233,24 +233,45 @@ async fn both_mode_integration() {
     let mut router = IntegrationTest::builder()
         .config(
             "
-                experimental_introspection_mode: both
+                # `experimental_introspection_mode` now defaults to `both`
                 supergraph:
                     introspection: true
             ",
         )
-        .supergraph("../examples/graphql/local.graphql")
-        .log("error,apollo_router=info,apollo_router::query_planner=debug")
+        .supergraph("tests/fixtures/schema_to_introspect.graphql")
+        .log("error,apollo_router=info,apollo_router::query_planner=trace")
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
-    router
-        .execute_query(&json!({
-            "query": include_str!("../fixtures/introspect_full_schema.graphql"),
-        }))
+    let query = json!({
+        "query": include_str!("../fixtures/introspect_full_schema.graphql"),
+    });
+    let (_trace_id, response) = router.execute_query(&query).await;
+    insta::assert_json_snapshot!(response.json::<serde_json::Value>().await.unwrap());
+    router.assert_log_contains("Introspection match! 🎉").await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test]
+async fn integration() {
+    let mut router = IntegrationTest::builder()
+        .config(
+            "
+                experimental_introspection_mode: new
+                supergraph:
+                    introspection: true
+            ",
+        )
+        .supergraph("tests/fixtures/schema_to_introspect.graphql")
+        .build()
         .await;
-    // TODO: should be a match after https://apollographql.atlassian.net/browse/ROUTER-703
-    // router.assert_log_contains("Introspection match! 🎉").await;
-    router.assert_log_contains("Introspection mismatch").await;
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({
+        "query": include_str!("../fixtures/introspect_full_schema.graphql"),
+    });
+    let (_trace_id, response) = router.execute_query(&query).await;
+    insta::assert_json_snapshot!(response.json::<serde_json::Value>().await.unwrap());
     router.graceful_shutdown().await;
 }

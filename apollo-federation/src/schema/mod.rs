@@ -163,10 +163,6 @@ impl FederationSchema {
         })
     }
 
-    pub(crate) fn validate(self) -> Result<ValidFederationSchema, FederationError> {
-        self.validate_or_return_self().map_err(|e| e.1)
-    }
-
     /// Similar to `Self::validate` but returns `self` as part of the error should it be needed by
     /// the caller
     pub(crate) fn validate_or_return_self(
@@ -232,10 +228,6 @@ impl ValidFederationSchema {
         Self::new_assume_valid(schema).map_err(|(_schema, error)| error)
     }
 
-    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.schema, &other.schema)
-    }
-
     /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
     fn new_assume_valid(
         mut schema: FederationSchema,
@@ -283,13 +275,12 @@ impl ValidFederationSchema {
             return Ok(name);
         }
 
-        // TODO: this otherwise needs to check for a type name in schema based
+        // TODO for composition: this otherwise needs to check for a type name in schema based
         // on the latest federation version.
-        // FED-311
-        Err(SingleFederationError::Internal {
-            message: String::from("typename should have been looked in a federation feature"),
-        }
-        .into())
+        // This code path is not hit during planning.
+        Err(FederationError::internal(
+            "typename should have been looked in a federation feature",
+        ))
     }
 
     pub(crate) fn is_interface_object_type(
