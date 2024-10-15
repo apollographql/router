@@ -123,6 +123,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 "apollo.connector.source.name" = tracing::field::Empty,
                 "apollo.connector.source.detail" = tracing::field::Empty,
                 "apollo_private.sent_time_offset" = fetch_time_offset,
+                "otel.status_code" = tracing::field::Empty,
             );
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
