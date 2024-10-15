@@ -277,7 +277,7 @@ dependencies = [
  "hex",
  "hmac",
  "http 0.2.12",
- "http-body 0.4.6",
+ "http-body 1.0.1",
  "http-serde",
  "humantime",
  "humantime-serde",
