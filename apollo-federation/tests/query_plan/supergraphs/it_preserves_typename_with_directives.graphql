@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: fbbe470b5e40af130de42043f74772ec30ee60ff
+# Composed from subgraphs with hash: 5781ed69d05761a7c894a8aac04728581a2475d9
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
@@ -22,19 +22,12 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Hello
-  @join__type(graph: SUBGRAPHSKIP)
-{
-  world: String!
-  goodbye: String!
-}
-
 scalar join__DirectiveArguments
 
 scalar join__FieldSet
 
 enum join__Graph {
-  SUBGRAPHSKIP @join__graph(name: "SubgraphSkip", url: "none")
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
 }
 
 scalar link__Import
@@ -52,8 +45,13 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: SUBGRAPHSKIP)
+  @join__type(graph: SUBGRAPH1)
 {
-  hello: Hello!
-  extraFieldToPreventSkipIncludeNodes: String!
+  t: T
+}
+
+type T
+  @join__type(graph: SUBGRAPH1, key: "id")
+{
+  id: ID!
 }

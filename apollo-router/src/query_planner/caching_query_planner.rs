@@ -280,7 +280,7 @@ where
         } in all_cache_keys
         {
             let context = Context::new();
-            let (doc, _operation_def) = match query_analysis
+            let doc = match query_analysis
                 .parse_document(&query, operation_name.as_deref())
                 .await
             {
@@ -324,7 +324,7 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let (doc, _operation_def) = match query_analysis
+                let doc = match query_analysis
                     .parse_document(&query, operation_name.as_deref())
                     .await
                 {

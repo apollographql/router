@@ -822,6 +822,9 @@ impl Selection {
         }
     }
 
+    /// # Errors
+    /// Returns an error if the selection contains a fragment spread, or if any of the
+    /// @skip/@include directives are invalid (per GraphQL validation rules).
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         let self_conditions = Conditions::from_directives(self.directives())?;
         if let Conditions::Boolean(false) = self_conditions {
@@ -992,6 +995,7 @@ mod field_selection {
     use apollo_compiler::Name;
     use serde::Serialize;
 
+    use super::TYPENAME_FIELD;
     use crate::error::FederationError;
     use crate::operation::ArgumentList;
     use crate::operation::DirectiveList;
@@ -1156,6 +1160,13 @@ mod field_selection {
 
         pub(crate) fn data(&self) -> &FieldData {
             &self.data
+        }
+
+        // Is this a plain simple __typename without any directive or alias?
+        pub(crate) fn is_plain_typename_field(&self) -> bool {
+            *self.data.field_position.field_name() == TYPENAME_FIELD
+                && self.data.directives.is_empty()
+                && self.data.alias.is_none()
         }
 
         pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
@@ -1735,38 +1746,63 @@ impl SelectionSet {
         }
     }
 
-    // TODO: Ideally, this method returns a proper, recursive iterator. As is, there is a lot of
-    // overhead due to indirection, both from over allocation and from v-table lookups.
-    pub(crate) fn split_top_level_fields(self) -> Box<dyn Iterator<Item = SelectionSet>> {
-        let parent_type = self.type_position.clone();
-        let selections: IndexMap<SelectionKey, Selection> = (**self.selections).clone();
-        Box::new(selections.into_values().flat_map(move |sel| {
-            let digest: Box<dyn Iterator<Item = SelectionSet>> = if sel.is_field() {
-                Box::new(std::iter::once(SelectionSet::from_selection(
-                    parent_type.clone(),
-                    sel.clone(),
-                )))
-            } else {
-                let Some(ele) = sel.element().ok() else {
-                    let digest: Box<dyn Iterator<Item = SelectionSet>> =
-                        Box::new(std::iter::empty());
-                    return digest;
-                };
-                Box::new(
-                    sel.selection_set()
-                        .cloned()
-                        .into_iter()
-                        .flat_map(SelectionSet::split_top_level_fields)
-                        .filter_map(move |set| {
-                            let parent_type = ele.parent_type_position();
-                            Selection::from_element(ele.clone(), Some(set))
-                                .ok()
-                                .map(|sel| SelectionSet::from_selection(parent_type, sel))
-                        }),
-                )
-            };
-            digest
-        }))
+    pub(crate) fn split_top_level_fields(self) -> impl Iterator<Item = SelectionSet> {
+        // NOTE: Ideally, we could just use a generator but, instead, we have to manually implement
+        // one :(
+        struct TopLevelFieldSplitter {
+            parent_type: CompositeTypeDefinitionPosition,
+            starting_set: <SelectionMap as IntoIterator>::IntoIter,
+            stack: Vec<(OpPathElement, Self)>,
+        }
+
+        impl TopLevelFieldSplitter {
+            fn new(selection_set: SelectionSet) -> Self {
+                Self {
+                    parent_type: selection_set.type_position,
+                    starting_set: Arc::unwrap_or_clone(selection_set.selections).into_iter(),
+                    stack: Vec::new(),
+                }
+            }
+        }
+
+        impl Iterator for TopLevelFieldSplitter {
+            type Item = SelectionSet;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                loop {
+                    match self.stack.last_mut() {
+                        None => {
+                            let selection = self.starting_set.next()?.1;
+                            if selection.is_field() {
+                                return Some(SelectionSet::from_selection(
+                                    self.parent_type.clone(),
+                                    selection,
+                                ));
+                            } else if let Ok(element) = selection.element() {
+                                if let Some(set) = selection.selection_set().cloned() {
+                                    self.stack.push((element, Self::new(set)));
+                                }
+                            }
+                        }
+                        Some((element, top)) => {
+                            match top.find_map(|set| {
+                                let parent_type = element.parent_type_position();
+                                Selection::from_element(element.clone(), Some(set))
+                                    .ok()
+                                    .map(|sel| SelectionSet::from_selection(parent_type, sel))
+                            }) {
+                                Some(set) => return Some(set),
+                                None => {
+                                    self.stack.pop();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        TopLevelFieldSplitter::new(self)
     }
 
     /// PORT_NOTE: JS calls this `newCompositeTypeSelectionSet`
@@ -2075,7 +2111,7 @@ impl SelectionSet {
         for (key, entry) in mutable_selection_map.iter_mut() {
             match entry {
                 SelectionValue::Field(mut field_selection) => {
-                    if field_selection.get().field.name() == &TYPENAME_FIELD
+                    if field_selection.get().field.is_plain_typename_field()
                         && !is_interface_object
                         && typename_field_key.is_none()
                     {
@@ -2163,6 +2199,9 @@ impl SelectionSet {
         }
     }
 
+    /// # Errors
+    /// Returns an error if the selection set contains a fragment spread, or if any of the
+    /// @skip/@include directives are invalid (per GraphQL validation rules).
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         // If the conditions of all the selections within the set are the same,
         // then those are conditions of the whole set and we return it.
@@ -4090,9 +4129,13 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
         for normalized_selection in val.selections.values() {
             let selection: executable::Selection = normalized_selection.try_into()?;
             if let executable::Selection::Field(field) = &selection {
-                if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME && field.alias.is_none() {
-                    // Move unaliased __typename to the start of the selection set.
+                if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
+                    && field.directives.is_empty()
+                    && field.alias.is_none()
+                {
+                    // Move the plain __typename to the start of the selection set.
                     // This looks nicer, and matches existing tests.
+                    // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
                     // PORT_NOTE: JS does this in `selectionsInPrintOrder`
                     flattened.insert(0, selection);
                     continue;

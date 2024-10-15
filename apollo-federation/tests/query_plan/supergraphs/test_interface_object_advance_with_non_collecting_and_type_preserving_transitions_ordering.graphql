@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: fbbe470b5e40af130de42043f74772ec30ee60ff
+# Composed from subgraphs with hash: 415e22ad50245441330e67dc6637cf09714a4831
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
@@ -22,11 +22,39 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Hello
-  @join__type(graph: SUBGRAPHSKIP)
+type A implements I
+  @join__implements(graph: Y1, interface: "I")
+  @join__implements(graph: Y2, interface: "I")
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id")
+  @join__type(graph: S3, key: "id")
+  @join__type(graph: S4, key: "id")
+  @join__type(graph: Y1, key: "id")
+  @join__type(graph: Y1, key: "alt_id { id }")
+  @join__type(graph: Y2, key: "id")
+  @join__type(graph: Y2, key: "alt_id { id }")
 {
-  world: String!
-  goodbye: String!
+  id: ID!
+  alt_id: AltID! @join__field(graph: Y1) @join__field(graph: Y2)
+  data: String! @join__field
+}
+
+type AltID
+  @join__type(graph: Y1)
+  @join__type(graph: Y2)
+  @join__type(graph: Z)
+{
+  id: ID!
+}
+
+interface I
+  @join__type(graph: Y1)
+  @join__type(graph: Y2)
+  @join__type(graph: Z, key: "alt_id { id }", isInterfaceObject: true)
+{
+  id: ID! @join__field(graph: Y1) @join__field(graph: Y2)
+  alt_id: AltID! @join__field(graph: Z)
+  data: String! @join__field(graph: Z)
 }
 
 scalar join__DirectiveArguments
@@ -34,7 +62,13 @@ scalar join__DirectiveArguments
 scalar join__FieldSet
 
 enum join__Graph {
-  SUBGRAPHSKIP @join__graph(name: "SubgraphSkip", url: "none")
+  S1 @join__graph(name: "S1", url: "none")
+  S2 @join__graph(name: "S2", url: "none")
+  S3 @join__graph(name: "S3", url: "none")
+  S4 @join__graph(name: "S4", url: "none")
+  Y1 @join__graph(name: "Y1", url: "none")
+  Y2 @join__graph(name: "Y2", url: "none")
+  Z @join__graph(name: "Z", url: "none")
 }
 
 scalar link__Import
@@ -52,8 +86,13 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: SUBGRAPHSKIP)
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+  @join__type(graph: S3)
+  @join__type(graph: S4)
+  @join__type(graph: Y1)
+  @join__type(graph: Y2)
+  @join__type(graph: Z)
 {
-  hello: Hello!
-  extraFieldToPreventSkipIncludeNodes: String!
+  test: A @join__field(graph: S1)
 }

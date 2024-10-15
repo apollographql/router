@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: fbbe470b5e40af130de42043f74772ec30ee60ff
+# Composed from subgraphs with hash: f5cb1210587d45fee11b9c57247d6c570d0ae7fd
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
@@ -22,11 +22,13 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Hello
-  @join__type(graph: SUBGRAPHSKIP)
+type A
+  @join__type(graph: SUBGRAPHQ)
+  @join__type(graph: SUBGRAPHX, key: "id")
+  @join__type(graph: SUBGRAPHY, key: "id")
 {
-  world: String!
-  goodbye: String!
+  id: ID! @join__field(graph: SUBGRAPHQ, external: true) @join__field(graph: SUBGRAPHX) @join__field(graph: SUBGRAPHY)
+  data: String! @join__field(graph: SUBGRAPHX) @join__field(graph: SUBGRAPHY)
 }
 
 scalar join__DirectiveArguments
@@ -34,7 +36,9 @@ scalar join__DirectiveArguments
 scalar join__FieldSet
 
 enum join__Graph {
-  SUBGRAPHSKIP @join__graph(name: "SubgraphSkip", url: "none")
+  SUBGRAPHQ @join__graph(name: "SubgraphQ", url: "none")
+  SUBGRAPHX @join__graph(name: "SubgraphX", url: "none")
+  SUBGRAPHY @join__graph(name: "SubgraphY", url: "none")
 }
 
 scalar link__Import
@@ -52,8 +56,9 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: SUBGRAPHSKIP)
+  @join__type(graph: SUBGRAPHQ)
+  @join__type(graph: SUBGRAPHX)
+  @join__type(graph: SUBGRAPHY)
 {
-  hello: Hello!
-  extraFieldToPreventSkipIncludeNodes: String!
+  test: A @join__field(graph: SUBGRAPHQ, provides: "id")
 }
