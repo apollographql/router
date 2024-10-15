@@ -1,4 +1,4 @@
-### Remove JavaScript-based schema introspection ([PR #6139](https://github.com/apollographql/router/pull/6139))
+### Remove legacy schema introspection ([PR #6139](https://github.com/apollographql/router/pull/6139))
 
 Schema introspection now runs natively without involving JavaScript code. We have high confidence that the two implementations return matching responses based on differential testing: fuzzing arbitrary queries against a large schema, and testing a corpus of customer schemas against a comprehensive query.
 
