@@ -1906,6 +1906,25 @@ expression: "&schema"
         }
       ]
     },
+    "DeduplicateQueryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Enable query deduplication",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "ignored_headers": {
+          "description": "List of header names to ignore when calculating which subgraph requests can be deduplicated",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "DefaultAttributeRequirementLevel": {
       "oneOf": [
         {
@@ -6403,17 +6422,9 @@ expression: "&schema"
           "nullable": true
         },
         "deduplicate_query": {
-          "description": "Enable query deduplication",
-          "nullable": true,
-          "type": "boolean"
-        },
-        "deduplicate_query_ignored_headers": {
-          "description": "List of header names to ignore when calculating which subgraph requests can be deduplicated",
-          "items": {
-            "type": "string"
-          },
-          "nullable": true,
-          "type": "array"
+          "$ref": "#/definitions/DeduplicateQueryConfig",
+          "description": "#/definitions/DeduplicateQueryConfig",
+          "nullable": true
         },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",

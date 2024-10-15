@@ -18,12 +18,15 @@ traffic_shaping:
       interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
   all:
-    deduplicate_query: true # Enable query deduplication for all subgraphs.
-    deduplicate_query_ignored_headers: ["x-my-header"] # Ignore certain headers when deduplicating queries
+    deduplicate_query:
+      enabled: true # Enable query deduplication for all subgraphs.
+      ignored_headers:
+        - "x-my-header" # Ignore certain headers when deduplicating queries
     compression: br # Enable brotli compression for all subgraphs.
   subgraphs: # Rules applied to requests from the router to individual subgraphs
     products:
-      deduplicate_query: false # Disable query deduplication for the products subgraph.
+      deduplicate_query:
+        enabled: false # Disable query deduplication for the products subgraph.
       compression: gzip # Enable gzip compression only for the products subgraph.
       global_rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
         capacity: 10
@@ -114,10 +117,12 @@ The router supports various options affecting traffic destined for subgraphs, th
 ```yaml title="router.yaml"
 traffic_shaping:
   all:
-    deduplicate_query: true # Enable query deduplication for all subgraphs.
+    deduplicate_query:
+      enabled: true # Enable query deduplication for all subgraphs.
   subgraphs: # Rules applied to requests from the router to individual subgraphs
     products:
-      deduplicate_query: false # Disable query deduplication for the products subgraph.
+      deduplicate_query:
+        enabled: false # Disable query deduplication for the products subgraph.
 ```
 
 ### Compression
@@ -180,7 +185,8 @@ If the router is simultaneously processing similar queries, it may result in pro
 ```yaml title="router.yaml"
 traffic_shaping:
   all:
-    deduplicate_query: true # Enable query deduplication for all subgraphs.
+    deduplicate_query:
+      enabled: true # Enable query deduplication for all subgraphs.
 ```
 
 When the Router is figuring out if a query can be deduplicated, it considers the entire request, including headers. This means that if you have two requests that have a different header value but are otherwise identical, they will not be deduplicated.
@@ -190,8 +196,10 @@ You can use the `deduplicate_query_ignored_headers` option to provide a list of 
 ```yaml title="router.yaml"
 traffic_shaping:
   all:
-    deduplicate_query: true
-    deduplicate_query_ignored_headers: ["x-my-header"]
+    deduplicate_query:
+      enabled: true
+      ignored_headers:
+        - "x-my-header"
 ```
 
 ### HTTP/2

@@ -58,9 +58,7 @@ trait Merge {
 #[serde(deny_unknown_fields)]
 struct Shaping {
     /// Enable query deduplication
-    deduplicate_query: Option<bool>,
-    /// List of header names to ignore when calculating which subgraph requests can be deduplicated
-    deduplicate_query_ignored_headers: Option<Vec<String>>,
+    deduplicate_query: Option<DeduplicateQueryConfig>,
     /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
     /// Enable global rate limiting
@@ -93,12 +91,12 @@ impl Merge for Shaping {
         match fallback {
             None => self.clone(),
             Some(fallback) => Shaping {
-                deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
-                deduplicate_query_ignored_headers: self
-                    .deduplicate_query_ignored_headers
+                deduplicate_query: self
+                    .deduplicate_query
                     .as_ref()
-                    .or(fallback.deduplicate_query_ignored_headers.as_ref())
+                    .or(fallback.deduplicate_query.as_ref())
                     .cloned(),
+
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
                 global_rate_limit: self
@@ -117,6 +115,24 @@ impl Merge for Shaping {
                     .or(fallback.experimental_http2.as_ref())
                     .cloned(),
             },
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeduplicateQueryConfig {
+    /// Enable query deduplication
+    enabled: Option<bool>,
+    /// List of header names to ignore when calculating which subgraph requests can be deduplicated
+    ignored_headers: Option<Vec<String>>,
+}
+
+impl Default for DeduplicateQueryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: Some(false),
+            ignored_headers: None,
         }
     }
 }
@@ -400,10 +416,16 @@ impl TrafficShaping {
                 tower::retry::RetryLayer::new(retry_policy)
             });
 
+            let deduplicate_query_ignored_headers = config
+                .shaping
+                .deduplicate_query
+                .as_ref()
+                .and_then(|cfg| cfg.ignored_headers.clone());
+
             Either::A(ServiceBuilder::new()
 
-                .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(||{
-                  QueryDeduplicationLayer::new(config.shaping.deduplicate_query_ignored_headers)
+                .option_layer(config.shaping.deduplicate_query.unwrap_or_default().enabled.unwrap_or_default().then(||{
+                  QueryDeduplicationLayer::new(deduplicate_query_ignored_headers)
                 }
                 ))
                     .map_future_with_request_data(
@@ -688,10 +710,12 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          deduplicate_query: true
+          deduplicate_query:
+            enabled: true
         subgraphs: 
           products:
-            deduplicate_query: false
+            deduplicate_query: 
+              enabled: false
         "#,
         )
         .unwrap();

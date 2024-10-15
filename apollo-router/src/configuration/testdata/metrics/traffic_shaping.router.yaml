@@ -5,7 +5,8 @@ traffic_shaping:
       capacity: 100
       interval: 1s
   all:
-    deduplicate_query: true
+    deduplicate_query:
+      enabled: true
     compression: br
     timeout: 10s
     global_rate_limit:
@@ -17,4 +18,3 @@ traffic_shaping:
       min_per_sec: 2
       retry_mutations: true
       retry_percent: 2
-
