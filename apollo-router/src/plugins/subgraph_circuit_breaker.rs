@@ -213,15 +213,14 @@ impl Plugin for SubgraphCircuitBreakerPlugin {
                 ))
             })
             .map_response(move |res: Response| {
-                match circuit_breaker.call(|| {
+                let _ = circuit_breaker.call(|| {
                     if res.response.status().is_success() {
                         Ok(res.response.status())
                     } else {
                         Err(res.response.status())
                     }
-                }) {
-                    _ => res
-                }
+                });
+                res
             })
             .service(service)
             .boxed()
