@@ -208,6 +208,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.26.0"
 sys-info = "0.9.1"
+sysinfo = { version = "0.32.0", features = ["windows"] }
 thiserror = "1.0.61"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
