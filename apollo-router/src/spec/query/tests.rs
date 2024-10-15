@@ -1268,31 +1268,38 @@ fn reformat_response_expected_int_got_string() {
         .expected_errors(json! ([
             {
                 "message": "Invalid value found for field Thing.i",
-                "path": ["get", "i"]
+                "path": ["get", "i"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid value found for field Thing.s",
-                "path": ["get", "s"]
+                "path": ["get", "s"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid value found for field Thing.f",
-                "path": ["get", "f"]
+                "path": ["get", "f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid value found for field Thing.b",
-                "path": ["get", "b"]
+                "path": ["get", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Expected a valid enum value for type E",
-                "path": ["get", "e"]
+                "path": ["get", "e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid non-object value of type number for composite type U",
-                "path": ["get", "u"]
+                "path": ["get", "u"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid non-list value of type string for list type [Int]",
-                "path": ["get", "l"]
+                "path": ["get", "l"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
         ]))
         .test();

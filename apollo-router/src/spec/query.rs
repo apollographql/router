@@ -51,6 +51,7 @@ pub(crate) mod transform;
 pub(crate) mod traverse;
 
 pub(crate) const TYPENAME: &str = "__typename";
+pub(crate) const RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAILED";
 
 /// A GraphQL query.
 #[derive(Derivative, Serialize, Deserialize)]
@@ -476,14 +477,17 @@ impl Query {
                 }
                 Value::Null => Ok(()),
                 v => {
-                    parameters.validation_errors.push(Error {
-                        message: format!(
-                            "Invalid non-list value of type {} for list type {field_type}",
-                            v.json_type_name()
-                        ),
-                        path: Some(Path::from_response_slice(path)),
-                        ..Error::default()
-                    });
+                    parameters.validation_errors.push(
+                        Error::builder()
+                            .message(format!(
+                                "Invalid non-list value of type {} for list type {field_type}",
+                                v.json_type_name()
+                            ))
+                            .path(Path::from_response_slice(path))
+                            .extension_code(RESPONSE_VALIDATION)
+                            .build(),
+                    );
+
                     *output = Value::Null;
                     Ok(())
                 }
@@ -503,11 +507,17 @@ impl Query {
                     *output = input.clone();
                 } else {
                     if !input.is_null() {
-                        parameters.validation_errors.push(Error {
-                            message: invalid_value_message(parent_type, field_type, field_or_index),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
                     }
                     *output = Value::Null;
                 }
@@ -518,11 +528,17 @@ impl Query {
                     *output = input.clone();
                 } else {
                     if !input.is_null() {
-                        parameters.validation_errors.push(Error {
-                            message: invalid_value_message(parent_type, field_type, field_or_index),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
                     }
                     *output = Value::Null;
                 }
@@ -533,11 +549,17 @@ impl Query {
                     *output = input.clone();
                 } else {
                     if !input.is_null() {
-                        parameters.validation_errors.push(Error {
-                            message: invalid_value_message(parent_type, field_type, field_or_index),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
                     }
                     *output = Value::Null;
                 }
@@ -548,11 +570,17 @@ impl Query {
                     *output = input.clone();
                 } else {
                     if !input.is_null() {
-                        parameters.validation_errors.push(Error {
-                            message: invalid_value_message(parent_type, field_type, field_or_index),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
                     }
                     *output = Value::Null;
                 }
@@ -563,11 +591,17 @@ impl Query {
                     *output = input.clone();
                 } else {
                     if !input.is_null() {
-                        parameters.validation_errors.push(Error {
-                            message: invalid_value_message(parent_type, field_type, field_or_index),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
                     }
                     *output = Value::Null;
                 }
@@ -588,27 +622,31 @@ impl Query {
                                     *output = input.clone();
                                     Ok(())
                                 } else {
-                                    parameters.validation_errors.push(Error {
-                                        message: format!(
-                                            "Expected a valid enum value for type {}",
-                                            enum_type.name
-                                        ),
-                                        path: Some(Path::from_response_slice(path)),
-                                        ..Error::default()
-                                    });
+                                    parameters.validation_errors.push(
+                                        Error::builder()
+                                            .message(format!(
+                                                "Expected a valid enum value for type {}",
+                                                enum_type.name
+                                            ))
+                                            .path(Path::from_response_slice(path))
+                                            .extension_code(RESPONSE_VALIDATION)
+                                            .build(),
+                                    );
                                     *output = Value::Null;
                                     Ok(())
                                 }
                             }
                             None => {
-                                parameters.validation_errors.push(Error {
-                                    message: format!(
-                                        "Expected a valid enum value for type {}",
-                                        enum_type.name
-                                    ),
-                                    path: Some(Path::from_response_slice(path)),
-                                    ..Error::default()
-                                });
+                                parameters.validation_errors.push(
+                                    Error::builder()
+                                        .message(format!(
+                                            "Expected a valid enum value for type {}",
+                                            enum_type.name
+                                        ))
+                                        .path(Path::from_response_slice(path))
+                                        .extension_code(RESPONSE_VALIDATION)
+                                        .build(),
+                                );
                                 *output = Value::Null;
                                 Ok(())
                             }
@@ -685,13 +723,15 @@ impl Query {
                         Ok(())
                     }
                     v => {
-                        parameters.validation_errors.push(Error {
-                            message: format!(
-                                "Invalid non-object value of type {} for composite type {type_name}", v.json_type_name()
-                            ),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                        parameters.validation_errors.push(
+                        Error::builder()
+                        .message(format!(
+                            "Invalid non-object value of type {} for composite type {type_name}", v.json_type_name()
+                        ))
+                        .path(Path::from_response_slice(path))
+                        .extension_code(RESPONSE_VALIDATION)
+                        .build(),
+                    );
                         *output = Value::Null;
                         Ok(())
                     }
