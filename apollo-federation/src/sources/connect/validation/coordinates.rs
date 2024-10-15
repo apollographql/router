@@ -157,12 +157,35 @@ impl Display for BaseUrlCoordinate<'_> {
     }
 }
 
-pub(super) fn connect_directive_http_body_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{object_name}.{field}`", object_name = object.name)
+/// The coordinate of a `@connect(http:body:)`.
+#[derive(Clone, Copy)]
+pub(super) struct BodyCoordinate<'a> {
+    pub(super) connect_directive_name: &'a Name,
+    pub(super) field_coordinate: FieldCoordinate<'a>,
+}
+
+impl Display for BodyCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        let BodyCoordinate {
+            connect_directive_name,
+            field_coordinate,
+        } = self;
+        write!(f, "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on {field_coordinate}")
+    }
+}
+
+impl<'a> From<ConnectDirectiveCoordinate<'a>> for BodyCoordinate<'a> {
+    fn from(connect_directive_coordinate: ConnectDirectiveCoordinate<'a>) -> Self {
+        let ConnectDirectiveCoordinate {
+            directive: _,
+            connect_directive_name,
+            field_coordinate,
+        } = connect_directive_coordinate;
+        Self {
+            connect_directive_name,
+            field_coordinate,
+        }
+    }
 }
 
 pub(super) fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {

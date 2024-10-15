@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/body/reference_arg_that_doesnt_exist.graphql
+---
+[
+    Message {
+        code: InvalidJsonSelection,
+        message: "Can't use `$args` when there are no arguments.",
+        locations: [
+            10:35..10:40,
+        ],
+    },
+]
