@@ -27,6 +27,7 @@ use wiremock::ResponseTemplate;
 
 use crate::json_ext::ValueExt;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
@@ -722,6 +723,7 @@ async fn test_tracing_connect_span() {
                 .fields()
                 .field("apollo.connector.source.detail")
                 .is_some());
+            assert!(attributes.fields().field(OTEL_STATUS_CODE).is_some());
             Id::from_u64(1)
         } else {
             panic!("unexpected span: {}", attributes.metadata().name());
