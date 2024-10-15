@@ -54,7 +54,7 @@ impl FleetDetector {
         // 'cgroups'
         let fses: HashSet<&str> = filesystems_file
             .split('\n')
-            .map(|x| x.trim().split_whitespace().next().unwrap())
+            .map(|x| x.split_whitespace().next().unwrap())
             .filter(|x| x.contains("cgroup"))
             .collect();
 
@@ -68,9 +68,8 @@ impl FleetDetector {
                         system_cpus
                     } else {
                         // If it's not max then divide the two to get an integer answer
-                        let (a, b) = readings.split_once(" ").unwrap();
-                        let result = a.parse::<u64>().unwrap() / b.parse::<u64>().unwrap();
-                        result
+                        let (a, b) = readings.split_once(' ').unwrap();
+                        a.parse::<u64>().unwrap() / b.parse::<u64>().unwrap();
                     }
                 }
                 Err(_) => system_cpus,
@@ -90,8 +89,7 @@ impl FleetDetector {
                     if quota == "-1" {
                         system_cpus
                     } else {
-                        let result = quota.parse::<u64>().unwrap() / period.parse::<u64>().unwrap();
-                        result
+                        quota.parse::<u64>().unwrap() / period.parse::<u64>().unwrap();
                     }
                 }
                 _ => system_cpus,
