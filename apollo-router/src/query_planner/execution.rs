@@ -333,11 +333,6 @@ impl PlanNode {
                         let v = parameters
                             .query
                             .variable_value(
-                                parameters
-                                    .supergraph_request
-                                    .body()
-                                    .operation_name
-                                    .as_deref(),
                                 condition.as_str(),
                                 &parameters.supergraph_request.body().variables,
                             )

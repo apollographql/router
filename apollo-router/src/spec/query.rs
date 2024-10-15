@@ -33,6 +33,7 @@ use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::QueryHash;
+use crate::services::layers::query_analysis::get_operation;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::spec::schema::ApiSchema;
@@ -59,7 +60,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) operations: Vec<Operation>,
+    pub(crate) operation: Operation,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -100,7 +101,7 @@ impl Query {
             fragments: Fragments {
                 map: HashMap::new(),
             },
-            operations: Vec::new(),
+            operation: Operation::empty(),
             subselections: HashMap::new(),
             unauthorized: UnauthorizedPaths::default(),
             filtered_query: None,
@@ -122,14 +123,12 @@ impl Query {
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
-        operation_name: Option<&str>,
         variables: Object,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
-        let original_operation = self.operation(operation_name);
         match data {
             Some(Value::Object(mut input)) => {
                 if self.is_deferred(defer_conditions) {
@@ -175,13 +174,13 @@ impl Query {
                             return vec![];
                         }
                     }
-                } else if let Some(operation) = original_operation {
-                    let mut output = Object::with_capacity(operation.selection_set.len());
+                } else {
+                    let mut output = Object::with_capacity(self.operation.selection_set.len());
 
-                    let all_variables = if operation.variables.is_empty() {
+                    let all_variables = if self.operation.variables.is_empty() {
                         variables
                     } else {
-                        operation
+                        self.operation
                             .variables
                             .iter()
                             .filter_map(|(k, Variable { default_value, .. })| {
@@ -193,9 +192,9 @@ impl Query {
                     };
 
                     let operation_type_name = schema
-                        .root_operation(operation.kind.into())
+                        .root_operation(self.operation.kind.into())
                         .map(|name| name.as_str())
-                        .unwrap_or(operation.kind.default_type_name());
+                        .unwrap_or(self.operation.kind.default_type_name());
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
@@ -206,7 +205,7 @@ impl Query {
                     response.data = Some(
                         match self.apply_root_selection_set(
                             operation_type_name,
-                            &operation.selection_set,
+                            &self.operation.selection_set,
                             &mut parameters,
                             &mut input,
                             &mut output,
@@ -223,8 +222,6 @@ impl Query {
                     }
 
                     return parameters.nullified;
-                } else {
-                    failfast_debug!("can't find operation for {:?}", operation_name);
                 }
             }
             Some(Value::Null) => {
@@ -277,11 +274,12 @@ impl Query {
         )
         .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
 
-        Ok(Arc::new(ParsedDocumentInner {
+        ParsedDocumentInner::new(
             ast,
-            executable: Arc::new(executable_document),
-            hash: Arc::new(QueryHash(hash)),
-        }))
+            Arc::new(executable_document),
+            operation_name,
+            Arc::new(QueryHash(hash)),
+        )
     }
 
     #[cfg(test)]
@@ -294,13 +292,13 @@ impl Query {
         let query = query.into();
 
         let doc = Self::parse_document(&query, operation_name, schema, configuration)?;
-        let (fragments, operations, defer_stats, schema_aware_hash) =
+        let (fragments, operation, defer_stats, schema_aware_hash) =
             Self::extract_query_information(schema, &doc.executable, operation_name)?;
 
         Ok(Query {
             string: query,
             fragments,
-            operations,
+            operation,
             subselections: HashMap::new(),
             unauthorized: UnauthorizedPaths::default(),
             filtered_query: None,
@@ -315,18 +313,15 @@ impl Query {
         schema: &Schema,
         document: &ExecutableDocument,
         operation_name: Option<&str>,
-    ) -> Result<(Fragments, Vec<Operation>, DeferStats, Vec<u8>), SpecError> {
+    ) -> Result<(Fragments, Operation, DeferStats, Vec<u8>), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
             conditional_defer_variable_names: IndexSet::default(),
         };
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
-        let operations = document
-            .operations
-            .iter()
-            .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
-            .collect::<Result<Vec<_>, SpecError>>()?;
+        let operation = get_operation(document, operation_name)?;
+        let operation = Operation::from_hir(&operation, schema, &mut defer_stats, &fragments)?;
 
         let mut visitor =
             QueryHashVisitor::new(schema.supergraph_schema(), &schema.raw_sdl, document);
@@ -335,7 +330,7 @@ impl Query {
         })?;
         let hash = visitor.finish();
 
-        Ok((fragments, operations, defer_stats, hash))
+        Ok((fragments, operation, defer_stats, hash))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -899,19 +894,13 @@ impl Query {
         request: &Request,
         schema: &Schema,
     ) -> Result<(), Response> {
-        let operation_name = request.operation_name.as_deref();
-        let operation_variable_types =
-            self.operations
-                .iter()
-                .fold(HashMap::new(), |mut acc, operation| {
-                    if operation_name.is_none() || operation.name.as_deref() == operation_name {
-                        acc.extend(operation.variables.iter().map(|(k, v)| (k.as_str(), v)))
-                    }
-                    acc
-                });
-
         if LevelFilter::current() >= LevelFilter::DEBUG {
-            let known_variables = operation_variable_types.keys().cloned().collect();
+            let known_variables = self
+                .operation
+                .variables
+                .keys()
+                .map(|k| k.as_str())
+                .collect();
             let provided_variables = request
                 .variables
                 .keys()
@@ -928,7 +917,9 @@ impl Query {
             }
         }
 
-        let errors = operation_variable_types
+        let errors = self
+            .operation
+            .variables
             .iter()
             .filter_map(
                 |(
@@ -940,12 +931,12 @@ impl Query {
                 )| {
                     let value = request
                         .variables
-                        .get(*name)
+                        .get(name.as_str())
                         .or(default_value.as_ref())
                         .unwrap_or(&Value::Null);
                     ty.validate_input_value(value, schema).err().map(|_| {
                         FetchError::ValidationInvalidTypeVariable {
-                            name: name.to_string(),
+                            name: name.as_str().to_string(),
                         }
                         .to_graphql_error(None)
                     })
@@ -962,47 +953,23 @@ impl Query {
 
     pub(crate) fn variable_value<'a>(
         &'a self,
-        operation_name: Option<&str>,
         variable_name: &str,
         variables: &'a Object,
     ) -> Option<&'a Value> {
         variables
             .get(variable_name)
-            .or_else(|| self.default_variable_value(operation_name, variable_name))
+            .or_else(|| self.default_variable_value(variable_name))
     }
 
-    pub(crate) fn default_variable_value(
-        &self,
-        operation_name: Option<&str>,
-        variable_name: &str,
-    ) -> Option<&Value> {
-        self.operation(operation_name).and_then(|op| {
-            op.variables
-                .get(variable_name)
-                .and_then(|Variable { default_value, .. }| default_value.as_ref())
-        })
-    }
-
-    pub(crate) fn operation(&self, operation_name: Option<impl AsRef<str>>) -> Option<&Operation> {
-        match operation_name {
-            Some(name) => self
-                .operations
-                .iter()
-                // we should have an error if the only operation is anonymous but the query specifies a name
-                .find(|op| {
-                    if let Some(op_name) = op.name.as_deref() {
-                        op_name == name.as_ref()
-                    } else {
-                        false
-                    }
-                }),
-            None => self.operations.first(),
-        }
+    pub(crate) fn default_variable_value(&self, variable_name: &str) -> Option<&Value> {
+        self.operation
+            .variables
+            .get(variable_name)
+            .and_then(|Variable { default_value, .. }| default_value.as_ref())
     }
 
     pub(crate) fn contains_error_path(
         &self,
-        operation_name: Option<&str>,
         label: &Option<String>,
         path: &Path,
         defer_conditions: BooleanValues,
@@ -1012,21 +979,14 @@ impl Query {
             defer_conditions,
         }) {
             Some(subselection) => &subselection.selection_set,
-            None => match self.operation(operation_name) {
-                None => return false,
-                Some(op) => &op.selection_set,
-            },
+            None => &self.operation.selection_set,
         };
         selection_set
             .iter()
             .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
     }
 
-    pub(crate) fn defer_variables_set(
-        &self,
-        operation_name: Option<&str>,
-        variables: &Object,
-    ) -> BooleanValues {
+    pub(crate) fn defer_variables_set(&self, variables: &Object) -> BooleanValues {
         let mut bits = 0_u32;
         for (i, variable) in self
             .defer_stats
@@ -1036,7 +996,7 @@ impl Query {
         {
             let value = variables
                 .get(variable.as_str())
-                .or_else(|| self.default_variable_value(operation_name, variable));
+                .or_else(|| self.default_variable_value(variable));
 
             if matches!(value, Some(serde_json_bytes::Value::Bool(true))) {
                 bits |= 1 << i;
@@ -1075,6 +1035,16 @@ pub(crate) struct Variable {
 }
 
 impl Operation {
+    fn empty() -> Self {
+        Self {
+            name: None,
+            kind: OperationKind::Query,
+            type_name: "".into(),
+            selection_set: Vec::new(),
+            variables: HashMap::new(),
+        }
+    }
+
     pub(crate) fn from_hir(
         operation: &executable::Operation,
         schema: &Schema,
