@@ -5,6 +5,7 @@ use std::sync::Arc;
 use http::HeaderValue;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -19,7 +20,19 @@ use super::Stage;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -40,6 +53,8 @@ pub(crate) struct Events {
     supergraph: Extendable<SupergraphEventsConfig, Event<SupergraphAttributes, SupergraphSelector>>,
     /// Supergraph service events
     subgraph: Extendable<SubgraphEventsConfig, Event<SubgraphAttributes, SubgraphSelector>>,
+    /// Connector events
+    connector: Extendable<ConnectorEventsConfig, Event<ConnectorAttributes, ConnectorSelector>>,
 }
 
 impl Events {
@@ -130,6 +145,10 @@ impl Events {
         }
     }
 
+    pub(crate) fn new_connector_events(&self) -> ConnectorEvents {
+        super::connector::events::new_connector_events(&self.connector)
+    }
+
     pub(crate) fn validate(&self) -> Result<(), String> {
         if let StandardEventConfig::Conditional { condition, .. } = &self.router.attributes.request
         {
@@ -159,6 +178,16 @@ impl Events {
         {
             condition.validate(Some(Stage::Response))?;
         }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.connector.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.connector.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
         for (name, custom_event) in &self.router.custom {
             custom_event.validate().map_err(|err| {
                 format!("configuration error for router custom event {name:?}: {err}")
@@ -172,6 +201,11 @@ impl Events {
         for (name, custom_event) in &self.subgraph.custom {
             custom_event.validate().map_err(|err| {
                 format!("configuration error for subgraph custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.connector.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for connector HTTP custom event {name:?}: {err}")
             })?;
         }
 
@@ -197,10 +231,10 @@ where
     Attributes: Selectors<Request = Request, Response = Response> + Default,
     Sel: Selector<Request = Request, Response = Response> + Debug,
 {
-    request: StandardEvent<Sel>,
-    response: StandardEvent<Sel>,
-    error: StandardEvent<Sel>,
-    custom: Vec<CustomEvent<Request, Response, Attributes, Sel>>,
+    pub(super) request: StandardEvent<Sel>,
+    pub(super) response: StandardEvent<Sel>,
+    pub(super) error: StandardEvent<Sel>,
+    pub(super) custom: Vec<CustomEvent<Request, Response, Attributes, Sel>>,
 }
 
 impl Instrumented
@@ -232,25 +266,25 @@ impl Instrumented
             let headers = request.router_request.headers();
 
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.headers"),
+                HTTP_REQUEST_HEADERS,
                 opentelemetry::Value::String(format!("{:?}", headers).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.method"),
+                HTTP_REQUEST_METHOD,
                 opentelemetry::Value::String(format!("{}", request.router_request.method()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.uri"),
+                HTTP_REQUEST_URI,
                 opentelemetry::Value::String(format!("{}", request.router_request.uri()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.version"),
+                HTTP_REQUEST_VERSION,
                 opentelemetry::Value::String(
                     format!("{:?}", request.router_request.version()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.body"),
+                HTTP_REQUEST_BODY,
                 opentelemetry::Value::String(format!("{:?}", request.router_request.body()).into()),
             ));
             log_event(self.request.level(), "router.request", attrs, "");
@@ -282,19 +316,19 @@ impl Instrumented
             #[cfg(not(test))]
             let headers = response.response.headers();
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.headers"),
+                HTTP_RESPONSE_HEADERS,
                 opentelemetry::Value::String(format!("{:?}", headers).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.status"),
+                HTTP_RESPONSE_STATUS,
                 opentelemetry::Value::String(format!("{}", response.response.status()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.version"),
+                HTTP_RESPONSE_VERSION,
                 opentelemetry::Value::String(format!("{:?}", response.response.version()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.body"),
+                HTTP_RESPONSE_BODY,
                 opentelemetry::Value::String(format!("{:?}", response.response.body()).into()),
             ));
             log_event(self.response.level(), "router.response", attrs, "");
@@ -360,29 +394,29 @@ impl Instrumented
             #[cfg(not(test))]
             let headers = request.supergraph_request.headers();
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.headers"),
+                HTTP_REQUEST_HEADERS,
                 opentelemetry::Value::String(format!("{:?}", headers).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.method"),
+                HTTP_REQUEST_METHOD,
                 opentelemetry::Value::String(
                     format!("{}", request.supergraph_request.method()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.uri"),
+                HTTP_REQUEST_URI,
                 opentelemetry::Value::String(
                     format!("{}", request.supergraph_request.uri()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.version"),
+                HTTP_REQUEST_VERSION,
                 opentelemetry::Value::String(
                     format!("{:?}", request.supergraph_request.version()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.body"),
+                HTTP_REQUEST_BODY,
                 opentelemetry::Value::String(
                     serde_json::to_string(request.supergraph_request.body())
                         .unwrap_or_default()
@@ -609,21 +643,21 @@ where
     E: Debug,
 {
     /// The log level of the event.
-    level: EventLevel,
+    pub(super) level: EventLevel,
 
     /// The event message.
-    message: Arc<String>,
+    pub(super) message: Arc<String>,
 
     /// When to trigger the event.
-    on: EventOn,
+    pub(super) on: EventOn,
 
     /// The event attributes.
     #[serde(default = "Extendable::empty_arc::<A, E>")]
-    attributes: Arc<Extendable<A, E>>,
+    pub(super) attributes: Arc<Extendable<A, E>>,
 
     /// The event conditions.
     #[serde(default = "Condition::empty::<E>")]
-    condition: Condition<E>,
+    pub(super) condition: Condition<E>,
 }
 
 impl<A, E, Request, Response, EventResponse> Event<A, E>
@@ -660,21 +694,21 @@ where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    inner: Mutex<CustomEventInner<Request, Response, A, T>>,
+    pub(super) inner: Mutex<CustomEventInner<Request, Response, A, T>>,
 }
 
-struct CustomEventInner<Request, Response, A, T>
+pub(super) struct CustomEventInner<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    name: String,
-    level: EventLevel,
-    event_on: EventOn,
-    message: Arc<String>,
-    selectors: Option<Arc<Extendable<A, T>>>,
-    condition: Condition<T>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(super) name: String,
+    pub(super) level: EventLevel,
+    pub(super) event_on: EventOn,
+    pub(super) message: Arc<String>,
+    pub(super) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(super) condition: Condition<T>,
+    pub(super) attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomEvent<Request, Response, A, T>
@@ -797,6 +831,7 @@ pub(crate) fn log_event(level: EventLevel, kind: &str, attributes: Vec<KeyValue>
 
 #[cfg(test)]
 mod tests {
+    use apollo_federation::sources::connect::HTTPMethod;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
     use tracing::instrument::WithSubscriber;
@@ -808,6 +843,10 @@ mod tests {
     use crate::graphql;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
+    use crate::services::connector_service::ConnectorInfo;
+    use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_router_events() {
@@ -1129,6 +1168,90 @@ mod tests {
                             .expect("expecting valid response")
                     },
                 )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_connector_events_request() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let connector_info = ConnectorInfo {
+                subgraph_name: "subgraph".to_string(),
+                source_name: Some("source".to_string()),
+                http_method: HTTPMethod::Get.as_str().to_string(),
+                url_template: "/test".to_string(),
+            };
+            let context = Context::default();
+            context
+                .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
+                .unwrap();
+            let mut http_request = http::Request::builder().body("".into()).unwrap();
+            http_request
+                .headers_mut()
+                .insert("x-log-request", HeaderValue::from_static("log"));
+            let http_request = HttpRequest {
+                http_request,
+                context: context.clone(),
+            };
+            test_harness
+                .call_http_client("subgraph", http_request, |http_request| HttpResponse {
+                    http_response: http::Response::builder()
+                        .status(200)
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .body("".into())
+                        .expect("expecting valid response"),
+                    context: http_request.context.clone(),
+                })
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_connector_events_response() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let connector_info = ConnectorInfo {
+                subgraph_name: "subgraph".to_string(),
+                source_name: Some("source".to_string()),
+                http_method: HTTPMethod::Get.as_str().to_string(),
+                url_template: "/test".to_string(),
+            };
+            let context = Context::default();
+            context
+                .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
+                .unwrap();
+            let mut http_request = http::Request::builder().body("".into()).unwrap();
+            http_request
+                .headers_mut()
+                .insert("x-log-response", HeaderValue::from_static("log"));
+            let http_request = HttpRequest {
+                http_request,
+                context: context.clone(),
+            };
+            test_harness
+                .call_http_client("subgraph", http_request, |http_request| HttpResponse {
+                    http_response: http::Response::builder()
+                        .status(200)
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .body("".into())
+                        .expect("expecting valid response"),
+                    context: http_request.context.clone(),
+                })
                 .await
                 .expect("expecting successful response");
         }

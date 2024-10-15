@@ -1,0 +1,35 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter with conditions
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        connector:
+          not.found.count:
+            description: Count of 404 responses from the user API
+            type: counter
+            unit: count
+            value: unit
+            attributes:
+              url_template:
+                connector_url_template: true
+            condition:
+              all:
+                - eq:
+                    - 404
+                    - connector_http_response_status: code
+                - eq:
+                    - user_api
+                    - connector_source: name
+---
+- name: not.found.count
+  description: Count of 404 responses from the user API
+  unit: count
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          url_template: "/user/{$this.userid}"

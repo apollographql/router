@@ -27,6 +27,11 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
   * `http.client.request.duration` - A histogram of request durations for requests handled by subgraphs.
   * `http.client.response.body.size` - A histogram of response body sizes for requests handled by subgraphs.
 
+* For connector HTTP requests:
+
+  * `http.client.request.body.size` - A histogram of request body sizes for connectors HTTP requests.
+  * `http.client.request.duration` - A histogram of request durations for connectors HTTP requests.
+  * `http.client.response.body.size` - A histogram of response body sizes for connectors HTTP responses.
 
 These instruments are configurable in `router.yaml`:
 
@@ -39,6 +44,10 @@ telemetry:
         http.server.request.body.size: true # (default false)
         http.server.request.duration: true # (default false)
       subgraph:
+        http.client.request.body.size: true # (default false)
+        http.client.request.duration: true # (default false)
+        http.client.response.body.size: true # (default false)
+      connector:
         http.client.request.body.size: true # (default false)
         http.client.request.duration: true # (default false)
         http.client.response.body.size: true # (default false)
@@ -59,6 +68,10 @@ telemetry:
         http.client.request.duration:
           attributes:
             subgraph.name: true
+      connector:
+        http.client.request.duration:
+          attributes:
+            connector.source.name: true
 ```
 
 ### Apollo standard instruments
@@ -77,6 +90,7 @@ The example configuration below defines four custom instruments:
 - `acme.request.duration` on the `router` service
 - `acme.graphql.requests` on the `supergraph` service
 - `acme.graphql.subgraph.errors` on the `subgraph` service
+- `acme.user.not.found` on a connector HTTP response
 - `acme.graphql.list.lengths` on each JSON element returned to the client (defined on `graphql`)
 
 ```yaml title="router.yaml"
@@ -112,6 +126,21 @@ telemetry:
           type: counter
           unit: count
           description: "my description"
+
+      connector:
+        acme.user.not.found:
+          value: unit
+          type: counter
+          unit: count
+          description: "Count of 404 responses from the user API"
+          condition:
+            all:
+              - eq:
+                  - 404
+                  - connector_http_response_status: code
+              - eq:
+                  - "user_api"
+                  - connector_source: name
 
       graphql:
         acme.graphql.list.lengths:

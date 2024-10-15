@@ -190,7 +190,6 @@ mod test {
     use super::studio::SingleStatsReport;
     use super::*;
     use crate::context::OPERATION_KIND;
-    use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugins::subscription;
     use crate::plugins::telemetry::apollo;
@@ -364,7 +363,7 @@ mod test {
                 request_builder.header("accept", "multipart/mixed;subscriptionSpec=1.0");
         }
         TestHarness::builder()
-            .extra_plugin(plugin)
+            .extra_private_plugin(plugin)
             .extra_plugin(create_subscription_plugin().await?)
             .build_router()
             .await?
@@ -410,6 +409,7 @@ mod test {
     async fn create_plugin_with_apollo_config(
         apollo_config: apollo::Config,
     ) -> Result<Telemetry, BoxError> {
+        use crate::plugin::PluginPrivate;
         Telemetry::new(PluginInit::fake_new(
             config::Conf {
                 apollo: apollo_config,
@@ -421,6 +421,7 @@ mod test {
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
+        use crate::plugin::PluginPrivate;
         subscription::Subscription::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),

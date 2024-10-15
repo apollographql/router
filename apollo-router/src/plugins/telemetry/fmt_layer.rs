@@ -264,6 +264,7 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::MutexGuard;
 
+    use apollo_federation::sources::connect::HTTPMethod;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
     use tracing::error;
@@ -283,6 +284,10 @@ mod tests {
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::otel;
+    use crate::services::connector_service::ConnectorInfo;
+    use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -362,7 +367,41 @@ subgraph:
         subgraph_response_status: code
       "my.custom.attribute":
         subgraph_response_data: "$.*"
-        default: "missing""#;
+        default: "missing"
+
+connector:
+  # Standard events
+  request: info
+  response: warn
+  error: error
+
+  # Custom events
+  my.connector.request.event:
+    message: "my request event message"
+    level: info
+    on: request
+    attributes:
+      subgraph.name: true
+      connector_source:
+        connector_source: name
+      http_method:
+        connector_http_method: true
+      url_template:
+        connector_url_template: true
+  my.connector.response.event:
+    message: "my response event message"
+    level: error
+    on: response
+    attributes:
+      subgraph.name: true
+      connector_source:
+        connector_source: name
+      http_method:
+        connector_http_method: true
+      url_template:
+        connector_url_template: true
+      response_status:
+        connector_http_response_status: code"#;
 
     #[derive(Default, Clone)]
     struct LogBuffer(Arc<Mutex<Vec<u8>>>);
@@ -787,6 +826,37 @@ subgraph:
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
+
+                let connector_info = ConnectorInfo {
+                    subgraph_name: "connector_subgraph".to_string(),
+                    source_name: Some("source".to_string()),
+                    http_method: HTTPMethod::Get.as_str().to_string(),
+                    url_template: "/test".to_string(),
+                };
+                let context = crate::Context::default();
+                context
+                    .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
+                    .unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                http_request
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+                let http_request = HttpRequest {
+                    http_request,
+                    context,
+                };
+                let connector_events = event_config.new_connector_events();
+                connector_events.on_request(&http_request);
+
+                let http_response = HttpResponse {
+                    http_response: http::Response::builder()
+                        .status(200)
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .body("".into())
+                        .expect("expecting valid response"),
+                    context: Default::default(),
+                };
+                connector_events.on_response(&http_response);
             },
         );
 
@@ -926,6 +996,37 @@ subgraph:
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
+
+                let connector_info = ConnectorInfo {
+                    subgraph_name: "connector_subgraph".to_string(),
+                    source_name: Some("source".to_string()),
+                    http_method: HTTPMethod::Get.as_str().to_string(),
+                    url_template: "/test".to_string(),
+                };
+                let context = crate::Context::default();
+                context
+                    .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
+                    .unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                http_request
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+                let http_request = HttpRequest {
+                    http_request,
+                    context,
+                };
+                let connector_events = event_config.new_connector_events();
+                connector_events.on_request(&http_request);
+
+                let http_response = HttpResponse {
+                    http_response: http::Response::builder()
+                        .status(200)
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .body("".into())
+                        .expect("expecting valid response"),
+                    context: Default::default(),
+                };
+                connector_events.on_response(&http_response);
             },
         );
 

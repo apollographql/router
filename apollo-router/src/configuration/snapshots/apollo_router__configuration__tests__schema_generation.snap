@@ -624,6 +624,143 @@ expression: "&schema"
         }
       ]
     },
+    "Condition_for_ConnectorSelector": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/ConnectorSelector",
+              "description": "#/definitions/ConnectorSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_ConnectorSelector",
+                "description": "#/definitions/Condition_for_ConnectorSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_ConnectorSelector",
+                "description": "#/definitions/Condition_for_ConnectorSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Static true condition",
+          "enum": [
+            "true"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Static false condition",
+          "enum": [
+            "false"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "Condition_for_GraphQLSelector": {
       "oneOf": [
         {
@@ -1780,6 +1917,222 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorEventsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "request": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "response": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorInstrumentsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "http.client.request.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.request.duration": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.response.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "subgraph_name": {
+              "description": "The subgraph name",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_source": {
+              "$ref": "#/definitions/ConnectorSource",
+              "description": "#/definitions/ConnectorSource"
+            }
+          },
+          "required": [
+            "connector_source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_request_header": {
+              "description": "The name of a connector HTTP request header.",
+              "type": "string"
+            },
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "required": [
+            "connector_http_request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_response_header": {
+              "description": "The name of a connector HTTP response header.",
+              "type": "string"
+            },
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "required": [
+            "connector_http_response_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_response_status": {
+              "$ref": "#/definitions/ResponseStatus",
+              "description": "#/definitions/ResponseStatus"
+            }
+          },
+          "required": [
+            "connector_http_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_method": {
+              "description": "The connector HTTP method.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_http_method"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_url_template": {
+              "description": "The connector URL template.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_url_template"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "static": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
+            }
+          },
+          "required": [
+            "static"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConnectorSource": {
+      "oneOf": [
+        {
+          "description": "The name of the connector source.",
+          "enum": [
+            "name"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ConnectorValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
+        }
+      ]
+    },
     "ConnectorsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -2103,6 +2456,29 @@ expression: "&schema"
         }
       ]
     },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
       "anyOf": [
         {
@@ -2346,6 +2722,37 @@ expression: "&schema"
         }
       ]
     },
+    "Event_for_ConnectorAttributes_and_ConnectorSelector": {
+      "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_ConnectorSelector",
+          "description": "#/definitions/Condition_for_ConnectorSelector"
+        },
+        "level": {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        "message": {
+          "description": "The event message.",
+          "type": "string"
+        },
+        "on": {
+          "$ref": "#/definitions/EventOn",
+          "description": "#/definitions/EventOn"
+        }
+      },
+      "required": [
+        "level",
+        "message",
+        "on"
+      ],
+      "type": "object"
+    },
     "Event_for_RouterAttributes_and_RouterSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
@@ -2475,6 +2882,10 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Events are",
       "properties": {
+        "connector": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>"
+        },
         "router": {
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>"
@@ -3397,6 +3808,42 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_ConnectorSelector",
+          "description": "#/definitions/Condition_for_ConnectorSelector"
+        },
+        "description": {
+          "description": "The description of the instrument.",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/InstrumentType",
+          "description": "#/definitions/InstrumentType"
+        },
+        "unit": {
+          "description": "The units of the instrument, e.g. \"ms\", \"bytes\", \"requests\".",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/definitions/ConnectorValue",
+          "description": "#/definitions/ConnectorValue"
+        }
+      },
+      "required": [
+        "description",
+        "type",
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    },
     "Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue": {
       "additionalProperties": false,
       "properties": {
@@ -3566,6 +4013,10 @@ expression: "&schema"
         "cache": {
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>",
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
+        },
+        "connector": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>"
         },
         "default_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
@@ -5330,6 +5781,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SelectorOrValue_for_ConnectorSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AttributeValue",
+          "description": "#/definitions/AttributeValue"
+        },
+        {
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
+        }
+      ]
+    },
     "SelectorOrValue_for_GraphQLSelector": {
       "anyOf": [
         {
@@ -5518,6 +5981,31 @@ expression: "&schema"
           },
           "required": [
             "alias"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_ConnectorSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
           ],
           "type": "object"
         }
@@ -7923,6 +8411,77 @@ expression: "&schema"
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
           "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ConnectorSelector",
+        "description": "#/definitions/ConnectorSelector"
+      },
+      "properties": {
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector",
+        "description": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector"
+      },
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "request": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "response": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue",
+        "description": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue"
+      },
+      "properties": {
+        "http.client.request.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.request.duration": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.response.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
         }
       },
       "type": "object"
