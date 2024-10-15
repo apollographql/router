@@ -3,7 +3,7 @@
 // If any of the tests fail, the thrown error will cause the respective rust
 // unit test to fail.
 
-fn process_common_request(check_context_method_and_id, request) {
+fn process_common_request(check_context_method_and_id, check_body, request) {
     if check_context_method_and_id {
         if request.context.entries != () {
             throw(`context entries: expected: (), actual: ${request.context.entries}`);
@@ -15,17 +15,19 @@ fn process_common_request(check_context_method_and_id, request) {
             throw(`query: expected: "string", actual: ${type_of(request.id)}`);
         }
     }
-    if request.body.operation_name != () {
-        throw(`operation name: expected: canned, actual: ${request.body.operation_name}`);
-    }
-    if request.body.query != () {
-        throw(`query: expected: (), actual: ${request.body.query}`);
-    }
-    if request.body.variables != #{} {
-        throw(`query: expected: #{}, actual: ${request.body.variables}`);
-    }
-    if request.body.extensions != #{} {
-        throw(`query: expected: #{}, actual: ${request.body.extensions}`);
+    if check_body {
+        if request.body.operation_name != () {
+            throw(`operation name: expected: canned, actual: ${request.body.operation_name}`);
+        }
+        if request.body.query != () {
+            throw(`query: expected: (), actual: ${request.body.query}`);
+        }
+        if request.body.variables != #{} {
+            throw(`query: expected: #{}, actual: ${request.body.variables}`);
+        }
+        if request.body.extensions != #{} {
+            throw(`query: expected: #{}, actual: ${request.body.extensions}`);
+        }
     }
     if request.uri.host != () {
         throw(`query: expected: (), actual: ${request.uri.host}`);
@@ -33,6 +35,10 @@ fn process_common_request(check_context_method_and_id, request) {
     if request.uri.path != "/" {
         throw(`query: expected: "/", actual: ${request.uri.path}`);
     }
+}
+
+fn process_router_request(request){
+    process_common_request(true, false, request);
 }
 
 fn process_supergraph_request(request) {
@@ -80,16 +86,16 @@ fn process_supergraph_request(request) {
 }
 
 fn process_execution_request(request) {
-    process_common_request(true, request);
+    process_common_request(true, true, request);
     if request.query_plan != "" {
         throw(`query: expected: (), actual: ${request.query_plan}`);
     }
 }
 
 fn process_subgraph_request(request) {
-    process_common_request(true, request);
+    process_common_request(true, true, request);
     // subgraph doesn't have a context member
-    process_common_request(false, request.subgraph);
+    process_common_request(false, true, request.subgraph);
 
     if request.subgraph_request_id == () {
         throw(`subgraph request must have a subgraph request id`);
