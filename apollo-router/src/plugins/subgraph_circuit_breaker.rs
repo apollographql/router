@@ -185,9 +185,9 @@ impl Plugin for SubgraphCircuitBreakerPlugin {
         }
 
         let circuit_breaker = checkpoint.unwrap();
+        let is_call_permitted = circuit_breaker.is_call_permitted();
         let service_name = subgraph_name.to_string();
 
-        let is_call_permitted = circuit_breaker.is_call_permitted();
         ServiceBuilder::new()
             .checkpoint(move |req: Request| {
                 if is_call_permitted {
