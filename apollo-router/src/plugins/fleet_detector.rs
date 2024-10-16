@@ -49,21 +49,21 @@ fn detect_cpu_count(system: &System) -> u64 {
 
     let system_cpus = system.cpus().len() as u64;
     // Grab the contents of /proc/filesystems
-    let filesystems_file = fs::read_to_string("/proc/filesystems").unwrap();
-    // Parse the list and only take the first column, filtering to elements that contain
-    // 'cgroups'
-    let fses: HashSet<&str> = filesystems_file
-        .split('\n')
-        .map(|x| x.split_whitespace().next().unwrap())
-        .filter(|x| x.contains("cgroup"))
-        .collect();
+    let fses: HashSet<String> = match fs::read_to_string("/proc/filesystems") {
+        Ok(content) => content
+            .lines()
+            .map(|x| x.split_whitespace().next().unwrap_or("").to_string())
+            .filter(|x| x.contains("cgroup"))
+            .collect(),
+        Err(_) => return system_cpus,
+    };
 
     if fses.contains("cgroup2") {
         // If we're looking at cgroup2 then we need to look in `cpu.max`
         match fs::read_to_string("/sys/fs/cgroup/cpu.max") {
             Ok(readings) => {
                 // The format of the file lists the quota first, followed by the period,
-                // but the quote could also be max which would mean there are no restrictions.
+                // but the quota could also be max which would mean there are no restrictions.
                 if readings.starts_with("max") {
                     system_cpus
                 } else {
