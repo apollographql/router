@@ -281,7 +281,10 @@ impl StaticCostCalculator {
         self.score_selection_set(
             ctx,
             &inline_fragment.selection_set,
-            inline_fragment.type_condition.as_ref().unwrap_or(parent_type),
+            inline_fragment
+                .type_condition
+                .as_ref()
+                .unwrap_or(parent_type),
             list_size_directive,
         )
     }
@@ -319,15 +322,10 @@ impl StaticCostCalculator {
                 parent_type,
                 list_size_directive.and_then(|dir| dir.size_of(f)),
             ),
-            Selection::FragmentSpread(s) => {
-                self.score_fragment_spread(ctx, s, list_size_directive)
+            Selection::FragmentSpread(s) => self.score_fragment_spread(ctx, s, list_size_directive),
+            Selection::InlineFragment(i) => {
+                self.score_inline_fragment(ctx, i, parent_type, list_size_directive)
             }
-            Selection::InlineFragment(i) => self.score_inline_fragment(
-                ctx,
-                i,
-                parent_type,
-                list_size_directive,
-            ),
         }
     }
 
