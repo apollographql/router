@@ -1177,6 +1177,9 @@ where
         .transpose()?;
     let context_to_send = response_config.context.then(|| response.context.clone());
     let service_name = response_config.service_name.then_some(service_name);
+    let subgraph_request_id = response_config
+        .subgraph_request_id
+        .then_some(response.id.clone());
 
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphResponse)
@@ -1186,6 +1189,7 @@ where
         .and_context(context_to_send)
         .and_status_code(status_to_send)
         .and_service_name(service_name)
+        .and_subgraph_request_id(subgraph_request_id)
         .build();
 
     tracing::debug!(?payload, "externalized output");
