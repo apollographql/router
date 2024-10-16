@@ -2,7 +2,7 @@
 
 This adds support to read the port from the `request.uri.port`/`request.subgraph.uri.port` functions in Rhai, enabling the ability to update the full URI for subgraph fetches. For example: 
 
-```rs
+```rust
 fn subgraph_service(service, subgraph){
     service.map_request(|request|{
         log_info(`${request.subgraph.uri.port}`);
@@ -16,4 +16,5 @@ fn subgraph_service(service, subgraph){
     });
 }
 ```
+
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5439
