@@ -15,14 +15,7 @@ telemetry:
         sampler: 0.1
         # Send all spans to the Datadog agent. 
         preview_datadog_agent_sampling: true
-      
-      # Example OTLP exporter configuration
-      otlp:
-        enabled: true
 
-      # Example Datadog native exporter configuration 
-      datadog:
-        enabled: true
         
 ```
 
@@ -30,6 +23,10 @@ By using these options, you can decrease your Datadog bill as you will only be s
 
 > [!IMPORTANT]
 > Users must enable `preview_datadog_agent_sampling` to get accurate APM metrics. Users that have been using recent versions of the router will have to modify their configuration to retain full APM metrics. 
+
+> [!IMPORTANT]
+> The Router does not support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+> Configuring `traces_per_second` in the Datadog agent will NOT dynamically adjust the Router's sampling rate to meet the target rate.
 
 > [!IMPORTANT]
 > Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.

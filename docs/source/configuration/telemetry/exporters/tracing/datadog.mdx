@@ -75,15 +75,16 @@ telemetry:
     tracing:
       common:
         # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
-        preview_datadog_agent_sampling: true
         sampler: 0.1
+        preview_datadog_agent_sampling: true
 ```
 
 <Note>
-
-    Using `preview_datadog_agent_sampling` will send ALL spans to the Datadog agent, but only the `sampler` percentage of them will be forwarded to Datadog. This means that your APM view will be correct at the cost of
-    the router sending more spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
-
+    The Router does not support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+    Configuring `traces_per_second` in the Datadog agent will not dynamically adjust the Router's sampling rate to meet the target rate.
+</Note>
+<Note>
+    Using `preview_datadog_agent_sampling` will send ALL spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
 </Note>
 
 ### Enabling log correlation
