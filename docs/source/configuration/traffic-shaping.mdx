@@ -187,6 +187,23 @@ traffic_shaping:
 
 <HttpConnection type="subgraph" />
 
+### DNS resolution strategy
+
+You can also change DNS resolution strategy applied to subgraphs's URL:
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    dns_resolution_strategy: ipv4_then_ipv6
+
+```
+
+Possible strategies are:
+* `ipv4_only` - Only query for `A` (IPv4) records.
+* `ipv6_only` - Only query for `AAAA` (IPv6) records.
+* `ipv4_and_ipv6` - Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel.
+* `ipv6_then_ipv4` - Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records.
+* `ipv4_then_ipv6`(default) - Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records.
+
 ### Ordering
 
 Traffic shaping always executes these steps in the same order, to ensure a consistent behaviour. Declaration order in the configuration will not affect the runtime order:

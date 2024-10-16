@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use crate::plugins::traffic_shaping::Http2Config;
 
-#[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema, buildstructor::Builder)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema, buildstructor::Builder)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
     pub(crate) experimental_http2: Option<Http2Config>,
