@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Service;
+use tracing::Span;
 use tracing_futures::Instrument;
 
 use super::entity::Subgraph;
@@ -19,9 +20,14 @@ use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::cache::invalidation::InvalidationRequest;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::ListenAddr;
+
+pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
@@ -102,6 +108,7 @@ impl Service<router::Request> for InvalidationService {
             async move {
                 let (parts, body) = req.router_request.into_parts();
                 if !parts.headers.contains_key(AUTHORIZATION) {
+                    Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                     return Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::UNAUTHORIZED)
@@ -114,6 +121,7 @@ impl Service<router::Request> for InvalidationService {
                     Method::POST => {
                         let body = Into::<RouterBody>::into(body)
                             .to_bytes()
+                            .instrument(tracing::info_span!("to_bytes"))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -130,14 +138,26 @@ impl Service<router::Request> for InvalidationService {
                             .headers
                             .get(AUTHORIZATION)
                             .ok_or("cannot find authorization header")?
-                            .to_str()?;
+                            .to_str()
+                            .inspect_err(|_err| {
+                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            })?;
                         match body {
                             Ok(body) => {
+                                Span::current().record(
+                                    "invalidation.request.kinds",
+                                    body.iter()
+                                        .map(|i| i.kind())
+                                        .collect::<Vec<&'static str>>()
+                                        .join(", "),
+                                );
                                 let valid_shared_key =
                                     body.iter().map(|b| b.subgraph_name()).any(|subgraph_name| {
                                         valid_shared_key(&config, shared_key, subgraph_name)
                                     });
                                 if !valid_shared_key {
+                                    Span::current()
+                                        .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::UNAUTHORIZED)
@@ -148,6 +168,7 @@ impl Service<router::Request> for InvalidationService {
                                 }
                                 match invalidation
                                     .invalidate(InvalidationOrigin::Endpoint, body)
+                                    .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {
                                     Ok(count) => Ok(router::Response {
@@ -162,34 +183,48 @@ impl Service<router::Request> for InvalidationService {
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     }),
-                                    Err(err) => Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::BAD_REQUEST)
-                                            .body(err.to_string().into())
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    }),
+                                    Err(err) => {
+                                        Span::current()
+                                            .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                        Ok(router::Response {
+                                            response: http::Response::builder()
+                                                .status(StatusCode::BAD_REQUEST)
+                                                .body(err.to_string().into())
+                                                .map_err(BoxError::from)?,
+                                            context: req.context,
+                                        })
+                                    }
                                 }
                             }
-                            Err(err) => Ok(router::Response {
-                                response: http::Response::builder()
-                                    .status(StatusCode::BAD_REQUEST)
-                                    .body(err.into())
-                                    .map_err(BoxError::from)?,
-                                context: req.context,
-                            }),
+                            Err(err) => {
+                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                Ok(router::Response {
+                                    response: http::Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(err.into())
+                                        .map_err(BoxError::from)?,
+                                    context: req.context,
+                                })
+                            }
                         }
                     }
-                    _ => Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body("".into())
-                            .map_err(BoxError::from)?,
-                        context: req.context,
-                    }),
+                    _ => {
+                        Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                        Ok(router::Response {
+                            response: http::Response::builder()
+                                .status(StatusCode::METHOD_NOT_ALLOWED)
+                                .body("".into())
+                                .map_err(BoxError::from)?,
+                            context: req.context,
+                        })
+                    }
                 }
             }
-            .instrument(tracing::info_span!("invalidation_endpoint")),
+            .instrument(tracing::info_span!(
+                INVALIDATION_ENDPOINT_SPAN_NAME,
+                "invalidation.request.kinds" = ::tracing::field::Empty,
+                "otel.status_code" = OTEL_STATUS_CODE_OK,
+            )),
         )
     }
 }
