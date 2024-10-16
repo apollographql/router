@@ -826,11 +826,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    static_page: StaticPageLayer,
-    apq_layer: APQLayer,
-    pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
-    query_analysis_layer: QueryAnalysisLayer,
-    batching: Batching,
+    sb: Arc<parking_lot::Mutex<router::BoxCloneService>>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -882,13 +878,53 @@ impl RouterCreator {
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
 
+        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
+            supergraph_creator.clone(),
+            apq_layer,
+            persisted_query_layer,
+            query_analysis_layer,
+            configuration.batching.clone(),
+        ));
+
+        // NOTE: This is very important code. This is where the client request load management
+        // ability of the router pipeline is provided.
+        let sb = ServiceBuilder::new()
+            .map_result(|result_arg| match result_arg {
+                Ok(arg) => match arg {
+                    // Note: It might be interesting to look at the result and see if the bridge
+                    // pool is full.
+                    little_loadshedder::LoadShedResponse::Inner(inner) => Ok(inner),
+                    little_loadshedder::LoadShedResponse::Overload => Err(BoxError::from(
+                        tower::load_shed::error::Overloaded::default(),
+                    )),
+                },
+                Err(err) => Err(err),
+            })
+            .layer(little_loadshedder::LoadShedLayer::new(
+                0.90,
+                std::time::Duration::from_millis(2_500),
+            ))
+            // Note: Alternative solutions here. Either we use the little loadshedder for adaptive
+            // load shedding or we use timeout, concurrency limits and rate limits to achieve the
+            // same thing.
+            // .load_shed()
+            // .concurrency_limit(10_000)
+            // .timeout(std::time::Duration::from_secs(2))
+            .buffer(50_000)
+            .layer(static_page.clone())
+            // .rate_limit(50_000, std::time::Duration::from_secs(1))
+            .service(
+                supergraph_creator
+                    .plugins()
+                    .iter()
+                    .rev()
+                    .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+            )
+            .boxed_clone();
+
         Ok(Self {
             supergraph_creator,
-            static_page,
-            apq_layer,
-            query_analysis_layer,
-            persisted_query_layer,
-            batching: configuration.batching.clone(),
+            sb: Arc::new(parking_lot::Mutex::new(sb)),
         })
     }
 
@@ -900,23 +936,7 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            self.supergraph_creator.clone(),
-            self.apq_layer.clone(),
-            self.persisted_query_layer.clone(),
-            self.query_analysis_layer.clone(),
-            self.batching.clone(),
-        ));
-
-        ServiceBuilder::new()
-            .layer(self.static_page.clone())
-            .service(
-                self.supergraph_creator
-                    .plugins()
-                    .iter()
-                    .rev()
-                    .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-            )
+        self.sb.lock().clone()
     }
 }
 

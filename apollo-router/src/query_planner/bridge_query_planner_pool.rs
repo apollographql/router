@@ -31,8 +31,6 @@ use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
 use crate::Configuration;
 
-static CHANNEL_SIZE: usize = 1_000;
-
 #[derive(Clone)]
 pub(crate) struct BridgeQueryPlannerPool {
     js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
@@ -61,10 +59,12 @@ impl BridgeQueryPlannerPool {
 
         let mut join_set = JoinSet::new();
 
+        // Note: To avoid excess queueing here, we limit our channels to exactly match the size of
+        // the pool.
         let (sender, receiver) = bounded::<(
             QueryPlannerRequest,
             oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
-        )>(CHANNEL_SIZE);
+        )>(size.into());
 
         let mut old_js_planners_iterator = old_js_planners.into_iter();
 
