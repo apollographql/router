@@ -325,7 +325,7 @@ async fn apq() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn entity_cache() -> Result<(), BoxError> {
+async fn entity_cache_basic() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
