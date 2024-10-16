@@ -795,6 +795,15 @@ fn ast_value_maybe_coerced_to(x: &ast::Value, y: &ast::Value) -> bool {
             }
         }
 
+        // Special case 3: JS QP may convert string to int for custom scalars, while Rust doesn't.
+        // - Note: This conversion seems a bit difficult to implement in the `apollo-federation`'s
+        //         `coerce_value` function, since IntValue's constructor is private to the crate.
+        (ast::Value::Int(ref x), ast::Value::String(ref y)) => {
+            if x.as_str() == y {
+                return true;
+            }
+        }
+
         // Recurse into list items.
         (ast::Value::List(ref x), ast::Value::List(ref y)) => {
             if vec_matches(x, y, |xx, yy| {
@@ -1023,6 +1032,17 @@ mod ast_comparison_tests {
     fn test_selection_argument_order() {
         let op_x = r#"{ x(arg1: "one", arg2: "two") }"#;
         let op_y = r#"{ x(arg2: "two", arg1: "one") }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_string_to_id_coercion_difference() {
+        // JS QP coerces strings into integer for ID type, while Rust QP doesn't.
+        // This tests a special case that same_ast_document accepts this difference.
+        let op_x = r#"{ x(id: 123) }"#;
+        let op_y = r#"{ x(id: "123") }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
