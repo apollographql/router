@@ -224,7 +224,7 @@ fn root_fields(
                     selection: Arc::new(
                         connector
                             .selection
-                            .apply_selection_set(&field.selection_set),
+                            .apply_selection_set(&request.operation, &field.selection_set),
                     ),
                     inputs: request_inputs,
                 };
@@ -278,12 +278,13 @@ fn entities_from_request(
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;
+    let (entities_field, typename_requested) =
+        graphql_utils::get_entity_fields(&request.operation, op)?;
 
     let selection = Arc::new(
         connector
             .selection
-            .apply_selection_set(&entities_field.selection_set),
+            .apply_selection_set(&request.operation, &entities_field.selection_set),
     );
 
     representations
@@ -365,18 +366,43 @@ fn entities_with_fields_from_request(
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;
+    let (entities_field, typename_requested) =
+        graphql_utils::get_entity_fields(&request.operation, op)?;
 
     let types_and_fields = entities_field
         .selection_set
         .selections
         .iter()
         .map(|selection| match selection {
-            Selection::Field(_) => Ok(vec![]),
+            Selection::Field(_) => Ok::<_, MakeRequestError>(vec![]),
 
-            Selection::FragmentSpread(_) => Err(InvalidOperation(
-                "_entities selection can't be a named fragment".into(),
-            )),
+            Selection::FragmentSpread(f) => {
+                let frag = f.fragment_def(&request.operation).expect("fragment exists");
+                let typename = frag.type_condition();
+                Ok(frag
+                    .selection_set
+                    .selections
+                    .iter()
+                    .filter_map(|sel| {
+                        let field = match sel {
+                            Selection::Field(f) => {
+                                if f.name == TYPENAME {
+                                    None
+                                } else {
+                                    Some(f)
+                                }
+                            }
+                            Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
+                                return Some(Err(InvalidOperation(
+                                    "handling fragments inside entity selections not implemented"
+                                        .into(),
+                                )))
+                            }
+                        };
+                        field.map(|f| Ok((typename.to_string(), f)))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?)
+            }
 
             Selection::InlineFragment(frag) => {
                 let typename = frag
@@ -387,17 +413,23 @@ fn entities_with_fields_from_request(
                     .selection_set
                     .selections
                     .iter()
-                    .map(|sel| {
+                    .filter_map(|sel| {
                         let field = match sel {
-                            Selection::Field(f) => f,
+                            Selection::Field(f) => {
+                                if f.name == TYPENAME {
+                                    None
+                                } else {
+                                    Some(f)
+                                }
+                            }
                             Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
-                                return Err(InvalidOperation(
+                                return Some(Err(InvalidOperation(
                                     "handling fragments inside entity selections not implemented"
                                         .into(),
-                                ))
+                                )));
                             }
                         };
-                        Ok((typename.to_string(), field))
+                        field.map(|f| Ok((typename.to_string(), f)))
                     })
                     .collect::<Result<Vec<_>, _>>()?)
             }
@@ -424,7 +456,7 @@ fn entities_with_fields_from_request(
             let selection = Arc::new(
                 connector
                     .selection
-                    .apply_selection_set(&field.selection_set),
+                    .apply_selection_set(&request.operation, &field.selection_set),
             );
 
             representations.iter().map(move |(i, representation)| {
@@ -1298,6 +1330,327 @@ mod tests {
     }
 
     #[test]
+    fn entities_from_request_entity_with_fragment() {
+        let partial_sdl = r#"
+        type Query {
+          entity(id: ID!): Entity
+        }
+
+        type Entity {
+          field: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let req = crate::services::connect::Request::builder()
+            .service_name("subgraph_Query_entity_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
+                query($representations: [_Any!]!) {
+                    _entities(representations: $representations) {
+                        ... _generated_Entity
+                    }
+                }
+                fragment _generated_Entity on Entity {
+                    __typename
+                    field
+                    alias: field
+                }
+                "#
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .build();
+
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("field").unwrap().1,
+            entity_resolver: Some(super::EntityResolver::Explicit),
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
+        [
+            Entity {
+                index: 0,
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "__typename",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
+                                    },
+                                ),
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $,
+                                                range: None,
+                                            },
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
+                                                        range: None,
+                                                    },
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "_Entity",
+                                                                    ),
+                                                                    range: None,
+                                                                },
+                                                            ],
+                                                            range: None,
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: None,
+                                                    },
+                                                ),
+                                                range: None,
+                                            },
+                                        ),
+                                        range: None,
+                                    },
+                                },
+                            ),
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
+                                None,
+                            ),
+                            Field(
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "alias",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
+                                    },
+                                ),
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..5,
+                        ),
+                    },
+                ),
+                inputs: RequestInputs {
+                    args: {
+                        "__typename": String(
+                            "Entity",
+                        ),
+                        "id": String(
+                            "1",
+                        ),
+                    },
+                    this: {},
+                },
+            },
+            Entity {
+                index: 1,
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "__typename",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
+                                    },
+                                ),
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $,
+                                                range: None,
+                                            },
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
+                                                        range: None,
+                                                    },
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "_Entity",
+                                                                    ),
+                                                                    range: None,
+                                                                },
+                                                            ],
+                                                            range: None,
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: None,
+                                                    },
+                                                ),
+                                                range: None,
+                                            },
+                                        ),
+                                        range: None,
+                                    },
+                                },
+                            ),
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
+                                None,
+                            ),
+                            Field(
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "alias",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
+                                    },
+                                ),
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..5,
+                        ),
+                    },
+                ),
+                inputs: RequestInputs {
+                    args: {
+                        "__typename": String(
+                            "Entity",
+                        ),
+                        "id": String(
+                            "2",
+                        ),
+                    },
+                    this: {},
+                },
+            },
+        ]
+        "###);
+    }
+
+    #[test]
     fn entities_from_request_root_field() {
         let partial_sdl = r#"
         type Query {
@@ -1547,6 +1900,285 @@ mod tests {
                             alias: field(foo: $bye) { selected }
                         }
                     }
+                }
+            "#
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ],
+                    "bye": "bye"
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .build();
+
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                name!(field),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("selected").unwrap().1,
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
+        [
+            EntityField {
+                index: 0,
+                field_name: "field",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..8,
+                        ),
+                    },
+                ),
+                inputs: RequestInputs {
+                    args: {
+                        "foo": String(
+                            "hi",
+                        ),
+                    },
+                    this: {
+                        "__typename": String(
+                            "Entity",
+                        ),
+                        "id": String(
+                            "1",
+                        ),
+                    },
+                },
+            },
+            EntityField {
+                index: 1,
+                field_name: "field",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..8,
+                        ),
+                    },
+                ),
+                inputs: RequestInputs {
+                    args: {
+                        "foo": String(
+                            "hi",
+                        ),
+                    },
+                    this: {
+                        "__typename": String(
+                            "Entity",
+                        ),
+                        "id": String(
+                            "2",
+                        ),
+                    },
+                },
+            },
+            EntityField {
+                index: 0,
+                field_name: "alias",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..8,
+                        ),
+                    },
+                ),
+                inputs: RequestInputs {
+                    args: {
+                        "foo": String(
+                            "bye",
+                        ),
+                    },
+                    this: {
+                        "__typename": String(
+                            "Entity",
+                        ),
+                        "id": String(
+                            "1",
+                        ),
+                    },
+                },
+            },
+            EntityField {
+                index: 1,
+                field_name: "alias",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..8,
+                        ),
+                    },
+                ),
+                inputs: RequestInputs {
+                    args: {
+                        "foo": String(
+                            "bye",
+                        ),
+                    },
+                    this: {
+                        "__typename": String(
+                            "Entity",
+                        ),
+                        "id": String(
+                            "2",
+                        ),
+                    },
+                },
+            },
+        ]
+        "###);
+    }
+
+    #[test]
+    fn entities_with_fields_from_request_with_fragment() {
+        let partial_sdl = r#"
+        type Query { _: String } # just to make it valid
+
+        type Entity { # @key(fields: "id")
+          id: ID!
+          field(foo: String): T
+        }
+
+        type T {
+          selected: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let req = crate::services::connect::Request::builder()
+            .service_name("subgraph_Entity_field_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
+                query($representations: [_Any!]!, $bye: String) {
+                    _entities(representations: $representations) {
+                        ... _generated_Entity
+                    }
+                }
+                fragment _generated_Entity on Entity {
+                    __typename
+                    field(foo: "hi") { selected }
+                    alias: field(foo: $bye) { selected }
                 }
             "#
                     .to_string(),
