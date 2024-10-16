@@ -42,30 +42,6 @@ impl Referencers {
             || self.input_object_types.contains_key(name)
     }
 
-    pub(crate) fn get_scalar_type(
-        &self,
-        name: &str,
-    ) -> Result<&ScalarTypeReferencers, FederationError> {
-        self.scalar_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Scalar type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
-    pub(crate) fn get_object_type(
-        &self,
-        name: &str,
-    ) -> Result<&ObjectTypeReferencers, FederationError> {
-        self.object_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Object type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
     pub(crate) fn get_interface_type(
         &self,
         name: &str,
@@ -73,42 +49,6 @@ impl Referencers {
         self.interface_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: "Interface type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
-    pub(crate) fn get_union_type(
-        &self,
-        name: &str,
-    ) -> Result<&UnionTypeReferencers, FederationError> {
-        self.union_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Union type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
-    pub(crate) fn get_enum_type(
-        &self,
-        name: &str,
-    ) -> Result<&EnumTypeReferencers, FederationError> {
-        self.enum_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Enum type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
-    pub(crate) fn get_input_object_type(
-        &self,
-        name: &str,
-    ) -> Result<&InputObjectTypeReferencers, FederationError> {
-        self.input_object_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Input object type referencers unexpectedly missing type".to_owned(),
             }
             .into()
         })
