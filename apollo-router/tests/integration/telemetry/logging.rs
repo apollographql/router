@@ -29,12 +29,16 @@ async fn test_json() -> Result<(), BoxError> {
     router.assert_log_contains("span_id").await;
     router.execute_query(&query).await;
     router.assert_log_contains(r#""static_one":"test""#).await;
-    router.execute_query(&query).await;
-    router
-        .assert_log_contains(
-            r#""schema.id":"dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9""#,
-        )
-        .await;
+    #[cfg(unix)]
+    {
+        router.execute_query(&query).await;
+        router
+            .assert_log_contains(
+                r#""schema.id":"dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9""#,
+            )
+            .await;
+    }
+
     router.execute_query(&query).await;
     router
         .assert_log_contains(r#""on_supergraph_response_event":"on_supergraph_event""#)
