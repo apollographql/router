@@ -44,8 +44,8 @@ use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::router::body::RouterBody;
-use crate::services::trust_dns_connector::new_async_http_connector;
-use crate::services::trust_dns_connector::AsyncHyperResolver;
+use crate::services::hickory_dns_connector::new_async_http_connector;
+use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::Configuration;
 use crate::Context;
 

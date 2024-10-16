@@ -9,10 +9,10 @@ use std::task::Poll;
 use hyper::client::connect::dns::Name;
 use hyper::client::HttpConnector;
 use hyper::service::Service;
-use trust_dns_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioAsyncResolver;
 
-/// Wrapper around trust-dns-resolver's
-/// [`TokioAsyncResolver`](https://docs.rs/trust-dns-resolver/0.23.2/trust_dns_resolver/type.TokioAsyncResolver.html)
+/// Wrapper around hickory-resolver's
+/// [`TokioAsyncResolver`](https://docs.rs/hickory-resolver/latest/hickory_resolver/type.TokioAsyncResolver.html)
 ///
 /// The resolver runs a background Task which manages dns requests. When a new resolver is created,
 /// the background task is also created, it needs to be spawned on top of an executor before using the client,
@@ -22,7 +22,7 @@ pub(crate) struct AsyncHyperResolver(TokioAsyncResolver);
 
 impl AsyncHyperResolver {
     /// constructs a new resolver from default configuration, uses the corresponding method of
-    /// [`TokioAsyncResolver`](https://docs.rs/trust-dns-resolver/0.23.2/trust_dns_resolver/type.TokioAsyncResolver.html#method.new)
+    /// [`TokioAsyncResolver`](https://docs.rs/hickory-resolver/latest/hickory_resolver/type.TokioAsyncResolver.html)
     pub(crate) fn new_from_system_conf() -> Result<Self, io::Error> {
         let resolver = TokioAsyncResolver::tokio_from_system_conf()?;
         Ok(Self(resolver))
