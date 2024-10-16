@@ -909,6 +909,17 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn fragments_cost() {
+        let schema = include_str!("./fixtures/basic_supergraph_schema.graphql");
+        let query = include_str!("./fixtures/basic_fragments_query.graphql");
+        let variables = "{}";
+
+        assert_eq!(basic_estimated_cost(schema, query, variables), 102.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 102.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 102.0);
+    }
+
+    #[test(tokio::test)]
     async fn federated_query_with_name() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_named_query.graphql");
