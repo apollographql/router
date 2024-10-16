@@ -207,6 +207,7 @@ fn coerce_value(
         // Custom scalars accept any value, even objects and lists.
         (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
+        (Value::Enum(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         // Enums must match the type.
         (Value::Enum(value), Some(ExtendedType::Enum(enum_)))
             if enum_.values.contains_key(value) => {}
@@ -414,5 +415,35 @@ mod tests {
           test(bools: [true], ints: [1], strings: ["string"], floats: [2.0])
         }
         "#);
+    }
+
+    #[test]
+    fn coerces_enum_values() {
+        let schema = Schema::parse_and_validate(
+            r#"
+        scalar CustomScalar
+        type Query {
+          test(
+            string: String!,
+            strings: [String!]!,
+            custom: CustomScalar!,
+            customList: [CustomScalar!]!,
+          ): Int
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        // Enum literals are only coerced into lists if the item type is a custom scalar type.
+        insta::assert_snapshot!(parse_and_coerce(&schema, r#"
+        {
+          test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: enumVal2)
+        }
+        "#), @r###"
+        {
+          test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: [enumVal2])
+        }
+        "###);
     }
 }
