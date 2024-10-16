@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
+use tokio::task::JoinHandle;
 use tower::BoxError;
 use tracing::debug;
 use tracing::info;
@@ -9,7 +10,9 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 
 #[derive(Debug)]
-struct FleetDetector {}
+struct FleetDetector {
+    handle: JoinHandle<()>,
+}
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
@@ -20,17 +23,34 @@ impl Plugin for FleetDetector {
 
     async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("beginning environment detection");
-        let sys = &System::new_all();
-        detect_cpu_values(sys);
-        detect_memory_values(sys);
-        Ok(FleetDetector {})
+        debug!("spawning continuous detector task");
+        let handle = tokio::task::spawn(async {
+            let mut sys = System::new_all();
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                sys.refresh_cpu_all();
+                sys.refresh_memory();
+                detect_cpu_values(&sys);
+                detect_memory_values(&sys);
+            }
+        });
+
+        Ok(FleetDetector { handle })
     }
 }
+
+impl Drop for FleetDetector {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
 fn detect_cpu_values(system: &System) {
     let cpus = system.cpus();
-    let cpu_freq = cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64;
-    info!(counter.apollo.router.instance.cpu_freq = cpu_freq);
     let cpu_count = detect_cpu_count(system);
+    let cpu_freq = cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64;
+    info!(value.apollo.router.instance.cpu_freq = cpu_freq);
     info!(counter.apollo.router.instance.cpu_count = cpu_count);
 }
 
