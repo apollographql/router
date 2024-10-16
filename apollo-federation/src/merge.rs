@@ -751,7 +751,7 @@ impl DirectiveNames {
         let external = federation_identity
             .map(|link| link.directive_name_in_schema(&FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC))
             .unwrap_or(FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC);
-        
+
         let interface_object = federation_identity
             .map(|link| {
                 link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
@@ -771,7 +771,9 @@ impl DirectiveNames {
             .unwrap_or(FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC);
 
         let from_context = federation_identity
-            .map(|link| link.directive_name_in_schema(&FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC))
+            .map(|link| {
+                link.directive_name_in_schema(&FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
+            })
             .unwrap_or(FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC);
 
         Self {

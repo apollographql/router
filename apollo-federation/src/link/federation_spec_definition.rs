@@ -425,7 +425,7 @@ impl FederationSpecDefinition {
             )?,
         })
     }
-    
+
     pub(crate) fn context_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -495,7 +495,7 @@ impl FederationSpecDefinition {
             arguments,
         })
     }
-    
+
     pub(crate) fn get_cost_spec_definition(
         &self,
         schema: &FederationSchema,
