@@ -255,7 +255,6 @@ impl StaticCostCalculator {
         &self,
         ctx: &ScoringContext,
         fragment_spread: &FragmentSpread,
-        parent_type: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
@@ -267,7 +266,7 @@ impl StaticCostCalculator {
         self.score_selection_set(
             ctx,
             &fragment.selection_set,
-            parent_type,
+            fragment.type_condition(),
             list_size_directive,
         )
     }
@@ -282,7 +281,7 @@ impl StaticCostCalculator {
         self.score_selection_set(
             ctx,
             &inline_fragment.selection_set,
-            parent_type,
+            inline_fragment.type_condition.as_ref().unwrap_or(parent_type),
             list_size_directive,
         )
     }
@@ -321,12 +320,12 @@ impl StaticCostCalculator {
                 list_size_directive.and_then(|dir| dir.size_of(f)),
             ),
             Selection::FragmentSpread(s) => {
-                self.score_fragment_spread(ctx, s, parent_type, list_size_directive)
+                self.score_fragment_spread(ctx, s, list_size_directive)
             }
             Selection::InlineFragment(i) => self.score_inline_fragment(
                 ctx,
                 i,
-                i.type_condition.as_ref().unwrap_or(parent_type),
+                parent_type,
                 list_size_directive,
             ),
         }
