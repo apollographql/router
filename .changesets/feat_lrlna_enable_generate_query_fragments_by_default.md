@@ -1,16 +1,21 @@
-### Enable query fragment generation by default
+### Compress subgraph operations by generating fragments
 
-The router previously had `experimental_reuse_query_fragments` enabled by
-default when trying to optimize fragments before sending operations to subgraphs.
-While on occasion this algorithm can be more performant, we found that in vast
-majority of cases the query planner can be just as, and very often more, performant using
-`generate_query_fragments` query plan option, which also significantly reduces
-query size being sent to subgraphs. While the two options will produce correct
-responses, the queries produced internally by the query planner will differ.
+The router now compresses operations sent to subgraphs by default by generating fragment
+definitions and using them in the operation.
 
-This change enables `generate_query_fragments` by default, while disabling
-`experimental_reuse_query_fragments`. You can change this behavior with the
-following options:
+Initially, the router is using a very simple transformation that is implemented in both
+the JavaScript and Native query planners. We will improve the algorithm after the JavaScript
+planner is no longer supported.
+
+This replaces a previous experimental algorithm that was enabled by default.
+`experimental_reuse_query_fragments` attempted to intelligently reuse the fragment definitions
+from the original operation. Fragment generation is much faster, and in most cases produces
+better outputs too.
+
+If you are relying on the shape of fragments in your subgraph operations or tests, you can opt
+out of the new algorithm with the configuration below. Note we strongly recommend against
+relying on the shape of planned operations as new router features and optimizations may affect
+it, and we intend to remove `experimental_reuse_query_fragments` in a future release.
 
 ```yaml
 supergraph:
