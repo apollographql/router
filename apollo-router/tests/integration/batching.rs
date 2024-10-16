@@ -829,9 +829,6 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn it_matches_subgraph_request_ids_to_responses() {}
-
 /// Utility methods for these tests
 mod helper {
     use std::time::Duration;

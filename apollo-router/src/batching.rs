@@ -740,7 +740,6 @@ mod tests {
     fn expect_batch(request: &wiremock::Request) -> ResponseTemplate {
         let requests: Vec<Request> = request.body_json().unwrap();
 
-        println!("requests: {:?}", requests);
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
             let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
@@ -839,7 +838,6 @@ mod tests {
             })
             .collect();
         let request = serde_json::to_value(requests).unwrap();
-        println!("requests: {request:?}");
 
         let context = Context::new();
         let request = router::Request {

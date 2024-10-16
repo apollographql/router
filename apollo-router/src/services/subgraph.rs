@@ -270,7 +270,7 @@ impl Response {
         // Warning: the id argument forthis builder is an Option to make that a non breaking change
         // but this means that if a subgraph response is created explicitely without an id, it will
         // be generated here and not match the id from the subgraph request
-        let id = id.unwrap_or_else(SubgraphRequestId::new);
+        let id = id.unwrap_or_default();
 
         Self {
             response,
