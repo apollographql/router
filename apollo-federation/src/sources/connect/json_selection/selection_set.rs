@@ -29,6 +29,8 @@ use super::location::Ranged;
 use super::location::WithRange;
 use super::parser::MethodArgs;
 use super::parser::PathList;
+use super::ConditionalElse;
+use super::ConditionalTest;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
@@ -156,6 +158,13 @@ impl SubSelection {
                         }
                     }
                 }
+                NamedSelection::Spread(spread) => {
+                    // TODO Consider skipping or pruning spreads that end up empty?
+                    new_selections.push(NamedSelection::Spread(WithRange::new(
+                        spread.apply_selection_set(document, selection_set),
+                        spread.range(),
+                    )));
+                }
             }
         }
 
@@ -164,6 +173,33 @@ impl SubSelection {
             // Keep the old range even though it may be inaccurate after the
             // removal of selections, since it still indicates where the
             // original SubSelection came from.
+            range: self.range.clone(),
+        }
+    }
+}
+
+impl ConditionalTest {
+    pub(crate) fn apply_selection_set(
+        &self,
+        document: &ExecutableDocument,
+        selection_set: &SelectionSet,
+    ) -> Self {
+        Self {
+            test: self.test.clone(),
+            when_true: self.when_true.apply_selection_set(document, selection_set),
+            when_else: self.when_else.as_ref().map(|cond_else| {
+                WithRange::new(
+                    match cond_else.as_ref() {
+                        ConditionalElse::Else(sub) => {
+                            ConditionalElse::Else(sub.apply_selection_set(document, selection_set))
+                        }
+                        ConditionalElse::ElseIf(test) => ConditionalElse::ElseIf(
+                            test.apply_selection_set(document, selection_set),
+                        ),
+                    },
+                    cond_else.range(),
+                )
+            }),
             range: self.range.clone(),
         }
     }
