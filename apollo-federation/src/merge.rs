@@ -35,9 +35,11 @@ use indexmap::map::Iter;
 use itertools::Itertools;
 
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
@@ -725,6 +727,8 @@ struct DirectiveNames {
     interface_object: Name,
     r#override: Name,
     inaccessible: Name,
+    context: Name,
+    from_context: Name,
 }
 
 impl DirectiveNames {
@@ -747,7 +751,7 @@ impl DirectiveNames {
         let external = federation_identity
             .map(|link| link.directive_name_in_schema(&FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC))
             .unwrap_or(FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC);
-
+        
         let interface_object = federation_identity
             .map(|link| {
                 link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
@@ -762,11 +766,21 @@ impl DirectiveNames {
             .map(|link| link.directive_name_in_schema(&INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC))
             .unwrap_or(INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC);
 
+        let context = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC);
+
+        let from_context = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC);
+
         Self {
             key,
             requires,
             provides,
             external,
+            context,
+            from_context,
             interface_object,
             r#override,
             inaccessible,
