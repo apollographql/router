@@ -303,7 +303,7 @@ dependencies = [
  "memchr",
  "mime",
  "mockall",
- "multer",
+ "multer 3.1.0",
  "multimap 0.9.1",
  "notify",
  "nu-ansi-term 0.50.1",
@@ -605,7 +605,7 @@ dependencies = [
  "http 0.2.12",
  "indexmap 2.2.6",
  "mime",
- "multer",
+ "multer 2.1.0",
  "num-traits",
  "once_cell",
  "pin-project-lite",
@@ -4118,6 +4118,23 @@ dependencies = [
  "http 0.2.12",
  "httparse",
  "log",
+ "memchr",
+ "mime",
+ "spin",
+ "version_check",
+]
+
+[[package]]
+name = "multer"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http 1.1.0",
+ "httparse",
  "memchr",
  "mime",
  "spin",
