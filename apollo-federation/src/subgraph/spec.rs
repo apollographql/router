@@ -110,7 +110,10 @@ lazy_static! {
             (KEY_DIRECTIVE_NAME, FederationDirectiveName::Key),
             (EXTENDS_DIRECTIVE_NAME, FederationDirectiveName::Extends),
             (EXTERNAL_DIRECTIVE_NAME, FederationDirectiveName::External),
-            (FROM_CONTEXT_DIRECTIVE_NAME, FederationDirectiveName::FromContext),
+            (
+                FROM_CONTEXT_DIRECTIVE_NAME,
+                FederationDirectiveName::FromContext,
+            ),
             (
                 INACCESSIBLE_DIRECTIVE_NAME,
                 FederationDirectiveName::Inaccessible,
@@ -346,7 +349,7 @@ impl FederationSpecDefinitions {
             locations: vec![DirectiveLocation::Schema],
         }
     }
-    
+
     /// directive @context(name: String!) repeatable on INTERFACE | OBJECT
     fn context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
@@ -413,7 +416,7 @@ impl FederationSpecDefinitions {
             ],
         }
     }
-    
+
     /// directive @fromContext(field: String!) on ARGUMENT_DEFINITION
     fn from_context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
