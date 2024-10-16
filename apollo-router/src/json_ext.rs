@@ -526,8 +526,7 @@ impl ValueExt for Value {
         // The Int scalar type represents a signed 32‐bit numeric non‐fractional value.
         // When expected as an input type, only integer input values are accepted.
         // All other input values, including strings with numeric content, must raise a query error indicating an incorrect type.
-        self.as_i64().and_then(|x| i32::try_from(x).ok()).is_some()
-            || self.as_u64().and_then(|x| i32::try_from(x).ok()).is_some()
+        self.as_i64().is_some() || self.as_u64().and_then(|x| i64::try_from(x).ok()).is_some()
     }
 
     #[track_caller]

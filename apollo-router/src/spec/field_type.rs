@@ -176,7 +176,18 @@ fn validate_input_value(
     match type_name.as_str() {
         "String" => return from_bool(value.is_string()),
         // Spec: https://spec.graphql.org/June2018/#sec-Int
-        "Int" => return from_bool(value.is_valid_int_input()),
+        "Int" => {
+            let valid = value.is_valid_int_input();
+
+            if value.as_i32().is_none() {
+                tracing::warn!(
+                    "Input INT '{}' is larger than 32-bits and is not GraphQL spec-compliant.",
+                    value.to_string()
+                )
+            }
+
+            return from_bool(valid);
+        }
         // Spec: https://spec.graphql.org/draft/#sec-Float.Input-Coercion
         "Float" => return from_bool(value.is_valid_float_input()),
         // "The ID scalar type represents a unique identifier, often used to refetch an object
