@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -40,6 +41,12 @@ pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Se
 /// unique id for a subgraph request and the related response
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SubgraphRequestId(pub String);
+
+impl Display for SubgraphRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
