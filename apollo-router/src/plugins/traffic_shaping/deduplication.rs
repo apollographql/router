@@ -16,9 +16,7 @@ use tower::Layer;
 use tower::ServiceExt;
 
 use crate::batching::BatchQuery;
-use crate::graphql::Request;
 use crate::http_ext;
-use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -48,7 +46,7 @@ where
     }
 }
 
-type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
+type CacheKey = String;
 
 type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
@@ -86,21 +84,11 @@ where
     fn get_cache_key(
         request: &SubgraphRequest,
         deduplicate_query_ignored_headers: &Option<Vec<String>>,
-    ) -> (http_ext::Request<Request>, Arc<CacheKeyMetadata>) {
-        let authorization_cache_key = request.authorization.clone();
-        let cache_key: (http_ext::Request<Request>, Arc<CacheKeyMetadata>) =
-            if let Some(headers) = deduplicate_query_ignored_headers {
-                let mut cloned_request = request.clone();
-                for header in headers {
-                    cloned_request.subgraph_request.headers_mut().remove(header);
-                }
-                (
-                    (cloned_request.subgraph_request).into(),
-                    authorization_cache_key,
-                )
-            } else {
-                ((&request.subgraph_request).into(), authorization_cache_key)
-            };
+    ) -> String {
+        let request_hash = request.to_sha256(deduplicate_query_ignored_headers.clone());
+        let auth_hash = request.authorization.to_sha256();
+        let cache_key = format!("{}.{}", request_hash, auth_hash);
+
         cache_key
     }
 
