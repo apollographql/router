@@ -25,6 +25,7 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 
 pub mod execution;
 pub(crate) mod external;
+pub(crate) mod hickory_dns_connector;
 pub(crate) mod http;
 pub(crate) mod layers;
 pub(crate) mod new_service;
@@ -34,7 +35,6 @@ pub mod subgraph;
 pub(crate) mod subgraph_service;
 pub mod supergraph;
 pub mod transport;
-pub(crate) mod hickory_dns_connector;
 
 impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {

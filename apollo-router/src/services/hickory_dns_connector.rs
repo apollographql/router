@@ -6,10 +6,10 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
+use hickory_resolver::TokioAsyncResolver;
 use hyper::client::connect::dns::Name;
 use hyper::client::HttpConnector;
 use hyper::service::Service;
-use hickory_resolver::TokioAsyncResolver;
 
 /// Wrapper around hickory-resolver's
 /// [`TokioAsyncResolver`](https://docs.rs/hickory-resolver/latest/hickory_resolver/type.TokioAsyncResolver.html)
