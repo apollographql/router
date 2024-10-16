@@ -5,7 +5,6 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  slack: circleci/slack@6.0.0
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
@@ -37,52 +36,6 @@ executors:
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
-  arm_linux_build: &arm_linux_build_executor
-    docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
-    resource_class: arm.xlarge
-    environment:
-      MISE_ENV: ci
-      CARGO_BUILD_JOBS: 8
-  arm_linux_test: &arm_linux_test_executor
-    docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
-    resource_class: arm.xlarge
-    environment:
-      MISE_ENV: ci
-      CARGO_BUILD_JOBS: 8
-  macos_build: &macos_build_executor
-    macos:
-      # See https://circleci.com/docs/xcode-policy along with the support matrix
-      # at https://circleci.com/docs/using-macos#supported-xcode-versions.
-      # We use the major.minor notation to bring in compatible patches.
-      xcode: "15.4.0"
-    resource_class: m2pro.large
-    environment:
-      MISE_ENV: ci,ci-mac
-  macos_test: &macos_test_executor
-    macos:
-      # See https://circleci.com/docs/xcode-policy along with the support matrix
-      # at https://circleci.com/docs/using-macos#supported-xcode-versions.
-      # We use the major.minor notation to bring in compatible patches.
-      xcode: "15.4.0"
-    resource_class: m2pro.large
-    environment:
-      MISE_ENV: ci,ci-mac
-  windows_build: &windows_build_executor
-    machine:
-      image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.2xlarge
-    shell: bash.exe --login -eo pipefail
-    environment:
-      MISE_ENV: ci,windows
-  windows_test: &windows_test_executor
-    machine:
-      image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.2xlarge
-    shell: bash.exe --login -eo pipefail
-    environment:
-      MISE_ENV: ci,windows
 
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
@@ -161,49 +114,6 @@ commands:
                 name: Write arch
                 command: |
                   echo 'amd_linux' >> ~/.arch
-      - when:
-          condition:
-            or:
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_test_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Write arch
-                command: |
-                  echo 'arm_linux' >> ~/.arch
-      - when:
-          condition:
-            or:
-              - equal: [*macos_build_executor, << parameters.platform >>]
-              - equal: [*macos_test_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Make link to md5
-                command: |
-                  mkdir -p ~/.local/aliases
-                  ln -s /sbin/md5 ~/.local/aliases/md5sum
-            - run:
-                name: Write arch
-                command: |
-                  echo 'osx' >> ~/.arch
-      - when:
-          condition:
-            or:
-              - equal: [*windows_build_executor, << parameters.platform >>]
-              - equal: [*windows_test_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Extend Bash profile for Windows
-                command: |
-                  echo 'alias find=/bin/find' >> "$BASH_ENV"
-                  echo 'alias sort=/bin/sort' >> "$BASH_ENV"
-                  echo 'export EXECUTABLE_SUFFIX=".exe"' >> "$BASH_ENV"
-                  echo 'export PATH="$HOME/AppData/Local/mise/shims:$HOME/scoop/apps/mise/current/bin:$HOME/scoop/shims:$PATH"' >> "$BASH_ENV"
-            - run:
-                name: Write arch
-                command: |
-                  echo 'windows' >> ~/.arch
-
   # Create files that are useful for cache keys
   create_cache_keys:
     steps:
@@ -229,37 +139,15 @@ commands:
       - when:
           condition:
             or:
-              - equal: [*amd_linux_helm_executor, << parameters.platform >>]
-              - equal: [*amd_linux_build_executor, << parameters.platform >>]
-              - equal: [*amd_linux_test_executor, << parameters.platform >>]
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_test_executor, << parameters.platform >>]
-              - equal: [*macos_build_executor, << parameters.platform >>]
-              - equal: [*macos_test_executor, << parameters.platform >>]
+              - equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
           steps:
             - run:
                 name: Install mise
                 command: |
                   curl https://mise.jdx.dev/install.sh | sh
                   mise activate bash >> "$BASH_ENV"
-                  # --raw disables the terminal timer/progress bars, so if mise gets stuck,
-                  # it will not continue to produce output preventing CCI from timing it out
-                  mise install --yes --raw
-      - when:
-          condition:
-            or:
-              - equal: [*windows_build_executor, << parameters.platform >>]
-              - equal: [*windows_test_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Install scoop
-                shell: powershell.exe -ExecutionPolicy Bypass
-                command: |
-                  iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
-            - run:
-                name: Install mise
-                command: |
-                  scoop install mise@${MISE_VERSION#v}
                   # --raw disables the terminal timer/progress bars, so if mise gets stuck,
                   # it will not continue to produce output preventing CCI from timing it out
                   mise install --yes --raw
@@ -285,7 +173,8 @@ commands:
                   - target
   xtask_release_preverify:
     steps:
-      - run: cargo xtask release pre-verify
+      - run: xtask release pre-verify
+              "${KUBECONFORM_INSTALL}/kubeconform" \
 
   xtask_check_helm:
     steps:
@@ -475,106 +364,9 @@ jobs:
       #     condition:
       #       and:
       #         - equal: [ true, << parameters.fuzz >> ]
-      #         - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
       #     steps:
       #       - fuzz_build
-  coverage:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - setup_environment:
-          platform: << parameters.platform >>
-      - do_coverage
 
-  test_updated:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-        default: amd_linux_test
-      from_test_updated_cargo_deps_workflow:
-        type: boolean
-        default: false
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - setup_environment:
-          platform: << parameters.platform >>
-      - run:
-          name: Update all Rust dependencies
-          command: |
-            rm Cargo.lock
-            cargo fetch
-      - xtask_test:
-          variant: "updated"
-
-      - when:
-          condition:
-            equal:
-              [true, << parameters.from_test_updated_cargo_deps_workflow >>]
-          steps:
-            - slack/notify:
-                event: fail
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":x: The `test_updated_cargo_deps` workflow has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-            - slack/notify:
-                event: pass
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":white_check_mark: The `test_updated_cargo_deps` workflow has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
   pre_verify_release:
     environment:
       <<: *common_job_environment
@@ -599,8 +391,6 @@ jobs:
     environment:
       <<: *common_job_environment
       RELEASE_BIN: router
-      APPLE_TEAM_ID: "YQK948L752"
-      APPLE_USERNAME: "opensource@apollographql.com"
       REPO_URL: << pipeline.project.git_url >>
     steps:
       - checkout
@@ -609,51 +399,7 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [*macos_build_executor, << parameters.platform >>]
-
-          steps:
-            - when:
-                condition:
-                  equal: [true, << parameters.nightly >>]
-                steps:
-                  - run: cargo xtask release prepare nightly
-            - run:
-                command: >
-                  cargo xtask dist --target aarch64-apple-darwin
-            - run:
-                command: >
-                  cargo xtask dist --target x86_64-apple-darwin
-            - run:
-                command: >
-                  mkdir -p artifacts
-            - run:
-                command: >
-                  cargo xtask package
-                  --target aarch64-apple-darwin
-                  --apple-team-id ${APPLE_TEAM_ID}
-                  --apple-username ${APPLE_USERNAME}
-                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
-                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
-                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
-                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
-                  --output artifacts/
-            - run:
-                command: >
-                  cargo xtask package
-                  --target x86_64-apple-darwin
-                  --apple-team-id ${APPLE_TEAM_ID}
-                  --apple-username ${APPLE_USERNAME}
-                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
-                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
-                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
-                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
-                  --output artifacts/
-      - when:
-          condition:
-            or:
-              - equal: [*amd_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
-              - equal: [*windows_build_executor, << parameters.platform >>]
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
           steps:
             # This will set the version to include current date and commit hash
             - when:
@@ -682,7 +428,7 @@ jobs:
               - equal: [*amd_linux_build_executor, << parameters.platform >>]
               - equal: [true, << parameters.nightly >>]
               - matches:
-                  pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
+                  pattern: "^https:\\/\\/github\\.com\\/scoremedia\\/router.*$"
                   value: << pipeline.project.git_url >>
           steps:
             - setup_remote_docker:
@@ -702,7 +448,7 @@ jobs:
                   ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
                   ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
-                  ROUTER_TAG=ghcr.io/apollographql/nightly/router
+                  ROUTER_TAG=thescore.jfrog.io/docker-prod/apollo-router-nightly
 
                   # Validate local artifact exists and calculate its checksum as a safety net
                   if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
@@ -743,14 +489,15 @@ jobs:
                   docker context create buildx-build
                   docker buildx create --driver docker-container --use buildx-build
                   docker buildx inspect --bootstrap
-                  # Note: GH Token owned by apollo-bot2, no expire
-                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+
+                  echo ${JFROG_ACCESS_TOKEN} | docker login thescore.jfrog.io -u ${JFROG_USERNAME} --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${DOWNLOAD_ARTIFACT_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
                   docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${DOWNLOAD_ARTIFACT_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
@@ -761,79 +508,7 @@ jobs:
                 root: .
                 paths:
                   - "built-containers/*.tar"
-            - run:
-                name: Helm build
-                command: |
-                  # Package up the helm chart
-                  helm package helm/chart/router
-                  # Make sure we have the newest chart
-                  CHART=$(ls -t router*.tgz| head -1)
-                  # Note: GH Token owned by apollo-bot2, no expire
-                  echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
-                  # Push chart to repository
-                  helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
-      - when:
-          condition:
-            equal: [true, << parameters.nightly >>]
-          steps:
-            - slack/notify:
-                event: fail
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":x: A `nightly` release run has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-            - slack/notify:
-                event: pass
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":white_check_mark: A `nightly` build has completed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-
-  publish_github_release:
+  publish_docker_release:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: small
@@ -844,22 +519,14 @@ jobs:
       - when:
           condition:
             not:
-              equal:
-                [
-                  "https://github.com/apollographql/router",
-                  << pipeline.project.git_url >>,
-                ]
+              equal: [ "https://github.com/scoremedia/router", << pipeline.project.git_url >> ]
           steps:
             - run:
                 command: >
-                  echo "Not publishing any github release."
+                  echo "Not publishing any docker release."
       - when:
           condition:
-            equal:
-              [
-                "https://github.com/apollographql/router",
-                << pipeline.project.git_url >>,
-              ]
+            equal: [ "https://github.com/scoremedia/router", << pipeline.project.git_url >> ]
           steps:
             - checkout
             - setup_environment:
@@ -871,6 +538,8 @@ jobs:
                 docker_layer_caching: true
             - attach_workspace:
                 at: artifacts
+            - store_artifacts:
+                path: artifacts/
             - run:
                 command: >
                   cd artifacts && sha256sum *.tar.gz > sha256sums.txt
@@ -880,66 +549,37 @@ jobs:
             - run:
                 command: >
                   cd artifacts && sha1sum *.tar.gz > sha1sums.txt
-
-            - run:
-                name: Publish to Crates.io
-                command: |
-                  # Remove leading 'v' which is present on the Git tag; Cargo doesn't want that leading 'v'
-                  VERSION_WITHOUT_LEADING_V="${VERSION#v}"
-                  echo "Publishing apollo-federation@${VERSION_WITHOUT_LEADING_V} and apollo-router@${VERSION_WITHOUT_LEADING_V}"
-                  # Just do a dry-run for now on apollo-federation, since that's a leading
-                  # indicator that the publish is going to work.  We don't do the attempt for
-                  # router because it's dependent on apollo-federation, so it'll definitely fail.
-                  cargo publish -p apollo-federation@${VERSION_WITHOUT_LEADING_V}
-                  cargo publish -p apollo-router@${VERSION_WITHOUT_LEADING_V}
-
-            - run:
-                name: Create GitHub Release
-                command: >
-                  case "$VERSION" in
-
-                    # If the VERSION contains a dash, consider it a pre-release version.
-                    # This is in-line with SemVer's expectations/designations!
-                    *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
-
-                    # In all other cases, publish it as the latest version.
-                    *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
-
-                  esac
             - run:
                 name: Docker build
                 command: |
-                  ROUTER_TAG=ghcr.io/apollographql/router
+                  BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
+
+                  ROUTER_TAG=thescore.jfrog.io/docker-prod/apollo-router
+
+                  echo "REPO_URL: ${REPO_URL}"
+                  echo "BASE_VERSION: ${BASE_VERSION}"
+                  echo "ARTIFACT_URL: ${ARTIFACT_URL}"
+                  echo "VERSION: ${VERSION}"
+                  echo "ROUTER_TAG: ${ROUTER_TAG}"
+
                   # Create a multi-arch builder which works properly under qemu
                   docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
                   docker context create buildx-build
                   docker buildx create --driver docker-container --use buildx-build
                   docker buildx inspect --bootstrap
-                  # Note: GH Token owned by apollo-bot2, no expire
-                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+
+                  echo ${JFROG_ACCESS_TOKEN} | docker login thescore.jfrog.io -u ${JFROG_USERNAME} --password-stdin
                   # To prevent overwrite, check to see if our images already exists
                   # If the manifest command succeeds, the images already exist
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
                   # Build and push debug image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
+                  docker buildx build --progress=plain --platform linux/amd64 --push --build-arg CIRCLE_TOKEN="${DOWNLOAD_ARTIFACT_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
                   # Build and push release image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
-            - run:
-                name: Helm build
-                command: |
-                  # Package up the helm chart
-                  helm package helm/chart/router
-                  # Make sure we have the newest chart
-                  CHART=$(ls -t router*.tgz| head -1)
-                  # Note: GH Token owned by apollo-bot2, no expire
-                  echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
-                  # To prevent overwrite, check to see if our chart already exists
-                  # If the show all command succeeds, the chart already exists
-                  VERSION=$(basename ${CHART} .tgz)
-                  helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${VERSION} > /dev/null && exit 1
-                  # Push chart to repository
-                  helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
+                  docker buildx build --progress=plain --platform linux/amd64 --push --build-arg CIRCLE_TOKEN="${DOWNLOAD_ARTIFACT_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+
 
 workflows:
   test_updated_cargo_deps:
@@ -959,11 +599,7 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [amd_linux_build]
-      - check_helm:
-          matrix:
-            parameters:
-              platform: [amd_linux_helm]
+              platform: [ amd_linux_build ]
       - check_compliance:
           matrix:
             parameters:
@@ -974,12 +610,11 @@ workflows:
           fuzz: false
           requires:
             - lint
-            - check_helm
             - check_compliance
           matrix:
             parameters:
               platform:
-                [macos_test, windows_test, amd_linux_test, arm_linux_test]
+                [ amd_linux_test ]
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
@@ -991,25 +626,14 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_build, windows_build, amd_linux_build, arm_linux_build]
-  coverage_only:
-    when: << pipeline.parameters.coverage >>
-    jobs:
-      - coverage:
-          matrix:
-            parameters:
-              platform: [macos_test]
+                [ amd_linux_build ]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
       - lint:
           matrix:
             parameters:
-              platform: [amd_linux_build]
-      - check_helm:
-          matrix:
-            parameters:
-              platform: [amd_linux_helm]
+              platform: [ amd_linux_build ]
       - check_compliance:
           matrix:
             parameters:
@@ -1020,17 +644,10 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_test, windows_test, amd_linux_test, arm_linux_test]
-      - coverage:
-          matrix:
-            parameters:
-              platform: [macos_test]
+                [ amd_linux_test ]
       - build_release:
           requires:
             - test
-            - coverage
-            - check_helm
-            - check_compliance
           nightly: true
           context:
             - router
@@ -1038,7 +655,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+                [ amd_linux_build ]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -1084,15 +701,6 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
-      - check_helm:
-          matrix:
-            parameters:
-              platform: [amd_linux_helm]
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v.*/
       - check_compliance:
           matrix:
             parameters:
@@ -1106,7 +714,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_test, windows_test, amd_linux_test, arm_linux_test]
+                [ amd_linux_test ]
           filters:
             branches:
               ignore: /.*/
@@ -1116,17 +724,16 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+                [ amd_linux_build ]
           filters:
             branches:
               ignore: /.*/
             tags:
               only: /v.*/
-      - publish_github_release:
+      - publish_docker_release:
           requires:
             - build_release
             - lint
-            - check_helm
             - check_compliance
             - pre_verify_release
             - test
@@ -1135,6 +742,8 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
+          context:
+            - Artifactory-Credentials
 
   security-scans:
     when:

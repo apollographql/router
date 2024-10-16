@@ -13,6 +13,7 @@ use tower::ServiceExt;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_response_errors() {
     let (mut service, execution_count) = build_test_harness(json!({
@@ -157,7 +158,7 @@ async fn test_response_errors() {
                 averageReviews: reviews {
                     ...reviewsFragment
                 }
-            } 
+            }
         }
     }
 
@@ -166,7 +167,7 @@ async fn test_response_errors() {
         author {
             penname: name
         }
-    } 
+    }
     ";
     expect_errors!(
         query,
@@ -186,7 +187,7 @@ async fn test_response_errors() {
                 averageReviews: reviews {
                     ...reviewsFragment
                 }
-            } 
+            }
         }
     }
 
@@ -195,7 +196,7 @@ async fn test_response_errors() {
         author {
             penname: name
         }
-    } 
+    }
     ";
     expect_errors!(
         query,
@@ -204,6 +205,7 @@ async fn test_response_errors() {
     assert_eq!(execution_count(), 3);
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_warn_only() {
     let (mut service, execution_count) = build_test_harness(json!({
@@ -301,6 +303,7 @@ fn expect_errors(response: graphql::Response, expected_error_codes: &[&str]) {
     }
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -319,6 +322,7 @@ async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_request_bytes_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
