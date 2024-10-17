@@ -365,6 +365,11 @@ pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut Ex
     for operation in document.operations.named.values_mut() {
         coerce_operation_values(schema, operation);
     }
+    for fragment in document.fragments.values_mut() {
+        let fragment = fragment.make_mut();
+        coerce_directive_application_values(schema, &mut fragment.directives);
+        coerce_selection_set_values(schema, &mut fragment.selection_set);
+    }
 }
 
 /// Applies default value coercion and removes non-semantic directives so that
@@ -443,6 +448,44 @@ mod tests {
         "#), @r###"
         {
           test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: [enumVal2])
+        }
+        "###);
+    }
+
+    #[test]
+    fn coerces_in_fragment_definitions() {
+        let schema = Schema::parse_and_validate(
+            r#"
+        type T {
+            get(bools: [Boolean!]!): Int
+        }
+        type Query {
+          test: T
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!(parse_and_coerce(&schema, r#"
+        {
+          test {
+            ...f
+          }
+        }
+
+        fragment f on T {
+            get(bools: true)
+        }
+        "#), @r###"
+        {
+          test {
+            ...f
+          }
+        }
+
+        fragment f on T {
+          get(bools: [true])
         }
         "###);
     }
