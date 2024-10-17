@@ -90,7 +90,6 @@ where
             let mut locked_wait_map = wait_map.lock().await;
             let authorization_cache_key = request.authorization.clone();
             let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
-
             match locked_wait_map.get_mut(&cache_key) {
                 Some(waiter) => {
                     // Register interest in key
@@ -99,6 +98,11 @@ where
 
                     match receiver.recv().await {
                         Ok(value) => {
+                            u64_counter!(
+                                "apollo.router.deduplicated.queries",
+                                "Total subgraph queries deduplicated",
+                                1
+                            );
                             return value
                                 .map(|response| {
                                     SubgraphResponse::new_from_response(
@@ -107,7 +111,7 @@ where
                                         request.subgraph_name.unwrap_or_default(),
                                     )
                                 })
-                                .map_err(|e| e.into())
+                                .map_err(|e| e.into());
                         }
                         // there was an issue with the broadcast channel, retry fetching
                         Err(_) => continue,
@@ -188,7 +192,6 @@ where
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let service = self.service.clone();
-
         if request.operation_kind == OperationKind::Query {
             let wait_map = self.wait_map.clone();
 

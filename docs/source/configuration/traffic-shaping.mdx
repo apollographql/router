@@ -182,6 +182,8 @@ traffic_shaping:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
 ```
 
+When query deduplication is enabled, a `apollo_router_deduplicated_queries_total` metric will be exposed by the Router.
+
 ### HTTP/2
 
 <HttpConnection type="subgraph" />
