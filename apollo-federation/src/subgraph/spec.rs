@@ -38,9 +38,11 @@ use crate::subgraph::spec::FederationSpecError::UnsupportedFederationDirective;
 use crate::subgraph::spec::FederationSpecError::UnsupportedVersionError;
 
 pub const COMPOSE_DIRECTIVE_NAME: Name = name!("composeDirective");
+pub const CONTEXT_DIRECTIVE_NAME: Name = name!("context");
 pub const KEY_DIRECTIVE_NAME: Name = name!("key");
 pub const EXTENDS_DIRECTIVE_NAME: Name = name!("extends");
 pub const EXTERNAL_DIRECTIVE_NAME: Name = name!("external");
+pub const FROM_CONTEXT_DIRECTIVE_NAME: Name = name!("fromContext");
 pub const INACCESSIBLE_DIRECTIVE_NAME: Name = name!("inaccessible");
 pub const INTF_OBJECT_DIRECTIVE_NAME: Name = name!("interfaceObject");
 pub const OVERRIDE_DIRECTIVE_NAME: Name = name!("override");
@@ -48,8 +50,6 @@ pub const PROVIDES_DIRECTIVE_NAME: Name = name!("provides");
 pub const REQUIRES_DIRECTIVE_NAME: Name = name!("requires");
 pub const SHAREABLE_DIRECTIVE_NAME: Name = name!("shareable");
 pub const TAG_DIRECTIVE_NAME: Name = name!("tag");
-pub const CONTEXT_DIRECTIVE_NAME: Name = name!("context");
-pub const FROM_CONTEXT_DIRECTIVE_NAME: Name = name!("fromContext");
 pub const FIELDSET_SCALAR_NAME: Name = name!("FieldSet");
 
 // federated types
@@ -68,11 +68,13 @@ pub const FEDERATION_V1_DIRECTIVE_NAMES: [Name; 5] = [
     REQUIRES_DIRECTIVE_NAME,
 ];
 
-pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 11] = [
+pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
     COMPOSE_DIRECTIVE_NAME,
+    CONTEXT_DIRECTIVE_NAME,
     KEY_DIRECTIVE_NAME,
     EXTENDS_DIRECTIVE_NAME,
     EXTERNAL_DIRECTIVE_NAME,
+    FROM_CONTEXT_DIRECTIVE_NAME,
     INACCESSIBLE_DIRECTIVE_NAME,
     INTF_OBJECT_DIRECTIVE_NAME,
     OVERRIDE_DIRECTIVE_NAME,
@@ -86,9 +88,11 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 11] = [
 // in FederationSpecDefinitions.directive_definition() for more information.
 enum FederationDirectiveName {
     Compose,
+    Context,
     Key,
     Extends,
     External,
+    FromContext,
     Inaccessible,
     IntfObject,
     Override,
@@ -102,9 +106,14 @@ lazy_static! {
     static ref FEDERATION_DIRECTIVE_NAMES_TO_ENUM: IndexMap<Name, FederationDirectiveName> = {
         IndexMap::from_iter([
             (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
+            (CONTEXT_DIRECTIVE_NAME, FederationDirectiveName::Context),
             (KEY_DIRECTIVE_NAME, FederationDirectiveName::Key),
             (EXTENDS_DIRECTIVE_NAME, FederationDirectiveName::Extends),
             (EXTERNAL_DIRECTIVE_NAME, FederationDirectiveName::External),
+            (
+                FROM_CONTEXT_DIRECTIVE_NAME,
+                FederationDirectiveName::FromContext,
+            ),
             (
                 INACCESSIBLE_DIRECTIVE_NAME,
                 FederationDirectiveName::Inaccessible,
@@ -285,9 +294,11 @@ impl FederationSpecDefinitions {
         };
         Ok(match enum_name {
             FederationDirectiveName::Compose => self.compose_directive_definition(alias),
+            FederationDirectiveName::Context => self.context_directive_definition(alias),
             FederationDirectiveName::Key => self.key_directive_definition(alias)?,
             FederationDirectiveName::Extends => self.extends_directive_definition(alias),
             FederationDirectiveName::External => self.external_directive_definition(alias),
+            FederationDirectiveName::FromContext => self.from_context_directive_definition(alias),
             FederationDirectiveName::Inaccessible => self.inaccessible_directive_definition(alias),
             FederationDirectiveName::IntfObject => {
                 self.interface_object_directive_definition(alias)
@@ -339,6 +350,24 @@ impl FederationSpecDefinitions {
         }
     }
 
+    /// directive @context(name: String!) repeatable on INTERFACE | OBJECT
+    fn context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
+        DirectiveDefinition {
+            description: None,
+            name: alias.clone().unwrap_or(CONTEXT_DIRECTIVE_NAME),
+            arguments: vec![InputValueDefinition {
+                description: None,
+                name: name!("name"),
+                ty: ty!(String!).into(),
+                default_value: None,
+                directives: Default::default(),
+            }
+            .into()],
+            repeatable: true,
+            locations: vec![DirectiveLocation::Interface, DirectiveLocation::Object],
+        }
+    }
+
     /// directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
     fn key_directive_definition(
         &self,
@@ -385,6 +414,24 @@ impl FederationSpecDefinitions {
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
             ],
+        }
+    }
+
+    /// directive @fromContext(field: String!) on ARGUMENT_DEFINITION
+    fn from_context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
+        DirectiveDefinition {
+            description: None,
+            name: alias.clone().unwrap_or(FROM_CONTEXT_DIRECTIVE_NAME),
+            arguments: vec![InputValueDefinition {
+                description: None,
+                name: name!("field"),
+                ty: ty!(String!).into(),
+                default_value: None,
+                directives: Default::default(),
+            }
+            .into()],
+            repeatable: false,
+            locations: vec![DirectiveLocation::ArgumentDefinition],
         }
     }
 
