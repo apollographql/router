@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 static POOL: OnceLock<threadpool::ThreadPool> = OnceLock::new();
 
 /// Drop-in replacement for Tokio’s [`spawn_blocking`]
-/// but intended for for tasks that keep a CPU core active: it uses a thread pool
+/// but intended for tasks that keep a CPU core active: it uses a thread pool
 /// limited to the number of available CPU cores.
 ///
 /// `spawn_blocking` on the other hand appears to be intended for tasks that pause a thread
