@@ -32,6 +32,9 @@ use crate::metrics::layer::METRIC_PREFIX_VALUE;
 use crate::plugins::telemetry::otel::OtelData;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+// FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.
+// The reason this is introduced right now is to directly avoid people relying on these attributes and then creating a breaking change in the future.
+pub(crate) const APOLLO_CONNECTOR_PREFIX: &str = "apollo.connector.";
 // This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
 pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
     "code.filepath",
