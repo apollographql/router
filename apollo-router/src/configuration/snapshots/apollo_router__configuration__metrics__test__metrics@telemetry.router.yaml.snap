@@ -8,10 +8,12 @@ expression: "&metrics.non_zero()"
       - value: 1
         attributes:
           opt.events: true
+          opt.events.connector: true
           opt.events.router: true
           opt.events.subgraph: true
           opt.events.supergraph: true
           opt.instruments: true
+          opt.instruments.connector: true
           opt.instruments.default_attribute_requirement_level: false
           opt.instruments.graphql: true
           opt.instruments.router: true
