@@ -1,0 +1,43 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect"]
+)
+
+type Query {
+    me: User
+      @connect(
+        http: {GET: "http://127.0.0.1/something"},
+        selection: """
+        id
+        literal: $("foo")
+        array_literal: $([1, 2, 3])
+        echo: $->echo("foo")
+        match: $.match_input->match(
+          [1, "one"],
+          [2, "two"],
+          [@, $("unknown")],
+        )
+        map: $.name->map(@.first_name)
+        first: $([1, 2, 3])->first
+        last: $([1, 2, 3])->last
+        slice: $([1, 2, 3, 4, 5])->slice(1, 3)
+        size: $.people->size
+        entries: $.people->entries.key
+        """
+      )
+}
+
+type User {
+    id: ID!
+    array_literal: [Int],
+    literal: String,
+    echo: String,
+    match: String,
+    map: String,
+    first: Int,
+    last: Int,
+    slice: [Int],
+    size: Int,
+    entries: [String],
+}
