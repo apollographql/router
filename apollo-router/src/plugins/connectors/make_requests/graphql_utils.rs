@@ -2,6 +2,7 @@ use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::schema::Value;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use serde_json::Number;
 use serde_json_bytes::ByteString;
@@ -85,9 +86,13 @@ pub(super) fn argument_value_to_json(
     }
 }
 
-pub(super) fn get_entity_fields(
-    op: &Node<Operation>,
-) -> Result<(&Node<Field>, bool), MakeRequestError> {
+/// Looks for _entities near the root of the operation. Also looks for
+/// __typename within the _entities selection — if it was selected, then we
+/// don't have a interfaceObject query.
+pub(super) fn get_entity_fields<'a>(
+    document: &'a ExecutableDocument,
+    op: &'a Node<Operation>,
+) -> Result<(&'a Node<Field>, bool), MakeRequestError> {
     use MakeRequestError::*;
 
     let root_field = op
@@ -109,8 +114,21 @@ pub(super) fn get_entity_fields(
                     typename_requested = true;
                 }
             }
-            Selection::FragmentSpread(_) => {
-                return Err(UnsupportedOperation("fragment spread not supported".into()))
+            Selection::FragmentSpread(f) => {
+                let fragment = document
+                    .fragments
+                    .get(f.fragment_name.as_str())
+                    .ok_or_else(|| InvalidOperation("missing fragment".into()))?;
+                for selection in fragment.selection_set.selections.iter() {
+                    match selection {
+                        Selection::Field(f) => {
+                            if f.name == "__typename" {
+                                typename_requested = true;
+                            }
+                        }
+                        Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {}
+                    }
+                }
             }
             Selection::InlineFragment(f) => {
                 for selection in f.selection_set.selections.iter() {
@@ -120,11 +138,7 @@ pub(super) fn get_entity_fields(
                                 typename_requested = true;
                             }
                         }
-                        Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
-                            return Err(UnsupportedOperation(
-                                "fragment spread not supported".into(),
-                            ))
-                        }
+                        Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {}
                     }
                 }
             }
