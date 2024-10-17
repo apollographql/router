@@ -229,7 +229,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 }
             };
             if subscription_config.enable_deduplication {
-                request.to_sha256(None)
+                request.to_sha256(&Vec::new())
             } else {
                 Uuid::new_v4().to_string()
             }

@@ -83,9 +83,9 @@ where
 
     fn get_cache_key(
         request: &SubgraphRequest,
-        deduplicate_query_ignored_headers: &Option<Vec<String>>,
+        deduplicate_query_ignored_headers: &Vec<String>,
     ) -> String {
-        let request_hash = request.to_sha256(deduplicate_query_ignored_headers.clone());
+        let request_hash = request.to_sha256(deduplicate_query_ignored_headers);
         let auth_hash = request.authorization.to_sha256();
         let cache_key = format!("{}.{}", request_hash, auth_hash);
 
@@ -96,7 +96,7 @@ where
         service: S,
         wait_map: WaitMap,
         request: SubgraphRequest,
-        deduplicate_query_ignored_headers: Option<Vec<String>>,
+        deduplicate_query_ignored_headers: Vec<String>,
     ) -> Result<SubgraphResponse, BoxError> {
         // Check if the request is part of a batch. If it is, completely bypass dedup since it
         // will break any request batches which this request is part of.
@@ -215,7 +215,10 @@ where
 
         if request.operation_kind == OperationKind::Query {
             let wait_map = self.wait_map.clone();
-            let deduplicate_query_ignored_headers = self.deduplicate_query_ignored_headers.clone();
+            let deduplicate_query_ignored_headers = self
+                .deduplicate_query_ignored_headers
+                .clone()
+                .unwrap_or_default();
 
             Box::pin(async move {
                 Self::dedup(
