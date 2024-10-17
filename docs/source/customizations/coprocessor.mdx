@@ -152,6 +152,22 @@ coprocessor:
 
 ```
 
+You can also change DNS resolution strategy applied to coprocessor's URL:
+```yaml title="router.yaml"
+coprocessor:
+  url: http://coprocessor.example.com:8081
+  client:
+    dns_resolution_strategy: ipv4_then_ipv6
+
+```
+
+Possible strategies are:
+* `ipv4_only` - Only query for `A` (IPv4) records.
+* `ipv6_only` - Only query for `AAAA` (IPv6) records.
+* `ipv4_and_ipv6` - Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel.
+* `ipv6_then_ipv4` - Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records.
+* `ipv4_then_ipv6`(default) - Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records.
+
 ## Coprocessor request format
 
 The router communicates with your coprocessor via HTTP POST requests (called **coprocessor requests**). The body of each coprocessor request is a JSON object with properties that describe either the current client request or the current router response.

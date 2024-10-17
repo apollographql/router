@@ -35,6 +35,7 @@ use self::rate::RateLimited;
 pub(crate) use self::retry::RetryPolicy;
 use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
+use crate::configuration::shared::DnsResolutionStrategy;
 use crate::error::ConfigurationError;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
@@ -72,6 +73,8 @@ struct Shaping {
     experimental_retry: Option<RetryConfig>,
     /// Enable HTTP2 for subgraphs
     experimental_http2: Option<Http2Config>,
+    /// DNS resolution strategy for subgraphs
+    dns_resolution_strategy: Option<DnsResolutionStrategy>,
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -108,6 +111,11 @@ impl Merge for Shaping {
                     .experimental_http2
                     .as_ref()
                     .or(fallback.experimental_http2.as_ref())
+                    .cloned(),
+                dns_resolution_strategy: self
+                    .dns_resolution_strategy
+                    .as_ref()
+                    .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
             },
         }
@@ -444,13 +452,19 @@ impl TrafficShaping {
         }
     }
 
-    pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> Http2Config {
+    pub(crate) fn subgraph_client_config(
+        &self,
+        service_name: &str,
+    ) -> crate::configuration::shared::Client {
         Self::merge_config(
             self.config.all.as_ref(),
             self.config.subgraphs.get(service_name),
         )
-        .and_then(|config| config.shaping.experimental_http2)
-        .unwrap_or(Http2Config::Enable)
+        .map(|config| crate::configuration::shared::Client {
+            experimental_http2: config.shaping.experimental_http2,
+            dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -749,16 +763,19 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_enable_subgraph_http2() {
+    async fn test_subgraph_client_config() {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
           experimental_http2: disable
+          dns_resolution_strategy: ipv6_only
         subgraphs: 
           products:
             experimental_http2: enable
+            dns_resolution_strategy: ipv6_then_ipv4
           reviews:
             experimental_http2: disable
+            dns_resolution_strategy: ipv4_only
         router:
           timeout: 65s
         "#,
@@ -769,9 +786,27 @@ mod test {
             .await
             .unwrap();
 
-        assert!(shaping_config.enable_subgraph_http2("products") == Http2Config::Enable);
-        assert!(shaping_config.enable_subgraph_http2("reviews") == Http2Config::Disable);
-        assert!(shaping_config.enable_subgraph_http2("this_doesnt_exist") == Http2Config::Disable);
+        assert_eq!(
+            shaping_config.subgraph_client_config("products"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Enable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
+            },
+        );
+        assert_eq!(
+            shaping_config.subgraph_client_config("reviews"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Disable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
+            },
+        );
+        assert_eq!(
+            shaping_config.subgraph_client_config("this_doesnt_exist"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Disable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
+            },
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
