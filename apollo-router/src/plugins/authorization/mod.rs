@@ -11,6 +11,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
+use sha2::Digest;
+use sha2::Sha256;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -61,6 +63,18 @@ pub(crate) struct CacheKeyMetadata {
     pub(crate) is_authenticated: bool,
     pub(crate) scopes: Vec<String>,
     pub(crate) policies: Vec<String>,
+}
+
+impl CacheKeyMetadata {
+    pub(crate) fn to_sha256(&self) -> String {
+        let mut hasher = Sha256::new();
+
+        hasher.update(self.is_authenticated.to_string().as_bytes());
+        hasher.update(self.scopes.join(",").as_bytes());
+        hasher.update(self.policies.join(",").as_bytes());
+
+        hex::encode(hasher.finalize())
+    }
 }
 
 /// Authorization plugin
