@@ -62,7 +62,7 @@ Root query type
 type TheQuery implements I @join__type(graph: SUBGRAPH1) {
   id: ID!
   ints: [[Int!]]! @deprecated(reason: "…")
-  url(arg: In = { b: 4, a: 2 }): Url
+  url(arg: [In] = [{ b: 4, a: 2 }]): Url
   union: U @deprecated(reason: null)
 }
 

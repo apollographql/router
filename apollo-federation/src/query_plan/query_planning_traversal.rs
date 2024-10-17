@@ -134,16 +134,16 @@ impl std::fmt::Debug for PlanInfo {
 #[derive(Serialize)]
 pub(crate) struct BestQueryPlanInfo {
     /// The fetch dependency graph for this query plan.
-    pub fetch_dependency_graph: FetchDependencyGraph,
+    pub(crate) fetch_dependency_graph: FetchDependencyGraph,
     /// The path tree for the closed branch options chosen for this query plan.
-    pub path_tree: Arc<OpPathTree>,
+    pub(crate) path_tree: Arc<OpPathTree>,
     /// The cost of this query plan.
-    pub cost: QueryPlanCost,
+    pub(crate) cost: QueryPlanCost,
 }
 
 impl BestQueryPlanInfo {
     // PORT_NOTE: The equivalent of `createEmptyPlan` in the JS codebase.
-    pub fn empty(parameters: &QueryPlanningParameters) -> Self {
+    pub(crate) fn empty(parameters: &QueryPlanningParameters) -> Self {
         Self {
             fetch_dependency_graph: FetchDependencyGraph::new(
                 parameters.supergraph_schema.clone(),
@@ -163,7 +163,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         feature = "snapshot_tracing",
         tracing::instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new")
     )]
-    pub fn new(
+    pub(crate) fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
         // The ownership of `QueryPlanningParameters` is awkward and should probably be
@@ -270,7 +270,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             name = "QueryPlanningTraversal::find_best_plan"
         )
     )]
-    pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
+    pub(crate) fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
         self.find_best_plan_inner()?;
         Ok(self.best_plan)
     }

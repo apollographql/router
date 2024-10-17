@@ -177,6 +177,9 @@ fn it_handles_fragments_with_one_non_leaf_field() {
     );
 }
 
+/// XXX(@goto-bus-stop): this test is meant to check that fragments with @skip and @include *are*
+/// migrated. But we are currently matching JS behavior, where they are not. This test should be
+/// updated when we remove JS compatibility.
 #[test]
 fn it_migrates_skip_include() {
     let planner = planner!(
@@ -342,6 +345,50 @@ fn fragments_that_share_a_hash_but_are_not_identical_generate_their_own_fragment
           y
           z
         }
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn same_as_js_router798() {
+    let planner = planner!(
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
+        Subgraph1: r#"
+            interface Interface { a: Int }
+            type Y implements Interface { a: Int b: Int }
+            type Z implements Interface { a: Int c: Int }
+
+            type Query {
+                interfaces(id: Int!): Interface
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            query($var0: Boolean! = true) {
+              ... @skip(if: $var0) {
+                field0: interfaces(id: 0) {
+                  field1: __typename
+                }
+              }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Skip(if: $var0) {
+        Fetch(service: "Subgraph1") {
+          {
+            ... {
+              field0: interfaces(id: 0) {
+                __typename
+                field1: __typename
+              }
+            }
+          }
+        },
       },
     }
     "###

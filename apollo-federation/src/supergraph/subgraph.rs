@@ -35,10 +35,6 @@ impl FederationSubgraphs {
         Ok(())
     }
 
-    fn get(&self, name: &str) -> Option<&FederationSubgraph> {
-        self.subgraphs.get(name)
-    }
-
     pub(super) fn get_mut(&mut self, name: &str) -> Option<&mut FederationSubgraph> {
         self.subgraphs.get_mut(name)
     }

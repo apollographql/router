@@ -178,6 +178,7 @@ const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
+pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -197,6 +198,7 @@ pub(crate) const APOLLO_PRIVATE_QUERY_ROOT_FIELDS: Key =
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
     pub(crate) config: Arc<config::Conf>,
+    supergraph_schema_id: Arc<String>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
@@ -314,6 +316,7 @@ impl Plugin for Telemetry {
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
+            supergraph_schema_id: init.supergraph_schema_id,
             field_level_instrumentation_ratio,
             activation: Mutex::new(TelemetryActivation {
                 tracer_provider: Some(tracer_provider),
@@ -340,6 +343,7 @@ impl Plugin for Telemetry {
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let config = self.config.clone();
+        let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
         let span_mode = config.instrumentation.spans.mode;
@@ -392,6 +396,10 @@ impl Plugin for Telemetry {
             }))
             .map_future_with_request_data(
                 move |request: &router::Request| {
+                    let _ = request.context.insert(
+                        SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY,
+                        supergraph_schema_id.clone(),
+                    );
                     if !use_legacy_request_span {
                         let span = Span::current();
 
@@ -698,30 +706,21 @@ impl Plugin for Telemetry {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
-                let operation_kind = req
-                    .query_plan
-                    .query
-                    .operation(req.supergraph_request.body().operation_name.as_deref())
-                    .map(|op| *op.kind());
+                let operation_kind = req.query_plan.query.operation.kind();
 
                 match operation_kind {
-                    Some(operation_kind) => match operation_kind {
-                        OperationKind::Subscription => info_span!(
-                            EXECUTION_SPAN_NAME,
-                            "otel.kind" = "INTERNAL",
-                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                            "apollo_private.operation.subtype" =
-                                OperationSubType::SubscriptionRequest.as_str(),
-                        ),
-                        _ => info_span!(
-                            EXECUTION_SPAN_NAME,
-                            "otel.kind" = "INTERNAL",
-                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                        ),
-                    },
-                    None => {
-                        info_span!(EXECUTION_SPAN_NAME, "otel.kind" = "INTERNAL",)
-                    }
+                    OperationKind::Subscription => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                        "apollo_private.operation.subtype" =
+                            OperationSubType::SubscriptionRequest.as_str(),
+                    ),
+                    _ => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                    ),
                 }
             })
             .service(service)

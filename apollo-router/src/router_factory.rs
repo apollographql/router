@@ -181,6 +181,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                             PluginInit::builder()
                                 .config(plugin_config.clone())
                                 .supergraph_sdl(schema.raw_sdl.clone())
+                                .supergraph_schema_id(schema.schema_id.clone())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .build(),
@@ -512,6 +513,7 @@ pub(crate) async fn add_plugin(
     factory: &PluginFactory,
     plugin_config: &Value,
     schema: Arc<String>,
+    schema_id: Arc<String>,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     notify: &crate::notification::Notify<String, crate::graphql::Response>,
@@ -523,6 +525,7 @@ pub(crate) async fn add_plugin(
             PluginInit::builder()
                 .config(plugin_config.clone())
                 .supergraph_sdl(schema)
+                .supergraph_schema_id(schema_id)
                 .supergraph_schema(supergraph_schema)
                 .subgraph_schemas(subgraph_schemas)
                 .notify(notify.clone())
@@ -548,6 +551,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
+    let supergraph_schema_id = schema.schema_id.clone();
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -578,6 +582,7 @@ pub(crate) async fn create_plugins(
                 $factory,
                 &$plugin_config,
                 schema.as_string().clone(),
+                supergraph_schema_id.clone(),
                 supergraph_schema.clone(),
                 subgraph_schemas.clone(),
                 &configuration.notify.clone(),

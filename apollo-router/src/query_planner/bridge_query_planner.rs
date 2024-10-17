@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::execution::InputCoercionError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
@@ -18,7 +18,6 @@ use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
-use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -30,8 +29,6 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
-use crate::cache::storage::CacheStorage;
-use crate::configuration::IntrospectionMode as IntrospectionConfig;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -39,8 +36,7 @@ use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
-use crate::graphql::Response;
-use crate::introspection::Introspection;
+use crate::introspection::IntrospectionCache;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::metrics::meter_provider;
@@ -80,11 +76,11 @@ pub(crate) struct BridgeQueryPlanner {
     planner: PlannerMode,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    introspection: IntrospectionMode,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
+    introspection: Arc<IntrospectionCache>,
 }
 
 #[derive(Clone)]
@@ -95,14 +91,6 @@ pub(crate) enum PlannerMode {
         rust: Arc<QueryPlanner>,
     },
     Rust(Arc<QueryPlanner>),
-}
-
-#[derive(Clone)]
-enum IntrospectionMode {
-    Js(Arc<Introspection>),
-    Both(Arc<Introspection>),
-    Rust,
-    Disabled,
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -234,27 +222,6 @@ impl PlannerMode {
             }
         };
         Ok(Arc::new(planner))
-    }
-
-    async fn js_introspection(
-        &self,
-        sdl: &str,
-        configuration: &Configuration,
-        old_js_planner: &Option<Arc<Planner<QueryPlanResult>>>,
-        cache: CacheStorage<String, Response>,
-    ) -> Result<Arc<Introspection>, ServiceBuildError> {
-        let js_planner = match self {
-            Self::Js(js) => js.clone(),
-            Self::Both { js, .. } => js.clone(),
-            Self::Rust(_) => {
-                // JS "planner" (actually runtime) was not created for planning
-                // but is still needed for introspection, so create it now
-                Self::js_planner(sdl, configuration, old_js_planner).await?
-            }
-        };
-        Ok(Arc::new(
-            Introspection::with_cache(js_planner, cache).await?,
-        ))
     }
 
     async fn plan(
@@ -424,30 +391,12 @@ impl BridgeQueryPlanner {
         configuration: Arc<Configuration>,
         old_js_planner: Option<Arc<Planner<QueryPlanResult>>>,
         rust_planner: Option<Arc<QueryPlanner>>,
-        cache: CacheStorage<String, Response>,
+        introspection_cache: Arc<IntrospectionCache>,
     ) -> Result<Self, ServiceBuildError> {
         let planner =
             PlannerMode::new(&schema, &configuration, &old_js_planner, rust_planner).await?;
 
         let subgraph_schemas = Arc::new(planner.subgraphs().await?);
-
-        let introspection = if configuration.supergraph.introspection {
-            match configuration.experimental_introspection_mode {
-                IntrospectionConfig::New => IntrospectionMode::Rust,
-                IntrospectionConfig::Legacy => IntrospectionMode::Js(
-                    planner
-                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner, cache)
-                        .await?,
-                ),
-                IntrospectionConfig::Both => IntrospectionMode::Both(
-                    planner
-                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner, cache)
-                        .await?,
-                ),
-            }
-        } else {
-            IntrospectionMode::Disabled
-        };
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
@@ -459,11 +408,11 @@ impl BridgeQueryPlanner {
             planner,
             schema,
             subgraph_schemas,
-            introspection,
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
             signature_normalization_algorithm,
+            introspection: introspection_cache,
         })
     }
 
@@ -471,13 +420,7 @@ impl BridgeQueryPlanner {
         match &self.planner {
             PlannerMode::Js(js) => Some(js.clone()),
             PlannerMode::Both { js, .. } => Some(js.clone()),
-            PlannerMode::Rust(_) => match &self.introspection {
-                IntrospectionMode::Js(js_introspection)
-                | IntrospectionMode::Both(js_introspection) => {
-                    Some(js_introspection.planner.clone())
-                }
-                IntrospectionMode::Rust | IntrospectionMode::Disabled => None,
-            },
+            PlannerMode::Rust(_) => None,
         }
     }
 
@@ -508,19 +451,19 @@ impl BridgeQueryPlanner {
             operation_name,
         )?;
 
-        let (fragments, operations, defer_stats, schema_aware_hash) =
+        let (fragments, operation, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
-            &operations,
+            &operation,
             &fragments.map,
             &defer_stats,
         )?;
         Ok(Query {
             string: query,
             fragments,
-            operations,
+            operation,
             filtered_query: None,
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
@@ -531,118 +474,6 @@ impl BridgeQueryPlanner {
             is_original: true,
             schema_aware_hash,
         })
-    }
-
-    async fn introspection(
-        &self,
-        key: QueryKey,
-        doc: ParsedDocument,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        match &self.introspection {
-            IntrospectionMode::Disabled => return Ok(QueryPlannerContent::IntrospectionDisabled),
-            IntrospectionMode::Rust => {
-                let schema = self.schema.clone();
-                let response = Box::new(
-                    tokio::task::spawn_blocking(move || {
-                        Self::rust_introspection(&schema, &key, &doc)
-                    })
-                    .await
-                    .expect("Introspection panicked")?,
-                );
-                return Ok(QueryPlannerContent::Response { response });
-            }
-            IntrospectionMode::Js(_) | IntrospectionMode::Both(_) => {}
-        }
-
-        if doc.executable.operations.len() > 1 {
-            // TODO: add an operation_name parameter to router-bridge to fix this?
-            let error = graphql::Error::builder()
-                .message(
-                    "Schema introspection is currently not supported \
-                     with multiple operations in the same document",
-                )
-                .extension_code("INTROSPECTION_WITH_MULTIPLE_OPERATIONS")
-                .build();
-            return Ok(QueryPlannerContent::Response {
-                response: Box::new(graphql::Response::builder().error(error).build()),
-            });
-        }
-
-        let response = match &self.introspection {
-            IntrospectionMode::Rust | IntrospectionMode::Disabled => unreachable!(), // returned above
-            IntrospectionMode::Js(js) => js
-                .execute(key.filtered_query)
-                .await
-                .map_err(QueryPlannerError::Introspection)?,
-            IntrospectionMode::Both(js) => {
-                let js_result = js
-                    .execute(key.filtered_query.clone())
-                    .await
-                    .map_err(QueryPlannerError::Introspection);
-                let schema = self.schema.clone();
-                let js_result_clone = js_result.clone();
-                tokio::task::spawn_blocking(move || {
-                    let rust_result = match Self::rust_introspection(&schema, &key, &doc) {
-                        Ok(response) => {
-                            if response.errors.is_empty() {
-                                Ok(response)
-                            } else {
-                                Err(QueryPlannerError::Introspection(IntrospectionError {
-                                    message: Some(
-                                        response
-                                            .errors
-                                            .into_iter()
-                                            .map(|e| e.to_string())
-                                            .collect::<Vec<_>>()
-                                            .join(", "),
-                                    ),
-                                }))
-                            }
-                        }
-                        Err(e) => Err(e),
-                    };
-                    super::dual_introspection::compare_introspection_responses(
-                        &key.original_query,
-                        js_result_clone,
-                        rust_result,
-                    );
-                })
-                .await
-                .expect("Introspection comparison panicked");
-                js_result?
-            }
-        };
-        Ok(QueryPlannerContent::Response {
-            response: Box::new(response),
-        })
-    }
-
-    fn rust_introspection(
-        schema: &Schema,
-        key: &QueryKey,
-        doc: &ParsedDocument,
-    ) -> Result<graphql::Response, QueryPlannerError> {
-        let schema = schema.api_schema();
-        let operation = doc.get_operation(key.operation_name.as_deref())?;
-        let variable_values = Default::default();
-        let variable_values =
-            apollo_compiler::execution::coerce_variable_values(schema, operation, &variable_values)
-                .map_err(|e| {
-                    let message = match &e {
-                        InputCoercionError::SuspectedValidationBug(e) => &e.message,
-                        InputCoercionError::ValueError { message, .. } => message,
-                    };
-                    QueryPlannerError::Introspection(IntrospectionError {
-                        message: Some(message.clone()),
-                    })
-                })?;
-        let response = apollo_compiler::execution::execute_introspection_only_query(
-            schema,
-            &doc.executable,
-            operation,
-            &variable_values,
-        );
-        Ok(response.into())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -798,11 +629,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         operation_name.as_deref(),
                     )
                     .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-                    doc = Arc::new(ParsedDocumentInner {
-                        executable: Arc::new(executable_document),
-                        ast: modified_query,
-                        hash: Arc::new(QueryHash(hash)),
-                    });
+                    doc = ParsedDocumentInner::new(
+                        modified_query,
+                        Arc::new(executable_document),
+                        operation_name.as_deref(),
+                        Arc::new(QueryHash(hash)),
+                    )?;
                     context
                         .extensions()
                         .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
@@ -880,10 +712,7 @@ impl BridgeQueryPlanner {
             )
             .await?;
 
-        if selections
-            .operation(key.operation_name.as_deref())
-            .is_some_and(|op| op.selection_set.is_empty())
-        {
+        if selections.operation.selection_set.is_empty() {
             // All selections have @skip(true) or @include(false)
             // Return an empty response now to avoid dealing with an empty query plan later
             return Ok(QueryPlannerContent::Response {
@@ -895,69 +724,16 @@ impl BridgeQueryPlanner {
             });
         }
 
+        match self
+            .introspection
+            .maybe_execute(&self.schema, &key, &doc)
+            .await
         {
-            let operation = doc
-                .executable
-                .operations
-                .get(key.operation_name.as_deref())
-                .ok();
-            let mut has_root_typename = false;
-            let mut has_schema_introspection = false;
-            let mut has_other_root_fields = false;
-            if let Some(operation) = operation {
-                for field in operation.root_fields(&doc.executable) {
-                    match field.name.as_str() {
-                        "__typename" => has_root_typename = true,
-                        "__schema" | "__type" if operation.is_query() => {
-                            has_schema_introspection = true
-                        }
-                        _ => has_other_root_fields = true,
-                    }
-                }
-                if has_root_typename && !has_schema_introspection && !has_other_root_fields {
-                    // Fast path for __typename alone
-                    if operation
-                        .selection_set
-                        .selections
-                        .iter()
-                        .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
-                    {
-                        let root_type_name: serde_json_bytes::ByteString =
-                            operation.object_type().as_str().into();
-                        let data = Value::Object(
-                            operation
-                                .root_fields(&doc.executable)
-                                .filter(|field| field.name == "__typename")
-                                .map(|field| {
-                                    (
-                                        field.response_key().as_str().into(),
-                                        Value::String(root_type_name.clone()),
-                                    )
-                                })
-                                .collect(),
-                        );
-                        return Ok(QueryPlannerContent::Response {
-                            response: Box::new(graphql::Response::builder().data(data).build()),
-                        });
-                    } else {
-                        // fragments might use @include or @skip
-                    }
-                }
-            } else {
-                // Should be unreachable as QueryAnalysisLayer would have returned an error
-            }
-
-            if has_schema_introspection {
-                if has_other_root_fields {
-                    let error = graphql::Error::builder()
-                        .message("Mixed queries with both schema introspection and concrete fields are not supported")
-                        .extension_code("MIXED_INTROSPECTION")
-                        .build();
-                    return Ok(QueryPlannerContent::Response {
-                        response: Box::new(graphql::Response::builder().error(error).build()),
-                    });
-                }
-                return self.introspection(key, doc).await;
+            ControlFlow::Continue(()) => (),
+            ControlFlow::Break(response) => {
+                return Ok(QueryPlannerContent::CachedIntrospectionResponse {
+                    response: Box::new(response),
+                })
             }
         }
 
@@ -1001,11 +777,12 @@ impl BridgeQueryPlanner {
                 key.operation_name.as_deref(),
             )
             .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-            doc = Arc::new(ParsedDocumentInner {
-                executable: Arc::new(executable_document),
-                ast: new_doc,
-                hash: Arc::new(QueryHash(hash)),
-            });
+            doc = ParsedDocumentInner::new(
+                new_doc,
+                Arc::new(executable_document),
+                key.operation_name.as_deref(),
+                Arc::new(QueryHash(hash)),
+            )?;
             selections.unauthorized.paths = unauthorized_paths;
         }
 
@@ -1126,7 +903,6 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::introspection::default_cache_storage;
     use crate::metrics::FutureMetricsExt as _;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -1171,15 +947,11 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(
-                schema.into(),
-                config,
-                None,
-                None,
-                default_cache_storage().await,
-            )
-            .await
-            .unwrap();
+            let introspection = Arc::new(IntrospectionCache::new(&config));
+            let _planner =
+                BridgeQueryPlanner::new(schema.into(), config, None, None, introspection)
+                    .await
+                    .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1194,15 +966,11 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(
-                schema.into(),
-                config,
-                None,
-                None,
-                default_cache_storage().await,
-            )
-            .await
-            .unwrap();
+            let introspection = Arc::new(IntrospectionCache::new(&config));
+            let _planner =
+                BridgeQueryPlanner::new(schema.into(), config, None, None, introspection)
+                    .await
+                    .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1216,7 +984,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap());
+        let config = Default::default();
+        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
         let planner = BridgeQueryPlanner::new(
@@ -1224,7 +993,7 @@ mod tests {
             Default::default(),
             None,
             None,
-            default_cache_storage().await,
+            Arc::new(IntrospectionCache::new(&config)),
         )
         .await
         .unwrap();
@@ -1268,10 +1037,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let result = plan(EXAMPLE_SCHEMA, "", "", None, PlanOptions::default()).await;
+        let query = "";
+        let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default()).await;
 
         assert_eq!(
-            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
+            "spec error: parsing error: syntax error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
@@ -1287,7 +1057,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Response { response } = result {
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -1308,7 +1078,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Response { response } = result {
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query","__typename":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -1330,7 +1100,7 @@ mod tests {
             configuration.clone(),
             None,
             None,
-            default_cache_storage().await,
+            Arc::new(IntrospectionCache::new(&configuration)),
         )
         .await
         .unwrap();
@@ -1644,7 +1414,7 @@ mod tests {
             configuration.clone(),
             None,
             None,
-            default_cache_storage().await,
+            Arc::new(IntrospectionCache::new(&configuration)),
         )
         .await
         .unwrap();
@@ -1654,8 +1424,7 @@ mod tests {
             operation_name.as_deref(),
             &planner.schema(),
             &configuration,
-        )
-        .unwrap();
+        )?;
 
         planner
             .get(

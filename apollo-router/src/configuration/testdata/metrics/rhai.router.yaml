@@ -1,0 +1,3 @@
+rhai:
+  scripts: rhai
+  main: main.rhai

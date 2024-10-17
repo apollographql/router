@@ -286,11 +286,10 @@ mod forbid_http_get_mutations_tests {
 
         let context = Context::new();
         context.extensions().with_lock(|mut lock| {
-            lock.insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
-                ast,
-                executable: Arc::new(executable),
-                hash: Default::default(),
-            }))
+            lock.insert::<ParsedDocument>(
+                ParsedDocumentInner::new(ast, Arc::new(executable), None, Default::default())
+                    .unwrap(),
+            )
         });
 
         SupergraphRequest::fake_builder()

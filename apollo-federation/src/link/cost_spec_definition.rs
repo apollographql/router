@@ -147,11 +147,6 @@ impl CostSpecDefinition {
         apollo_compiler::ast::DirectiveList,
         Node::new
     );
-    propagate_demand_control_directives!(
-        propagate_demand_control_schema_directives,
-        apollo_compiler::schema::DirectiveList,
-        Component::from
-    );
 
     propagate_demand_control_directives_to_position!(
         propagate_demand_control_directives_for_enum,
