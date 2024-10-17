@@ -1234,6 +1234,7 @@ fn reformat_response_expected_int_got_string() {
                       a
                     }
                   }
+                  id
                 }
                 l
             }
@@ -1247,9 +1248,9 @@ fn reformat_response_expected_int_got_string() {
                 "b": 0,
                 "e": "X",
                 "u": 1,
-                // "id": {
-                //     "test": "test"
-                // }
+                "id": {
+                    "test": "test",
+                },
                 "l": "A"
             },
         }})
@@ -1261,7 +1262,7 @@ fn reformat_response_expected_int_got_string() {
                 "b": null,
                 "e": null,
                 "u": null,
-                //"id": null
+                "id": null,
                 "l": null
             },
         }})
@@ -1294,6 +1295,11 @@ fn reformat_response_expected_int_got_string() {
             {
                 "message": "Invalid non-object value of type number for composite type U",
                 "path": ["get", "u"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.id",
+                "path": ["get", "id"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
