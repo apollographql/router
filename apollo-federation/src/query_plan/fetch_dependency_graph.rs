@@ -36,9 +36,7 @@ use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
 use crate::operation::DirectiveList;
 use crate::operation::Field;
-use crate::operation::FieldData;
 use crate::operation::InlineFragment;
-use crate::operation::InlineFragmentData;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Operation;
 use crate::operation::Selection;
@@ -587,7 +585,6 @@ impl FetchDependencyGraphNodePath {
 
     fn advance_field_type(&self, element: &Field) -> Result<IndexSet<Name>, FederationError> {
         if !element
-            .data()
             .output_base_type()
             .map(|base_type| base_type.is_composite_type())
             .unwrap_or_default()
@@ -660,7 +657,7 @@ impl FetchDependencyGraphNodePath {
                 }
 
                 new_path.push(FetchDataPathElement::Key(
-                    field.response_name(),
+                    field.response_name().clone(),
                     Default::default(),
                 ));
 
@@ -2952,7 +2949,7 @@ fn operation_for_entities_fetch(
     let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
 
     let entities_call = Selection::from_element(
-        OpPathElement::Field(Field::new(FieldData {
+        OpPathElement::Field(Field {
             schema: subgraph_schema.clone(),
             field_position: entities,
             alias: None,
@@ -2962,7 +2959,7 @@ fn operation_for_entities_fetch(
             )),
             directives: Default::default(),
             sibling_typename: None,
-        })),
+        }),
         Some(selection_set),
     )?;
 
@@ -3897,13 +3894,13 @@ fn wrap_selection_with_type_and_conditions<T>(
         // PORT_NOTE: JS code looks for type condition in the wrapping type's schema based on
         // the name of wrapping type. Not sure why.
         return wrap_in_fragment(
-            InlineFragment::new(InlineFragmentData {
+            InlineFragment {
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
                 directives: Default::default(), // None
                 selection_id: SelectionId::new(),
-            }),
+            },
             initial,
         );
     }
@@ -3924,13 +3921,13 @@ fn wrap_selection_with_type_and_conditions<T>(
             .into()],
         };
         wrap_in_fragment(
-            InlineFragment::new(InlineFragmentData {
+            InlineFragment {
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
                 directives: [directive].into_iter().collect(),
                 selection_id: SelectionId::new(),
-            }),
+            },
             acc,
         )
     })
@@ -4770,7 +4767,7 @@ mod tests {
         object: Name,
         field: Name,
     ) -> OpPathElement {
-        OpPathElement::Field(super::Field::new(FieldData {
+        OpPathElement::Field(Field {
             schema: schema.clone(),
             field_position: ObjectTypeDefinitionPosition::new(object)
                 .field(field)
@@ -4779,7 +4776,7 @@ mod tests {
             arguments: Default::default(),
             directives: Default::default(),
             sibling_typename: None,
-        }))
+        })
     }
 
     fn inline_fragment_element(
@@ -4794,13 +4791,13 @@ mod tests {
             .unwrap();
         let type_condition =
             type_condition_name.map(|n| schema.get_type(n).unwrap().try_into().unwrap());
-        OpPathElement::InlineFragment(super::InlineFragment::new(InlineFragmentData {
+        OpPathElement::InlineFragment(InlineFragment {
             schema: schema.clone(),
             parent_type_position: parent_type,
             type_condition_position: type_condition,
             directives: Default::default(),
             selection_id: SelectionId::new(),
-        }))
+        })
     }
 
     fn to_string(response_path: &[FetchDataPathElement]) -> String {

@@ -6,7 +6,6 @@ use apollo_compiler::name;
 use super::runtime_types_intersect;
 use super::DirectiveList;
 use super::Field;
-use super::FieldData;
 use super::FieldSelection;
 use super::FragmentSpreadSelection;
 use super::InlineFragmentSelection;
@@ -62,7 +61,7 @@ impl FieldSelection {
 
         let field_element =
             if self.field.schema() == schema && self.field.field_position == field_position {
-                self.field.data().clone()
+                self.field.clone()
             } else {
                 self.field
                     .with_updated_position(schema.clone(), field_position)
@@ -89,7 +88,7 @@ impl FieldSelection {
                     arguments: vec![(name!("if"), false).into()],
                 });
                 let non_included_typename = Selection::from_field(
-                    Field::new(FieldData {
+                    Field {
                         schema: schema.clone(),
                         field_position: field_composite_type_position
                             .introspection_typename_field(),
@@ -97,7 +96,7 @@ impl FieldSelection {
                         arguments: Default::default(),
                         directives,
                         sibling_typename: None,
-                    }),
+                    },
                     None,
                 );
                 let mut typename_selection = SelectionMap::new();
@@ -229,14 +228,14 @@ impl InlineFragmentSelection {
                     parent_type.introspection_typename_field()
                 };
                 let typename_field_selection = Selection::from_field(
-                    Field::new(FieldData {
+                    Field {
                         schema: schema.clone(),
                         field_position: parent_typename_field,
                         alias: None,
                         arguments: Default::default(),
                         directives,
                         sibling_typename: None,
-                    }),
+                    },
                     None,
                 );
 
@@ -260,7 +259,7 @@ impl InlineFragmentSelection {
             && this_condition.is_some_and(|c| c.is_abstract_type())
         {
             let mut liftable_selections = SelectionMap::new();
-            for (_, selection) in selection_set.selections.iter() {
+            for selection in selection_set.selections.values() {
                 match selection {
                     Selection::FragmentSpread(spread_selection) => {
                         let type_condition = &spread_selection.spread.type_condition_position;
@@ -296,7 +295,7 @@ impl InlineFragmentSelection {
 
             // Otherwise, if there are "liftable" selections, we must return a set comprised of those lifted selection,
             // and the current fragment _without_ those lifted selections.
-            if liftable_selections.len() > 0 {
+            if !liftable_selections.is_empty() {
                 // Converting `... [on T] { <liftable_selections> <non-liftable_selections> }` into
                 // `{ ... [on T] { <non-liftable_selections> } <liftable_selections> }`.
                 // PORT_NOTE: It appears that this lifting could be repeatable (meaning lifted
@@ -323,8 +322,8 @@ impl InlineFragmentSelection {
 
                 // Since liftable_selections are changing their parent, we need to rebase them.
                 liftable_selections = liftable_selections
-                    .into_iter()
-                    .map(|(_key, sel)| sel.rebase_on(parent_type, named_fragments, schema))
+                    .into_values()
+                    .map(|sel| sel.rebase_on(parent_type, named_fragments, schema))
                     .collect::<Result<_, _>>()?;
 
                 let mut final_selection_map = SelectionMap::new();
