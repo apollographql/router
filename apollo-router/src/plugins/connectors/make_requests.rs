@@ -377,7 +377,12 @@ fn entities_with_fields_from_request(
             Selection::Field(_) => Ok::<_, MakeRequestError>(vec![]),
 
             Selection::FragmentSpread(f) => {
-                let frag = f.fragment_def(&request.operation).expect("fragment exists");
+                let Some(frag) = f.fragment_def(&request.operation) else {
+                    return Err(InvalidOperation(format!(
+                        "invalid operation: fragment `{}` missing",
+                        f.fragment_name
+                    )));
+                };
                 let typename = frag.type_condition();
                 Ok(frag
                     .selection_set
