@@ -1,9 +1,27 @@
 use nom::bytes::complete::tag;
 use nom::combinator::map;
-use nom::IResult;
 use nom_locate::LocatedSpan;
 
-pub(crate) type Span<'a> = LocatedSpan<&'a str>;
+use super::ParseResult;
+
+// Currently, all our error messages are &'static str, which allows the Span
+// type to remain Copy, which is convenient to avoid having to clone Spans
+// frequently in the parser code.
+//
+// If we wanted to introduce any error messages computed using format!, we'd
+// have to switch to Option<String> here (or some other type containing owned
+// String data), which would make Span no longer Copy, requiring more cloning.
+// Not the end of the world, but something to keep in mind for the future.
+//
+// The cloning would still be relatively cheap because we use None throughout
+// parsing and then only set Some(message) when we need to report an error, so
+// we would not be cloning long String messages very often (and the rest of the
+// Span fields are cheap to clone).
+pub(crate) type Span<'a> = LocatedSpan<&'a str, Option<&'static str>>;
+
+pub(super) fn new_span(input: &str) -> Span {
+    Span::new_extra(input, None)
+}
 
 // Some parsed AST structures, like PathSelection and NamedSelection, can
 // produce a range directly from their children, so they do not need to be
@@ -108,7 +126,7 @@ pub(super) fn merge_ranges(left: OffsetRange, right: OffsetRange) -> OffsetRange
 // matched string and the range of the match.
 pub(super) fn ranged_span<'a, 'b>(
     s: &'a str,
-) -> impl FnMut(Span<'b>) -> IResult<Span<'b>, WithRange<&'b str>> + 'a
+) -> impl FnMut(Span<'b>) -> ParseResult<WithRange<&'b str>> + 'a
 where
     'b: 'a,
 {
