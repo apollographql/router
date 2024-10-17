@@ -111,6 +111,29 @@ telemetry:
 
 - `parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to disable it (setting `parent_based_sampler: false`) if your router is exposed directly to the internet.
 
+### `preview_datadog_agent_sampling`
+
+The Datadog APM view relies on traces to generate metrics. For this to be accurate 100% of requests must be sampled and sent to the Datadog agent.
+To prevent ALL traces from then being sent to Datadog, you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        sampler: 0.1
+        preview_datadog_agent_sampling: true
+```
+
+<Note>
+    The Router does not support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+    Configuring `traces_per_second` in the Datadog agent will not dynamically adjust the Router's sampling rate to meet the target rate.
+</Note>
+<Note>
+    Using `preview_datadog_agent_sampling` will send ALL spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
+</Note>
+
 ### `propagation`
 
 The `telemetry.exporters.tracing.propagation` section allows you to configure which propagators are active in addition to those automatically activated by using an exporter.
@@ -235,17 +258,21 @@ Using this configuration you will have a response header called `my-trace-id` co
 
 ## Tracing common reference
 
-| Attribute                        | Default                  | Description                                     |
-|----------------------------------|--------------------------|-------------------------------------------------|
-| `service_name`                   | `unknown_service:router` | The OpenTelemetry service name.                 |
-| `service_namespace`              |                          | The OpenTelemetry namespace.                    |
-| `resource`                       |                          | The OpenTelemetry resource to attach to traces. |
-| `experimental_response_trace_id` |                          | Return the trace ID in a response header.       |
-| `max_attributes_per_event`       | 128                      | The maximum number of attributes per event.     |
-| `max_attributes_per_link`        | 128                      | The maximum number of attributes per link.      |
-| `max_attributes_per_span`        | 128                      | The maximum number of attributes per span.      |
-| `max_events_per_span`            | 128                      | The maximum number of events per span.          |
-| `max_links_per_span`             | 128                      | The maximum links per span.                     |
+| Attribute                        | Default                  | Description                                      |
+|----------------------------------|--------------------------|--------------------------------------------------|
+| `parent_based_sampler`           | `true`                   | Sampling decisions from upstream will be honored |
+| `preview_datadog_agent_sampling` | `false`                  | Send all spans to the Datadog agent.             |
+| `propagation`                    |                          | The propagation configuration.                   |
+| `sampler`                        | `always_on`              | The sampling rate for traces.                    |
+| `service_name`                   | `unknown_service:router` | The OpenTelemetry service name.                  |
+| `service_namespace`              |                          | The OpenTelemetry namespace.                     |
+| `resource`                       |                          | The OpenTelemetry resource to attach to traces.  |
+| `experimental_response_trace_id` |                          | Return the trace ID in a response header.        |
+| `max_attributes_per_event`       | 128                      | The maximum number of attributes per event.      |
+| `max_attributes_per_link`        | 128                      | The maximum number of attributes per link.       |
+| `max_attributes_per_span`        | 128                      | The maximum number of attributes per span.       |
+| `max_events_per_span`            | 128                      | The maximum number of events per span.           |
+| `max_links_per_span`             | 128                      | The maximum links per span.                      |
 
 ## Related topics
 

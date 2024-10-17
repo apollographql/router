@@ -90,7 +90,7 @@ async fn test_local_root() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_untraced_query(&query).await;
+    let (id, result) = router.execute_untraced_query(&query, None).await;
     assert!(!result
         .headers()
         .get("apollo-custom-trace-id")
@@ -121,7 +121,7 @@ async fn test_local_root_no_sample() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (_, response) = router.execute_untraced_query(&query).await;
+    let (_, response) = router.execute_untraced_query(&query, None).await;
     assert!(response.headers().get("apollo-custom-trace-id").is_some());
 
     router.graceful_shutdown().await;
@@ -141,7 +141,7 @@ async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
     let query = json!({"query":"query ExampleQuery {topProducts{name}}\n","variables":{}, "operationName": "ExampleQuery"});
 
     for _ in 0..100 {
-        let (id, result) = router.execute_untraced_query(&query).await;
+        let (id, result) = router.execute_untraced_query(&query, None).await;
 
         if result.headers().get("apollo-custom-trace-id").is_some()
             && validate_trace(
@@ -177,7 +177,7 @@ async fn test_no_telemetry() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (_, response) = router.execute_untraced_query(&query).await;
+    let (_, response) = router.execute_untraced_query(&query, None).await;
     assert!(response.headers().get("apollo-custom-trace-id").is_none());
 
     router.graceful_shutdown().await;
