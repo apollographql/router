@@ -16,7 +16,6 @@ use nom::multi::many1;
 use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
-use nom::IResult;
 
 use super::helpers::spaces_or_comments;
 use super::location::merge_ranges;
@@ -24,10 +23,12 @@ use super::location::ranged_span;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
+use super::nom_error_message;
 use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
 use super::ExternalVarPaths;
+use super::ParseResult;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitExpr {
@@ -43,7 +44,7 @@ pub(crate) enum LitExpr {
 impl LitExpr {
     // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
-    pub(crate) fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
+    pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         tuple((
             spaces_or_comments,
             alt((
@@ -70,7 +71,7 @@ impl LitExpr {
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
-    fn parse_number(input: Span) -> IResult<Span, WithRange<Self>> {
+    fn parse_number(input: Span) -> ParseResult<WithRange<Self>> {
         let (suffix, (_, neg, _, num)) = tuple((
             spaces_or_comments,
             opt(ranged_span("-")),
@@ -148,15 +149,17 @@ impl LitExpr {
             let range = merge_ranges(neg.and_then(|n| n.range()), num.range());
             Ok((suffix, WithRange::new(lit_number, range)))
         } else {
-            Err(nom::Err::Failure(nom::error::Error::new(
+            Err(nom_error_message(
                 input,
-                nom::error::ErrorKind::IsNot,
-            )))
+                // We could include the faulty number in the error message, but
+                // it will also appear at the beginning of the input span.
+                "Failed to parse numeric literal",
+            ))
         }
     }
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
-    fn parse_object(input: Span) -> IResult<Span, WithRange<Self>> {
+    fn parse_object(input: Span) -> ParseResult<WithRange<Self>> {
         tuple((
             spaces_or_comments,
             ranged_span("{"),
@@ -191,13 +194,13 @@ impl LitExpr {
     }
 
     // LitProperty ::= Key ":" LitExpr
-    fn parse_property(input: Span) -> IResult<Span, (WithRange<Key>, WithRange<Self>)> {
+    fn parse_property(input: Span) -> ParseResult<(WithRange<Key>, WithRange<Self>)> {
         tuple((Key::parse, spaces_or_comments, char(':'), Self::parse))(input)
             .map(|(input, (key, _, _colon, value))| (input, (key, value)))
     }
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
-    fn parse_array(input: Span) -> IResult<Span, WithRange<Self>> {
+    fn parse_array(input: Span) -> ParseResult<WithRange<Self>> {
         tuple((
             spaces_or_comments,
             ranged_span("["),
@@ -272,10 +275,11 @@ mod tests {
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
+    use crate::sources::connect::json_selection::location::new_span;
     use crate::sources::connect::json_selection::PathList;
 
     fn check_parse(input: &str, expected: LitExpr) {
-        match LitExpr::parse(Span::new(input)) {
+        match LitExpr::parse(new_span(input)) {
             Ok((remainder, parsed)) => {
                 assert!(span_is_all_spaces_or_comments(remainder));
                 assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
