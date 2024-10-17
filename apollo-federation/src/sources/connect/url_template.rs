@@ -376,7 +376,7 @@ impl FromStr for VariableType {
             .find(|var_type| var_type.as_str() == input)
             .ok_or_else(|| {
                 format!(
-                    "Variable type must be one of {}, got {input}",
+                    "Variable type must be one of {}, got `{input}`",
                     Self::iter().map(|var_type| var_type.as_str()).join(", ")
                 )
             })
@@ -514,7 +514,7 @@ mod test_parse {
         let err = URLTemplate::from_str("/something/{$blah.stuff}/more").unwrap_err();
         assert_eq!(
             err.message,
-            "Variable type must be one of $args, $this, $config, got $blah"
+            "Variable type must be one of $args, $this, $config, got `$blah`"
         );
         assert_eq!(err.location, Some(12..17));
     }
