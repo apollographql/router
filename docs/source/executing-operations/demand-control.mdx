@@ -5,12 +5,6 @@ description: Protect your graph from malicious or demanding clients with Apollo 
 minVersion: 1.48.0
 ---
 
-<SummitCallout
-  topic="graph security"
-  workshopName="Securing your graph: A defense-in-depth strategy"
-  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712945157460001NjSZ"
-/>
-
 <EnterpriseFeature />
 
 ## What is demand control?
@@ -243,7 +237,7 @@ When enabling `demand_control` for the first time, set it to `measure` mode. Thi
 
 <Tip>
 
-New to router telemetry? See [Router Telemetry](../configuration/telemetry/overview).
+New to router telemetry? See [Router Telemetry](/router/configuration/telemetry/overview).
 
 </Tip>
 
@@ -270,7 +264,7 @@ Attributes for `cost` can be applied to instruments, spans, and events—anywher
 | `cost.actual`    | boolean | The actual cost of an operation, measured after execution.                                       |
 | `cost.estimated` | boolean | The estimated cost of an operation before execution.                                             |
 | `cost.delta`     | boolean | The difference between the actual and estimated cost.                                            |
-| `cost.result`    | boolean | The return code of the cost calculation. `COST_OK` or an [error code](../errors/#demand-control) |
+| `cost.result`    | boolean | The return code of the cost calculation. `COST_OK` or an [error code](/router/errors/#demand-control) |
 
 ### Selectors
 

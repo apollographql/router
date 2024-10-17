@@ -4,12 +4,6 @@ subtitle: Configure router caching for query plans and automatic persisted queri
 description: Configure in-memory caching for improved performance in Apollo GraphOS Router or Apollo Router Core. Configure query plans and automatic persisted queries caching.
 ---
 
-<SummitCallout
-  topic="graph performance"
-  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
-  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
-/>
-
 Both GraphOS Router and Apollo Router Core use an in-memory LRU cache to store the following data:
 
 - [Generated query plans](#caching-query-plans)
@@ -20,7 +14,7 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 
 <Tip>
 
-If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
+If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](/router/configuration/distributed-caching/).
 
 </Tip>
 
@@ -34,7 +28,7 @@ Whenever your router receives an incoming GraphQL operation, it generates a [que
 
 By caching previously generated query plans, your router can _skip_ generating them _again_ if a client later sends the exact same operation. This improves your router's responsiveness.
 
-The GraphOS Router enables query plan caching by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of query plan entries in the cache like so:
+The GraphOS Router enables query plan caching by default. In your router's [YAML config file](/router/configuration/overview/#yaml-config-file), you can configure the maximum number of query plan entries in the cache like so:
 
 ```yaml title="router.yaml"
 supergraph:
@@ -61,7 +55,7 @@ supergraph:
     warmed_up_queries: 100
 ```
 
-(In addition, the router can use the contents of the [persisted query list](./persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](./persisted-queries#persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.)
+(In addition, the router can use the contents of the [persisted query list](/router/configuration/persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](/router/configuration/persisted-queries#persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.)
 
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
@@ -112,7 +106,7 @@ Because the router's role differs between these two interactions, you configure 
 
 ### APQ with clients
 
-The router enables APQ caching for client operations by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
+The router enables APQ caching for client operations by default. In your router's [YAML config file](/router/configuration/overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
 
 ```yaml title="router.yaml"
 apq:
@@ -133,7 +127,7 @@ apq:
 
 By default, the router does _not_ use APQ when sending queries to its subgraphs.
 
-In your router's [YAML config file](./overview/#yaml-config-file), you can configure this APQ support with a combination of global and per-subgraph settings:
+In your router's [YAML config file](/router/configuration/overview/#yaml-config-file), you can configure this APQ support with a combination of global and per-subgraph settings:
 
 ```yaml title="router.yaml"
 apq:

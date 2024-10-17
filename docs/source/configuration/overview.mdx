@@ -4,8 +4,6 @@ subtitle: Configure a router via environment variables, command-line options, an
 description: Learn how to configure the Apollo GraphOS Router or Apollo Router Core with environment variables, command-line options and commands, and YAML configuration files.
 ---
 
-import RedisTLS from '../../shared/redis-tls.mdx'
-
 Learn how to customize the behavior of your GraphOS Router or Apollo Router Core with environment variables, command-line commands and options, and YAML file configuration.
 
 ## Environment variables
@@ -76,7 +74,7 @@ A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-key
 
 ## Command-line options
 
-After [installing the Apollo Router Core](../quickstart/) in your current working directory, you can run the router with the following example command:
+After [installing the Apollo Router Core](/router/quickstart) in your current working directory, you can run the router with the following example command:
 
 ```bash
 ./router --config router.yaml --supergraph supergraph-schema.graphql
@@ -104,13 +102,13 @@ This reference lists and describes the options supported by the `router` binary.
 </td>
 <td>
 
-The [supergraph schema](/federation/federated-types/overview/#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
 
 > &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages. 
 
 Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
 
-To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart).
 
 **Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
@@ -212,9 +210,9 @@ An offline GraphOS Enterprise license. Enables Enterprise router features when d
 
 An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
 
-When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](../enterprise-features/#the-enterprise-license).
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).
 
-For information about fetching an offline license and configuring the router, see [Offline Enterprise license](../enterprise-features/#offline-enterprise-license).
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/router/enterprise-features/#offline-enterprise-license).
 
 </td>
 </tr>
@@ -501,9 +499,9 @@ supergraph:
 
 ### Debugging
 
-- To configure logging, see [Logging in the router](./telemetry/exporters/logging/overview).
+- To configure logging, see [Logging in the router](/router/configuration/telemetry/exporters/logging/overview).
 
-- To configure the inclusion of subgraph errors, see [Subgraph error inclusion](./subgraph-error-inclusion).
+- To configure the inclusion of subgraph errors, see [Subgraph error inclusion](/router/configuration/subgraph-error-inclusion).
 
 ### Landing pages
 
@@ -563,7 +561,7 @@ In this example, the `organizations` subgraph URL is overridden to point to `htt
 
 Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use the routing URL specified in the supergraph schema.
 
-If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](../customizations/overview/#request-path) in the `SubgraphService` layer.
+If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](/router/customizations/overview/#request-path) in the `SubgraphService` layer.
 
 ### Caching
 
@@ -573,11 +571,39 @@ By default, the router stores the following data in its in-memory cache to impro
 - Automatic persisted queries (APQ)
 - Introspection responses
 
-You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-Memory Caching in the router](./in-memory-caching/).
+You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-Memory Caching in the router](/router/configuration/in-memory-caching/).
 
 **If you have a GraphOS Enterprise plan:** 
-- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
-- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](./entity-caching/).
+- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](/router/configuration/distributed-caching/).
+- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](/router/configuration/entity-caching/).
+
+<MinVersion version ="1.49.0">
+
+### Native query planner
+
+</MinVersion>
+
+Starting with v1.49.0, the router can run a Rust-native query planner. This native query planner can be run by itself to plan all queries, replacing the legacy JavaScript implementation.
+
+<Tip>
+
+Starting with v1.56.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following options in your `router.yaml`:
+
+```yaml title="router.yaml"
+experimental_query_planner_mode: new
+experimental_introspection_mode: new
+```
+
+You can also improve throughput by reducing the size of queries sent to subgraphs with the following option:
+
+```yaml title="router.yaml"
+supergraph:
+  generate_query_fragments: true
+```
+
+</Tip>
+
+Learn more in [Native Query Planner](/router/executing-operations/native-query-planner) docs.
 
 <MinVersion version="1.44.0">
 
@@ -836,59 +862,64 @@ To ensure sufficient data to distinguish between genuinely unused values and tho
 Thanks to extended reference reporting, operation checks can more accurately flag issues for changes to enum values and input object fields. See the comparison table below for differences between standard operation checks based on legacy reference reporting and enhanced checks based on extended reference reporting.
 
 <table class="field-table api-ref">
-<tr>
-<th style="min-width: 100px;"></th>
-<th style="min-width: 200px;">
-Standard Check Behavior<br/>
-(Legacy reference reporting)
-</th>
-<th>
-Enhanced Check Behavior<br/>
-(Extended reference reporting)
-</th>
-</tr>
-<tr>
-<td>
+  <thead>
+    <tr>
+      <th style={{ minWidth: '100px' }}></th>
+      <th style={{ minWidth: '200px' }}>
+        Standard Check Behavior<br/>
+        (Legacy reference reporting)
+      </th>
+      <th>
+        Enhanced Check Behavior<br/>
+        (Extended reference reporting)
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
 
 ##### Enum value removal
 
-</td>
-<td>Removing any enum values is considered a breaking change if any operations use the enum.</td>
-<td>Removing enum values is only a breaking change if historical operations use the specific enum value(s) that were removed.</td>
-</tr>
-<tr>
-<td>
+      </td>
+      <td>Removing any enum values is considered a breaking change if any operations use the enum.</td>
+      <td>Removing enum values is only a breaking change if historical operations use the specific enum value(s) that were removed.</td>
+    </tr>
+    <tr>
+      <td>
 
 ##### Default argument changes for input object fields
 
-</td>
+      </td>
+      <td>
+        Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.
+      </td>
+      <td>
+        Changing or removing default values for input object fields is considered a breaking change.
+You can [configure checks to ignore default values changes](/graphos/platform/schema-management/checks#ignored-conditions-settings).
 
-<td>Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.</td>
-<td>
-
-Changing or removing default values for input object fields is considered a breaking change.
-You can [configure checks to ignore default values changes](/graphos/delivery/schema-checks/#ignored-conditions-settings).
-
-</td>
-</tr>
-<tr>
-<td>
+      </td>
+    </tr>
+    <tr>
+      <td>
 
 ##### Nullable input object field removal
-</td>
-<td>Removing a nullable input object field is always considered a breaking change.</td>
-<td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field is always omitted in historical operations, its removal isn't considered a breaking change.</td>
-</tr>
-<tr>
-<td>
+      </td>
+      <td>Removing a nullable input object field is always considered a breaking change.</td>
+      <td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field is always omitted in historical operations, its removal isn't considered a breaking change.</td>
+    </tr>
+    <tr>
+      <td>
 
 ##### Changing nullable input object fields to non-nullable
 
-</td>
-<td>Changing a nullable input object field to non-nullable is considered a breaking change.</td>
-<td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
-</tr>
+      </td>
+      <td>Changing a nullable input object field to non-nullable is considered a breaking change.</td>
+      <td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
+    </tr>
+  </tbody>
 </table>
+
 
 <Note>
 
@@ -901,59 +932,59 @@ You won't see an immediate change in checks behavior when you first turn on exte
 
 You can enhance your graph's security with GraphOS Router by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
 
-See [Safelisting with persisted queries](./persisted-queries) for more information.
+See [Safelisting with persisted queries](/router/configuration/persisted-queries) for more information.
 
 ### HTTP header rules
 
-See [Sending HTTP headers to subgraphs](./header-propagation/).
+See [Sending HTTP headers to subgraphs](/router/configuration/header-propagation/).
 
 ### Traffic shaping
 
-To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the router](./traffic-shaping).
+To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the router](/router/configuration/traffic-shaping).
 
 ### Cross-Origin Resource Sharing (CORS)
 
-See [Configuring CORS in the router](./cors).
+See [Configuring CORS in the router](/router/configuration/cors).
 
 ### Defer support
 
-See [router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
+See [router support for `@defer`](/router/executing-operations/defer-support/#disabling-defer).
 
 ### Query batching support
 
-See [GraphOS Router's support for query batching](../executing-operations/query-batching).
+See [GraphOS Router's support for query batching](/router/executing-operations/query-batching).
 
 ### Subscription support
 
-See [GraphQL subscriptions in the GraphOS Router](../executing-operations/subscription-support/#router-setup).
+See [GraphQL subscriptions in the GraphOS Router](/router/executing-operations/subscription-support/#router-setup).
 
 ### Authorization support
 
-- To configure authorization directives, see [Authorization directives](./authorization/#authorization-directives).
+- To configure authorization directives, see [Authorization directives](/router/configuration/authorization/#authorization-directives).
 
-- To configure the authorization plugin, see [Configuration options](./authorization/#configuration-options).
+- To configure the authorization plugin, see [Configuration options](/router/configuration/authorization/#configuration-options).
 
 ### JWT authentication
 
-To enable and configure JWT authentication, see [JWT authentication in the GraphOS Router](./authn-jwt).
+To enable and configure JWT authentication, see [JWT authentication in the GraphOS Router](/router/configuration/authn-jwt).
 
 ### Cross-site request forgery (CSRF) prevention
 
-To configure CSRF prevention, see [CSRF prevention in the router](./csrf).
+To configure CSRF prevention, see [CSRF prevention in the router](/router/configuration/csrf).
 
 ### Subgraph authentication
 
-To configure subgraph authentication with AWS SigV4, see a [configuration example](./authn-subgraph/#configuration-example).
+To configure subgraph authentication with AWS SigV4, see a [configuration example](/router/configuration/authn-subgraph/#configuration-example).
 
 ### External coprocessing
 
-See [External coprocessing in the GraphOS Router](../customizations/coprocessor/).
+See [External coprocessing in the GraphOS Router](/router/customizations/coprocessor/).
 
 ### Telemetry and monitoring
 
 The router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
 
-See the [router telemetry overview](./telemetry/overview).
+See the [router telemetry overview](/router/configuration/telemetry/overview).
 
 ### TLS
 
@@ -1067,7 +1098,22 @@ tls:
 
 #### Redis TLS configuration
 
-<RedisTLS />
+For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](https://www.apollographql.com/docs/router/overview/#yaml-config-file). For example:
+
+```yaml
+apq:
+  router:
+    cache:
+      redis:
+        urls: [ "rediss://redis.example.com:6379" ]
+        #highlight-start
+        tls:
+          certificate_authorities: ${file./path/to/ca.crt}
+          client_authentication:
+            certificate_chain: ${file./path/to/certificate_chain.pem}
+            key: ${file./path/to/key.pem}
+        #highlight-end
+```
 
 ### Request limits
 
@@ -1075,7 +1121,7 @@ The GraphOS Router supports enforcing three types of request limits for enhanced
 
 - Network-based limits
 - Lexical, parser-based limits
-- Semantic, operation-based limits (this is an [Enterprise feature](../enterprise-features/))
+- Semantic, operation-based limits (this is an [Enterprise feature](/router/enterprise-features/))
 
 The router rejects any request that violates at least one of these limits.
 
@@ -1097,7 +1143,7 @@ limits:
 
 #### Operation-based limits (Enterprise only)
 
-See [this article](./operation-limits/).
+See [this article](/router/configuration/operation-limits/).
 
 #### Network-based limits
 
@@ -1151,7 +1197,7 @@ Note that the router calculates the recursion depth for each operation and fragm
 
 ### Demand control
 
-See [Demand Control](../executing-operations/demand-control) to learn how to analyze the cost of operations and to reject requests with operations that exceed customizable cost limits. 
+See [Demand Control](/router/executing-operations/demand-control) to learn how to analyze the cost of operations and to reject requests with operations that exceed customizable cost limits. 
 
 ### Early cancel
 
@@ -1173,7 +1219,7 @@ supergraph:
 
 ### Plugins
 
-You can customize the router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
+You can customize the router's behavior with [plugins](/router/customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
 
 ```yaml {4,8} title="example-plugin-router.yaml"
 plugins:
@@ -1220,6 +1266,12 @@ Alternatively, the router can be configured to _generate_ fragments for subgraph
 supergraph:
   generate_query_fragments: true
 ```
+
+<Note>
+
+In the future, the `generate_query_fragments` option will be the only option for handling fragments.
+
+</Note>
 
 ### Reusing configuration
 

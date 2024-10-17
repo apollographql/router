@@ -45,7 +45,7 @@ A request's HTTP `Accept` header didn't contain any of the router's supported mi
 
 <Property name="429" short="Too many requests">
 
-Request traffic exceeded configured rate limits. See [client side traffic shaping](./configuration/traffic-shaping/#client-side-traffic-shaping).
+Request traffic exceeded configured rate limits. See [client side traffic shaping](/router/configuration/traffic-shaping/#client-side-traffic-shaping).
 
 </Property>
 <Property name="499" short="Request canceled by client">
@@ -61,14 +61,14 @@ The router encountered an unexpected issue. [Report](https://github.com/apollogr
 
 <Property name="504" short="Request timed out">
 
-The request was not able to complete within a configured amount of time.  See [client side traffic shaping timeouts](./configuration/traffic-shaping/#timeouts).
+The request was not able to complete within a configured amount of time.  See [client side traffic shaping timeouts](/router/configuration/traffic-shaping/#timeouts).
 
 </Property>
 </PropertyList>
 
 <Note>
 
-You can create Rhai scripts that throw custom status codes. See [Terminating client requests](./customizations/rhai-api#terminating-client-requests) to learn more.
+You can create Rhai scripts that throw custom status codes. See [Terminating client requests](/router/customizations/rhai-api#terminating-client-requests) to learn more.
 
 </Note>
 
@@ -76,7 +76,7 @@ You can create Rhai scripts that throw custom status codes. See [Terminating cli
 
 ### Demand control
 
-Errors returned by the router when [demand control](./executing-operations/demand-control) is enabled.
+Errors returned by the router when [demand control](/router/executing-operations/demand-control) is enabled.
 
 <PropertyList kind="errCodes">
 <Property name="COST_ESTIMATED_TOO_EXPENSIVE">
