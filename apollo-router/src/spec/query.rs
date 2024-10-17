@@ -405,7 +405,7 @@ impl Query {
                     input,
                     output,
                     path,
-                    field_type,
+                    parent_type,
                     field_or_index,
                     selection_set,
                 ) {
