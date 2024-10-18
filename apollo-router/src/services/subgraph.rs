@@ -267,7 +267,7 @@ impl Response {
 
         *response.headers_mut() = headers.unwrap_or_default();
 
-        // Warning: the id argument forthis builder is an Option to make that a non breaking change
+        // Warning: the id argument for this builder is an Option to make that a non breaking change
         // but this means that if a subgraph response is created explicitely without an id, it will
         // be generated here and not match the id from the subgraph request
         let id = id.unwrap_or_default();
