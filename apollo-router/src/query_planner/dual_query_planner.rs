@@ -268,7 +268,7 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFa
     check_match_eq!(*operation_kind, other.operation_kind);
     check_match_eq!(*id, other.id);
     check_match_eq!(*authorization, other.authorization);
-    check_match!(same_selection_set_sorted(requires, &other.requires));
+    check_match!(same_requires(requires, &other.requires));
     check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
     check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
     check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
@@ -300,7 +300,12 @@ fn operation_matches(
     this: &SubgraphOperation,
     other: &SubgraphOperation,
 ) -> Result<(), MatchFailure> {
-    let this_ast = match ast::Document::parse(this.as_serialized(), "this_operation.graphql") {
+    document_str_matches(this.as_serialized(), other.as_serialized())
+}
+
+// Compare operation document strings such as query or just selection set.
+fn document_str_matches(this: &str, other: &str) -> Result<(), MatchFailure> {
+    let this_ast = match ast::Document::parse(this, "this_operation.graphql") {
         Ok(document) => document,
         Err(_) => {
             return Err(MatchFailure::new(
@@ -308,7 +313,7 @@ fn operation_matches(
             ));
         }
     };
-    let other_ast = match ast::Document::parse(other.as_serialized(), "other_operation.graphql") {
+    let other_ast = match ast::Document::parse(other, "other_operation.graphql") {
         Ok(document) => document,
         Err(_) => {
             return Err(MatchFailure::new(
@@ -317,6 +322,20 @@ fn operation_matches(
         }
     };
     same_ast_document(&this_ast, &other_ast)
+}
+
+fn opt_document_string_matches(
+    this: &Option<String>,
+    other: &Option<String>,
+) -> Result<(), MatchFailure> {
+    match (this, other) {
+        (None, None) => Ok(()),
+        (Some(this_sel), Some(other_sel)) => document_str_matches(this_sel, other_sel),
+        _ => Err(MatchFailure::new(format!(
+            "mismatched at opt_document_string_matches\nleft: {:?}\nright: {:?}",
+            this, other
+        ))),
+    }
 }
 
 // The rest is calling the comparison functions above instead of `PartialEq`,
@@ -494,8 +513,8 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
                 deferred: other_deferred,
             },
         ) => {
-            check_match!(defer_primary_node_matches(primary, other_primary));
-            check_match!(vec_matches(deferred, other_deferred, deferred_node_matches));
+            defer_primary_node_matches(primary, other_primary)?;
+            vec_matches_result(deferred, other_deferred, deferred_node_matches)?;
         }
         (
             PlanNode::Subscription { primary, rest },
@@ -536,12 +555,15 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
     Ok(())
 }
 
-fn defer_primary_node_matches(this: &Primary, other: &Primary) -> bool {
+fn defer_primary_node_matches(this: &Primary, other: &Primary) -> Result<(), MatchFailure> {
     let Primary { subselection, node } = this;
-    *subselection == other.subselection && opt_plan_node_matches(node, &other.node).is_ok()
+    opt_document_string_matches(subselection, &other.subselection)
+        .map_err(|err| err.add_description("under defer primary subselection"))?;
+    opt_plan_node_matches(node, &other.node)
+        .map_err(|err| err.add_description("under defer primary plan node"))
 }
 
-fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> bool {
+fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> Result<(), MatchFailure> {
     let DeferredNode {
         depends,
         label,
@@ -549,11 +571,14 @@ fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> bool {
         subselection,
         node,
     } = this;
-    *depends == other.depends
-        && *label == other.label
-        && *query_path == other.query_path
-        && *subselection == other.subselection
-        && opt_plan_node_matches(node, &other.node).is_ok()
+
+    check_match_eq!(*depends, other.depends);
+    check_match_eq!(*label, other.label);
+    check_match_eq!(*query_path, other.query_path);
+    opt_document_string_matches(subselection, &other.subselection)
+        .map_err(|err| err.add_description("under deferred subselection"))?;
+    opt_plan_node_matches(node, &other.node)
+        .map_err(|err| err.add_description("under deferred node"))
 }
 
 fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> Result<(), MatchFailure> {
@@ -634,6 +659,10 @@ fn same_selection_set_sorted(x: &[Selection], y: &[Selection]) -> bool {
         .into_iter()
         .zip(sorted_by_selection_key(y))
         .all(|(x, y)| same_selection(x, y))
+}
+
+fn same_requires(x: &[Selection], y: &[Selection]) -> bool {
+    vec_matches_as_set(x, y, same_selection)
 }
 
 fn same_rewrites(x: &Option<Vec<DataRewrite>>, y: &Option<Vec<DataRewrite>>) -> bool {
@@ -957,6 +986,54 @@ mod ast_comparison_tests {
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod qp_selection_comparison_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_requires_comparison_with_same_selection_key() {
+        let requires_json = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "id",
+                    },
+                  ]
+            },
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "id",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "job",
+                    }
+                  ]
+            },
+        ]);
+
+        // The only difference between requires1 and requires2 is the order of selections.
+        // But, their items all have the same SelectionKey.
+        let requires1: Vec<Selection> = serde_json::from_value(requires_json).unwrap();
+        let requires2: Vec<Selection> = requires1.iter().rev().cloned().collect();
+
+        // `same_selection_set_sorted` fails to match, since it doesn't account for
+        // two items with the same SelectionKey but in different order.
+        assert!(!same_selection_set_sorted(&requires1, &requires2));
+        // `same_requires` should succeed.
+        assert!(same_requires(&requires1, &requires2));
     }
 }
 
