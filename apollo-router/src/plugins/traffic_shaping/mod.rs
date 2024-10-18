@@ -329,6 +329,7 @@ impl TrafficShaping {
                     .boxed()
                 },
             )
+            .load_shed()
             .layer(TimeoutLayer::new(
                 self.config
                     .router
@@ -394,42 +395,42 @@ impl TrafficShaping {
             });
 
             Either::A(ServiceBuilder::new()
-
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
-                    .map_future_with_request_data(
-                        |req: &subgraph::Request| req.context.clone(),
-                        move |ctx, future| {
-                            async {
-                                let response: Result<subgraph::Response, BoxError> = future.await;
-                                match response {
-                                    Err(error) if error.is::<Elapsed>() => {
-                                        subgraph::Response::error_builder()
-                                            .status_code(StatusCode::GATEWAY_TIMEOUT)
-                                            .error::<graphql::Error>(Elapsed::new().into())
-                                            .context(ctx)
-                                            .build()
-                                    }
-                                    Err(error) if error.is::<RateLimited>() => {
-                                        subgraph::Response::error_builder()
-                                            .status_code(StatusCode::TOO_MANY_REQUESTS)
-                                            .error::<graphql::Error>(RateLimited::new().into())
-                                            .context(ctx)
-                                            .build()
-                                    }
-                                    _ => response,
+                .map_future_with_request_data(
+                    |req: &subgraph::Request| req.context.clone(),
+                    move |ctx, future| {
+                        async {
+                            let response: Result<subgraph::Response, BoxError> = future.await;
+                            match response {
+                                Err(error) if error.is::<Elapsed>() => {
+                                    subgraph::Response::error_builder()
+                                        .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                        .error::<graphql::Error>(Elapsed::new().into())
+                                        .context(ctx)
+                                        .build()
                                 }
-                            }.boxed()
-                        },
-                    )
-                    .layer(TimeoutLayer::new(
-                        config.shaping
-                        .timeout
-                        .unwrap_or(DEFAULT_TIMEOUT),
-                    ))
-                    .option_layer(retry)
-                    .option_layer(rate_limit)
+                                Err(error) if error.is::<RateLimited>() => {
+                                    subgraph::Response::error_builder()
+                                        .status_code(StatusCode::TOO_MANY_REQUESTS)
+                                        .error::<graphql::Error>(RateLimited::new().into())
+                                        .context(ctx)
+                                        .build()
+                                }
+                                _ => response,
+                            }
+                        }.boxed()
+                    },
+                )
+                .load_shed()
+                .layer(TimeoutLayer::new(
+                    config.shaping
+                    .timeout
+                    .unwrap_or(DEFAULT_TIMEOUT),
+                ))
+                .option_layer(retry)
+                .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.shaping.compression {
@@ -440,6 +441,7 @@ impl TrafficShaping {
                     req
                 }))
         } else {
+            // Note: Does this need more thinking about?
             Either::B(service)
         }
     }
@@ -806,23 +808,17 @@ mod test {
             .body()
             .errors
             .is_empty());
-        assert_eq!(
-            plugin
-                .as_any()
-                .downcast_ref::<TrafficShaping>()
-                .unwrap()
-                .subgraph_service_internal("test", test_service.clone())
-                .oneshot(SubgraphRequest::fake_builder().build())
-                .await
-                .unwrap()
-                .response
-                .body()
-                .errors[0]
-                .extensions
-                .get("code")
-                .unwrap(),
-            "REQUEST_RATE_LIMITED"
-        );
+        let err = plugin
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service.clone())
+            .oneshot(SubgraphRequest::fake_builder().build())
+            .await
+            .unwrap_err();
+
+        assert!(err.is::<RateLimited>());
+
         assert!(plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
@@ -868,16 +864,15 @@ mod test {
         mock_service.expect_clone().returning(|| {
             let mut mock_service = MockSupergraphService::new();
 
-            mock_service.expect_clone().returning(|| {
-                let mut mock_service = MockSupergraphService::new();
-                mock_service.expect_call().times(0..2).returning(move |_| {
-                    Ok(SupergraphResponse::fake_builder()
-                        .data(json!({ "test": 1234_u32 }))
-                        .build()
-                        .unwrap())
-                });
-                mock_service
+            mock_service.expect_call().times(0..2).returning(move |_| {
+                Ok(SupergraphResponse::fake_builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .build()
+                    .unwrap())
             });
+            mock_service
+                .expect_clone()
+                .returning(MockSupergraphService::new);
             mock_service
         });
 
@@ -895,24 +890,15 @@ mod test {
             .errors
             .is_empty());
 
-        assert_eq!(
-            plugin
-                .as_any()
-                .downcast_ref::<TrafficShaping>()
-                .unwrap()
-                .supergraph_service_internal(mock_service.clone())
-                .oneshot(SupergraphRequest::fake_builder().build().unwrap())
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap()
-                .errors[0]
-                .extensions
-                .get("code")
-                .unwrap(),
-            "REQUEST_RATE_LIMITED"
-        );
+        let err = plugin
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .supergraph_service_internal(mock_service.clone())
+            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap_err();
+        assert!(err.is::<RateLimited>());
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(plugin
             .as_any()
