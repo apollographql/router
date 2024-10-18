@@ -1,0 +1,40 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Connector HTTP client duration metric
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        connector:
+          http.client.request.duration:
+            attributes:
+              subgraph.name: true
+              connector.source:
+                connector_source: name
+              connector.http.method: true
+              connector.url.template: true
+              custom.request.header.attribute:
+                connector_http_request_header: custom_request_header
+              custom.response.header.attribute:
+                connector_http_response_header: custom_response_header
+              custom.response.status.attribute:
+                connector_http_response_status: code
+              custom.static.attribute:
+                static: custom_value
+---
+- name: http.client.request.duration
+  description: Duration of HTTP client requests.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes:
+          connector.http.method: GET
+          connector.source: posts_api
+          connector.url.template: /posts
+          custom.request.header.attribute: custom_request_header_value
+          custom.response.header.attribute: custom_response_header_value
+          custom.response.status.attribute: 200
+          custom.static.attribute: custom_value
+          subgraph.name: posts
