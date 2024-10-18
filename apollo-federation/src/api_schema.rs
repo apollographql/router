@@ -110,7 +110,7 @@ pub struct ApiSchemaOptions {
     pub include_stream: bool,
 }
 
-pub fn to_api_schema(
+pub(crate) fn to_api_schema(
     schema: ValidFederationSchema,
     options: ApiSchemaOptions,
 ) -> Result<ValidFederationSchema, FederationError> {
