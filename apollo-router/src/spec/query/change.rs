@@ -478,7 +478,10 @@ impl<'a> QueryHashVisitor<'a> {
 
         if let Some(dir_name) = self.join_type_directive_name.as_deref() {
             if let Some(dir) = directives.get(dir_name) {
-                if let Some(key) = dir.argument_by_name("key").and_then(|arg| arg.as_str()) {
+                if let Some(key) = dir
+                    .specified_argument_by_name("key")
+                    .and_then(|arg| arg.as_str())
+                {
                     let mut parser = Parser::new();
                     if let Ok(field_set) = parser.parse_field_set(
                         Valid::assume_valid_ref(self.schema),
@@ -510,7 +513,7 @@ impl<'a> QueryHashVisitor<'a> {
         if let Some(dir_name) = self.join_field_directive_name.as_deref() {
             if let Some(dir) = directives.get(dir_name) {
                 if let Some(requires) = dir
-                    .argument_by_name("requires")
+                    .specified_argument_by_name("requires")
                     .and_then(|arg| arg.as_str())
                 {
                     if let Ok(parent_type) = Name::new(parent_type) {

@@ -17,6 +17,8 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::Subgraph;
 
+mod defer;
+
 pub(super) fn parse_schema_and_operation(
     schema_and_operation: &str,
 ) -> (ValidFederationSchema, ExecutableDocument) {
@@ -1204,7 +1206,7 @@ mod make_selection_tests {
                 base_selection_set.type_position.clone(),
                 selection.clone(),
             );
-            Selection::from_element(base.element().unwrap(), Some(subselections), None).unwrap()
+            Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
         };
 
         let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
@@ -1331,7 +1333,7 @@ mod lazy_map_tests {
             let field_element =
                 Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
             let typename_selection =
-                Selection::from_element(field_element.into(), /*subselection*/ None, None)?;
+                Selection::from_element(field_element.into(), /*subselection*/ None)?;
             // return `updated` and `typename_selection`
             Ok([updated, typename_selection].into_iter().collect())
         })
@@ -1364,11 +1366,7 @@ mod lazy_map_tests {
     }
 }
 
-fn field_element(
-    schema: &ValidFederationSchema,
-    object: apollo_compiler::Name,
-    field: apollo_compiler::Name,
-) -> OpPathElement {
+fn field_element(schema: &ValidFederationSchema, object: Name, field: Name) -> OpPathElement {
     OpPathElement::Field(super::Field::new(super::FieldData {
         schema: schema.clone(),
         field_position: ObjectTypeDefinitionPosition::new(object)
@@ -1504,7 +1502,10 @@ fn add_at_path_collapses_unnecessary_fragments() {
             Some(
                 &SelectionSet::parse(
                     schema.clone(),
-                    InterfaceTypeDefinitionPosition::new(name!("X")).into(),
+                    InterfaceTypeDefinitionPosition {
+                        type_name: name!("X"),
+                    }
+                    .into(),
                     "... on C { d }",
                 )
                 .unwrap()

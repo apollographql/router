@@ -46,12 +46,12 @@ use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_cache() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
     // If this test fails and the cache key format changed you'll need to update the key here.
-    // 1. Force this test to run locally by removing the cfg() line at the top of this file.
-    // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
-    // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
-    // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:cache:1:federation:v2.9.0:schema:087288dbcef764e15c3088f332a47568275df3573719b7bbd358ede489a492e4:query:a64923334e18d0422a5b4485e3d4a4911839f72b3cc1e8582771c0b670a7ca64:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
+    // Look at the top of the file for instructions on getting the new cache key.
+    let known_cache_key = "plan:cache:1:federation:v2.9.2:schema:087288dbcef764e15c3088f332a47568275df3573719b7bbd358ede489a492e4:query:a64923334e18d0422a5b4485e3d4a4911839f72b3cc1e8582771c0b670a7ca64:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fffd4213337929d098b1d9f7c7337d0fd167ebc4c3c4c98ffc5bb5e1d164d996";
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -181,6 +181,10 @@ async fn query_planner_cache() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apq() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -321,6 +325,10 @@ async fn apq() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entity_cache() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -596,6 +604,10 @@ async fn entity_cache() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entity_cache_authorization() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -930,6 +942,10 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn connection_failure_blocks_startup() {
+    if !graph_os_enabled() {
+        return;
+    }
+
     let _ = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
@@ -988,7 +1004,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:56fcacc8de2e085d1f46a0dfcdf3b1e8c0a2549975388c8d2b8ecb64d522c14f"
+        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:cbfa8570d4e57116629a00bedd4391cb311a075269d19f311a760f0993bb0d0c"
     )
     .await;
 }
@@ -1000,25 +1016,6 @@ async fn query_planner_redis_update_planner_mode() {
         include_str!("fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"),
         "",
     )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn query_planner_redis_update_introspection() {
-    // If this test fails and the cache key format changed you'll need to update
-    // the key here.  Look at the top of the file for instructions on getting
-    // the new cache key.
-    //
-    // You first need to follow the process and update the key in
-    // `test_redis_query_plan_config_update`, and then update the key in this
-    // test.
-    //
-    // This test requires graphos license, so make sure you have
-    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
-    // test just passes locally.
-    test_redis_query_plan_config_update(
-        include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:214819cece87efcdd3ae25c19de048154c403b0a98a2f09047e3416a1aefca36"    )
     .await;
 }
 
@@ -1037,7 +1034,8 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:e3f21779503e898c8798a568e10416162670e2c29fced43cb9a71dbf60a31beb"    )
+        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:4148d368d81bada698527f710e6f71b78e632d827184a463f937b1b87af1f3c4"
+    )
     .await;
 }
 
@@ -1058,7 +1056,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:334396bce746bff275068c97e126891f7b867edb88bf32d707169016ae0bf220"
+        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0fde8b7bd9fc39dc9c7d077aae4fe1756bfdb9df7d07de5b01712582b553c8e2"
     )
     .await;
 }
@@ -1080,7 +1078,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:f92d99f543f3911c0bae7edcccd4d5bf76de37ac1f2f6c0b4deb44cb62ed9e35"
+        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:027e66f8bc66b24abf2d64cddcdf9dab8aec4e84538c16db4d78d16e146cba3c"
     )
     .await;
 }
@@ -1104,7 +1102,10 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
+    // If the tests above are failing, this is the key that needs to be changed first.
+    let starting_key = "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fffd4213337929d098b1d9f7c7337d0fd167ebc4c3c4c98ffc5bb5e1d164d996";
+    assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
+
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;

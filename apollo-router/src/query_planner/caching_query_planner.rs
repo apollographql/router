@@ -83,8 +83,6 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     enable_authorization_directives: bool,
     experimental_reuse_query_plans: QueryPlanReuseMode,
     config_mode: Arc<QueryHash>,
-    introspection: bool,
-    legacy_introspection_caching: bool,
 }
 
 fn init_query_plan_from_redis(
@@ -165,11 +163,6 @@ where
                 .query_planning
                 .experimental_reuse_query_plans,
             config_mode,
-            introspection: configuration.supergraph.introspection,
-            legacy_introspection_caching: configuration
-                .supergraph
-                .query_planning
-                .legacy_introspection_caching,
         })
     }
 
@@ -218,7 +211,6 @@ where
                                 metadata,
                                 plan_options,
                                 config_mode: _,
-                                introspection: _,
                             },
                             _,
                         )| WarmUpCachingQueryKey {
@@ -228,7 +220,6 @@ where
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
                             config_mode: self.config_mode.clone(),
-                            introspection: self.introspection,
                         },
                     )
                     .take(count)
@@ -274,7 +265,6 @@ where
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
                         config_mode: self.config_mode.clone(),
-                        introspection: self.introspection,
                     });
                 }
             }
@@ -292,11 +282,10 @@ where
             metadata,
             plan_options,
             config_mode: _,
-            introspection: _,
         } in all_cache_keys
         {
             let context = Context::new();
-            let (doc, _operation_def) = match query_analysis
+            let doc = match query_analysis
                 .parse_document(&query, operation_name.as_deref())
                 .await
             {
@@ -312,13 +301,12 @@ where
                 } else {
                     CachingQueryHash::DoNotReuse {
                         query_hash: doc.hash.clone(),
-                        schema_hash: self.schema.hash.clone(),
+                        schema_hash: self.schema.schema_id.clone(),
                     }
                 },
                 metadata: metadata.clone(),
                 plan_options: plan_options.clone(),
                 config_mode: self.config_mode.clone(),
-                introspection: self.introspection,
             };
 
             let mut should_measure = None;
@@ -346,7 +334,6 @@ where
                         metadata: metadata.clone(),
                         plan_options: plan_options.clone(),
                         config_mode: self.config_mode.clone(),
-                        introspection: self.introspection,
                     });
                 }
             };
@@ -358,7 +345,7 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let (doc, _operation_def) = match query_analysis
+                let doc = match query_analysis
                     .parse_document(&query, operation_name.as_deref())
                     .await
                 {
@@ -590,13 +577,12 @@ where
             } else {
                 CachingQueryHash::DoNotReuse {
                     query_hash: doc.hash.clone(),
-                    schema_hash: self.schema.hash.clone(),
+                    schema_hash: self.schema.schema_id.clone(),
                 }
             },
             metadata,
             plan_options,
             config_mode: self.config_mode.clone(),
-            introspection: self.introspection,
         };
 
         let context = request.context.clone();
@@ -640,8 +626,12 @@ where
                         }) => {
                             if let Some(content) = content.clone() {
                                 let can_cache = match &content {
-                                    QueryPlannerContent::Plan { .. } => true,
-                                    _ => self.legacy_introspection_caching,
+                                    // Already cached in an introspection-specific, small-size,
+                                    // in-memory-only cache.
+                                    QueryPlannerContent::CachedIntrospectionResponse { .. } => {
+                                        false
+                                    }
+                                    _ => true,
                                 };
 
                                 if can_cache {
@@ -742,7 +732,6 @@ pub(crate) struct CachingQueryKey {
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: Arc<QueryHash>,
-    pub(crate) introspection: bool,
 }
 
 // Update this key every time the cache key or the query plan format has to change.
@@ -760,7 +749,6 @@ impl std::fmt::Display for CachingQueryKey {
         self.metadata.hash(&mut hasher);
         self.plan_options.hash(&mut hasher);
         self.config_mode.hash(&mut hasher);
-        self.introspection.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
@@ -778,7 +766,7 @@ pub(crate) enum CachingQueryHash {
     Reuse(Arc<QueryHash>),
     DoNotReuse {
         query_hash: Arc<QueryHash>,
-        schema_hash: Arc<QueryHash>,
+        schema_hash: Arc<String>,
     },
 }
 
@@ -826,7 +814,6 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: Arc<QueryHash>,
-    pub(crate) introspection: bool,
 }
 
 struct StructHasher {
@@ -859,7 +846,10 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
             Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
-            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
+            Ok(QueryPlannerContent::Response { response })
+            | Ok(QueryPlannerContent::CachedIntrospectionResponse { response }) => {
+                Some(estimate_size(response))
+            }
             Ok(QueryPlannerContent::IntrospectionDisabled) => None,
             Err(e) => Some(estimate_size(e)),
         }
@@ -1093,7 +1083,7 @@ mod tests {
             .returning(|| {
                 let mut planner = MockMyQueryPlanner::new();
                 planner.expect_sync_call().returning(|_| {
-                    let qp_content = QueryPlannerContent::Response {
+                    let qp_content = QueryPlannerContent::CachedIntrospectionResponse {
                         response: Box::new(
                             crate::graphql::Response::builder()
                                 .data(Object::new())
@@ -1109,16 +1099,7 @@ mod tests {
                 planner
             });
 
-        let configuration = Arc::new(crate::Configuration {
-            supergraph: crate::configuration::Supergraph {
-                query_planning: crate::configuration::QueryPlanning {
-                    legacy_introspection_caching: false,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ..Default::default()
-        });
+        let configuration = Default::default();
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 

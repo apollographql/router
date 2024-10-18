@@ -64,6 +64,68 @@ fn it_preservers_aliased_typename() {
 }
 
 #[test]
+fn it_preserves_typename_with_directives() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query($v: Boolean!) {
+            t {
+              __typename
+              __typename @skip(if: $v)
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            __typename @skip(if: $v)
+          }
+        }
+      },
+    }
+    "###
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          query($v: Boolean!) {
+            t {
+              __typename @skip(if: $v)
+              __typename
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            __typename @skip(if: $v)
+          }
+        }
+      },
+    }
+    "###
+    );
+}
+
+#[test]
 fn it_does_not_needlessly_consider_options_for_typename() {
     let planner = planner!(
         Subgraph1: r#"
@@ -286,6 +348,107 @@ fn add_back_sibling_typename_to_interface_object() {
                 ... on Audio {
                   name
                 }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn test_indirect_branch_merging_with_typename_sibling() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+                test: T
+            }
+
+            interface T {
+                id: ID!
+            }
+
+            type A implements T @key(fields: "id") {
+                id: ID!
+            }
+
+            type B implements T @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        Subgraph2: r#"
+            interface T {
+                id: ID!
+                f: Int!
+            }
+
+            type A implements T @key(fields: "id") {
+                id: ID!
+                f: Int!
+            }
+
+            type B implements T @key(fields: "id") {
+                id: ID!
+                f: Int!
+            }
+        "#,
+    );
+    // This operation has two `f` selection instances: One with __typename sibling and one without.
+    // It creates multiple identical branches in the form of `... on A { f }` with different `f`.
+    // The query plan must chose one over the other, which is implementation specific.
+    // Currently, the last one is chosen.
+    assert_plan!(
+        &planner,
+        r#"
+            {
+                test {
+                    __typename
+                    f # <= This will have a sibling typename value.
+                    ... on A {
+                        f # <= This one will have no sibling typename.
+                    }
+                }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            test {
+              __typename
+              ... on A {
+                __typename
+                id
+              }
+              ... on B {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+              ... on B {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                f
+              }
+              ... on B {
+                __typename
+                f
               }
             }
           },

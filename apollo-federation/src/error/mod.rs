@@ -13,6 +13,37 @@ use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
 
+/// Break out of the current function, returning an internal error.
+#[macro_export]
+macro_rules! internal_error {
+    ( $( $arg:tt )+ ) => {
+        return Err($crate::error::FederationError::internal(format!( $( $arg )+ )).into());
+    }
+}
+
+/// A safe assertion: in debug mode, it panicks on failure, and in production, it returns an
+/// internal error.
+///
+/// Treat this as an assertion. It must only be used for conditions that *should never happen*
+/// in normal operation.
+#[macro_export]
+macro_rules! ensure {
+    ( $expr:expr, $( $arg:tt )+ ) => {
+        #[cfg(debug_assertions)]
+        {
+            if false {
+                return Err($crate::error::FederationError::internal("ensure!() must be used in a function that returns a Result").into());
+            }
+            assert!($expr, $( $arg )+);
+        }
+
+        #[cfg(not(debug_assertions))]
+        if !$expr {
+            $crate::internal_error!( $( $arg )+ );
+        }
+    }
+}
+
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.
 #[derive(Clone, Debug, strum_macros::Display)]
@@ -33,8 +64,6 @@ impl From<SchemaRootKind> for String {
 
 #[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
 pub enum UnsupportedFeatureKind {
-    #[strum(to_string = "progressive overrides")]
-    ProgressiveOverrides,
     #[strum(to_string = "defer")]
     Defer,
     #[strum(to_string = "context")]

@@ -19,7 +19,6 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 /// A GraphQL schema.
@@ -29,7 +28,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) hash: Arc<QueryHash>,
+    pub(crate) schema_id: Arc<String>,
 }
 
 /// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
@@ -67,8 +66,10 @@ impl Schema {
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
             for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
                 let join_directive = value.directives.get("join__graph")?;
-                let name = join_directive.argument_by_name("name")?.as_str()?;
-                let url = join_directive.argument_by_name("url")?.as_str()?;
+                let name = join_directive
+                    .specified_argument_by_name("name")?
+                    .as_str()?;
+                let url = join_directive.specified_argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
                 if url.is_empty() {
@@ -108,6 +109,8 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
+        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
+
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
                 include_defer: config.supergraph.defer_support,
@@ -119,17 +122,13 @@ impl Schema {
                 ))
             })?;
 
-        let mut hasher = Sha256::new();
-        hasher.update(raw_sdl.as_bytes());
-        let hash = Arc::new(QueryHash(hasher.finalize().to_vec()));
-
         Ok(Schema {
             raw_sdl,
             supergraph,
             subgraphs,
             implementers_map,
             api_schema: ApiSchema(api_schema),
-            hash,
+            schema_id,
         })
     }
 
@@ -222,7 +221,7 @@ impl Schema {
         for directive in &self.supergraph_schema().schema_definition.directives {
             let join_url = if directive.name == "core" {
                 let Some(feature) = directive
-                    .argument_by_name("feature")
+                    .specified_argument_by_name("feature")
                     .and_then(|value| value.as_str())
                 else {
                     continue;
@@ -231,7 +230,7 @@ impl Schema {
                 feature
             } else if directive.name == "link" {
                 let Some(url) = directive
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 else {
                     continue;
@@ -259,7 +258,7 @@ impl Schema {
             .filter(|dir| dir.name.as_str() == "link")
             .any(|link| {
                 if let Some(url_in_link) = link
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 {
                     let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
@@ -297,7 +296,7 @@ impl Schema {
             .filter(|dir| dir.name.as_str() == "link")
             .find(|link| {
                 if let Some(url_in_link) = link
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 {
                     let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
@@ -321,7 +320,7 @@ impl Schema {
                 }
             })
             .map(|link| {
-                link.argument_by_name("as")
+                link.specified_argument_by_name("as")
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| default.to_string())
             })
@@ -332,7 +331,7 @@ impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
             raw_sdl,
-            hash: _,
+            schema_id: _,
             supergraph: _, // skip
             subgraphs,
             implementers_map,

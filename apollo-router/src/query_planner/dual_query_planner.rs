@@ -12,6 +12,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::QueryPlan;
 
@@ -43,6 +44,7 @@ pub(crate) struct BothModeComparisonJob {
     pub(crate) document: Arc<Valid<ExecutableDocument>>,
     pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
+    pub(crate) plan_options: QueryPlanOptions,
 }
 
 type Queue = crossbeam_channel::Sender<BothModeComparisonJob>;
@@ -88,7 +90,9 @@ impl BothModeComparisonJob {
             let start = Instant::now();
 
             // No question mark operator or macro from here …
-            let result = self.rust_planner.build_query_plan(&self.document, name);
+            let result =
+                self.rust_planner
+                    .build_query_plan(&self.document, name, self.plan_options);
 
             let elapsed = start.elapsed().as_secs_f64();
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
@@ -149,7 +153,7 @@ impl BothModeComparisonJob {
                 let match_result = opt_plan_node_matches(js_root_node, &rust_root_node);
                 is_matched = match_result.is_ok();
                 match match_result {
-                    Ok(_) => tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉"),
+                    Ok(_) => tracing::trace!("JS and Rust query plans match{operation_desc}! 🎉"),
                     Err(err) => {
                         tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
                         tracing::debug!("{}", err.full_description());
@@ -264,7 +268,7 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFa
     check_match_eq!(*operation_kind, other.operation_kind);
     check_match_eq!(*id, other.id);
     check_match_eq!(*authorization, other.authorization);
-    check_match!(same_selection_set_sorted(requires, &other.requires));
+    check_match!(same_requires(requires, &other.requires));
     check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
     check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
     check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
@@ -296,7 +300,12 @@ fn operation_matches(
     this: &SubgraphOperation,
     other: &SubgraphOperation,
 ) -> Result<(), MatchFailure> {
-    let this_ast = match ast::Document::parse(this.as_serialized(), "this_operation.graphql") {
+    document_str_matches(this.as_serialized(), other.as_serialized())
+}
+
+// Compare operation document strings such as query or just selection set.
+fn document_str_matches(this: &str, other: &str) -> Result<(), MatchFailure> {
+    let this_ast = match ast::Document::parse(this, "this_operation.graphql") {
         Ok(document) => document,
         Err(_) => {
             return Err(MatchFailure::new(
@@ -304,7 +313,7 @@ fn operation_matches(
             ));
         }
     };
-    let other_ast = match ast::Document::parse(other.as_serialized(), "other_operation.graphql") {
+    let other_ast = match ast::Document::parse(other, "other_operation.graphql") {
         Ok(document) => document,
         Err(_) => {
             return Err(MatchFailure::new(
@@ -313,6 +322,20 @@ fn operation_matches(
         }
     };
     same_ast_document(&this_ast, &other_ast)
+}
+
+fn opt_document_string_matches(
+    this: &Option<String>,
+    other: &Option<String>,
+) -> Result<(), MatchFailure> {
+    match (this, other) {
+        (None, None) => Ok(()),
+        (Some(this_sel), Some(other_sel)) => document_str_matches(this_sel, other_sel),
+        _ => Err(MatchFailure::new(format!(
+            "mismatched at opt_document_string_matches\nleft: {:?}\nright: {:?}",
+            this, other
+        ))),
+    }
 }
 
 // The rest is calling the comparison functions above instead of `PartialEq`,
@@ -382,7 +405,6 @@ fn vec_matches_result<T>(
             item_matches(this, other)
                 .map_err(|err| err.add_description(&format!("under item[{}]", index)))
         })?;
-    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok()));
     Ok(())
 }
 
@@ -394,31 +416,36 @@ fn vec_matches_sorted<T: Ord + Clone>(this: &[T], other: &[T]) -> bool {
     vec_matches(&this_sorted, &other_sorted, T::eq)
 }
 
-fn vec_matches_sorted_by<T: Eq + Clone>(
+fn vec_matches_sorted_by<T: Clone>(
     this: &[T],
     other: &[T],
     compare: impl Fn(&T, &T) -> std::cmp::Ordering,
-) -> bool {
+    item_matches: impl Fn(&T, &T) -> Result<(), MatchFailure>,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(this.len(), other.len());
     let mut this_sorted = this.to_owned();
     let mut other_sorted = other.to_owned();
     this_sorted.sort_by(&compare);
     other_sorted.sort_by(&compare);
-    vec_matches(&this_sorted, &other_sorted, T::eq)
+    std::iter::zip(&this_sorted, &other_sorted)
+        .try_fold((), |_acc, (this, other)| item_matches(this, other))?;
+    Ok(())
+}
+
+// `this` vector includes `other` vector as a set
+fn vec_includes_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
+    other.iter().all(|other_node| {
+        this.iter()
+            .any(|this_node| item_matches(this_node, other_node))
+    })
 }
 
 // performs a set comparison, ignoring order
 fn vec_matches_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     // Set-inclusion test in both directions
     this.len() == other.len()
-        && this.iter().all(|this_node| {
-            other
-                .iter()
-                .any(|other_node| item_matches(this_node, other_node))
-        })
-        && other.iter().all(|other_node| {
-            this.iter()
-                .any(|this_node| item_matches(this_node, other_node))
-        })
+        && vec_includes_as_set(this, other, &item_matches)
+        && vec_includes_as_set(other, this, &item_matches)
 }
 
 fn vec_matches_result_as_set<T>(
@@ -449,7 +476,6 @@ fn vec_matches_result_as_set<T>(
             ));
         }
     }
-    assert!(vec_matches_as_set(this, other, item_matches));
     Ok(())
 }
 
@@ -487,8 +513,8 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
                 deferred: other_deferred,
             },
         ) => {
-            check_match!(defer_primary_node_matches(primary, other_primary));
-            check_match!(vec_matches(deferred, other_deferred, deferred_node_matches));
+            defer_primary_node_matches(primary, other_primary)?;
+            vec_matches_result(deferred, other_deferred, deferred_node_matches)?;
         }
         (
             PlanNode::Subscription { primary, rest },
@@ -529,12 +555,15 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
     Ok(())
 }
 
-fn defer_primary_node_matches(this: &Primary, other: &Primary) -> bool {
+fn defer_primary_node_matches(this: &Primary, other: &Primary) -> Result<(), MatchFailure> {
     let Primary { subselection, node } = this;
-    *subselection == other.subselection && opt_plan_node_matches(node, &other.node).is_ok()
+    opt_document_string_matches(subselection, &other.subselection)
+        .map_err(|err| err.add_description("under defer primary subselection"))?;
+    opt_plan_node_matches(node, &other.node)
+        .map_err(|err| err.add_description("under defer primary plan node"))
 }
 
-fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> bool {
+fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> Result<(), MatchFailure> {
     let DeferredNode {
         depends,
         label,
@@ -542,11 +571,14 @@ fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> bool {
         subselection,
         node,
     } = this;
-    *depends == other.depends
-        && *label == other.label
-        && *query_path == other.query_path
-        && *subselection == other.subselection
-        && opt_plan_node_matches(node, &other.node).is_ok()
+
+    check_match_eq!(*depends, other.depends);
+    check_match_eq!(*label, other.label);
+    check_match_eq!(*query_path, other.query_path);
+    opt_document_string_matches(subselection, &other.subselection)
+        .map_err(|err| err.add_description("under deferred subselection"))?;
+    opt_plan_node_matches(node, &other.node)
+        .map_err(|err| err.add_description("under deferred node"))
 }
 
 fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> Result<(), MatchFailure> {
@@ -629,6 +661,10 @@ fn same_selection_set_sorted(x: &[Selection], y: &[Selection]) -> bool {
         .all(|(x, y)| same_selection(x, y))
 }
 
+fn same_requires(x: &[Selection], y: &[Selection]) -> bool {
+    vec_matches_as_set(x, y, same_selection)
+}
+
 fn same_rewrites(x: &Option<Vec<DataRewrite>>, y: &Option<Vec<DataRewrite>>) -> bool {
     match (x, y) {
         (None, None) => true,
@@ -697,14 +733,85 @@ fn same_ast_operation_definition(
 ) -> Result<(), MatchFailure> {
     // Note: Operation names are ignored, since parallel fetches may have different names.
     check_match_eq!(x.operation_type, y.operation_type);
-    check_match!(vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x
-        .name
-        .cmp(&y.name)));
+    vec_matches_sorted_by(
+        &x.variables,
+        &y.variables,
+        |a, b| a.name.cmp(&b.name),
+        |a, b| same_variable_definition(a, b),
+    )
+    .map_err(|err| err.add_description("under Variable definition"))?;
     check_match_eq!(x.directives, y.directives);
     check_match!(same_ast_selection_set_sorted(
         &x.selection_set,
         &y.selection_set
     ));
+    Ok(())
+}
+
+// `x` may be coerced to `y`.
+// - `x` should be a value from JS QP.
+// - `y` should be a value from Rust QP.
+// - Assume: x and y are already checked not equal.
+// Due to coercion differences, we need to compare AST values with special cases.
+fn ast_value_maybe_coerced_to(x: &ast::Value, y: &ast::Value) -> bool {
+    match (x, y) {
+        // Special case 1: JS QP may convert an enum value into string.
+        // - In this case, compare them as strings.
+        (ast::Value::String(ref x), ast::Value::Enum(ref y)) => {
+            if x == y.as_str() {
+                return true;
+            }
+        }
+
+        // Special case 2: Rust QP expands a object value by filling in its
+        // default field values.
+        // - If the Rust QP object value subsumes the JS QP object value, consider it a match.
+        // - Assuming the Rust QP object value has only default field values.
+        // - Warning: This is an unsound heuristic.
+        (ast::Value::Object(ref x), ast::Value::Object(ref y)) => {
+            if vec_includes_as_set(y, x, |(yy_name, yy_val), (xx_name, xx_val)| {
+                xx_name == yy_name
+                    && (xx_val == yy_val || ast_value_maybe_coerced_to(xx_val, yy_val))
+            }) {
+                return true;
+            }
+        }
+
+        // Recurse into list items.
+        (ast::Value::List(ref x), ast::Value::List(ref y)) => {
+            if vec_matches(x, y, |xx, yy| {
+                xx == yy || ast_value_maybe_coerced_to(xx, yy)
+            }) {
+                return true;
+            }
+        }
+
+        _ => {} // otherwise, fall through
+    }
+    false
+}
+
+// Use this function, instead of `VariableDefinition`'s `PartialEq` implementation,
+// due to known differences.
+fn same_variable_definition(
+    x: &ast::VariableDefinition,
+    y: &ast::VariableDefinition,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(x.name, y.name);
+    check_match_eq!(x.ty, y.ty);
+    if x.default_value != y.default_value {
+        if let (Some(x), Some(y)) = (&x.default_value, &y.default_value) {
+            if ast_value_maybe_coerced_to(x, y) {
+                return Ok(());
+            }
+        }
+
+        return Err(MatchFailure::new(format!(
+            "mismatch between default values:\nleft: {:?}\nright: {:?}",
+            x.default_value, y.default_value
+        )));
+    }
+    check_match_eq!(x.directives, y.directives);
     Ok(())
 }
 
@@ -803,6 +910,50 @@ mod ast_comparison_tests {
     }
 
     #[test]
+    fn test_query_variable_decl_enum_value_coercion() {
+        // Note: JS QP converts enum default values into strings.
+        let op_x = r#"query($qv1: E! = "default_value") { x(arg1: $qv1) }"#;
+        let op_y = r#"query($qv1: E! = default_value) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_object_value_coercion_empty_case() {
+        // Note: Rust QP expands empty object default values by filling in its default field
+        // values.
+        let op_x = r#"query($qv1: T! = {}) { x(arg1: $qv1) }"#;
+        let op_y =
+            r#"query($qv1: T! = { field1: true, field2: "default_value" }) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_object_value_coercion_non_empty_case() {
+        // Note: Rust QP expands an object default values by filling in its default field values.
+        let op_x = r#"query($qv1: T! = {field1: true}) { x(arg1: $qv1) }"#;
+        let op_y =
+            r#"query($qv1: T! = { field1: true, field2: "default_value" }) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_list_of_object_value_coercion() {
+        // Testing a combination of list and object value coercion.
+        let op_x = r#"query($qv1: [T!]! = [{}]) { x(arg1: $qv1) }"#;
+        let op_y =
+            r#"query($qv1: [T!]! = [{field1: true, field2: "default_value"}]) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
     fn test_entities_selection_order() {
         let op_x = r#"
             query subgraph1__1($representations: [_Any!]!) {
@@ -835,6 +986,54 @@ mod ast_comparison_tests {
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod qp_selection_comparison_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_requires_comparison_with_same_selection_key() {
+        let requires_json = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "id",
+                    },
+                  ]
+            },
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "id",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "job",
+                    }
+                  ]
+            },
+        ]);
+
+        // The only difference between requires1 and requires2 is the order of selections.
+        // But, their items all have the same SelectionKey.
+        let requires1: Vec<Selection> = serde_json::from_value(requires_json).unwrap();
+        let requires2: Vec<Selection> = requires1.iter().rev().cloned().collect();
+
+        // `same_selection_set_sorted` fails to match, since it doesn't account for
+        // two items with the same SelectionKey but in different order.
+        assert!(!same_selection_set_sorted(&requires1, &requires2));
+        // `same_requires` should succeed.
+        assert!(same_requires(&requires1, &requires2));
     }
 }
 

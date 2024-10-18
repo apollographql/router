@@ -873,6 +873,14 @@ impl RouterCreator {
         } else {
             APQLayer::disabled()
         };
+        // There is a problem here.
+        // APQ isn't a plugin and so cannot participate in plugin lifecycle events.
+        // After telemetry `activate` NO part of the pipeline can fail as globals have been interacted with.
+        // However, the APQLayer uses DeduplicatingCache which is fallible. So if this fails on hot reload the router will be
+        // left in an inconsistent state and all metrics will likely stop working.
+        // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
+        // For now just call activate to make the gauges work on the happy path.
+        apq_layer.activate();
 
         Ok(Self {
             supergraph_creator,
