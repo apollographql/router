@@ -11,7 +11,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use crate::introspection::default_cache_storage;
+use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -97,12 +97,13 @@ impl<T: Plugin> PluginTestHarness<T> {
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
             let rust_planner = PlannerMode::maybe_rust(&schema, &config).unwrap();
+            let introspection = Arc::new(IntrospectionCache::new(&config));
             let planner = BridgeQueryPlanner::new(
                 schema.into(),
                 Arc::new(config),
                 None,
                 rust_planner,
-                default_cache_storage().await,
+                introspection,
             )
             .await
             .unwrap();
@@ -117,6 +118,7 @@ impl<T: Plugin> PluginTestHarness<T> {
 
         let plugin_init = PluginInit::builder()
             .config(config_for_plugin.clone())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
