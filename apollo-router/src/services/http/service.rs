@@ -103,7 +103,7 @@ impl HttpClientService {
         service: impl Into<String>,
         configuration: &Configuration,
         tls_root_store: &RootCertStore,
-        http2: Http2Config,
+        client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
         let tls_cert_store = configuration
@@ -131,15 +131,16 @@ impl HttpClientService {
 
         let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
 
-        HttpClientService::new(name, http2, tls_client_config)
+        HttpClientService::new(name, tls_client_config, client_config)
     }
 
     pub(crate) fn new(
         service: impl Into<String>,
-        http2: Http2Config,
         tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        let mut http_connector = new_async_http_connector()?;
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -149,6 +150,7 @@ impl HttpClientService {
             .https_or_http()
             .enable_http1();
 
+        let http2 = client_config.experimental_http2.unwrap_or_default();
         let connector = if http2 != Http2Config::Disable {
             builder.enable_http2().wrap_connector(http_connector)
         } else {

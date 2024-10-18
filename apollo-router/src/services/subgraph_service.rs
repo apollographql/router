@@ -1699,7 +1699,6 @@ mod tests {
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
-    use crate::plugins::traffic_shaping::Http2Config;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
@@ -2376,7 +2375,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "testbis",
                 &Configuration::default(),
-                Http2Config::Disable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2420,7 +2419,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2454,7 +2453,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2489,7 +2488,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2527,7 +2526,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2566,7 +2565,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2609,7 +2608,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2650,7 +2649,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2703,7 +2702,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2747,7 +2746,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2789,7 +2788,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2827,7 +2826,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2865,7 +2864,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2902,7 +2901,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2939,7 +2938,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2985,7 +2984,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3029,7 +3028,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3070,7 +3069,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3111,7 +3110,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3152,7 +3151,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");

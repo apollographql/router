@@ -116,7 +116,7 @@ async fn tls_self_signed() {
         "test",
         &config,
         &rustls::RootCertStore::empty(),
-        Http2Config::Enable,
+        crate::configuration::shared::Client::default(),
     )
     .unwrap();
 
@@ -173,7 +173,7 @@ async fn tls_custom_root() {
         "test",
         &config,
         &rustls::RootCertStore::empty(),
-        Http2Config::Enable,
+        crate::configuration::shared::Client::default(),
     )
     .unwrap();
 
@@ -283,7 +283,7 @@ async fn tls_client_auth() {
         "test",
         &config,
         &rustls::RootCertStore::empty(),
-        Http2Config::Enable,
+        crate::configuration::shared::Client::default(),
     )
     .unwrap();
 
@@ -343,11 +343,13 @@ async fn test_subgraph_h2c() {
     tokio::task::spawn(emulate_h2c_server(listener));
     let subgraph_service = HttpClientService::new(
         "test",
-        Http2Config::Http2Only,
         rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_native_roots()
             .with_no_client_auth(),
+        crate::configuration::shared::Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build(),
     )
     .expect("can create a HttpService");
 
@@ -419,11 +421,13 @@ async fn test_compressed_request_response_body() {
     tokio::task::spawn(emulate_subgraph_compressed_response(listener));
     let subgraph_service = HttpClientService::new(
         "test",
-        Http2Config::Http2Only,
         rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_native_roots()
             .with_no_client_auth(),
+        crate::configuration::shared::Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build(),
     )
     .expect("can create a HttpService");
 
