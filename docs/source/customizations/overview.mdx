@@ -209,7 +209,7 @@ httpServer --"14. HTTP response" --> client
 
 For simplicity's sake, the preceding diagrams show the request and response sides separately and sequentially. In reality, some requests and responses may happen simultaneously and repeatedly.
 
-For example, `SubgraphRequest`s can happen both in parallel _and_ in sequence: one subgraph's response may be necessary for another's `SubgraphRequest`. (The query planner decides which requests can happen in parallel vs. which need to happen in sequence.)
+For example, `SubgraphRequest`s can happen both in parallel _and_ in sequence: one subgraph's response may be necessary for another's `SubgraphRequest`. (The query planner decides which requests can happen in parallel vs. which need to happen in sequence). To match subgraph requests to responses in customizations, the router exposes a `subgraph_request_id` field that will hold the same value in paired requests and responses.
 
 ##### Requests run in parallel 
 
