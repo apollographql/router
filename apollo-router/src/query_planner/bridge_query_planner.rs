@@ -29,6 +29,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
+use crate::compute_task;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -259,7 +260,7 @@ impl PlannerMode {
             PlannerMode::Rust(rust_planner) => {
                 let doc = doc.clone();
                 let rust_planner = rust_planner.clone();
-                let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
+                let (plan, mut root_node) = compute_task::execute(move || {
                     let start = Instant::now();
 
                     let query_plan_options = QueryPlanOptions {
