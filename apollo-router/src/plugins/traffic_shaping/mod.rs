@@ -564,6 +564,9 @@ mod test {
             r#"
         traffic_shaping:
             deduplicate_variables: true
+        supergraph:
+            # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            generate_query_fragments: false
         "#,
         )
         .unwrap();

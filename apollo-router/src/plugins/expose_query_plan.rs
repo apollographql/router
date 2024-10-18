@@ -218,6 +218,10 @@ mod tests {
             build_mock_supergraph(serde_json::json! {{
                 "plugins": {
                     "experimental.expose_query_plan": true
+                },
+                "supergraph": {
+                    // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                    "generate_query_fragments": false,
                 }
             }})
             .await,
@@ -231,6 +235,10 @@ mod tests {
             build_mock_supergraph(serde_json::json! {{
                 "plugins": {
                     "experimental.expose_query_plan": true
+                },
+                "supergraph": {
+                    // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                    "generate_query_fragments": false,
                 }
             }})
             .await,
@@ -245,6 +253,10 @@ mod tests {
         let supergraph = build_mock_supergraph(serde_json::json! {{
             "plugins": {
                 "experimental.expose_query_plan": false
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }})
         .await;

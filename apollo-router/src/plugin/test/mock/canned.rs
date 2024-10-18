@@ -52,7 +52,7 @@ pub(crate) fn reviews_subgraph() -> MockSubgraph {
     let review_mocks = vec![
         (
             json! {{
-                    "query": "query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}",
+                    "query": "query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){..._generated_onProduct1_0}}fragment _generated_onProduct1_0 on Product{reviews{id product{__typename upc}author{__typename id}}}",
                     "operationName": "TopProducts__reviews__1",
                     "variables": {
                         "representations":[
