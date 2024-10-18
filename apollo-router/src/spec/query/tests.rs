@@ -100,6 +100,11 @@ impl FormatTest {
         self
     }
 
+    fn expected_errors(mut self, v: serde_json_bytes::Value) -> Self {
+        self.expected_errors = Some(v);
+        self
+    }
+
     fn expected_extensions(mut self, v: serde_json_bytes::Value) -> Self {
         self.expected_extensions = Some(v);
         self
@@ -1179,6 +1184,130 @@ fn reformat_response_array_of_id_duplicate() {
                 "array": ["hello","world"],
             },
         }})
+        .test();
+}
+
+#[test]
+// If this test fails, this means you got greedy about allocations,
+// beware of aliases!
+fn reformat_response_expected_int_got_string() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                i: Int
+                s: String
+                f: Float
+                b: Boolean
+                e: E
+                u: U
+                id: ID
+                l: [Int]
+            }
+            
+            enum E {
+              A
+              B
+            }
+            union U = ObjA | ObjB
+            type ObjA {
+                a: String
+            }
+            type ObjB {
+                a: String
+            }
+            ",
+        )
+        .query(
+            r#"{
+            get {
+                i
+                s
+                f
+                ... on Thing {
+                  b
+                  e
+                  u {
+                    ... on ObjA {
+                      a
+                    }
+                  }
+                  id
+                }
+                l
+            }
+        }"#,
+        )
+        .response(json! {{
+            "get": {
+                "i": "hello",
+                "s": 1.0,
+                "f": [1],
+                "b": 0,
+                "e": "X",
+                "u": 1,
+                "id": {
+                    "test": "test",
+                },
+                "l": "A"
+            },
+        }})
+        .expected(json! {{
+            "get": {
+                "i": null,
+                "s": null,
+                "f": null,
+                "b": null,
+                "e": null,
+                "u": null,
+                "id": null,
+                "l": null
+            },
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Thing.i",
+                "path": ["get", "i"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.s",
+                "path": ["get", "s"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.f",
+                "path": ["get", "f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.b",
+                "path": ["get", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Expected a valid enum value for type E",
+                "path": ["get", "e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-object value of type number for composite type U",
+                "path": ["get", "u"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.id",
+                "path": ["get", "id"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-list value of type string for list type [Int]",
+                "path": ["get", "l"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
         .test();
 }
 
@@ -5841,4 +5970,71 @@ fn filtered_defer_fragment() {
     );
 
     assert_json_snapshot!(response);
+}
+
+#[test]
+fn it_errors_on_larger_than_32_int() {
+    let schema = "type Query {
+        me: User
+    }
+
+    type User {
+        id: String!
+        name: String
+        someNumber: Int
+        someOtherNumber: Int!
+    }
+    ";
+
+    let query = "query  { me { id name someNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": null,
+            },
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field User.someNumber",
+                "path": ["me", "someNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]))
+        .test();
+
+    let query2 = "query  { me { id name someOtherNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query2)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someOtherNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field User.someOtherNumber",
+                "path": ["me", "someOtherNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]))
+        .test();
 }
