@@ -101,6 +101,18 @@ where
         })
     }
 
+    pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
+        Self {
+            cache_size_gauge: Default::default(),
+            cache_estimated_storage_gauge: Default::default(),
+            cache_size: Default::default(),
+            cache_estimated_storage: Default::default(),
+            caller,
+            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
+            redis: None,
+        }
+    }
+
     fn create_cache_size_gauge(&self) -> ObservableGauge<i64> {
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let current_cache_size_for_gauge = self.cache_size.clone();

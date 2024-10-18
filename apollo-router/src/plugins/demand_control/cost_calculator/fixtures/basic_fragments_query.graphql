@@ -1,0 +1,21 @@
+# Fragment narrowing an abstract type to a concrete type
+fragment narrowFrag on SecondObjectType {
+    field1
+}
+# Fragment widening a concrete type to an abstract type
+fragment widenFrag on MyInterface {
+    field2
+}
+
+{
+    interfaceInstance1 {
+	field2
+	...narrowFrag
+    }
+    someUnion {
+	...narrowFrag
+	... on FirstObjectType {
+	    innerList { ...widenFrag }
+	}
+    }
+}

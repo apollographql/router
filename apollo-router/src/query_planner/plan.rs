@@ -77,25 +77,21 @@ impl QueryPlan {
 }
 
 impl QueryPlan {
-    pub(crate) fn is_deferred(&self, operation: Option<&str>, variables: &Object) -> bool {
-        self.root.is_deferred(operation, variables, &self.query)
+    pub(crate) fn is_deferred(&self, variables: &Object) -> bool {
+        self.root.is_deferred(variables, &self.query)
     }
 
-    pub(crate) fn is_subscription(&self, operation: Option<&str>) -> bool {
-        match self.query.operation(operation) {
-            Some(op) => matches!(op.kind(), OperationKind::Subscription),
-            None => false,
-        }
+    pub(crate) fn is_subscription(&self) -> bool {
+        matches!(self.query.operation.kind(), OperationKind::Subscription)
     }
 
     pub(crate) fn query_hashes(
         &self,
         batching_config: Batching,
-        operation: Option<&str>,
         variables: &Object,
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
         self.root
-            .query_hashes(batching_config, operation, variables, &self.query)
+            .query_hashes(batching_config, variables, &self.query)
     }
 
     pub(crate) fn estimated_size(&self) -> usize {
@@ -180,20 +176,11 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn is_deferred(
-        &self,
-        operation: Option<&str>,
-        variables: &Object,
-        query: &Query,
-    ) -> bool {
+    pub(crate) fn is_deferred(&self, variables: &Object, query: &Query) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes
-                .iter()
-                .any(|n| n.is_deferred(operation, variables, query)),
-            Self::Parallel { nodes } => nodes
-                .iter()
-                .any(|n| n.is_deferred(operation, variables, query)),
-            Self::Flatten(node) => node.node.is_deferred(operation, variables, query),
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
+            Self::Flatten(node) => node.node.is_deferred(variables, query),
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
             Self::Subscription { .. } => false,
@@ -203,19 +190,19 @@ impl PlanNode {
                 condition,
             } => {
                 if query
-                    .variable_value(operation, condition.as_str(), variables)
+                    .variable_value(condition.as_str(), variables)
                     .map(|v| *v == Value::Bool(true))
                     .unwrap_or(true)
                 {
                     // right now ConditionNode is only used with defer, but it might be used
                     // in the future to implement @skip and @include execution
                     if let Some(node) = if_clause {
-                        if node.is_deferred(operation, variables, query) {
+                        if node.is_deferred(variables, query) {
                             return true;
                         }
                     }
                 } else if let Some(node) = else_clause {
-                    if node.is_deferred(operation, variables, query) {
+                    if node.is_deferred(variables, query) {
                         return true;
                     }
                 }
@@ -240,7 +227,6 @@ impl PlanNode {
     pub(crate) fn query_hashes(
         &self,
         batching_config: Batching,
-        operation: Option<&str>,
         variables: &Object,
         query: &Query,
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
@@ -286,7 +272,7 @@ impl PlanNode {
                         condition,
                     } => {
                         if query
-                            .variable_value(operation, condition.as_str(), variables)
+                            .variable_value(condition.as_str(), variables)
                             .map(|v| *v == Value::Bool(true))
                             .unwrap_or(true)
                         {

@@ -14,6 +14,7 @@ use super::NamedFragments;
 use super::Selection;
 use super::SelectionMap;
 use super::SelectionSet;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
@@ -136,11 +137,10 @@ impl FragmentSpreadSelection {
 
         // We must update the spread parent type if necessary since we're not going deeper,
         // or we'll be fundamentally losing context.
-        if self.spread.schema != *schema {
-            return Err(FederationError::internal(
-                "Should not try to flatten_unnecessary_fragments using a type from another schema",
-            ));
-        }
+        ensure!(
+            self.spread.schema == *schema,
+            "Should not try to flatten_unnecessary_fragments using a type from another schema",
+        );
 
         let rebased_fragment_spread = self.rebase_on(parent_type, named_fragments, schema)?;
         Ok(Some(SelectionOrSet::Selection(rebased_fragment_spread)))
