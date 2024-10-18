@@ -6,7 +6,7 @@ orbs:
   gh: circleci/github-cli@2.3.0
   slack: circleci/slack@4.12.6
   secops: apollo/circleci-secops-orb@2.0.7
-
+  codecov: codecov/codecov@4.0.1
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
@@ -372,6 +372,10 @@ commands:
               cargo install --locked --version 0.12.0 cargo-fuzz
             fi
 
+            if [[ ! -f "$HOME/.cargo/bin/cargo-llvm-cov$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked --version 0.6.10 cargo-llvm-cov
+            fi
+
             if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
               cargo install --locked --version 0.9.70 cargo-nextest
             fi
@@ -522,6 +526,7 @@ commands:
       - store_test_results:
           # The results from nextest that power the CircleCI Insights.
           path: ./target/nextest/ci/junit.xml
+      - codecov/upload
   fuzz_build:
     steps:
       - run: cargo +nightly fuzz build
