@@ -47,17 +47,17 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
-use crate::plugin::PluginPrivate;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::authentication::connector::ConnectorAuth;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
 use crate::plugins::authentication::subgraph::AuthConfig;
+use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::Context;
-use crate::services::connector_service::ConnectorSourceRef;
 
 mod connector;
 mod jwks;
@@ -500,12 +500,13 @@ impl PluginPrivate for AuthenticationPlugin {
         };
 
         let connector = if let Some(config) = init.config.connector {
-            let mut signing_params: HashMap<ConnectorSourceRef, Arc<SigningParamsConfig>> = Default::default();
+            let mut signing_params: HashMap<ConnectorSourceRef, Arc<SigningParamsConfig>> =
+                Default::default();
             for (s, source_config) in config.sources {
                 let source_ref: ConnectorSourceRef = s.parse()?;
                 signing_params.insert(
                     source_ref.clone(),
-                    make_signing_params(&source_config, &*source_ref.subgraph_name)
+                    make_signing_params(&source_config, &source_ref.subgraph_name)
                         .await
                         .map(Arc::new)?,
                 );

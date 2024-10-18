@@ -84,7 +84,6 @@ impl From<&Connector> for ConnectorInfo {
     }
 }
 
-
 /// A reference to a unique Connector source.
 #[derive(Hash, Eq, PartialEq, Clone)]
 pub(crate) struct ConnectorSourceRef {
@@ -106,8 +105,14 @@ impl FromStr for ConnectorSourceRef {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut parts = s.split('.');
-        let subgraph_name = parts.next().ok_or(String::from(format!("Invalid connector source reference '{}'", s)))?.to_string();
-        let source_name = parts.next().ok_or(String::from(format!("Invalid connector source reference '{}'", s)))?.to_string();
+        let subgraph_name = parts
+            .next()
+            .ok_or(format!("Invalid connector source reference '{}'", s))?
+            .to_string();
+        let source_name = parts
+            .next()
+            .ok_or(format!("Invalid connector source reference '{}'", s))?
+            .to_string();
         Ok(Self::new(subgraph_name, source_name))
     }
 }

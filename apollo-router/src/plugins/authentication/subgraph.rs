@@ -424,7 +424,7 @@ fn increment_failure_counter(subgraph_name: &str) {
     );
 }
 
-pub(crate) async fn make_signing_params(
+pub(super) async fn make_signing_params(
     config: &AuthConfig,
     subgraph_name: &str,
 ) -> Result<SigningParamsConfig, BoxError> {

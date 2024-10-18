@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower::{ServiceBuilder, ServiceExt};
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::services::connector_service::{ConnectorInfo, ConnectorSourceRef, CONNECTOR_INFO_CONTEXT_KEY};
+use crate::services::connector_service::ConnectorInfo;
+use crate::services::connector_service::ConnectorSourceRef;
+use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
 use crate::services::http::HttpRequest;
 
 pub(super) struct ConnectorAuth {
@@ -26,7 +30,10 @@ impl ConnectorAuth {
                 {
                     if let Some(source_name) = connector_info.source_name {
                         if let Some(signing_params) = signing_params
-                            .get(&ConnectorSourceRef::new(subgraph_name.clone(), source_name.clone()))
+                            .get(&ConnectorSourceRef::new(
+                                subgraph_name.clone(),
+                                source_name.clone(),
+                            ))
                             .cloned()
                         {
                             req.context
