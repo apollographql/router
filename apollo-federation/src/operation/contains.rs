@@ -163,15 +163,15 @@ impl SelectionSet {
         let mut is_equal = true;
         let mut did_ignore_typename = false;
 
-        for (key, other_selection) in other.selections.iter() {
-            if key.is_typename_field() && options.ignore_missing_typename {
+        for other_selection in other.selections.values() {
+            if other_selection.is_typename_field() && options.ignore_missing_typename {
                 if !self.has_top_level_typename_field() {
                     did_ignore_typename = true;
                 }
                 continue;
             }
 
-            let Some(self_selection) = self.selections.get(key) else {
+            let Some(self_selection) = self.selections.get(other_selection.key()) else {
                 return Containment::NotContained;
             };
 
