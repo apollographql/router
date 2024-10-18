@@ -51,7 +51,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     }
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
-    let known_cache_key = "plan:0:v2.9.2:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:68e167191994b73c1892549ef57d0ec4cd76d518fad4dac5350846fe9af0b3f1";
+    let known_cache_key = "plan:0:v2.9.3:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:68e167191994b73c1892549ef57d0ec4cd76d518fad4dac5350846fe9af0b3f1";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -963,7 +963,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:0:v2.9.2:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d239cf1d493e71f4bcb05e727c38e4cf55b32eb806791fa415bb6f6c8e5352e5",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d239cf1d493e71f4bcb05e727c38e4cf55b32eb806791fa415bb6f6c8e5352e5",
     )
     .await;
 }
@@ -993,7 +993,7 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:0:v2.9.2:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:752b870a0241594f54b7b593f16ab6cf6529eb5c9fe3d24e6bc4a618c24a5b81",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:752b870a0241594f54b7b593f16ab6cf6529eb5c9fe3d24e6bc4a618c24a5b81",
     )
     .await;
 }
@@ -1015,7 +1015,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:0:v2.9.2:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:e2145b320a44bebbd687c714dcfd046c032e56fe394aedcf50d9ab539f4354ea",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:e2145b320a44bebbd687c714dcfd046c032e56fe394aedcf50d9ab539f4354ea",
     )
     .await;
 }
@@ -1037,7 +1037,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:0:v2.9.2:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8b6c1838a55cbc6327adb5507f103eed1d5b1071e9acb9c67e098c5b9ea2887e",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8b6c1838a55cbc6327adb5507f103eed1d5b1071e9acb9c67e098c5b9ea2887e",
     )
     .await;
 }
@@ -1062,7 +1062,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.clear_redis_cache().await;
 
     // If the tests above are failing, this is the key that needs to be changed first.
-    let starting_key = "plan:0:v2.9.2:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:41ae54204ebb1911412cf23e8f1d458cb08d6fabce16f255f7a497fd2b6fe213";
+    let starting_key = "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:41ae54204ebb1911412cf23e8f1d458cb08d6fabce16f255f7a497fd2b6fe213";
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
     router.execute_default_query().await;

@@ -4997,6 +4997,25 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "A value from context.",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "request_context": {
+              "description": "The request context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A header from the response",
           "properties": {
             "default": {

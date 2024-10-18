@@ -449,6 +449,18 @@ async fn it_can_process_subgraph_response() {
         .expect("test failed");
 }
 
+#[tokio::test]
+async fn it_can_parse_request_uri() {
+    let mut request = SupergraphRequest::canned_builder()
+        .operation_name("canned")
+        .build()
+        .expect("build canned supergraph request");
+    *request.supergraph_request.uri_mut() = "https://not-default:8080/path".parse().unwrap();
+    call_rhai_function_with_arg("test_parse_request_details", request)
+        .await
+        .expect("test failed");
+}
+
 #[test]
 fn it_can_urlencode_string() {
     let engine = new_rhai_test_engine();
