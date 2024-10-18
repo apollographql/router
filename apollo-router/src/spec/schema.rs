@@ -21,6 +21,7 @@ use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
+
 /// A GraphQL schema.
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
@@ -331,11 +332,11 @@ impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
             raw_sdl,
-            schema_id: _,
             supergraph: _, // skip
             subgraphs,
             implementers_map,
             api_schema: _, // skip
+            schema_id: _,
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
