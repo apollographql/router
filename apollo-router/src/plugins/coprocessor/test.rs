@@ -702,8 +702,13 @@ mod tests {
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value = serde_json::from_slice(&body.to_bytes().await.unwrap()).unwrap();
+                let subgraph_id = body.get("subgraphRequestId").unwrap();
+                assert_eq!(subgraph_id.as_str(), Some("5678"));
+
                 Ok(http::Response::builder()
                     .body(RouterBody::from(
                         r#"{
