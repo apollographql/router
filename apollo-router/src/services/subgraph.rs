@@ -316,7 +316,7 @@ impl Response {
 
 impl Request {
     #[allow(dead_code)]
-    pub(crate) fn to_sha256(&self) -> String {
+    pub(crate) fn to_sha256(&self, excluded_headers: &Vec<String>) -> String {
         let mut hasher = Sha256::new();
         let http_req = &self.subgraph_request;
         hasher.update(http_req.method().as_str().as_bytes());
@@ -343,10 +343,15 @@ impl Request {
         }
 
         // this assumes headers are in the same order
-        for (name, value) in http_req.headers() {
-            hasher.update(name.as_str().as_bytes());
-            hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
-        }
+        http_req
+            .headers()
+            .iter()
+            .filter(|(name, _)| excluded_headers.contains(&name.to_string()))
+            .for_each(|(name, value)| {
+                hasher.update(name.as_str().as_bytes());
+                hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
+            });
+
         if let Some(claim) = self
             .context
             .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)

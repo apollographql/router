@@ -1,0 +1,12 @@
+description: "`traffic_shaping.deduplicate_query` was a true/false before but now has child properties `enabled` and `ignored_headers`"
+actions:
+  - type: change
+    path: traffic_shaping.all.deduplicate_query
+    from: true
+    to:
+      enabled: true
+  - type: change
+    path: traffic_shaping.all.deduplicate_query
+    from: false
+    to:
+      enabled: false
