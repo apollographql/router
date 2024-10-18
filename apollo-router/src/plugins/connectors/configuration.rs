@@ -8,7 +8,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
-use crate::plugins::authentication::subgraph::AuthConfig;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
 use crate::Configuration;
 
@@ -49,9 +48,6 @@ pub(crate) struct SourceConfiguration {
 
     /// The maximum number of requests for this source
     pub(crate) max_requests_per_operation: Option<usize>,
-
-    /// Authentication configuration for this source
-    pub(crate) authentication: Option<AuthConfig>,
 }
 
 /// Modifies connectors with values from the configuration

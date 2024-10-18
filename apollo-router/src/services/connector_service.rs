@@ -1,6 +1,7 @@
 //! Tower service for connectors.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -80,6 +81,34 @@ impl From<&Connector> for ConnectorInfo {
             http_method: connector.transport.method.as_str().to_string(),
             url_template: connector.transport.connect_template.to_string(),
         }
+    }
+}
+
+
+/// A reference to a unique Connector source.
+#[derive(Hash, Eq, PartialEq, Clone)]
+pub(crate) struct ConnectorSourceRef {
+    pub(crate) subgraph_name: String,
+    pub(crate) source_name: String,
+}
+
+impl ConnectorSourceRef {
+    pub(crate) fn new(subgraph_name: String, source_name: String) -> Self {
+        Self {
+            subgraph_name,
+            source_name,
+        }
+    }
+}
+
+impl FromStr for ConnectorSourceRef {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split('.');
+        let subgraph_name = parts.next().ok_or(String::from(format!("Invalid connector source reference '{}'", s)))?.to_string();
+        let source_name = parts.next().ok_or(String::from(format!("Invalid connector source reference '{}'", s)))?.to_string();
+        Ok(Self::new(subgraph_name, source_name))
     }
 }
 

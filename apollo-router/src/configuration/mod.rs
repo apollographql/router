@@ -55,6 +55,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
+pub(crate) mod connector;
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
