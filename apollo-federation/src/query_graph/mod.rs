@@ -3,10 +3,13 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::Name;
+use multimap::MultiMap;
 use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
@@ -27,6 +30,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
 pub mod build_query_graph;
@@ -130,6 +134,19 @@ impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
     }
 }
 
+// TODO: Add docs.
+#[derive(Debug, PartialEq, Clone)]
+pub struct ContextCondition  {
+  context: String,
+  subgraph_name: String,
+  named_parameter: String,
+  selection: String,
+  types_with_context_set: HashSet<String>,
+  // TODO: Do we want this or maybe we want composition type position...
+  arg_type: TypeDefinitionPosition,
+  coordinate: String,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct QueryGraphEdge {
     /// Indicates what kind of edge this is and what the edge does/represents. For instance, if the
@@ -154,9 +171,31 @@ pub(crate) struct QueryGraphEdge {
     /// one of them has an @override with a label. If the override condition
     /// matches the query plan parameters, this edge can be taken.
     pub(crate) override_condition: Option<OverrideCondition>,
+    // TODO: Add docs
+    // TODO: Should this be a set?
+    pub(crate) required_contexts: Vec<ContextCondition>
 }
 
 impl QueryGraphEdge {
+    pub(crate) fn new(transition: QueryGraphEdgeTransition, conditions: Option<Arc<SelectionSet>>) -> Self {
+        Self {
+            transition,
+            conditions,
+            override_condition: None,
+            required_contexts: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_override_condition(mut self, override_condition: OverrideCondition) -> Self {
+        self.override_condition = Some(override_condition);
+        self
+    }
+
+    pub(crate) fn with_required_contexts(mut self, contexts: impl IntoIterator<Item = ContextCondition>) -> Self {
+        self.required_contexts.extend(contexts);
+        self
+    }
+
     fn satisfies_override_conditions(
         &self,
         conditions_to_check: &EnabledOverrideConditions,
@@ -356,6 +395,10 @@ pub struct QueryGraph {
     /// lowered composition validation on a big composition (100+ subgraphs) from ~4 minutes to
     /// ~10 seconds.
     non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
+    // TODO: Are these duplicate fields??
+    // TODO: If not, write docs
+    subgraph_to_args: MultiMap<String, String>,
+    subgraph_to_arg_indices: HashMap<String, HashMap<String, String>>,
 }
 
 impl QueryGraph {

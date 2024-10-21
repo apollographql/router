@@ -44,6 +44,8 @@ use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::extract_subgraphs_from_supergraph;
 
+use super::ContextCondition;
+
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
 /// A federated query graph is one that is used to reason about queries made by a router against a
@@ -68,6 +70,8 @@ pub fn build_federated_query_graph(
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        subgraph_to_args: Default::default(),
+        subgraph_to_arg_indices: Default::default(),
     };
     let subgraphs =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
@@ -102,6 +106,8 @@ pub fn build_query_graph(
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        subgraph_to_args: Default::default(),
+        subgraph_to_arg_indices: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
@@ -136,15 +142,9 @@ impl BaseQueryGraphBuilder {
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        self.query_graph.graph.add_edge(
-            head,
-            tail,
-            QueryGraphEdge {
-                transition,
-                conditions,
-                override_condition: None,
-            },
-        );
+        self.query_graph
+            .graph
+            .add_edge(head, tail, QueryGraphEdge::new(transition, conditions));
         let head_weight = self.query_graph.node_weight(head)?;
         let tail_weight = self.query_graph.node_weight(tail)?;
         if head_weight.source != tail_weight.source {
