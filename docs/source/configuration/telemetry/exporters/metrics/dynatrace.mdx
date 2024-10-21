@@ -15,7 +15,7 @@ To configure the router:
 - Enable the [OTLP exporter](./otlp#configuration)
 - Set `temporality: delta` (Using _Delta_ is required as _Cumulative_ temporality is **not** supported by Dynatrace)
 - Set the `protocol` as `http` (Dynatrace [doesn't currently support](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export) gRPC)
-- Provide your [Dynatrace endpoint](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/opentelemetry/post-metrics) (e.g., ensuring that it contains `{your-environment-id}` in the hostname and ends in `/api/v2/otlp/v1/metrics`) 
+- Set the `endpoint` to your [Dynatrace OpenTelemetry metrics endpoint](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/opentelemetry/post-metrics) (e.g., ensuring that it contains `{your-environment-id}` in the hostname and ends in `/api/v2/otlp/v1/metrics`) 
 - Provide your Dynatrace API token in the `Authorization` header (the header should start with [`Api-Token` and then your Dynatrace token](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export#authentication-export-to-activegate)
 
 For example:
