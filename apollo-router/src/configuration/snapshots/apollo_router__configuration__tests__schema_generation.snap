@@ -5930,6 +5930,11 @@ expression: "&schema"
           "description": "Send the service name",
           "type": "boolean"
         },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
+          "type": "boolean"
+        },
         "uri": {
           "default": false,
           "description": "Send the subgraph URI",
@@ -5970,6 +5975,11 @@ expression: "&schema"
         "status_code": {
           "default": false,
           "description": "Send the http status",
+          "type": "boolean"
+        },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
           "type": "boolean"
         }
       },

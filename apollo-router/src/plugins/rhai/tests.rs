@@ -669,7 +669,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 244, position 5)'".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 251, position 5)'".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -697,7 +697,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         assert_eq!(
             processed_error.message,
             Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 255, position 5)'"
+                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 262, position 5)'"
                     .to_string()
             )
         );

@@ -44,6 +44,7 @@ use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
+use super::subgraph::SubgraphRequestId;
 use super::Plugins;
 use crate::batching::assemble_batch;
 use crate::batching::BatchQuery;
@@ -494,6 +495,7 @@ async fn call_websocket(
         subgraph_request,
         subscription_stream,
         connection_closed_signal,
+        id: subgraph_request_id,
         ..
     } = request;
     let subscription_stream_tx =
@@ -707,6 +709,7 @@ async fn call_websocket(
         resp.map(|_| graphql::Response::default()),
         context,
         service_name,
+        subgraph_request_id,
     ))
 }
 
@@ -807,7 +810,7 @@ fn http_response_to_graphql_response(
 pub(crate) async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
-    mut contexts: Vec<Context>,
+    mut contexts: Vec<(Context, SubgraphRequestId)>,
     mut request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
@@ -854,6 +857,7 @@ pub(crate) async fn process_batch(
     let batch_context = contexts
         .first()
         .expect("we have at least one context in the batch")
+        .0
         .clone();
     let display_body = batch_context.contains_key(LOGGING_DISPLAY_BODY);
     let client = client_factory.create(&service);
@@ -1014,9 +1018,10 @@ pub(crate) async fn process_batch(
                 .map(|mut http_res| {
                     *http_res.headers_mut() = parts.headers.clone();
                     // Use the original context for the request to create the response
-                    let context = contexts.pop().expect("we have a context for each response");
+                    let (context, id) =
+                        contexts.pop().expect("we have a context for each response");
                     let resp =
-                        SubgraphResponse::new_from_response(http_res, context, subgraph_name);
+                        SubgraphResponse::new_from_response(http_res, context, subgraph_name, id);
 
                     tracing::debug!("we have a resp: {resp:?}");
                     resp
@@ -1098,7 +1103,12 @@ pub(crate) async fn notify_batch_query(
 }
 
 type BatchInfo = (
-    (String, http::Request<RouterBody>, Vec<Context>, usize),
+    (
+        String,
+        http::Request<RouterBody>,
+        Vec<(Context, SubgraphRequestId)>,
+        usize,
+    ),
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
 
@@ -1226,7 +1236,9 @@ pub(crate) async fn call_single_http(
     });
 
     let SubgraphRequest {
-        subgraph_request, ..
+        subgraph_request,
+        id: subgraph_request_id,
+        ..
     } = request;
 
     let operation_name = subgraph_request
@@ -1357,6 +1369,7 @@ pub(crate) async fn call_single_http(
                     .expect("it won't fail everything is coming from an existing response"),
                 context.clone(),
                 service_name.to_owned(),
+                subgraph_request_id.clone(),
             );
             should_log = condition.lock().evaluate_response(&subgraph_response);
         }
@@ -1401,6 +1414,7 @@ pub(crate) async fn call_single_http(
         resp,
         context,
         service_name.to_owned(),
+        subgraph_request_id,
     ))
 }
 
