@@ -40,6 +40,7 @@ macro_rules! assert_eq_and_ordered_json {
 }
 
 #[derive(Default)]
+#[must_use = "Must call .test() to run the test"]
 struct FormatTest {
     schema: Option<&'static str>,
     query_type_name: Option<&'static str>,
@@ -1307,6 +1308,247 @@ fn reformat_response_expected_int_got_string() {
                 "path": ["get", "l"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_int() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: Int
+                b: Int
+                c: Int
+                d: Int
+                e: Int
+                f: Int
+            }
+            "#
+        )
+        .query(r#"{ a b c d e f }"#)
+        .response(json!({
+            "a": 1.0, // Should be accepted as Int 1
+            "b": 1.2, // Float should not be truncated
+            "c": "1234", // Optional to be coerced by spec: we do not do so
+            "d": true,
+            "e": [1],
+            "f": { "value": 1 },
+        }))
+        .expected(json!({
+            "a": 1,
+            "b": null,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field Query.b",
+                "path": ["b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.c",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.d",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.e",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_float() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: Float
+                b: Float
+                c: Float
+                d: Float
+                e: Float
+                f: Float
+            }
+            "#
+        )
+        .query(r#"{ a b c d e f }"#)
+        .response(json!({
+            // Note: NaNs and Infinitys are not supported by GraphQL Floats,
+            // and handily not representable in JSON, so we don't need to handle them.
+            "a": 1, // Int can be interpreted as Float
+            "b": 1.2,
+            "c": "2.2", // Optional to be coerced by spec: we do not do so
+            "d": true,
+            "e": [1.234],
+            "f": { "value": 12.34 },
+        }))
+        .expected(json!({
+            "a": 1, // Representing int-valued float without the decimals is okay in JSON
+            "b": 1.2,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field Query.c",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.d",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.e",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_string() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: String
+                b: String
+                c: String
+                d: String
+                e: String
+                f: String
+            }
+            "#
+        )
+        .query(r#"{ a b c d e f }"#)
+        .response(json!({
+            "a": "text",
+            "b": 1, // Optional to be coerced by spec: we do not do so
+            "c": false, // Optional to be coerced by spec: we do not do so
+            "d": 1234.5678, // Optional to be coerced by spec: we do not do so
+            "e": ["s"],
+            "f": { "text": "text" },
+        }))
+        .expected(json!({
+            "a": "text",
+            "b": null,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field Query.b",
+                "path": ["b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.c",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.d",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.e",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_id() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: ID
+                b: ID
+                c: ID
+                d: ID
+                e: ID
+                f: ID
+                g: ID
+            }
+            "#
+        )
+        .query(r#"{ a b c d e f g }"#)
+        .response(json!({
+            "a": "1234",
+            "b": "ABCD",
+            "c": 1234,
+            "d": 1234.0, // Integer represented as a float should be coerced
+            "e": false,
+            "f": 1234.5678, // Float should not be truncated
+            "g": ["s"],
+        }))
+        .expected(json!({
+            // Note technically IDs should always be represented as a String in JSON,
+            // though the value returned from a field can be either Int or String.
+            // We do not coerce the acceptable types to strings today.
+            "a": "1234",
+            "b": "ABCD",
+            "c": 1234,
+            "d": 1234,
+            "e": null,
+            "f": null,
+            "g": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field Query.e",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.g",
+                "path": ["g"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
         ]))
         .test();
 }
