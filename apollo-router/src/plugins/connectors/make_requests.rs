@@ -600,7 +600,6 @@ mod tests {
                                     None,
                                 ),
                             ],
-                            star: None,
                             range: Some(
                                 0..1,
                             ),
@@ -642,7 +641,6 @@ mod tests {
                                     None,
                                 ),
                             ],
-                            star: None,
                             range: Some(
                                 0..1,
                             ),
@@ -1201,7 +1199,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..5,
                         ),
@@ -1312,7 +1309,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..5,
                         ),
@@ -1522,7 +1518,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..5,
                         ),
@@ -1633,7 +1628,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..5,
                         ),
@@ -1765,7 +1759,6 @@ mod tests {
                                                 None,
                                             ),
                                         ],
-                                        star: None,
                                         range: Some(
                                             6..15,
                                         ),
@@ -1773,7 +1766,6 @@ mod tests {
                                 ),
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..15,
                         ),
@@ -1832,7 +1824,6 @@ mod tests {
                                                 None,
                                             ),
                                         ],
-                                        star: None,
                                         range: Some(
                                             6..15,
                                         ),
@@ -1840,7 +1831,6 @@ mod tests {
                                 ),
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..15,
                         ),
@@ -1979,7 +1969,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2023,7 +2012,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2067,7 +2055,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2111,7 +2098,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2258,7 +2244,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2302,7 +2287,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2346,7 +2330,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2390,7 +2373,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2532,7 +2514,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),
@@ -2574,7 +2555,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..8,
                         ),

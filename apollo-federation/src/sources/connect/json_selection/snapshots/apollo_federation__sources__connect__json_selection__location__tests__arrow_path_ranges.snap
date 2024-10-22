@@ -74,7 +74,6 @@ Named(
                 },
             ),
         ],
-        star: None,
         range: Some(
             2..36,
         ),
