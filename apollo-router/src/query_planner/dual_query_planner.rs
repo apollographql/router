@@ -1124,9 +1124,6 @@ mod ast_comparison_tests {
         let op_y = r#"{ q { ...g2 } } fragment g1 on T { x y } fragment g2 on T { z ...g1 }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        if let Err(failure) = super::same_ast_document(&ast_x, &ast_y) {
-            println!("{}", failure.full_description());
-        }
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
     }
 
@@ -1138,9 +1135,6 @@ mod ast_comparison_tests {
         let op_y = r#"{ q { ...g2 ...g3 } } fragment g1 on T { x y } fragment g2 on T { w }  fragment g3 on T { z ...g1 }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        if let Err(failure) = super::same_ast_document(&ast_x, &ast_y) {
-            println!("{}", failure.full_description());
-        }
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
     }
 }
