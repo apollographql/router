@@ -94,7 +94,7 @@ PathWithSubSelection ::= Path SubSelection
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
 AtPath               ::= "@" PathStep*
-ExprPath             ::= "$(" LitExpr ")" PathStep*
+ExprPath             ::= "$(" LitExpr ("," LitExpr)* ","? ")" PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
@@ -627,7 +627,8 @@ method, but are passed in as expressions that the method may choose to evaluate
 ![ExprPath](./grammar/ExprPath.svg)
 
 Another syntax for beginning a `PathSelection` is the `ExprPath` rule, which is
-a `LitExpr` enclosed by `$(...)`, followed by zero or more `PathStep` items.
+typically a single `LitExpr` enclosed by `$(...)`, followed by zero or more
+`PathStep` items.
 
 This syntax is especially useful for embedding literal values, allowing
 
@@ -658,6 +659,26 @@ alphabetSlice: $("abcdefghijklmnopqrstuvwxyz")->slice($args.start, $args.end)
 The `->echo` method is still useful when you want to do something with the input
 value (which is bound to `@` within the echoed expression), rather than ignoring
 the input value (using `@` nowhere in the expression).
+
+#### Using `$(expr1, expr2, ..., default)` to default missing values
+
+Another important use for `$(...)` is when you want to test one or more input
+expressions that might be undefined, returning the first one that successfully
+evaluates to a JSON value, or some default value if none succeed:
+
+```graphql
+firstPersonOrNull: $(people->first, null)
+reliableArray: $(sometimes.array, [])
+thisOrThatOrNeither: $(maybe.this, maybe.that, "neither")
+thisOrThatOrNull: $($.this, $.that, null)
+nameOrTitle: product->echo($(@.name, @.title, "[anonymous]"))
+```
+
+In the `nameOrTitle` example, the `product` object is passed to the `->echo`
+method, which binds `@` to the product object, then attempts to evaluate
+`@.name` followed by `@.title` followed by a default value of `"[anonymous]"`.
+
+#### Using `$(...)` within a `LitExpr`
 
 The `$(...)` syntax can be useful within a `LitExpr` as well:
 
@@ -878,8 +899,6 @@ from JSON, which allows double-quoted strings only.
 ![LitArray](./grammar/LitArray.svg)
 
 A list of `LitExpr` items within square brackets, as in JavaScript.
-
-Trailing commas are not currently allowed, but could be supported in the future.
 
 ### `NO_SPACE ::= !SpacesOrComments`
 
