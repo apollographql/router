@@ -6,80 +6,87 @@ Path(
     PathSelection {
         path: WithRange {
             node: Expr(
-                WithRange {
-                    node: LitPath(
+                MethodArgs {
+                    args: [
                         WithRange {
-                            node: Array(
-                                [
-                                    WithRange {
-                                        node: Number(
-                                            Number(1),
-                                        ),
-                                        range: Some(
-                                            3..4,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Number(
-                                            Number(2),
-                                        ),
-                                        range: Some(
-                                            6..7,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Number(
-                                            Number(3),
-                                        ),
-                                        range: Some(
-                                            9..10,
-                                        ),
-                                    },
-                                ],
-                            ),
-                            range: Some(
-                                2..11,
-                            ),
-                        },
-                        WithRange {
-                            node: Method(
+                            node: LitPath(
                                 WithRange {
-                                    node: "get",
-                                    range: Some(
-                                        13..16,
-                                    ),
-                                },
-                                Some(
-                                    MethodArgs {
-                                        args: [
+                                    node: Array(
+                                        [
                                             WithRange {
                                                 node: Number(
                                                     Number(1),
                                                 ),
                                                 range: Some(
-                                                    17..18,
+                                                    3..4,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Number(
+                                                    Number(2),
+                                                ),
+                                                range: Some(
+                                                    6..7,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Number(
+                                                    Number(3),
+                                                ),
+                                                range: Some(
+                                                    9..10,
                                                 ),
                                             },
                                         ],
-                                        range: Some(
-                                            16..19,
-                                        ),
-                                    },
-                                ),
-                                WithRange {
-                                    node: Empty,
+                                    ),
                                     range: Some(
-                                        19..19,
+                                        2..11,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Method(
+                                        WithRange {
+                                            node: "get",
+                                            range: Some(
+                                                13..16,
+                                            ),
+                                        },
+                                        Some(
+                                            MethodArgs {
+                                                args: [
+                                                    WithRange {
+                                                        node: Number(
+                                                            Number(1),
+                                                        ),
+                                                        range: Some(
+                                                            17..18,
+                                                        ),
+                                                    },
+                                                ],
+                                                range: Some(
+                                                    16..19,
+                                                ),
+                                            },
+                                        ),
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                19..19,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        11..19,
                                     ),
                                 },
                             ),
                             range: Some(
-                                11..19,
+                                2..19,
                             ),
                         },
-                    ),
+                    ],
                     range: Some(
-                        2..19,
+                        1..20,
                     ),
                 },
                 WithRange {

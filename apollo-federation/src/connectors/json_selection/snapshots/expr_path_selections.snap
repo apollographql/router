@@ -49,12 +49,19 @@ Named(
                                                         PathSelection {
                                                             path: WithRange {
                                                                 node: Expr(
-                                                                    WithRange {
-                                                                        node: Number(
-                                                                            Number(-1),
-                                                                        ),
+                                                                    MethodArgs {
+                                                                        args: [
+                                                                            WithRange {
+                                                                                node: Number(
+                                                                                    Number(-1),
+                                                                                ),
+                                                                                range: Some(
+                                                                                    32..35,
+                                                                                ),
+                                                                            },
+                                                                        ],
                                                                         range: Some(
-                                                                            32..35,
+                                                                            30..37,
                                                                         ),
                                                                     },
                                                                     WithRange {

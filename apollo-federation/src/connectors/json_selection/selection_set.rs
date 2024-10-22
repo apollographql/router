@@ -27,11 +27,10 @@ use apollo_compiler::validation::Valid;
 use multimap::MultiMap;
 
 use super::JSONSelectionParseError;
-use super::known_var::KnownVariable;
+use super::MethodArgs;
 use super::lit_expr::LitExpr;
 use super::location::Ranged;
 use super::location::WithRange;
-use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::connectors::JSONSelection;
 use crate::connectors::PathSelection;
@@ -105,22 +104,15 @@ impl SubSelection {
                 alias: Some(Alias::new("__typename")),
                 path: PathSelection {
                     path: WithRange::new(
-                        PathList::Var(
-                            WithRange::new(KnownVariable::Dollar, None),
-                            WithRange::new(
-                                PathList::Method(
-                                    WithRange::new("echo".to_string(), None),
-                                    Some(MethodArgs {
-                                        args: vec![WithRange::new(
-                                            LitExpr::String(selection_set.ty.to_string()),
-                                            None,
-                                        )],
-                                        ..Default::default()
-                                    }),
-                                    WithRange::new(PathList::Empty, None),
-                                ),
-                                None,
-                            ),
+                        PathList::Expr(
+                            MethodArgs {
+                                args: vec![WithRange::new(
+                                    LitExpr::String(selection_set.ty.to_string()),
+                                    None,
+                                )],
+                                range: None,
+                            },
+                            WithRange::new(PathList::Empty, None),
                         ),
                         None,
                     ),
@@ -614,10 +606,10 @@ mod tests {
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
-  __typename: $->echo("T")
+  __typename: $("T")
   id
   author: {
-    __typename: $->echo("A")
+    __typename: $("A")
     id: authorId
   }
 }"###
@@ -694,11 +686,11 @@ mod tests {
             r###"reviews: result {
   id
   product: {
-    __typename: $->echo("Product")
+    __typename: $("Product")
     upc: product_upc
   }
   author: {
-    __typename: $->echo("User")
+    __typename: $("User")
     id: author_id
   }
 }"###

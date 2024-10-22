@@ -30,6 +30,7 @@ use super::location::Ranged;
 use super::location::Span;
 use super::location::SpanExtra;
 use super::location::WithRange;
+use super::location::get_connect_spec;
 use super::location::merge_ranges;
 use super::location::new_span;
 use super::location::new_span_with_spec;
@@ -468,7 +469,7 @@ impl ExternalVarPaths for NamedSelection {
 // VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 // KeyPath              ::= Key PathStep+
 // AtPath               ::= "@" PathStep*
-// ExprPath             ::= "$(" LitExpr ")" PathStep*
+// ExprPath             ::= "$" NO_SPACE MethodArgs PathStep*
 // PathStep             ::= "." Key | "->" Identifier MethodArgs?
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -580,9 +581,10 @@ pub(super) enum PathList {
     // middle/tail of a PathList.
     Key(WithRange<Key>, WithRange<PathList>),
 
-    // An ExprPath, which begins with a LitExpr enclosed by $(...). Must appear
-    // only at the beginning of a PathSelection, like PathList::Var.
-    Expr(WithRange<LitExpr>, WithRange<PathList>),
+    // An ExprPath, which begins with one or more LitExpr items enclosed by
+    // $(...) and separated by commas. Must appear only at the beginning of a
+    // PathSelection, like PathList::Var.
+    Expr(MethodArgs, WithRange<PathList>),
 
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection.
@@ -643,22 +645,50 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) =
-                tuple((
-                    spaces_or_comments,
-                    ranged_span("$("),
-                    LitExpr::parse,
-                    spaces_or_comments,
-                    ranged_span(")"),
-                ))(input.clone())
+            if let Ok((after_dollar_open_paren, dollar_open_paren)) =
+                ranged_span("$(")(input.clone())
             {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
-                let full_range = merge_ranges(expr_range, rest.range());
-                return Ok((
-                    remainder,
-                    WithRange::new(Self::Expr(expr, rest), full_range),
-                ));
+                if let Ok((suffix, dollar_method_args)) = match get_connect_spec(&input) {
+                    ConnectSpec::V0_1 => {
+                        tuple((LitExpr::parse, spaces_or_comments, ranged_span(")")))(
+                            after_dollar_open_paren,
+                        )
+                        .map(|(suffix, (expr, _, close_paren))| {
+                            let open_paren_range = dollar_open_paren
+                                .range()
+                                .map(|range| range.start + 1..range.end);
+
+                            // Though we use MethodArgs to represent the
+                            // single-argument $(...) syntax from v0.1, the parser
+                            // enforces only one argument is present.
+                            let method_args = MethodArgs {
+                                args: vec![expr],
+                                range: merge_ranges(open_paren_range, close_paren.range()),
+                            };
+
+                            (suffix, method_args)
+                        })
+                    }
+
+                    // With ConnectSpec::v0_2 and later, the $(...) syntax allows
+                    // multiple arguments/alternatives, returning the first value in
+                    // the sequence that evaluates successfully as non-None JSON.
+                    _ => MethodArgs::parse(input.slice(1..)),
+                } {
+                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                    let full_range = merge_ranges(dollar_open_paren.range(), rest.range());
+
+                    return Ok((
+                        remainder,
+                        WithRange::new(Self::Expr(dollar_method_args, rest), full_range),
+                    ));
+                } else if get_connect_spec(&input) != ConnectSpec::V0_1 {
+                    // This error did not exist in v0.1 and was enabled in v0.2.
+                    return Err(nom_fail_message(
+                        input.clone(),
+                        "Invalid argument syntax in $(...)",
+                    ));
+                }
             }
 
             if let Ok((suffix, (dollar, opt_var))) =
@@ -870,8 +900,10 @@ impl ExternalVarPaths for PathList {
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
                 paths.extend(rest.external_var_paths());
             }
-            PathList::Expr(expr, rest) => {
-                paths.extend(expr.external_var_paths());
+            PathList::Expr(expressions, rest) => {
+                for expr in expressions.args.iter() {
+                    paths.extend(expr.external_var_paths());
+                }
                 paths.extend(rest.external_var_paths());
             }
             PathList::Method(_, opt_args, rest) => {
@@ -2378,7 +2410,10 @@ mod tests {
                 input,
                 PathSelection {
                     path: PathList::Expr(
-                        expected.into_with_range(),
+                        MethodArgs {
+                            args: vec![expected.into_with_range()],
+                            range: None,
+                        },
                         PathList::Empty.into_with_range(),
                     )
                     .into_with_range(),

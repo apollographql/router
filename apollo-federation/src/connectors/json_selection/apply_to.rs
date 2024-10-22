@@ -592,9 +592,46 @@ impl ApplyToInternal for WithRange<PathList> {
                     tail.apply_to_path(child, vars, &input_path_with_key)
                 }
             }
-            PathList::Expr(expr, tail) => expr
-                .apply_to_path(data, vars, input_path)
-                .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path)),
+
+            PathList::Expr(expressions, tail) => {
+                // In case none of the expressions successfully evaluate to a
+                // JSON value, we'll want to see all the errors that could be
+                // responsible for that failure. If any expression succeeds,
+                // all_errors will be ignored.
+                let mut all_errors = Vec::new();
+
+                for expr in expressions.args.iter() {
+                    let (expr_value, expr_errors) = expr.apply_to_path(data, vars, input_path);
+                    if let Some(value) = expr_value.as_ref() {
+                        return tail
+                            .apply_to_path(value, vars, input_path)
+                            .prepend_errors(expr_errors);
+                    }
+                    // As long as the expressions keep evaluating to None, keep
+                    // accumulating errors in all_errors.
+                    all_errors.extend(expr_errors);
+                }
+
+                if expressions.args.is_empty() {
+                    // If $() was used with no arguments, it logically should
+                    // evaluate to None, but since there's no way it could have
+                    // succeeded, we can assume the $() syntax was intentional
+                    // and avoid reporting an error.
+                } else {
+                    all_errors.push(ApplyToError::new(
+                        "No $(...) expression evaluated successfully".to_string(),
+                        input_path.to_vec(),
+                        // Subtract 1 from range.start to include the $, given that
+                        // expressions.range() covers the (...) arguments.
+                        expressions
+                            .range()
+                            .map(|range| (range.start - 1)..range.end),
+                    ));
+                }
+
+                (None, all_errors)
+            }
+
             PathList::Method(method_name, method_args, tail) => {
                 let method_path =
                     input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
@@ -752,15 +789,45 @@ impl ApplyToInternal for WithRange<PathList> {
                 (child_shape, Some(tail))
             }
 
-            PathList::Expr(expr, tail) => (
-                expr.compute_output_shape(
-                    input_shape,
-                    dollar_shape.clone(),
-                    named_var_shapes,
-                    source_id,
-                ),
-                Some(tail),
-            ),
+            PathList::Expr(expressions, tail) => {
+                let mut nones = Vec::new();
+                let mut tail_tuple: Option<(_, _)> = None;
+
+                for expr in expressions.args.iter() {
+                    let expr_shape = expr.compute_output_shape(
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                        named_var_shapes,
+                        source_id,
+                    );
+                    if expr_shape.is_none() {
+                        nones.push(expr_shape);
+                    } else {
+                        tail_tuple = Some((expr_shape, tail));
+                        break;
+                    }
+                }
+
+                if let Some((expr_shape, tail)) = tail_tuple {
+                    // If any expression evaluated to a value, apply the tail to
+                    // that value and return.
+                    (expr_shape, Some(tail))
+                } else {
+                    // If none of the expressions evaluated to a value, return
+                    // None without calling tail.compute_output_shape, but do it
+                    // by combining all the nones (if any) with Shape::one,
+                    // which should produce a single Shape::none() value with
+                    // all locations and other metadata merged.
+                    if nones.is_empty() {
+                        (Shape::none(), None)
+                    } else {
+                        (
+                            Shape::one(nones, expressions.shape_location(source_id)),
+                            None,
+                        )
+                    }
+                }
+            }
 
             PathList::Method(method_name, method_args, tail) => {
                 if let Some(method) = ArrowMethod::lookup(method_name) {
@@ -1998,6 +2065,184 @@ mod tests {
                 })),
                 vec![],
             ),
+        );
+    }
+
+    #[test]
+    fn test_variadic_expression_selection() {
+        assert_eq!(
+            selection!("id nameOrTitle: $($.name, $.title)").apply_to(&json!({
+                "id": 123,
+                "name": "Ben",
+                "title": "Developer",
+            })),
+            (
+                Some(json!({
+                    "id": 123,
+                    "nameOrTitle": "Ben",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("id titleOrName: $(maybe.title, maybe.name)").apply_to(&json!({
+                "id": 123,
+                "maybe": {
+                    "name": "Ben",
+                    "title": "Developer",
+                },
+            })),
+            (
+                Some(json!({
+                    "id": 123,
+                    "titleOrName": "Developer",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+            nameOrTitle: product->echo($(@.name, @.title, null))
+            "#
+            )
+            .apply_to(&json!({
+                "product": {
+                    "isbn": "9780593734223",
+                    "author": "Yuval Noah Harari",
+                },
+            })),
+            (
+                Some(json!({
+                    "nameOrTitle": null,
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+            nameOrTitle: product->echo($(@.name, @.title, null))
+            "#
+            )
+            .apply_to(&json!({
+                "product": {
+                    "isbn": "9780593734223",
+                    "author": "Yuval Noah Harari",
+                    "title": "Nexus",
+                },
+            })),
+            (
+                Some(json!({
+                    "nameOrTitle": "Nexus",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("$(people->first, 'nobody')").apply_to(&json!({
+                "people": [],
+            })),
+            (Some(json!("nobody")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$(people->first, 'nobody')").apply_to(&json!({
+                "people": [{ "name": "Ben" }],
+            })),
+            (Some(json!({ "name": "Ben" })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$($($.people, $.folks)->first, 'missing')").apply_to(&json!({
+                "folks": ["Alice", "Bob"],
+            })),
+            (Some(json!("Alice")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$($($.people, $.folks)->first, 'missing')").apply_to(&json!({
+                "dinosaurs": ["Allosaurus", "Brachiosaurus"],
+            })),
+            (Some(json!("missing")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$($.people, $.folks)->first").apply_to(&json!({
+                "dinosaurs": ["Allosaurus", "Brachiosaurus"],
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::new(
+                        "Property .people not found in object".to_string(),
+                        vec![json!("people")],
+                        Some(4..10),
+                    ),
+                    ApplyToError::new(
+                        "Property .folks not found in object".to_string(),
+                        vec![json!("folks")],
+                        Some(14..19),
+                    ),
+                    ApplyToError::new(
+                        "No $(...) expression evaluated successfully".to_string(),
+                        vec![],
+                        Some(0..20),
+                    ),
+                ],
+            ),
+        );
+
+        assert_eq!(
+            selection!("$($($.people, $.folks)->first)").apply_to(&json!({
+                "dinosaurs": ["Allosaurus", "Brachiosaurus"],
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::new(
+                        "Property .people not found in object".to_string(),
+                        vec![json!("people")],
+                        Some(6..12),
+                    ),
+                    ApplyToError::new(
+                        "Property .folks not found in object".to_string(),
+                        vec![json!("folks")],
+                        Some(16..21),
+                    ),
+                    ApplyToError::new(
+                        "No $(...) expression evaluated successfully".to_string(),
+                        vec![],
+                        Some(2..22),
+                    ),
+                    ApplyToError::new(
+                        "No $(...) expression evaluated successfully".to_string(),
+                        vec![],
+                        Some(0..30),
+                    ),
+                ],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+            $(
+                $("unexpected")->match(
+                    ["hi", "hello"],
+                    ["greetings", "salutations"],
+                    # No default [@, "whatever"] case
+                ),
+                "default",
+            )
+            "#
+            )
+            .apply_to(&json!(null)),
+            (Some(json!("default")), vec![],),
         );
     }
 

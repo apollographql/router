@@ -94,7 +94,7 @@ PathWithSubSelection ::= Path SubSelection
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
 AtPath               ::= "@" PathStep*
-ExprPath             ::= "$(" LitExpr ")" PathStep*
+ExprPath             ::= "$" NO_SPACE MethodArgs PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
@@ -161,14 +161,15 @@ negative lookahead of `NO_SPACE` is enforced by _avoiding_ `spaces_or_comments`
 in a few key places:
 
 ```ebnf
-VarPath     ::= "$" (NO_SPACE Identifier)? PathStep*
-Identifier  ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
+VarPath    ::= "$" (NO_SPACE Identifier)? PathStep*
+ExprPath   ::= "$" NO_SPACE MethodArgs PathStep*
+Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 ```
 
 These rules mean the `$` of a `$variable` cannot be separated from the
-identifier part (so `$ var` is invalid), and the first character of a
-multi-character `Identifier` must not be separated from the remaining
-characters.
+identifier part (so `$ var` is invalid), an `ExprPath` must begin with `$(`, and
+the first character of a multi-character `Identifier` must not be separated from
+the remaining characters.
 
 Make sure you use `spaces_or_comments` generously when modifying or adding to
 the grammar implementation, or parsing may fail in cryptic ways when the input
@@ -641,7 +642,8 @@ method, but are passed in as expressions that the method may choose to evaluate
 ![ExprPath](./grammar/ExprPath.svg)
 
 Another syntax for beginning a `PathSelection` is the `ExprPath` rule, which is
-a `LitExpr` enclosed by `$(...)`, followed by zero or more `PathStep` items.
+typically a single `LitExpr` enclosed by `$(...)`, followed by zero or more
+`PathStep` items.
 
 This syntax is especially useful for embedding literal values, allowing
 
@@ -713,6 +715,24 @@ nested: array.field->map(@->mul(2))
 In this capacity, the `$(...)` syntax is useful for controlling
 associativity/grouping/precedence, similar to parenthesized expressions in other
 programming languages.
+
+#### Using `$(expr1, expr2, ..., default)` to default missing values
+
+Another important use for `$(...)` is when you want to test one or more input
+expressions that might be undefined, returning the first one that successfully
+evaluates to a JSON value, or some default value if none succeed:
+
+```graphql
+firstPersonOrNull: $(people->first, null)
+reliableArray: $(sometimes.array, [])
+thisOrThatOrNeither: $(maybe.this, maybe.that, "neither")
+thisOrThatOrNull: $($.this, $.that, null)
+nameOrTitle: product->echo($(@.name, @.title, "[anonymous]"))
+```
+
+In the `nameOrTitle` example, the `product` object is passed to the `->echo`
+method, which binds `@` to the product object, then attempts to evaluate
+`@.name` followed by `@.title` followed by a default value of `"[anonymous]"`.
 
 ### `PathStep ::=`
 
@@ -962,8 +982,6 @@ from JSON, which allows double-quoted strings only.
 ![LitArray](./grammar/LitArray.svg)
 
 A list of `LitExpr` items within square brackets, as in JavaScript.
-
-Trailing commas are not currently allowed, but could be supported in the future.
 
 ### `NO_SPACE ::= !SpacesOrComments`
 

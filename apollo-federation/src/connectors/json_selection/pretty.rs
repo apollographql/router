@@ -140,15 +140,17 @@ impl PrettyPrintable for PathList {
                 let rest = tail.pretty_print_with_indentation(inline, indentation);
                 result.push_str(rest.as_str());
             }
-            Self::Expr(expr, tail) => {
-                let rest = tail.pretty_print_with_indentation(inline, indentation);
-                result.push_str("$(");
+            Self::Expr(expressions, tail) => {
+                result.push('$');
                 result.push_str(
-                    expr.pretty_print_with_indentation(inline, indentation)
+                    expressions
+                        .pretty_print_with_indentation(inline, indentation)
                         .as_str(),
                 );
-                result.push(')');
-                result.push_str(rest.as_str());
+                result.push_str(
+                    tail.pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
             }
             Self::Method(method, args, tail) => {
                 result.push_str("->");
@@ -455,6 +457,8 @@ mod tests {
             "$(12345678987654321)->div(111111111)->eq(111111111)",
             "$(\"Product\")->slice(0, $(4)->mul(-1))->eq(\"Pro\")",
             "$($args.unnecessary.parens)->eq(42)",
+            "$(maybe.one, $(maybe.two, $(maybe.three, maybe.four)), null)",
+            "$(maybe.this, maybe.that, maybe.another)->eq(42)",
         ];
         for path in paths {
             let (unmatched, path_selection) = PathSelection::parse(new_span(path)).unwrap();

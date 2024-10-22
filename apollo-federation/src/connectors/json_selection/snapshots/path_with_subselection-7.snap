@@ -87,12 +87,19 @@ Ok(
                                                     path: PathSelection {
                                                         path: WithRange {
                                                             node: Expr(
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "Args",
-                                                                    ),
+                                                                MethodArgs {
+                                                                    args: [
+                                                                        WithRange {
+                                                                            node: String(
+                                                                                "Args",
+                                                                            ),
+                                                                            range: Some(
+                                                                                118..124,
+                                                                            ),
+                                                                        },
+                                                                    ],
                                                                     range: Some(
-                                                                        118..124,
+                                                                        117..125,
                                                                     ),
                                                                 },
                                                                 WithRange {
