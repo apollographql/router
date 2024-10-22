@@ -1326,7 +1326,7 @@ fn reformat_response_expected_int() {
                 f: Int
                 g: Int
             }
-            "#
+            "#,
         )
         .query(r#"{ a b c d e f g }"#)
         .response(json!({
@@ -1464,7 +1464,7 @@ fn reformat_response_expected_float() {
                 e: Float
                 f: Float
             }
-            "#
+            "#,
         )
         .query(r#"{ a b c d e f }"#)
         .response(json!({
@@ -1523,7 +1523,7 @@ fn reformat_response_expected_string() {
                 e: String
                 f: String
             }
-            "#
+            "#,
         )
         .query(r#"{ a b c d e f }"#)
         .response(json!({
@@ -1586,7 +1586,7 @@ fn reformat_response_expected_id() {
                 f: ID
                 g: ID
             }
-            "#
+            "#,
         )
         .query(r#"{ a b c d e f g }"#)
         .response(json!({
