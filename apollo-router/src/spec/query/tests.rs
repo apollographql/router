@@ -1324,25 +1324,30 @@ fn reformat_response_expected_int() {
                 d: Int
                 e: Int
                 f: Int
+                g: Int
             }
             "#
         )
-        .query(r#"{ a b c d e f }"#)
+        .query(r#"{ a b c d e f g }"#)
         .response(json!({
-            "a": 1.0, // Should be accepted as Int 1
-            "b": 1.2, // Float should not be truncated
-            "c": "1234", // Optional to be coerced by spec: we do not do so
-            "d": true,
-            "e": [1],
-            "f": { "value": 1 },
+            "a": 1,
+            "b": 1.0, // Should be accepted as Int 1
+            "c": 1.2, // Float should not be truncated
+            "d": "1234", // Optional to be coerced by spec: we do not do so
+            "e": true,
+            "f": [1],
+            "g": { "value": 1 },
         }))
         .expected(json!({
             "a": 1,
+            // FIXME(@goto-bus-stop): we should accept this, and truncate it
+            // to Int value `1`, but do not do so today
             "b": null,
             "c": null,
             "d": null,
             "e": null,
             "f": null,
+            "g": null,
         }))
         .expected_errors(json!([
             {
@@ -1367,6 +1372,11 @@ fn reformat_response_expected_int() {
             },
             {
                 "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.g",
                 "path": ["f"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
@@ -1595,9 +1605,13 @@ fn reformat_response_expected_id() {
             "a": "1234",
             "b": "ABCD",
             "c": 1234,
-            "d": 1234,
+            // FIXME(@goto-bus-stop): We should coerce this to string "1234" (without .0),
+            // but we don't do so today
+            "d": 1234.0,
             "e": null,
-            "f": null,
+            // FIXME(@goto-bus-stop): We should null out this value as it is neither
+            // Int nor String, but we do not do so today
+            "f": 1234.5678,
             "g": null,
         }))
         .expected_errors(json!([
