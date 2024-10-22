@@ -1377,7 +1377,7 @@ fn reformat_response_expected_int() {
             },
             {
                 "message": "Invalid value found for field Query.g",
-                "path": ["f"],
+                "path": ["g"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
         ]))
@@ -1618,11 +1618,6 @@ fn reformat_response_expected_id() {
             {
                 "message": "Invalid value found for field Query.e",
                 "path": ["e"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.f",
-                "path": ["f"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {

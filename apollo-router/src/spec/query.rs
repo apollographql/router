@@ -938,6 +938,11 @@ impl Query {
                         continue;
                     }
 
+                    let root_type = apollo_compiler::ast::Type::Named(
+                        // Unchecked name instantiation is always safe, and we know the name is
+                        // valid here
+                        apollo_compiler::Name::new_unchecked(root_type_name),
+                    );
                     let field_name = alias.as_ref().unwrap_or(name);
                     let field_name_str = field_name.as_str();
                     if let Some(input_value) = input.get_mut(field_name_str) {
@@ -961,7 +966,7 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            &field_type.0,
+                            &root_type,
                             FieldOrIndex::Field(field_name_str),
                             selection_set,
                         );
