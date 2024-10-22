@@ -1191,7 +1191,7 @@ fn reformat_response_array_of_id_duplicate() {
 #[test]
 // If this test fails, this means you got greedy about allocations,
 // beware of aliases!
-fn reformat_response_expected_int_got_string() {
+fn reformat_response_expected_types() {
     FormatTest::builder()
         .schema(
             "type Query {
@@ -1369,6 +1369,73 @@ fn reformat_response_expected_int() {
                 "message": "Invalid value found for field Query.f",
                 "path": ["f"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_int_range() {
+    let schema = "type Query {
+        me: User
+    }
+
+    type User {
+        id: String!
+        name: String
+        someNumber: Int
+        someOtherNumber: Int!
+    }
+    ";
+
+    let query = "query  { me { id name someNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": null,
+            },
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field User.someNumber",
+                "path": ["me", "someNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]))
+        .test();
+
+    let query2 = "query  { me { id name someOtherNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query2)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someOtherNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field User.someOtherNumber",
+                "path": ["me", "someOtherNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
             },
         ]))
         .test();
@@ -6212,71 +6279,4 @@ fn filtered_defer_fragment() {
     );
 
     assert_json_snapshot!(response);
-}
-
-#[test]
-fn it_errors_on_larger_than_32_int() {
-    let schema = "type Query {
-        me: User
-    }
-
-    type User {
-        id: String!
-        name: String
-        someNumber: Int
-        someOtherNumber: Int!
-    }
-    ";
-
-    let query = "query  { me { id name someNumber  } }";
-
-    FormatTest::builder()
-        .schema(schema)
-        .query(query)
-        .response(json!({
-            "me": {
-                "id": "123",
-                "name": "Guy Guyson",
-                "someNumber": 51049694213_i64
-            },
-        }))
-        .expected(json!({
-            "me": {
-                "id": "123",
-                "name": "Guy Guyson",
-                "someNumber": null,
-            },
-        }))
-        .expected_errors(json!([
-            {
-                "message": "Invalid value found for field User.someNumber",
-                "path": ["me", "someNumber"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
-            }
-        ]))
-        .test();
-
-    let query2 = "query  { me { id name someOtherNumber  } }";
-
-    FormatTest::builder()
-        .schema(schema)
-        .query(query2)
-        .response(json!({
-            "me": {
-                "id": "123",
-                "name": "Guy Guyson",
-                "someOtherNumber": 51049694213_i64
-            },
-        }))
-        .expected(json!({
-            "me": null,
-        }))
-        .expected_errors(json!([
-            {
-                "message": "Invalid value found for field User.someOtherNumber",
-                "path": ["me", "someOtherNumber"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
-            },
-        ]))
-        .test();
 }
