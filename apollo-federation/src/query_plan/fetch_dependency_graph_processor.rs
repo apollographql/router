@@ -5,6 +5,7 @@ use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
+use super::conditions::ConditionKind;
 use super::query_planner::SubgraphOperationCompression;
 use super::QueryPathElement;
 use crate::error::FederationError;
@@ -304,11 +305,10 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
-                for (name, negated) in variables.iter() {
-                    let (if_clause, else_clause) = if negated {
-                        (None, Some(Box::new(value)))
-                    } else {
-                        (Some(Box::new(value)), None)
+                for (name, kind) in variables.iter() {
+                    let (if_clause, else_clause) = match kind {
+                        ConditionKind::Skip => (None, Some(Box::new(value))),
+                        ConditionKind::Include => (Some(Box::new(value)), None),
                     };
                     value = PlanNode::from(ConditionNode {
                         condition_variable: name.clone(),

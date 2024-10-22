@@ -4,37 +4,72 @@ use tower::ServiceExt;
 
 const SCHEMA: &str = r#"
 schema
-  @core(feature: "https://specs.apollo.dev/core/v0.1"),
-  @core(feature: "https://specs.apollo.dev/join/v0.1")
-{
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: MyQuery
   mutation: MyMutation
 }
 
-directive @core(feature: String!) repeatable on SCHEMA
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-
-directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
 scalar join__FieldSet
+scalar link__Import
 
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001")
-  INVENTORY @join__graph(name: "inventory" url: "http://localhost:4004")
-  PRODUCTS @join__graph(name: "products" url: "http://localhost:4003")
-  REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002")
+  SUBGRAPH_A
+    @join__graph(
+      name: "subgraph-a"
+      url: "http://graphql.subgraph-a.svc.cluster.local:4000"
+    )
 }
 
-type MyMutation {
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type MyMutation @join__type(graph: SUBGRAPH_A) {
   createThing: String
 }
 
-type MyQuery {
+type MyQuery @join__type(graph: SUBGRAPH_A) {
   thing: String
 }
 "#;
@@ -61,6 +96,74 @@ async fn aliased() {
         .query("{ n: __typename }")
         .build()
         .unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "n": "MyQuery"
+      }
+    }
+    "###);
+}
+
+// FIXME: bellow test panic because of bug in query planner, failing with:
+// "value retrieval failed: empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction."
+// See: https://github.com/apollographql/router/issues/6154
+#[tokio::test]
+#[should_panic]
+async fn inside_inline_fragment() {
+    let request = Request::fake_builder()
+        .query("{ ... { __typename } }")
+        .build()
+        .unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "n": "MyQuery"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+#[should_panic] // See above FIXME
+async fn inside_fragment() {
+    let query = r#"
+       { ...SomeFragment }
+
+       fragment SomeFragment on MyQuery {
+         __typename
+       }
+    "#;
+    let request = Request::fake_builder().query(query).build().unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "n": "MyQuery"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+#[should_panic] // See above FIXME
+async fn deeply_nested_inside_fragments() {
+    let query = r#"
+       { ...SomeFragment }
+
+       fragment SomeFragment on MyQuery {
+         ... {
+           ...AnotherFragment
+         }
+       }
+
+       fragment AnotherFragment on MyQuery {
+         __typename
+       }
+    "#;
+    let request = Request::fake_builder().query(query).build().unwrap();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {

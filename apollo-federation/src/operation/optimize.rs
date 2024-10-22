@@ -247,7 +247,9 @@ impl Selection {
             (self.selection_set(), other.selection_set())
         {
             let common = self_sub_selection.intersection(other_sub_selection)?;
-            if !common.is_empty() {
+            if common.is_empty() {
+                return Ok(None);
+            } else {
                 return self
                     .with_updated_selections(
                         self_sub_selection.type_position.clone(),
@@ -1600,32 +1602,6 @@ impl Operation {
     }
 }
 
-/// Returns a consistent GraphQL name for the given index.
-fn fragment_name(mut index: usize) -> Name {
-    /// https://spec.graphql.org/draft/#NameContinue
-    const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-    /// https://spec.graphql.org/draft/#NameStart
-    const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
-
-    if index < NAME_START_CHARS.len() {
-        Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
-    } else {
-        let mut s = String::new();
-
-        let i = index % NAME_START_CHARS.len();
-        s.push(NAME_START_CHARS.as_bytes()[i].into());
-        index /= NAME_START_CHARS.len();
-
-        while index > 0 {
-            let i = index % NAME_CHARS.len();
-            s.push(NAME_CHARS.as_bytes()[i].into());
-            index /= NAME_CHARS.len();
-        }
-
-        Name::new_unchecked(&s)
-    }
-}
-
 #[derive(Debug, Default)]
 struct FragmentGenerator {
     fragments: NamedFragments,
@@ -1634,10 +1610,6 @@ struct FragmentGenerator {
 }
 
 impl FragmentGenerator {
-    fn next_name(&self) -> Name {
-        fragment_name(self.fragments.len())
-    }
-
     // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
     // In the future, we will just use `.next_name()`.
     fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
@@ -1711,6 +1683,20 @@ impl FragmentGenerator {
                 }
                 SelectionValue::InlineFragment(mut candidate) => {
                     self.visit_selection_set(candidate.get_selection_set_mut())?;
+
+                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                    // JS federation does not consider fragments without a type condition.
+                    if candidate
+                        .get()
+                        .inline_fragment
+                        .type_condition_position
+                        .is_none()
+                    {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    }
 
                     let directives = &candidate.get().inline_fragment.directives;
                     let skip_include = directives
@@ -1816,6 +1802,32 @@ mod tests {
             validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    /// Returns a consistent GraphQL name for the given index.
+    fn fragment_name(mut index: usize) -> Name {
+        /// https://spec.graphql.org/draft/#NameContinue
+        const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+        /// https://spec.graphql.org/draft/#NameStart
+        const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+        if index < NAME_START_CHARS.len() {
+            Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
+        } else {
+            let mut s = String::new();
+
+            let i = index % NAME_START_CHARS.len();
+            s.push(NAME_START_CHARS.as_bytes()[i].into());
+            index /= NAME_START_CHARS.len();
+
+            while index > 0 {
+                let i = index % NAME_CHARS.len();
+                s.push(NAME_CHARS.as_bytes()[i].into());
+                index /= NAME_CHARS.len();
+            }
+
+            Name::new_unchecked(&s)
+        }
     }
 
     #[test]
@@ -2281,12 +2293,12 @@ mod tests {
             type Query {
                 t: T
             }
-    
+
             type T {
                 a: A
                 b: Int
             }
-    
+
             type A {
                 x: String
                 y: String
@@ -2312,14 +2324,14 @@ mod tests {
                 x
                 y
             }
-    
+
             fragment FT on T {
                 a {
                 __typename
                 ...FA
                 }
             }
-    
+
             query {
                 t {
                 ...FT
@@ -2346,19 +2358,19 @@ mod tests {
               type Query {
                 t: T
               }
-        
+
               type T {
                 a: String
                 b: B
                 c: Int
                 d: D
               }
-        
+
               type B {
                 x: String
                 y: String
               }
-        
+
               type D {
                 m: String
                 n: String
@@ -2376,7 +2388,7 @@ mod tests {
                     m
                   }
                 }
-        
+
                 {
                   t {
                     ...FragT
@@ -2415,23 +2427,23 @@ mod tests {
           type Query {
             i: I
           }
-    
+
           interface I {
             a: String
           }
-    
+
           type T implements I {
             a: String
             b: B
             c: Int
             d: D
           }
-    
+
           type B {
             x: String
             y: String
           }
-    
+
           type D {
             m: String
             n: String
@@ -2449,7 +2461,7 @@ mod tests {
                 m
               }
             }
-    
+
             {
               i {
                 ... on T {
@@ -2489,19 +2501,19 @@ mod tests {
               type Query {
                 t: T
               }
-        
+
               type T {
                 a: String
                 b: B
                 c: Int
                 d: D
               }
-        
+
               type B {
                 x: String
                 y: String
               }
-        
+
               type D {
                 m: String
                 n: String
@@ -2527,7 +2539,7 @@ mod tests {
                     m
                   }
                 }
-        
+
                 fragment Frag2 on T {
                   a
                   b {
@@ -2539,7 +2551,7 @@ mod tests {
                     n
                   }
                 }
-        
+
                 {
                   t {
                     ...Frag1
@@ -2573,11 +2585,11 @@ mod tests {
               type Query {
                 t: T
               }
-        
+
               interface I {
                 x: String
               }
-        
+
               type T implements I {
                 x: String
                 a: String
@@ -2591,7 +2603,7 @@ mod tests {
                     a
                   }
                 }
-        
+
                 {
                   t {
                     ...FragI
@@ -2615,12 +2627,12 @@ mod tests {
               type Query {
                 t: T
               }
-        
+
               type T {
                 a: String
                 u: U
               }
-        
+
               type U {
                 x: String
                 y: String
@@ -2631,7 +2643,7 @@ mod tests {
                 fragment Frag1 on T {
                   a
                 }
-        
+
                 fragment Frag2 on T {
                   u {
                     x
@@ -2639,13 +2651,13 @@ mod tests {
                   }
                   ...Frag1
                 }
-        
+
                 fragment Frag3 on Query {
                   t {
                     ...Frag2
                   }
                 }
-        
+
                 {
                   ...Frag3
                 }
@@ -2670,16 +2682,16 @@ mod tests {
               type Query {
                 t1: T1
               }
-        
+
               interface I {
                 x: Int
               }
-        
+
               type T1 implements I {
                 x: Int
                 y: Int
               }
-        
+
               type T2 implements I {
                 x: Int
                 z: Int
@@ -2695,7 +2707,7 @@ mod tests {
                     z
                   }
                 }
-        
+
                 {
                   t1 {
                     ...FragOnI
@@ -2718,24 +2730,24 @@ mod tests {
               type Query {
                 i2: I2
               }
-        
+
               interface I1 {
                 x: Int
               }
-        
+
               interface I2 {
                 y: Int
               }
-        
+
               interface I3 {
                 z: Int
               }
-        
+
               type T1 implements I1 & I2 {
                 x: Int
                 y: Int
               }
-        
+
               type T2 implements I1 & I3 {
                 x: Int
                 z: Int
@@ -2751,7 +2763,7 @@ mod tests {
                     z
                   }
                 }
-        
+
                 {
                   i2 {
                     ...FragOnI1
@@ -2781,13 +2793,13 @@ mod tests {
               type Query {
                 t1: T1
               }
-        
+
               union U = T1 | T2
-        
+
               type T1 {
                 x: Int
               }
-        
+
               type T2 {
                 y: Int
               }
@@ -2802,7 +2814,7 @@ mod tests {
                     y
                   }
                 }
-        
+
                 {
                   t1 {
                     ...OnU
@@ -2912,18 +2924,18 @@ mod tests {
               type Query {
                 t1: T1
               }
-        
+
               union U1 = T1 | T2 | T3
               union U2 =      T2 | T3
-        
+
               type T1 {
                 x: Int
               }
-        
+
               type T2 {
                 y: Int
               }
-        
+
               type T3 {
                 z: Int
               }
@@ -2935,7 +2947,7 @@ mod tests {
                   ...Outer
                 }
               }
-        
+
               fragment Outer on U1 {
                 ... on T1 {
                   x
@@ -2947,7 +2959,7 @@ mod tests {
                   ... Inner
                 }
               }
-        
+
               fragment Inner on U2 {
                 ... on T2 {
                   y
@@ -3006,23 +3018,23 @@ mod tests {
               type Query {
                 t1: T1
               }
-        
+
               union U1 = T1 | T2 | T3
               union U2 =      T2 | T3
-        
+
               type T1 {
                 x: Int
               }
-        
+
               type T2 {
                 y1: Y
                 y2: Y
               }
-        
+
               type T3 {
                 z: Int
               }
-        
+
               type Y {
                 v: Int
               }
@@ -3034,7 +3046,7 @@ mod tests {
                   ...Outer
                 }
               }
-        
+
               fragment Outer on U1 {
                 ... on T1 {
                   x
@@ -3046,7 +3058,7 @@ mod tests {
                   ... Inner
                 }
               }
-        
+
               fragment Inner on U2 {
                 ... on T2 {
                   y1 {
@@ -3057,7 +3069,7 @@ mod tests {
                   }
                 }
               }
-        
+
               fragment WillBeUnused on Y {
                 v
               }
@@ -3092,14 +3104,14 @@ mod tests {
                 t1: T
                 t2: T
               }
-        
+
               type T {
                 a1: Int
                 a2: Int
                 b1: B
                 b2: B
               }
-        
+
               type B {
                 x: Int
                 y: Int
@@ -3115,7 +3127,7 @@ mod tests {
                   ...TFields
                 }
               }
-        
+
               fragment TFields on T {
                 ...DirectFieldsOfT
                 b1 {
@@ -3125,12 +3137,12 @@ mod tests {
                   ...BFields
                 }
               }
-        
+
               fragment DirectFieldsOfT on T {
                 a1
                 a2
               }
-        
+
               fragment BFields on B {
                 x
                 y
@@ -3213,7 +3225,7 @@ mod tests {
                   t2: T
                   t3: T
                 }
-        
+
                 type T {
                   a: Int
                   b: Int
@@ -3226,7 +3238,7 @@ mod tests {
                   fragment DirectiveInDef on T {
                     a @include(if: $cond1)
                   }
-        
+
                   query myQuery($cond1: Boolean!, $cond2: Boolean!) {
                     t1 {
                       a
@@ -3263,7 +3275,7 @@ mod tests {
                   t2: T
                   t3: T
                 }
-        
+
                 type T {
                   a: Int
                   b: Int
@@ -3276,7 +3288,7 @@ mod tests {
                   fragment NoDirectiveDef on T {
                     a
                   }
-        
+
                   query myQuery($cond1: Boolean!) {
                     t1 {
                       ...NoDirectiveDef
