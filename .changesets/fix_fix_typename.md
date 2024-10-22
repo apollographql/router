@@ -2,7 +2,8 @@
 
 The router now correctly handles the `__typename` field used on operation root types, even when the subgraph's root type has a name that differs from the supergraph's root type.
 
-For example, in query like this:
+For example, given a query like this:
+
 ```graphql
 {
   ...RootFragment

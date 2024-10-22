@@ -1,6 +1,8 @@
-### Add support of router request_context selector and add schema id in context ([PR #6160](https://github.com/apollographql/router/pull/6160))
+### Support new `request_context` selector for telemetry ([PR #6160](https://github.com/apollographql/router/pull/6160))
 
-Added a new selector `request_context` for the router service for telemetry. Now the supergraph schema id is also available through the context so if you want to access or display this schema id at the router service level you can now configure it like this:
+The router supports a new `request_context` selector for telemetry that enables access to the supergraph schema ID.
+
+You can configure the context to access the supergraph schema ID at the router service level:
 
 ```yaml
 telemetry:
@@ -16,6 +18,6 @@ telemetry:
               request_context: "apollo::supergraph_schema_id" # The key containing the supergraph schema id
 ```
 
-It can be used in any services at any stages. This example is using selectors on event's attributes but it can also be done on spans and instruments.
+You can use the selector in any service at any stage. While this example applies to `events` attributes, the selector can also be used on spans and instruments.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6160

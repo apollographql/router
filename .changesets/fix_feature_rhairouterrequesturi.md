@@ -1,6 +1,10 @@
-### Add uri and method properties on router request in Rhai ([PR #6114](https://github.com/apollographql/router/pull/6114))
+### Support URI and method properties for router request in Rhai ([PR #6147](https://github.com/apollographql/router/pull/6147))
 
-Previously, when trying to access `request.uri` and `request.method` on a Router Request in Rhai, Router would error saying the properties are undefined.
+The router now supports accessing `request.uri` and `request.method` properties from custom Rhai scripts.
+
+Previously, when trying to access `request.uri` and `request.method` on a router request in Rhai, the router would return error messages stating the properties were undefined.
+
+An example Rhai script using these properties:
 
 ```rhai
 fn router_service(service) {

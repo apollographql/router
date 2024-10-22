@@ -1,6 +1,6 @@
-### Support to get/set URI port in Rhai ([Issue #5437](https://github.com/apollographql/router/issues/5437))
+### Support reading and setting `port` on request URIs using Rhai ([Issue #5437](https://github.com/apollographql/router/issues/5437))
 
-This adds support to read the port from the `request.uri.port`/`request.subgraph.uri.port` functions in Rhai, enabling the ability to update the full URI for subgraph fetches. For example: 
+Custom Rhai scripts in the router now support the `request.uri.port` and `request.subgraph.uri.port` functions for reading and setting URI ports. These functions enable you to update the full URI for subgraph fetches. For example: 
 
 ```rust
 fn subgraph_service(service, subgraph){
