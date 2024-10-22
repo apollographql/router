@@ -1,6 +1,7 @@
 //! Running two query planner implementations and comparing their results
 
 use std::borrow::Borrow;
+use std::collections::hash_map::HashMap;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -388,6 +389,9 @@ fn opt_plan_node_matches(
     }
 }
 
+//==================================================================================================
+// Vec comparison functions
+
 fn vec_matches<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     this.len() == other.len()
         && std::iter::zip(this, other).all(|(this, other)| item_matches(this, other))
@@ -417,6 +421,19 @@ fn vec_matches_sorted<T: Ord + Clone>(this: &[T], other: &[T]) -> bool {
 }
 
 fn vec_matches_sorted_by<T: Clone>(
+    this: &[T],
+    other: &[T],
+    compare: impl Fn(&T, &T) -> std::cmp::Ordering,
+    item_matches: impl Fn(&T, &T) -> bool,
+) -> bool {
+    let mut this_sorted = this.to_owned();
+    let mut other_sorted = other.to_owned();
+    this_sorted.sort_by(&compare);
+    other_sorted.sort_by(&compare);
+    vec_matches(&this_sorted, &other_sorted, item_matches)
+}
+
+fn vec_matches_result_sorted_by<T: Clone>(
     this: &[T],
     other: &[T],
     compare: impl Fn(&T, &T) -> std::cmp::Ordering,
@@ -478,6 +495,9 @@ fn vec_matches_result_as_set<T>(
     }
     Ok(())
 }
+
+//==================================================================================================
+// PlanNode comparison functions
 
 fn option_to_string(name: Option<impl ToString>) -> String {
     name.map_or_else(|| "<none>".to_string(), |name| name.to_string())
@@ -630,17 +650,22 @@ fn hash_selection_key(selection: &Selection) -> u64 {
     hash_value(&get_selection_key(selection))
 }
 
+// Note: This `Selection` struct is a limited version used for the `requires` field.
 fn same_selection(x: &Selection, y: &Selection) -> bool {
-    let x_key = get_selection_key(x);
-    let y_key = get_selection_key(y);
-    if x_key != y_key {
-        return false;
-    }
-    let x_selections = x.selection_set();
-    let y_selections = y.selection_set();
-    match (x_selections, y_selections) {
-        (Some(x), Some(y)) => same_selection_set_sorted(x, y),
-        (None, None) => true,
+    match (x, y) {
+        (Selection::Field(x), Selection::Field(y)) => {
+            x.name == y.name
+                && x.alias == y.alias
+                && match (&x.selections, &y.selections) {
+                    (Some(x), Some(y)) => same_selection_set_sorted(x, y),
+                    (None, None) => true,
+                    _ => false,
+                }
+        }
+        (Selection::InlineFragment(x), Selection::InlineFragment(y)) => {
+            x.type_condition == y.type_condition
+                && same_selection_set_sorted(&x.selections, &y.selections)
+        }
         _ => false,
     }
 }
@@ -694,7 +719,6 @@ fn same_ast_document(x: &ast::Document, y: &ast::Document) -> Result<(), MatchFa
                 _ => others.push(def),
             }
         }
-        fragments.sort_by_key(|frag| frag.name.clone());
         (operations, fragments, others)
     }
 
@@ -708,21 +732,37 @@ fn same_ast_document(x: &ast::Document, y: &ast::Document) -> Result<(), MatchFa
         "Different number of operation definitions"
     );
 
+    check_match_eq!(x_frags.len(), y_frags.len());
+    let mut fragment_map: HashMap<Name, Name> = HashMap::new();
+    // Assumption: x_frags and y_frags are topologically sorted.
+    //             Thus, we can build the fragment name mapping in a single pass and compare
+    //             fragment definitions using the mapping at the same time, since earlier fragments
+    //             will never reference later fragments.
+    x_frags.iter().try_fold((), |_, x_frag| {
+        let y_frag = y_frags
+            .iter()
+            .find(|y_frag| same_ast_fragment_definition(x_frag, y_frag, &fragment_map).is_ok());
+        if let Some(y_frag) = y_frag {
+            if x_frag.name != y_frag.name {
+                // record it only if they are not identical
+                fragment_map.insert(x_frag.name.clone(), y_frag.name.clone());
+            }
+            Ok(())
+        } else {
+            Err(MatchFailure::new(format!(
+                "mismatch: no matching fragment definition for {}",
+                x_frag.name
+            )))
+        }
+    })?;
+
     check_match_eq!(x_ops.len(), y_ops.len());
     x_ops
         .iter()
         .zip(y_ops.iter())
         .try_fold((), |_, (x_op, y_op)| {
-            same_ast_operation_definition(x_op, y_op)
+            same_ast_operation_definition(x_op, y_op, &fragment_map)
                 .map_err(|err| err.add_description("under operation definition"))
-        })?;
-    check_match_eq!(x_frags.len(), y_frags.len());
-    x_frags
-        .iter()
-        .zip(y_frags.iter())
-        .try_fold((), |_, (x_frag, y_frag)| {
-            same_ast_fragment_definition(x_frag, y_frag)
-                .map_err(|err| err.add_description("under fragment definition"))
         })?;
     Ok(())
 }
@@ -730,10 +770,11 @@ fn same_ast_document(x: &ast::Document, y: &ast::Document) -> Result<(), MatchFa
 fn same_ast_operation_definition(
     x: &ast::OperationDefinition,
     y: &ast::OperationDefinition,
+    fragment_map: &HashMap<Name, Name>,
 ) -> Result<(), MatchFailure> {
     // Note: Operation names are ignored, since parallel fetches may have different names.
     check_match_eq!(x.operation_type, y.operation_type);
-    vec_matches_sorted_by(
+    vec_matches_result_sorted_by(
         &x.variables,
         &y.variables,
         |a, b| a.name.cmp(&b.name),
@@ -743,7 +784,8 @@ fn same_ast_operation_definition(
     check_match_eq!(x.directives, y.directives);
     check_match!(same_ast_selection_set_sorted(
         &x.selection_set,
-        &y.selection_set
+        &y.selection_set,
+        fragment_map,
     ));
     Ok(())
 }
@@ -773,6 +815,15 @@ fn ast_value_maybe_coerced_to(x: &ast::Value, y: &ast::Value) -> bool {
                 xx_name == yy_name
                     && (xx_val == yy_val || ast_value_maybe_coerced_to(xx_val, yy_val))
             }) {
+                return true;
+            }
+        }
+
+        // Special case 3: JS QP may convert string to int for custom scalars, while Rust doesn't.
+        // - Note: This conversion seems a bit difficult to implement in the `apollo-federation`'s
+        //         `coerce_value` function, since IntValue's constructor is private to the crate.
+        (ast::Value::Int(ref x), ast::Value::String(ref y)) => {
+            if x.as_str() == y {
                 return true;
             }
         }
@@ -818,25 +869,41 @@ fn same_variable_definition(
 fn same_ast_fragment_definition(
     x: &ast::FragmentDefinition,
     y: &ast::FragmentDefinition,
+    fragment_map: &HashMap<Name, Name>,
 ) -> Result<(), MatchFailure> {
-    check_match_eq!(x.name, y.name);
+    // Note: Fragment names at definitions are ignored.
     check_match_eq!(x.type_condition, y.type_condition);
     check_match_eq!(x.directives, y.directives);
     check_match!(same_ast_selection_set_sorted(
         &x.selection_set,
-        &y.selection_set
+        &y.selection_set,
+        fragment_map,
     ));
     Ok(())
 }
 
-fn get_ast_selection_key(selection: &ast::Selection) -> SelectionKey {
+fn same_ast_argument_value(x: &ast::Value, y: &ast::Value) -> bool {
+    x == y || ast_value_maybe_coerced_to(x, y)
+}
+
+fn same_ast_argument(x: &ast::Argument, y: &ast::Argument) -> bool {
+    x.name == y.name && same_ast_argument_value(&x.value, &y.value)
+}
+
+fn get_ast_selection_key(
+    selection: &ast::Selection,
+    fragment_map: &HashMap<Name, Name>,
+) -> SelectionKey {
     match selection {
         ast::Selection::Field(field) => SelectionKey::Field {
             response_name: field.response_name().clone(),
             directives: field.directives.clone(),
         },
         ast::Selection::FragmentSpread(fragment) => SelectionKey::FragmentSpread {
-            fragment_name: fragment.fragment_name.clone(),
+            fragment_name: fragment_map
+                .get(&fragment.fragment_name)
+                .unwrap_or(&fragment.fragment_name)
+                .clone(),
             directives: fragment.directives.clone(),
         },
         ast::Selection::InlineFragment(fragment) => SelectionKey::InlineFragment {
@@ -846,54 +913,68 @@ fn get_ast_selection_key(selection: &ast::Selection) -> SelectionKey {
     }
 }
 
-use std::ops::Not;
-
-/// Get the sub-selections of a selection.
-fn get_ast_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>> {
-    match selection {
-        ast::Selection::Field(field) => field
-            .selection_set
-            .is_empty()
-            .not()
-            .then(|| &field.selection_set),
-        ast::Selection::FragmentSpread(_) => None,
-        ast::Selection::InlineFragment(fragment) => Some(&fragment.selection_set),
-    }
-}
-
-fn same_ast_selection(x: &ast::Selection, y: &ast::Selection) -> bool {
-    let x_key = get_ast_selection_key(x);
-    let y_key = get_ast_selection_key(y);
-    if x_key != y_key {
-        return false;
-    }
-    let x_selections = get_ast_selection_set(x);
-    let y_selections = get_ast_selection_set(y);
-    match (x_selections, y_selections) {
-        (Some(x), Some(y)) => same_ast_selection_set_sorted(x, y),
-        (None, None) => true,
+fn same_ast_selection(
+    x: &ast::Selection,
+    y: &ast::Selection,
+    fragment_map: &HashMap<Name, Name>,
+) -> bool {
+    match (x, y) {
+        (ast::Selection::Field(x), ast::Selection::Field(y)) => {
+            x.name == y.name
+                && x.alias == y.alias
+                && vec_matches_sorted_by(
+                    &x.arguments,
+                    &y.arguments,
+                    |a, b| a.name.cmp(&b.name),
+                    |a, b| same_ast_argument(a, b),
+                )
+                && x.directives == y.directives
+                && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set, fragment_map)
+        }
+        (ast::Selection::FragmentSpread(x), ast::Selection::FragmentSpread(y)) => {
+            let mapped_fragment_name = fragment_map
+                .get(&x.fragment_name)
+                .unwrap_or(&x.fragment_name);
+            *mapped_fragment_name == y.fragment_name && x.directives == y.directives
+        }
+        (ast::Selection::InlineFragment(x), ast::Selection::InlineFragment(y)) => {
+            x.type_condition == y.type_condition
+                && x.directives == y.directives
+                && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set, fragment_map)
+        }
         _ => false,
     }
 }
 
-fn hash_ast_selection_key(selection: &ast::Selection) -> u64 {
-    hash_value(&get_ast_selection_key(selection))
+fn hash_ast_selection_key(selection: &ast::Selection, fragment_map: &HashMap<Name, Name>) -> u64 {
+    hash_value(&get_ast_selection_key(selection, fragment_map))
 }
 
-fn same_ast_selection_set_sorted(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
-    fn sorted_by_selection_key(s: &[ast::Selection]) -> Vec<&ast::Selection> {
+// Selections are sorted and compared after renaming x's fragment spreads according to the
+// fragment_map.
+fn same_ast_selection_set_sorted(
+    x: &[ast::Selection],
+    y: &[ast::Selection],
+    fragment_map: &HashMap<Name, Name>,
+) -> bool {
+    fn sorted_by_selection_key<'a>(
+        s: &'a [ast::Selection],
+        fragment_map: &HashMap<Name, Name>,
+    ) -> Vec<&'a ast::Selection> {
         let mut sorted: Vec<&ast::Selection> = s.iter().collect();
-        sorted.sort_by_key(|x| hash_ast_selection_key(x));
+        sorted.sort_by_key(|x| hash_ast_selection_key(x, fragment_map));
         sorted
     }
 
     if x.len() != y.len() {
         return false;
     }
-    sorted_by_selection_key(x)
+    let x_sorted = sorted_by_selection_key(x, fragment_map); // Map fragment spreads
+    let y_sorted = sorted_by_selection_key(y, &Default::default()); // Don't map fragment spreads
+    x_sorted
         .into_iter()
-        .zip(sorted_by_selection_key(y))
-        .all(|(x, y)| same_ast_selection(x, y))
+        .zip(y_sorted)
+        .all(|(x, y)| same_ast_selection(x, y, fragment_map))
 }
 
 #[cfg(test)]
@@ -983,6 +1064,75 @@ mod ast_comparison_tests {
     fn test_fragment_definition_order() {
         let op_x = r#"{ q { ...f1 ...f2 } } fragment f1 on T { x y } fragment f2 on T { w z }"#;
         let op_y = r#"{ q { ...f1 ...f2 } } fragment f2 on T { w z } fragment f1 on T { x y }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_selection_argument_is_compared() {
+        let op_x = r#"{ x(arg1: "one") }"#;
+        let op_y = r#"{ x(arg1: "two") }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_err());
+    }
+
+    #[test]
+    fn test_selection_argument_order() {
+        let op_x = r#"{ x(arg1: "one", arg2: "two") }"#;
+        let op_y = r#"{ x(arg2: "two", arg1: "one") }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_string_to_id_coercion_difference() {
+        // JS QP coerces strings into integer for ID type, while Rust QP doesn't.
+        // This tests a special case that same_ast_document accepts this difference.
+        let op_x = r#"{ x(id: 123) }"#;
+        let op_y = r#"{ x(id: "123") }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_fragment_definition_different_names() {
+        let op_x = r#"{ q { ...f1 ...f2 } } fragment f1 on T { x y } fragment f2 on T { w z }"#;
+        let op_y = r#"{ q { ...g1 ...g2 } } fragment g1 on T { x y } fragment g2 on T { w z }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_fragment_definition_different_names_nested_1() {
+        // Nested fragments have the same name, only top-level fragments have different names.
+        let op_x = r#"{ q { ...f2 } } fragment f1 on T { x y } fragment f2 on T { z ...f1 }"#;
+        let op_y = r#"{ q { ...g2 } } fragment f1 on T { x y } fragment g2 on T { z ...f1 }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_fragment_definition_different_names_nested_2() {
+        // Nested fragments have different names.
+        let op_x = r#"{ q { ...f2 } } fragment f1 on T { x y } fragment f2 on T { z ...f1 }"#;
+        let op_y = r#"{ q { ...g2 } } fragment g1 on T { x y } fragment g2 on T { z ...g1 }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_fragment_definition_different_names_nested_3() {
+        // Nested fragments have different names.
+        // Also, fragment definitions are in different order.
+        let op_x = r#"{ q { ...f2 ...f3 } } fragment f1 on T { x y } fragment f2 on T { z ...f1 } fragment f3 on T { w } "#;
+        let op_y = r#"{ q { ...g2 ...g3 } } fragment g1 on T { x y } fragment g2 on T { w }  fragment g3 on T { z ...g1 }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());

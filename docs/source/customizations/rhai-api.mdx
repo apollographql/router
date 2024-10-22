@@ -405,6 +405,8 @@ request.subgraph.uri.path
 request.subgraph.uri.port
 ```
 
+**For `subgraph_service` callbacks only,** the `request` object provides the non modifiable field `request.subgraph_request_id` which is a unique ID corresponding to the subgraph request.
+
 ### `request.context`
 
 The context is a generic key/value store that exists for the entire lifespan of a particular client request. You can use this to share information between multiple callbacks throughout the request's lifespan.
@@ -593,6 +595,8 @@ response.body.extensions
 ```
 
 All of the above fields are read/write.
+
+**For `subgraph_service` callbacks only,** the `response` object provides the non modifiable field `response.subgraph_request_id` which is a unique ID corresponding to the subgraph request, and the same id that can be obtained on the request side.
 
 The following fields are identical in behavior to their `request` counterparts:
 
