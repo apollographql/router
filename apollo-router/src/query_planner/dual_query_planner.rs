@@ -719,7 +719,6 @@ fn same_ast_document(x: &ast::Document, y: &ast::Document) -> Result<(), MatchFa
                 _ => others.push(def),
             }
         }
-        fragments.sort_by_key(|frag| frag.name.clone());
         (operations, fragments, others)
     }
 
