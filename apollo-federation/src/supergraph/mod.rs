@@ -47,10 +47,14 @@ pub use self::subgraph::ValidFederationSubgraphs;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::context_spec_definition::CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::cost_spec_definition::CostSpecDefinition;
+use crate::link::federation_spec_definition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::join_spec_definition::ContextArgument;
 use crate::link::join_spec_definition::FieldDirectiveArguments;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::join_spec_definition::TypeDirectiveArguments;
@@ -709,6 +713,21 @@ fn extract_object_type_content(
             message: "@join__implements should exist for a fed2 supergraph".to_owned(),
         })?;
 
+    let context = supergraph_schema
+        .metadata()
+        .and_then(|metadata| metadata.for_identity(&Identity::context_identity()))
+        .and_then(|context_link| CONTEXT_VERSIONS.find(&context_link.url.version))
+        .and_then(|context_spec_def| {
+            if let Some(name_in_schema) = context_spec_def
+                .context_directive_name_in_schema(supergraph_schema)
+                .ok()
+            {
+                return Some((context_spec_def, name_in_schema));
+            }
+            None
+        });
+    // let context_name_in_schema = context_spec_def
+    //     .and_then(|def| def.context_directive_name_in_schema(supergraph_schema).ok());
     for TypeInfo {
         name: type_name,
         subgraph_info,
@@ -745,6 +764,45 @@ fn extract_object_type_content(
                 &mut subgraph.schema,
                 ComponentName::from(Name::new(implements_directive_application.interface)?),
             )?;
+        }
+
+        if let Some((context_spec_def, name_in_supergraph)) = context {
+            for directive in type_.directives.get_all(name_in_supergraph.as_str()) {
+                if let Some(context_name) =
+                    FederationSpecDefinition::context_directive_arguments(directive).ok()
+                {
+                    // todo should I return an error if there isn't a value?
+                    let arr: std::str::Split<'_, &str> = context_name.name.split("__");
+                    if let Some(subgraph_name) = arr.next() {
+                        let subgraph_name = Name::new(subgraph_name)?;
+                        let subgraph = get_subgraph(
+                            subgraphs,
+                            graph_enum_value_name_to_subgraph_name,
+                            &subgraph_name,
+                        )?;
+                        let federation_spec_definition = federation_spec_definitions
+                            .get(&subgraph_name)
+                            .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                                message: "Subgraph unexpectedly does not use federation spec"
+                                    .to_owned(),
+                            })?;
+                        if let Some(context_in_subgraph) = arr.last() {
+                            pos.insert_directive(
+                                &mut subgraph.schema,
+                                (federation_spec_definition.context_directive(
+                                    &subgraph.schema,
+                                    context_in_subgraph.to_string(),
+                                )?)
+                                .into(),
+                            );
+                        } else {
+                            todo!();
+                        }
+                    } else {
+                        todo!();
+                    }
+                }
+            }
         }
 
         for graph_enum_value in subgraph_info.keys() {
@@ -1389,6 +1447,7 @@ fn add_subgraph_field(
             override_: None,
             override_label: None,
             user_overridden: None,
+            context_arguments: None,
         });
     let subgraph_field_type = match &field_directive_application.type_ {
         Some(t) => decode_type(t)?,
@@ -1474,6 +1533,35 @@ fn add_subgraph_field(
         )?;
     }
 
+    if let Some(context_arguments) = &field_directive_application.context_arguments {
+        for args in context_arguments {
+            let ContextArgument {
+                name,
+                type_,
+                context,
+                selection,
+            } = args;
+            let mut split = context.split("__");
+            split.next();
+            let Some(context_name_in_subgraph) = split.last() else {
+                todo!();
+            };
+            let from_context_directive = federation_spec_definition
+                .from_context_directive(&subgraph.schema, context_name_in_subgraph.to_string())?;
+            let mut directives = std::iter::once(from_context_directive).collect();
+            let ty = decode_type(type_)?;
+            let _subgraph_type = subgraph.schema.get_type(ty.inner_named_type().clone())?;
+            let node = Node::new(InputValueDefinition {
+                name: Name::new(name)?,
+                ty: ty.into(),
+                directives,
+                default_value: None,
+                description: None,
+            });
+            subgraph_field.arguments.push(node);
+        }
+    }
+
     match object_or_interface_field_definition_position {
         ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
             pos.insert(&mut subgraph.schema, Component::from(subgraph_field))?;
@@ -1504,6 +1592,7 @@ fn add_subgraph_input_field(
             override_: None,
             override_label: None,
             user_overridden: None,
+            context_arguments: None,
         });
     let subgraph_input_field_type = match &field_directive_application.type_ {
         Some(t) => Node::new(decode_type(t)?),
@@ -1552,6 +1641,19 @@ fn get_subgraph<'subgraph>(
                 ),
             }
         })?;
+    subgraphs.get_mut(subgraph_name).ok_or_else(|| {
+        SingleFederationError::Internal {
+            message: "All subgraphs should have been created by \"collect_empty_subgraphs()\""
+                .to_owned(),
+        }
+        .into()
+    })
+}
+
+fn get_subgraph_by_name<'subgraph>(
+    subgraphs: &'subgraph mut FederationSubgraphs,
+    subgraph_name: &str,
+) -> Result<&'subgraph mut FederationSubgraph, FederationError> {
     subgraphs.get_mut(subgraph_name).ok_or_else(|| {
         SingleFederationError::Internal {
             message: "All subgraphs should have been created by \"collect_empty_subgraphs()\""
