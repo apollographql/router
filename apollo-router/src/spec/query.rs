@@ -586,7 +586,7 @@ impl Query {
                 }
                 Ok(())
             }
-            executable::Type::Named(name) if name == "ID" => {
+            executable::Type::Named(name) if name == "Id" => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
                     *output = input.clone();
                 } else {

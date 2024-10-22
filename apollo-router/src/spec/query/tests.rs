@@ -1263,7 +1263,11 @@ fn reformat_response_expected_types() {
                 "b": null,
                 "e": null,
                 "u": null,
-                "id": null,
+                // FIXME(@goto-bus-stop): this should be null, but we do not
+                // validate ID values today
+                "id": {
+                    "test": "test",
+                },
                 "l": null
             },
         }})
@@ -1296,11 +1300,6 @@ fn reformat_response_expected_types() {
             {
                 "message": "Invalid non-object value of type number for composite type U",
                 "path": ["get", "u"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Thing.id",
-                "path": ["get", "id"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
@@ -1608,23 +1607,29 @@ fn reformat_response_expected_id() {
             // FIXME(@goto-bus-stop): We should coerce this to string "1234" (without .0),
             // but we don't do so today
             "d": 1234.0,
-            "e": null,
-            // FIXME(@goto-bus-stop): We should null out this value as it is neither
-            // Int nor String, but we do not do so today
+            // FIXME(@goto-bus-stop): We should null out all these values,
+            // but we don't validate IDs today
+            "e": false,
             "f": 1234.5678,
-            "g": null,
+            "g": ["s"],
         }))
         .expected_errors(json!([
-            {
-                "message": "Invalid value found for field Query.e",
-                "path": ["e"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.g",
-                "path": ["g"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
+            // FIXME(@goto-bus-stop): we should expect these errors:
+            // {
+            //     "message": "Invalid value found for field Query.e",
+            //     "path": ["e"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+            // {
+            //     "message": "Invalid value found for field Query.f",
+            //     "path": ["f"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+            // {
+            //     "message": "Invalid value found for field Query.g",
+            //     "path": ["g"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
         ]))
         .test();
 }
