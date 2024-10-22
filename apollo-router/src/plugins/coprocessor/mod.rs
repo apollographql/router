@@ -78,7 +78,9 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let mut http_connector = new_async_http_connector()?;
+        let client_config = init.config.client.clone().unwrap_or_default();
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -93,9 +95,8 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             .https_or_http()
             .enable_http1();
 
-        let connector = if init.config.client.is_none()
-            || init.config.client.as_ref().unwrap().experimental_http2 != Some(Http2Config::Disable)
-        {
+        let experimental_http2 = client_config.experimental_http2.unwrap_or_default();
+        let connector = if experimental_http2 != Http2Config::Disable {
             builder.enable_http2().wrap_connector(http_connector)
         } else {
             builder.wrap_connector(http_connector)
@@ -106,11 +107,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
                 .layer(TimeoutLayer::new(init.config.timeout))
                 .service(
                     hyper::Client::builder()
-                        .http2_only(
-                            init.config.client.is_some()
-                                && init.config.client.as_ref().unwrap().experimental_http2
-                                    == Some(Http2Config::Http2Only),
-                        )
+                        .http2_only(experimental_http2 == Http2Config::Http2Only)
                         .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                         .build(connector),
                 ),

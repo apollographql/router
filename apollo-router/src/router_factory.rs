@@ -417,7 +417,7 @@ pub(crate) async fn create_subgraph_services(
             name,
             configuration,
             &tls_root_store,
-            shaping.enable_subgraph_http2(name),
+            shaping.subgraph_client_config(name),
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
