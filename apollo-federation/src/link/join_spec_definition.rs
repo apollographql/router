@@ -59,6 +59,13 @@ pub(crate) struct TypeDirectiveArguments<'doc> {
     pub(crate) is_interface_object: bool,
 }
 
+pub(crate) struct ContextArgument<'doc> {
+    pub(crate) name: &'doc str,
+    pub(crate) type_: &'doc str,
+    pub(crate) context: &'doc str,
+    pub(crate) selection: &'doc str,
+}
+
 pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) graph: Option<Name>,
     pub(crate) requires: Option<&'doc str>,
@@ -68,6 +75,7 @@ pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) override_: Option<&'doc str>,
     pub(crate) override_label: Option<&'doc str>,
     pub(crate) user_overridden: Option<bool>,
+    pub(crate) context_arguments: Option<Vec<ContextArgument<'doc>>>,
 }
 
 pub(crate) struct ImplementsDirectiveArguments<'doc> {
@@ -228,6 +236,7 @@ impl JoinSpecDefinition {
                 application,
                 &JOIN_USEROVERRIDDEN_ARGUMENT_NAME,
             )?,
+            context_arguments: directive_op,
         })
     }
 

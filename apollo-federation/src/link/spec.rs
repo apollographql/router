@@ -95,6 +95,13 @@ impl Identity {
             name: name!("cost"),
         }
     }
+
+    pub fn context_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("context"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.

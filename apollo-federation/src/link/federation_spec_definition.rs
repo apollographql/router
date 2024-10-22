@@ -23,6 +23,9 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
 
+use super::context_spec_definition::ContextSpecDefinition;
+use super::context_spec_definition::CONTEXT_VERSIONS;
+
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
 pub(crate) const FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("interfaceObject");
@@ -59,6 +62,14 @@ pub(crate) struct ProvidesDirectiveArguments<'doc> {
 pub(crate) struct OverrideDirectiveArguments<'doc> {
     pub(crate) from: &'doc str,
     pub(crate) label: Option<&'doc str>,
+}
+
+pub(crate) struct ContextDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
+}
+
+pub(crate) struct FromContextDirectiveArguments<'doc> {
+    pub(crate) field: &'doc str,
 }
 
 #[derive(Debug)]
@@ -461,6 +472,14 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn context_directive_arguments<'doc>(
+        application: &'doc Node<Directive>,
+    ) -> Result<ContextDirectiveArguments<'doc>, FederationError> {
+        Ok(ContextDirectiveArguments {
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
+        })
+    }
+
     pub(crate) fn from_context_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -496,6 +515,18 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn from_context_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
+        Ok(FromContextDirectiveArguments {
+            field: directive_required_string_argument(
+                application,
+                &FEDERATION_FIELD_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
     pub(crate) fn get_cost_spec_definition(
         &self,
         schema: &FederationSchema,
@@ -505,6 +536,17 @@ impl FederationSpecDefinition {
             .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()))
             .and_then(|link| COST_VERSIONS.find(&link.url.version))
             .or_else(|| COST_VERSIONS.find_for_federation_version(self.version()))
+    }
+
+    pub(crate) fn get_context_spec_definition(
+        &self,
+        schema: &FederationSchema,
+    ) -> Option<&'static ContextSpecDefinition> {
+        schema
+            .metadata()
+            .and_then(|metadata| metadata.for_identity(&&Identity::context_identity()))
+            .and_then(|link| CONTEXT_VERSIONS.find(&link.url.version))
+            .or_else(|| CONTEXT_VERSIONS.find_for_federation_version(self.version()))
     }
 }
 
