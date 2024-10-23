@@ -36,7 +36,6 @@ Ok(
                                                         None,
                                                     ),
                                                 ],
-                                                star: None,
                                                 range: Some(
                                                     19..25,
                                                 ),
@@ -118,7 +117,6 @@ Ok(
                                                                                                 None,
                                                                                             ),
                                                                                         ],
-                                                                                        star: None,
                                                                                         range: Some(
                                                                                             54..68,
                                                                                         ),
@@ -141,7 +139,6 @@ Ok(
                                                         },
                                                     ),
                                                 ],
-                                                star: None,
                                                 range: Some(
                                                     44..70,
                                                 ),
@@ -159,7 +156,6 @@ Ok(
                         },
                     ),
                 ],
-                star: None,
                 range: Some(
                     13..70,
                 ),

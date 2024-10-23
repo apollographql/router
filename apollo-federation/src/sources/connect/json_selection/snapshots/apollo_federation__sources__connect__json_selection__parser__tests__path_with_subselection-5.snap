@@ -111,7 +111,6 @@ Ok(
                                                                 None,
                                                             ),
                                                         ],
-                                                        star: None,
                                                         range: Some(
                                                             50..108,
                                                         ),
@@ -134,7 +133,6 @@ Ok(
                         },
                     ),
                 ],
-                star: None,
                 range: Some(
                     13..108,
                 ),

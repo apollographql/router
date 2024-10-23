@@ -353,7 +353,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..7,
                         ),
@@ -475,7 +474,6 @@ mod tests {
                                 None,
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..13,
                         ),

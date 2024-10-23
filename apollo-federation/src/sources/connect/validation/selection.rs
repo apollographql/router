@@ -11,7 +11,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use either::Either;
 use itertools::Itertools;
 
 use super::coordinates::ConnectDirectiveCoordinate;
@@ -25,7 +24,6 @@ use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
-use crate::sources::connect::json_selection::StarSelection;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
@@ -240,23 +238,17 @@ impl SelectionValidator<'_, '_> {
 
 #[derive(Clone, Copy, Debug)]
 struct Field<'schema> {
-    selection: Either<&'schema NamedSelection, &'schema StarSelection>,
+    selection: &'schema NamedSelection,
     definition: &'schema Node<FieldDefinition>,
 }
 
 impl<'schema> Field<'schema> {
     fn next_subselection(&self) -> Option<&'schema SubSelection> {
-        match self.selection {
-            Either::Left(selection) => selection.next_subselection(),
-            Either::Right(_) => None,
-        }
+        self.selection.next_subselection()
     }
 
     fn inner_range(&self) -> Option<Range<usize>> {
-        match self.selection {
-            Either::Left(selection) => selection.range(),
-            Either::Right(selection) => selection.range(),
-        }
+        self.selection.range()
     }
 }
 
@@ -325,7 +317,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
             for field_name in selection.names() {
                 if let Some(definition) = group.ty.fields.get(field_name) {
                     results.push(Ok(Field {
-                        selection: Either::Left(selection),
+                        selection,
                         definition,
                     }));
                 } else {
@@ -341,9 +333,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
                 }
             }
             results
-        }).chain(
-            self.validate_star_selection(group)
-        ).collect()
+        }).collect()
     }
 
     fn exit_group(&mut self) -> Result<(), Self::Error> {
@@ -431,110 +421,4 @@ impl<'schema, 'a> SelectionValidator<'schema, 'a> {
     fn last_field(&self) -> &PathPart {
         self.path.last().unwrap_or(&self.root)
     }
-
-    fn validate_star_selection(
-        &self,
-        group: &'a Group<'schema>,
-    ) -> impl Iterator<Item = Result<Field<'schema>, Message>> + '_ {
-        group.selection.star_iter().map(|star| {
-            let Some(alias) = star.alias() else {
-                return Err(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `*` without an alias. Use `fieldName: *` to map properties to a field.",
-                        coordinate = self.selection_arg.coordinate,
-                    ),
-                    locations: self.get_selection_location(star).collect(),
-                });
-            };
-
-            let field_name = alias.name();
-
-            let Some(definition) = group.ty.fields.get(field_name) else {
-                return Err(Message {
-                    code: Code::SelectedFieldNotFound,
-                    message: format!(
-                        "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                        coordinate = self.selection_arg.coordinate,
-                        parent_type = group.ty.name,
-                    ),
-                    locations: self.get_selection_location(alias).collect(),
-                });
-            };
-
-            let locations = self.get_selection_location(star).chain(definition.line_column_range(&self.schema.sources));
-
-            if definition.ty.is_list() {
-                return Err(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a list. It must be a non-list custom scalar.",
-                        coordinate = self.selection_arg.coordinate,
-                        field_name = field_name,
-                        parent_type = group.ty.name,
-                        ty = definition.ty
-                    ),
-                    locations: locations.collect(),
-                });
-            }
-
-            let Some(ty) = self.schema.types.get(definition.ty.inner_named_type()) else {
-                return Err(Message {
-                    code: Code::GraphQLError,
-                    message: format!(
-                        "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
-                        coordinate = self.selection_arg.coordinate,
-                        type_name = definition.ty.inner_named_type()
-                    ),
-                    locations: locations.collect(),
-                });
-            };
-
-            if !ty.is_scalar() {
-                return Err(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns {ty_kind} type. It must be a non-list custom scalar.",
-                        coordinate = self.selection_arg.coordinate,
-                        field_name = field_name,
-                        parent_type = group.ty.name,
-                        ty = definition.ty,
-                        ty_kind = type_sentence_part(ty)
-                    ),
-                    locations: locations.collect(),
-                });
-            }
-
-            if ty.is_built_in() {
-                return Err(Message {
-                    code: Code::InvalidStarSelection,
-                    message: format!(
-                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a built-in scalar type. It must be a non-list custom scalar.",
-                        coordinate = self.selection_arg.coordinate,
-                        field_name = field_name,
-                        parent_type = group.ty.name,
-                        ty = definition.ty
-                    ),
-                    locations: locations.collect(),
-                });
-            }
-
-            Ok(Field {
-                selection: Either::Right(star),
-                definition,
-            })
-        })
-    }
-}
-
-fn type_sentence_part(ty: &ExtendedType) -> String {
-    match ty {
-        ExtendedType::Object(_) => "an object",
-        ExtendedType::Interface(_) => "an interface",
-        ExtendedType::Union(_) => "a union",
-        ExtendedType::Enum(_) => "an enum",
-        ExtendedType::InputObject(_) => "an input object",
-        ExtendedType::Scalar(_) => "a scalar",
-    }
-    .to_string()
 }

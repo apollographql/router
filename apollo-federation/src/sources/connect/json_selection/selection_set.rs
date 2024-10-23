@@ -16,9 +16,6 @@
     )
 )]
 
-use std::collections::HashSet;
-
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
@@ -35,7 +32,6 @@ use super::parser::PathList;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
-use crate::sources::connect::Key;
 use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
 
@@ -61,8 +57,6 @@ impl SubSelection {
         selection_set: &SelectionSet,
     ) -> Self {
         let mut new_selections = Vec::new();
-        let mut dropped_fields = IndexSet::default();
-        let mut referenced_fields = HashSet::new();
         let field_map = map_fields_by_name(document, selection_set);
 
         // When the operation contains __typename, it might be used to complete
@@ -109,9 +103,6 @@ impl SubSelection {
                         .map(|a| a.name.as_str())
                         .unwrap_or(name.as_str());
                     if let Some(fields) = field_map.get_vec(key) {
-                        if self.star.is_some() {
-                            referenced_fields.insert(key);
-                        }
                         for field in fields {
                             let field_response_key = field.response_key().as_str();
                             new_selections.push(NamedSelection::Field(
@@ -126,8 +117,6 @@ impl SubSelection {
                                 }),
                             ));
                         }
-                    } else if self.star.is_some() {
-                        dropped_fields.insert(key);
                     }
                 }
                 NamedSelection::Path(alias, path_selection) => {
@@ -155,14 +144,6 @@ impl SubSelection {
                             path_selection.apply_selection_set(document, selection_set),
                         ));
                     }
-
-                    if self.star.is_some() {
-                        if let Some(name) = key_name(path_selection) {
-                            referenced_fields.insert(name);
-                        }
-                    } else if let Some(name) = key_name(path_selection) {
-                        dropped_fields.insert(name);
-                    }
                 }
                 NamedSelection::Group(alias, sub) => {
                     let key = alias.name.as_str();
@@ -177,24 +158,9 @@ impl SubSelection {
                 }
             }
         }
-        let new_star = self.star.as_ref().cloned();
-        if new_star.is_some() {
-            // Alias fields that were dropped from the original selection to prevent them from
-            // being picked up by the star.
-            dropped_fields.retain(|key| !referenced_fields.contains(key));
-            for dropped in dropped_fields {
-                let name = format!("__unused__{dropped}");
-                new_selections.push(NamedSelection::Field(
-                    Some(Alias::new(name.as_str())),
-                    WithRange::new(Key::field(dropped), None),
-                    None,
-                ));
-            }
-        }
 
         Self {
             selections: new_selections,
-            star: new_star,
             // Keep the old range even though it may be inaccurate after the
             // removal of selections, since it still indicates where the
             // original SubSelection came from.
@@ -260,14 +226,6 @@ impl PathList {
             }
             Self::Empty => Self::Empty,
         }
-    }
-}
-
-#[inline]
-fn key_name(path_selection: &PathSelection) -> Option<&str> {
-    match path_selection.path.as_ref() {
-        PathList::Key(key, _) => Some(key.as_str()),
-        _ => None,
     }
 }
 
@@ -405,10 +363,8 @@ mod tests {
               j
               k
             }
-            rest: *
           }
           path_to_f: c.f
-          rest: *
         }
         "###,
         )
@@ -462,12 +418,8 @@ mod tests {
     group: {
       j
     }
-    __unused__d: d
-    __unused__i: i
-    rest: *
   }
   path_to_f: c.f
-  rest: *
 }"###
         );
 
@@ -501,17 +453,8 @@ mod tests {
                         "group": {
                           "j": "j"
                         },
-                        "__unused__d": "d",
-                        "__unused__i": "i",
-                        "rest": {
-                            "f": "f",
-                            "g": "g",
-                            "j": "j",
-                            "k": "k",
-                        }
                     },
                     "path_to_f": "f",
-                    "rest": {}
                 })),
                 vec![]
             )

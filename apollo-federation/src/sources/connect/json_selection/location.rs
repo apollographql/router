@@ -207,18 +207,7 @@ pub(crate) mod strip_ranges {
         fn strip_ranges(&self) -> Self {
             SubSelection {
                 selections: self.selections.iter().map(|s| s.strip_ranges()).collect(),
-                star: self.star.as_ref().map(|s| s.strip_ranges()),
                 ..Default::default()
-            }
-        }
-    }
-
-    impl StripRanges for StarSelection {
-        fn strip_ranges(&self) -> Self {
-            StarSelection {
-                alias: self.alias.as_ref().map(|a| a.strip_ranges()),
-                selection: self.selection.as_ref().map(|s| Box::new(s.strip_ranges())),
-                range: None,
             }
         }
     }
@@ -326,7 +315,6 @@ mod tests {
             group: { a b c }
             arg: $args . arg
             field
-            rest: * { data }
         }
         "#,
         )

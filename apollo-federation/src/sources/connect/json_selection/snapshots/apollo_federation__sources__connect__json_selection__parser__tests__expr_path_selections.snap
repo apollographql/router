@@ -163,7 +163,6 @@ Named(
                 },
             ),
         ],
-        star: None,
         range: Some(
             1..71,
         ),

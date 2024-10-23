@@ -62,7 +62,6 @@ subgraphs:
               id
               name
               username
-              rest: *
               """
               entity: true
             )
@@ -79,7 +78,6 @@ subgraphs:
           id: ID!
           name: String
           username: String
-          rest: JSON
           c: String @external
           d: String
             @requires(fields: "c")
