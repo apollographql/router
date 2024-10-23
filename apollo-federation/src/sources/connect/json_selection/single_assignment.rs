@@ -88,12 +88,12 @@ pub(crate) struct FieldWithParent<'schema> {
 }
 
 impl FieldWithParent<'_> {
-    fn is_leaf(&self, schema: &Valid<Schema>) -> bool {
+    fn is_leaf_type(&self, schema: &Valid<Schema>) -> bool {
         let name = self.def.ty.inner_named_type();
         let Some(ty) = schema.types.get(name) else {
             return false;
         };
-        return ty.is_leaf();
+        ty.is_leaf()
     }
 }
 
@@ -476,7 +476,7 @@ impl SingleAssignmentInternal for SubSelection {
             self.pretty_print_with_indentation(true, 0)
         );
 
-        if field_path.leaf().is_leaf(schema) {
+        if field_path.leaf().is_leaf_type(schema) {
             let coord = format!("{:?}", field_path.leaf());
             errors.push(AssignmentError::AssignmentToLeafField(coord));
             return vec![];
@@ -547,7 +547,7 @@ impl SingleAssignmentInternal for WithRange<PathList> {
                         errors,
                     )
                 } else {
-                    let is_leaf = field_path.leaf().is_leaf(schema);
+                    let is_leaf = field_path.leaf().is_leaf_type(schema);
                     let ends_with_method = expression_path
                         .0
                         .last()
