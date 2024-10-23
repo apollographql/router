@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.56.0"
+version = "1.57.0"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.56.0"
+version = "1.57.0"
 dependencies = [
  "access-json",
  "ahash",
@@ -276,6 +276,7 @@ dependencies = [
  "graphql_client",
  "heck 0.5.0",
  "hex",
+ "hickory-resolver",
  "hmac",
  "http 0.2.12",
  "http-body 0.4.6",
@@ -383,7 +384,6 @@ dependencies = [
  "tracing-serde",
  "tracing-subscriber",
  "tracing-test",
- "trust-dns-resolver",
  "uname",
  "url",
  "urlencoding",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.56.0"
+version = "1.57.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.56.0"
+version = "1.57.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -3186,6 +3186,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "hickory-proto"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07698b8420e2f0d6447a436ba999ec85d8fbf2a398bbd737b82cac4a2e96e512"
+dependencies = [
+ "async-trait",
+ "cfg-if",
+ "data-encoding",
+ "enum-as-inner",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "idna 0.4.0",
+ "ipnet",
+ "once_cell",
+ "rand 0.8.5",
+ "thiserror",
+ "tinyvec",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "hickory-resolver"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28757f23aa75c98f254cf0405e6d8c25b831b32921b050a66692427679b1f243"
+dependencies = [
+ "cfg-if",
+ "futures-util",
+ "hickory-proto",
+ "ipconfig",
+ "lru-cache",
+ "once_cell",
+ "parking_lot",
+ "rand 0.8.5",
+ "resolv-conf",
+ "smallvec",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "hmac"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5510,9 +5555,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.6.3+v2.9.2"
+version = "0.6.4+v2.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f183e217b4010e7d37d581b7919ca5e0136a46b6d6b1ff297c52e702bce1089"
+checksum = "0bcc6f2aa0c619a4fb74ce271873a500f5640c257ca2e7aa8ea6be6226262855"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -7009,52 +7054,6 @@ checksum = "e6631e42e10b40c0690bf92f404ebcfe6e1fdb480391d15f17cc8e96eeed5369"
 dependencies = [
  "serde",
  "stable_deref_trait",
-]
-
-[[package]]
-name = "trust-dns-proto"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3119112651c157f4488931a01e586aa459736e9d6046d3bd9105ffb69352d374"
-dependencies = [
- "async-trait",
- "cfg-if",
- "data-encoding",
- "enum-as-inner",
- "futures-channel",
- "futures-io",
- "futures-util",
- "idna 0.4.0",
- "ipnet",
- "once_cell",
- "rand 0.8.5",
- "smallvec",
- "thiserror",
- "tinyvec",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "trust-dns-resolver"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a3e6c3aff1718b3c73e395d1f35202ba2ffa847c6a62eea0db8fb4cfe30be6"
-dependencies = [
- "cfg-if",
- "futures-util",
- "ipconfig",
- "lru-cache",
- "once_cell",
- "parking_lot",
- "rand 0.8.5",
- "resolv-conf",
- "smallvec",
- "thiserror",
- "tokio",
- "tracing",
- "trust-dns-proto",
 ]
 
 [[package]]
