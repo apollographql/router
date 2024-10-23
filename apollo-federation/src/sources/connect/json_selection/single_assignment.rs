@@ -528,8 +528,16 @@ impl SingleAssignmentInternal for WithRange<PathList> {
         errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         tracing::info!(
-            "{field_path:?} = {}",
-            self.pretty_print_with_indentation(true, 0)
+            "{field_path:?} = {} ({})",
+            self.pretty_print_with_indentation(true, 0),
+            match self.as_ref() {
+                PathList::Var(_, _) => "Var",
+                PathList::Key(_, _) => "Key",
+                PathList::Expr(_, _) => "Expr",
+                PathList::Method(_, _, _) => "Method",
+                PathList::Selection(_) => "Selection",
+                PathList::Empty => "Empty",
+            }
         );
 
         match self.as_ref() {
@@ -553,8 +561,9 @@ impl SingleAssignmentInternal for WithRange<PathList> {
                         .last()
                         .map(|e| matches!(e, Expression::Method(_, _)))
                         .unwrap_or(false);
-                    let coord = format!("{:?}", field_path.leaf());
+
                     if !is_leaf && ends_with_method {
+                        let coord = format!("{:?}", field_path.leaf());
                         errors.push(AssignmentError::AssignmentToCompositeField(coord));
                         vec![]
                     } else {
@@ -580,20 +589,20 @@ impl SingleAssignmentInternal for WithRange<PathList> {
                         errors,
                     )
                 } else {
-                    vec![Assignment {
-                        left: field_path,
-                        right: expression_path,
-                    }]
+                    if !field_path.leaf().is_leaf_type(schema) {
+                        let coord = format!("{:?}", field_path.leaf());
+                        errors.push(AssignmentError::AssignmentToCompositeField(coord));
+                        vec![]
+                    } else {
+                        vec![Assignment {
+                            left: field_path,
+                            right: expression_path,
+                        }]
+                    }
                 }
             }
 
             // Literal expressions must be at the start of a PathList
-            // If the tail is empty, we'll use the literal expression for assignment
-            //      If the expression is an array, we'll recurse into it to see if we can use it for assignment
-            //      If the expression is a scalar, we'll return an assignment here
-            //      If the expression is an object, we'll recurse into it and create assignments for its fields
-            // If the tail is not empty, the literal is input for keys, methods, or selections
-            //      Append it to the expression path and recurse
             PathList::Expr(expr, tail) => {
                 let (expressions, sub_selection) = tail.flatten_with_tail();
                 let expression_path =
@@ -1294,6 +1303,8 @@ mod tests {
         g: $->echo(@)               # composite
         h: $->entries { key value } # leaf
         i: $([{ g: 1 }])            # leaf
+        j: z.y.x                    # composite
+        k: z.y.x { x }              # leaf
         ",
         )
         .unwrap();
@@ -1312,6 +1323,8 @@ mod tests {
                 g: X
                 h: Int
                 i: Int
+                j: X
+                k: Int
             }
 
             type X {
@@ -1335,6 +1348,8 @@ mod tests {
                 "Assignment to composite field `T.g: X` must have have subselections".to_string(),
                 "Assignment to leaf field `T.h: Int` must not have subselections".to_string(),
                 "Assignment to leaf field `T.i: Int` must not have subselections".to_string(),
+                "Assignment to composite field `T.j: X` must have have subselections".to_string(),
+                "Assignment to leaf field `T.k: Int` must not have subselections".to_string(),
             ]
         );
     }
@@ -1351,6 +1366,8 @@ mod tests {
         g: $->echo(@)               # left
         h: $->entries { key value } # composite
         i: $([{ x: 1 }])            # composite
+        j: z.y.x                    # leaf
+        k: z.y.x { x }              # composite
         ",
         )
         .unwrap();
@@ -1369,6 +1386,8 @@ mod tests {
                 g: Int
                 h: KV
                 i: X
+                j: Int
+                k: X
             }
 
             type X {
