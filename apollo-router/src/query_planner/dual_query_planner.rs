@@ -2,6 +2,7 @@
 
 use std::borrow::Borrow;
 use std::collections::hash_map::HashMap;
+use std::fmt::Write;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -465,35 +466,138 @@ fn vec_matches_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) 
         && vec_includes_as_set(other, this, &item_matches)
 }
 
-fn vec_matches_result_as_set<T>(
+// Forward/reverse mappings from one Vec items (indices) to another.
+type VecMapping = (HashMap<usize, usize>, HashMap<usize, usize>);
+
+// performs a set comparison, ignoring order
+// and returns a mapping from `this` to `other`.
+fn vec_matches_as_set_with_mapping<T>(
     this: &[T],
     other: &[T],
     item_matches: impl Fn(&T, &T) -> bool,
-) -> Result<(), MatchFailure> {
+) -> VecMapping {
     // Set-inclusion test in both directions
-    check_match_eq!(this.len(), other.len());
-    for (index, this_node) in this.iter().enumerate() {
-        if !other
+    // - record forward/reverse mapping from this items <-> other items for reporting mismatches
+    let mut forward_map: HashMap<usize, usize> = HashMap::new();
+    let mut reverse_map: HashMap<usize, usize> = HashMap::new();
+    for (this_pos, this_node) in this.iter().enumerate() {
+        if let Some(other_pos) = other
             .iter()
-            .any(|other_node| item_matches(this_node, other_node))
+            .position(|other_node| item_matches(this_node, other_node))
         {
-            return Err(MatchFailure::new(format!(
-                "mismatched set: missing item[{}]",
-                index
-            )));
+            forward_map.insert(this_pos, other_pos);
+            reverse_map.insert(other_pos, this_pos);
         }
     }
-    for other_node in other.iter() {
-        if !this
+    for (other_pos, other_node) in other.iter().enumerate() {
+        if reverse_map.contains_key(&other_pos) {
+            continue;
+        }
+        if let Some(this_pos) = this
             .iter()
-            .any(|this_node| item_matches(this_node, other_node))
+            .position(|this_node| item_matches(this_node, other_node))
         {
+            forward_map.insert(this_pos, other_pos);
+            reverse_map.insert(other_pos, this_pos);
+        }
+    }
+    (forward_map, reverse_map)
+}
+
+// Returns a formatted mismatch message and an optional pair of mismatched positions if the pair
+// are the only remaining unmatched items.
+fn format_mismatch_as_set(
+    this_len: usize,
+    other_len: usize,
+    forward_map: &HashMap<usize, usize>,
+    reverse_map: &HashMap<usize, usize>,
+) -> Result<(String, Option<(usize, usize)>), std::fmt::Error> {
+    let mut ret = String::new();
+    let buf = &mut ret;
+    write!(buf, "- mapping from left to right: [")?;
+    let mut this_missing_pos = None;
+    for this_pos in 0..this_len {
+        if this_pos != 0 {
+            write!(buf, ", ")?;
+        }
+        if let Some(other_pos) = forward_map.get(&this_pos) {
+            write!(buf, "{}", other_pos)?;
+        } else {
+            this_missing_pos = Some(this_pos);
+            write!(buf, "?")?;
+        }
+    }
+    writeln!(buf, "]")?;
+
+    write!(buf, "- left-over on the right: [")?;
+    let mut other_missing_count = 0;
+    let mut other_missing_pos = None;
+    for other_pos in 0..other_len {
+        if reverse_map.get(&other_pos).is_none() {
+            if other_missing_count != 0 {
+                write!(buf, ", ")?;
+            }
+            other_missing_count += 1;
+            other_missing_pos = Some(other_pos);
+            write!(buf, "{}", other_pos)?;
+        }
+    }
+    write!(buf, "]")?;
+    let unmatched_pair = if let (Some(this_missing_pos), Some(other_missing_pos)) =
+        (this_missing_pos, other_missing_pos)
+    {
+        if this_len == 1 + forward_map.len() && other_len == 1 + reverse_map.len() {
+            // Special case: There are only one missing item on each side. They are supposed to
+            // match each other.
+            Some((this_missing_pos, other_missing_pos))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Ok((ret, unmatched_pair))
+}
+
+fn vec_matches_result_as_set<T>(
+    this: &[T],
+    other: &[T],
+    item_matches: impl Fn(&T, &T) -> Result<(), MatchFailure>,
+) -> Result<VecMapping, MatchFailure> {
+    // Set-inclusion test in both directions
+    // - record forward/reverse mapping from this items <-> other items for reporting mismatches
+    let (forward_map, reverse_map) =
+        vec_matches_as_set_with_mapping(this, other, |a, b| item_matches(a, b).is_ok());
+    if forward_map.len() == this.len() && reverse_map.len() == other.len() {
+        Ok((forward_map, reverse_map))
+    } else {
+        // report mismatch
+        let Ok((message, unmatched_pair)) =
+            format_mismatch_as_set(this.len(), other.len(), &forward_map, &reverse_map)
+        else {
+            // Exception: Unable to format mismatch report => fallback to most generic message
             return Err(MatchFailure::new(
-                "mismatched set: extra item found".to_string(),
+                "mismatch at vec_matches_result_as_set (failed to format mismatched sets)"
+                    .to_string(),
             ));
+        };
+        if let Some(unmatched_pair) = unmatched_pair {
+            // found a unique pair to report => use that pair's error message
+            let Err(err) = item_matches(&this[unmatched_pair.0], &other[unmatched_pair.1]) else {
+                // Exception: Unable to format unique pair mismatch error => fallback to overall report
+                return Err(MatchFailure::new(format!(
+                    "mismatched sets (failed to format unique pair mismatch error):\n{}",
+                    message
+                )));
+            };
+            Err(err.add_description(&format!(
+                "under a sole unmatched pair ({} -> {}) in a set comparison",
+                unmatched_pair.0, unmatched_pair.1
+            )))
+        } else {
+            Err(MatchFailure::new(format!("mismatched sets:\n{}", message)))
         }
     }
-    Ok(())
 }
 
 //==================================================================================================
@@ -510,7 +614,7 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
                 .map_err(|err| err.add_description("under Sequence node"))?;
         }
         (PlanNode::Parallel { nodes: this }, PlanNode::Parallel { nodes: other }) => {
-            vec_matches_result_as_set(this, other, |a, b| plan_node_matches(a, b).is_ok())
+            vec_matches_result_as_set(this, other, plan_node_matches)
                 .map_err(|err| err.add_description("under Parallel node"))?;
         }
         (PlanNode::Fetch(this), PlanNode::Fetch(other)) => {
