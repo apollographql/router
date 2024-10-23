@@ -4,7 +4,7 @@ version: 2.1
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
   gh: circleci/github-cli@2.3.0
-  slack: circleci/slack@4.12.6
+  slack: circleci/slack@4.15.0
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
