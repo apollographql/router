@@ -10,7 +10,7 @@ telemetry:
 experimental_query_planner_mode: legacy
 
 rhai:
-  scripts: "tests/samples/enterprise/progressive-override/rhai"
+  scripts: "tests/samples/enterprise/progressive-override/basic/rhai"
   main: "main.rhai"
 
 plugins:
