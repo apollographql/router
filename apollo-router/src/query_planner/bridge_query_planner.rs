@@ -7,6 +7,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Instant;
 
+use ageing::Priority;
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -260,7 +261,7 @@ impl PlannerMode {
             PlannerMode::Rust(rust_planner) => {
                 let doc = doc.clone();
                 let rust_planner = rust_planner.clone();
-                let (plan, mut root_node) = compute_task::execute(move || {
+                let (plan, mut root_node) = compute_task::enqueue(Priority::One, move || {
                     let start = Instant::now();
 
                     let query_plan_options = QueryPlanOptions {
@@ -288,6 +289,7 @@ impl PlannerMode {
                         (plan, root_node)
                     })
                 })
+                .expect("NEED SOME CODE TO CONVERT ERROR")
                 .await
                 .expect("query planner panicked")?;
                 if let Some(node) = &mut root_node {

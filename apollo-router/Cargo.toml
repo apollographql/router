@@ -60,6 +60,7 @@ features = ["docs_rs"]
 
 [dependencies]
 access-json = "0.1.0"
+ageing = { git = "https://github.com/apollographql/ageing", branch = "main" }
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=1.56.0" }
