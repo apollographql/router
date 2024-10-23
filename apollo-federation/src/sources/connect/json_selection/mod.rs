@@ -8,6 +8,7 @@ mod methods;
 mod parser;
 mod pretty;
 mod selection_set;
+mod single_assignment;
 
 pub use apply_to::*;
 // Pretty code is currently only used in tests, so this cfg is to suppress the
@@ -16,5 +17,5 @@ pub use apply_to::*;
 pub(crate) use known_var::*;
 pub(crate) use location::Ranged;
 pub use parser::*;
-#[cfg(test)]
+// #[cfg(test)]
 pub(crate) use pretty::*;
