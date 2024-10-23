@@ -49,6 +49,10 @@ sha1.workspace = true
 tempfile.workspace = true
 pretty_assertions = "1.4.0"
 rstest = "0.22.0"
+tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter"] }
+test-log = { version = "0.2.16", default-features = false, features = [
+    "trace",
+] }
 
 [[test]]
 name = "main"
