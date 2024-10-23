@@ -1,5 +1,4 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -33,6 +32,7 @@ use serde_json::json;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::load_shed::error::Overloaded;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -429,7 +429,7 @@ pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
         .unwrap_or_default()
 }
 
-async fn decompression_error(_error: BoxError) -> axum::response::Response {
+async fn decompression_error(_error: BoxError) -> impl IntoResponse {
     (StatusCode::BAD_REQUEST, "cannot decompress request body").into_response()
 }
 
@@ -657,10 +657,10 @@ async fn handle_graphql(
     let processing_seconds = dur.as_secs_f64();
 
     f64_histogram!(
-        "apollo.router.processing.time",
-        "Time spent by the router actually working on the request, not waiting for its network calls or other queries being processed",
-        processing_seconds
-    );
+            "apollo.router.processing.time",
+            "Time spent by the router actually working on the request, not waiting for its network calls or other queries being processed",
+            processing_seconds
+        );
 
     match res {
         Err(err) => internal_server_error(err),
@@ -689,23 +689,32 @@ async fn handle_graphql(
 
 fn internal_server_error<T>(err: T) -> Response
 where
-    T: Display,
+    T: Into<BoxError>,
 {
+    let err: BoxError = err.into();
+
+    let code = if err.is::<Overloaded>() {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+
     tracing::error!(
-        code = "INTERNAL_SERVER_ERROR",
+        code = code.to_string(),
         %err,
     );
 
     // This intentionally doesn't include an error message as this could represent leakage of internal information.
     // The error message is logged above.
     let error = graphql::Error::builder()
-        .message("internal server error")
+        .message(code.to_string())
+        // Note: Decide exactly what this extension_code should be for SERVICE_UNAVAILABLE
         .extension_code("INTERNAL_SERVER_ERROR")
         .build();
 
     let response = graphql::Response::builder().error(error).build();
 
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!(response))).into_response()
+    (code, Json(json!(response))).into_response()
 }
 
 struct CancelHandler<'a> {
