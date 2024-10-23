@@ -8,6 +8,8 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
+use super::ConditionalElse;
+use super::ConditionalTest;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -292,7 +294,57 @@ impl PrettyPrintable for NamedSelection {
                 let sub = sub.pretty_print_with_indentation(true, indentation);
                 result.push_str(sub.as_str());
             }
+            Self::Spread(test) => {
+                let test = test.pretty_print_with_indentation(inline, indentation);
+                result.push_str("... ");
+                result.push_str(test.as_str());
+            }
         };
+
+        result
+    }
+}
+
+impl PrettyPrintable for ConditionalTest {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        let mut result = String::new();
+
+        if !inline {
+            result.push_str(indent_chars(indentation).as_str());
+        }
+
+        result.push_str("if (");
+        let test = self.test.pretty_print_with_indentation(inline, indentation);
+        result.push_str(test.as_str());
+        result.push_str(") ");
+
+        let when_true = self
+            .when_true
+            .pretty_print_with_indentation(inline, indentation);
+        result.push_str(when_true.as_str());
+
+        if let Some(when_else) = &self.when_else {
+            result.push_str(" else ");
+            let when_else = when_else.pretty_print_with_indentation(inline, indentation);
+            result.push_str(when_else.as_str());
+        }
+
+        result
+    }
+}
+
+impl PrettyPrintable for ConditionalElse {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        let mut result = String::new();
+
+        result.push_str("else ");
+        result.push_str(
+            match self {
+                Self::Else(sub) => sub.pretty_print_with_indentation(inline, indentation),
+                Self::ElseIf(test) => test.pretty_print_with_indentation(inline, indentation),
+            }
+            .as_str(),
+        );
 
         result
     }

@@ -1,0 +1,161 @@
+---
+source: apollo-federation/src/sources/connect/json_selection/parser.rs
+expression: "selection!(r#\"\n            id\n            ... if (kind->eq(\"book\")) {\n                isbn\n                title\n                author { name }\n            }\n            \"#)"
+---
+Named(
+    SubSelection {
+        selections: [
+            Field(
+                None,
+                WithRange {
+                    node: Field(
+                        "id",
+                    ),
+                    range: Some(
+                        13..15,
+                    ),
+                },
+                None,
+            ),
+            Spread(
+                WithRange {
+                    node: ConditionalTest {
+                        test: WithRange {
+                            node: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "kind",
+                                                ),
+                                                range: Some(
+                                                    36..40,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "eq",
+                                                        range: Some(
+                                                            42..44,
+                                                        ),
+                                                    },
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "book",
+                                                                    ),
+                                                                    range: Some(
+                                                                        45..51,
+                                                                    ),
+                                                                },
+                                                            ],
+                                                            range: Some(
+                                                                44..52,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            52..52,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    40..52,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            36..52,
+                                        ),
+                                    },
+                                },
+                            ),
+                            range: Some(
+                                36..52,
+                            ),
+                        },
+                        when_true: SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "isbn",
+                                        ),
+                                        range: Some(
+                                            72..76,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "title",
+                                        ),
+                                        range: Some(
+                                            93..98,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "author",
+                                        ),
+                                        range: Some(
+                                            115..121,
+                                        ),
+                                    },
+                                    Some(
+                                        SubSelection {
+                                            selections: [
+                                                Field(
+                                                    None,
+                                                    WithRange {
+                                                        node: Field(
+                                                            "name",
+                                                        ),
+                                                        range: Some(
+                                                            124..128,
+                                                        ),
+                                                    },
+                                                    None,
+                                                ),
+                                            ],
+                                            range: Some(
+                                                122..130,
+                                            ),
+                                        },
+                                    ),
+                                ),
+                            ],
+                            range: Some(
+                                54..144,
+                            ),
+                        },
+                        when_else: None,
+                        range: Some(
+                            32..144,
+                        ),
+                    },
+                    range: Some(
+                        28..144,
+                    ),
+                },
+            ),
+        ],
+        range: Some(
+            13..144,
+        ),
+    },
+)

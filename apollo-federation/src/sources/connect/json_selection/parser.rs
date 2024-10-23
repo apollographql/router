@@ -10,6 +10,7 @@ use nom::combinator::opt;
 use nom::combinator::recognize;
 use nom::error::ParseError;
 use nom::multi::many0;
+use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::terminated;
@@ -242,13 +243,14 @@ impl ExternalVarPaths for JSONSelection {
 // NamedGroupSelection  ::= Alias SubSelection
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum NamedSelection {
+pub(crate) enum NamedSelection {
     Field(Option<Alias>, WithRange<Key>, Option<SubSelection>),
     // Represents either NamedPathSelection or PathWithSubSelection, with the
     // invariant alias.is_some() || path.has_subselection() enforced by
     // NamedSelection::parse_path.
     Path(Option<Alias>, PathSelection),
     Group(Alias, SubSelection),
+    Spread(WithRange<ConditionalTest>),
 }
 
 // Like PathSelection, NamedSelection is an AST structure that takes its range
@@ -276,6 +278,7 @@ impl Ranged<NamedSelection> for NamedSelection {
                 merge_ranges(alias_range, path.range())
             }
             Self::Group(alias, sub) => merge_ranges(alias.range(), sub.range()),
+            Self::Spread(spread) => spread.range(),
         }
     }
 }
@@ -294,6 +297,7 @@ impl NamedSelection {
             Self::parse_path,
             Self::parse_field,
             Self::parse_group,
+            Self::parse_spread,
         ))(input)
     }
 
@@ -329,6 +333,10 @@ impl NamedSelection {
             .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
 
+    fn parse_spread(input: Span) -> ParseResult<Self> {
+        ConditionalSelection::parse(input).map(|(input, spread)| (input, Self::Spread(spread)))
+    }
+
     pub(crate) fn names(&self) -> Vec<&str> {
         match self {
             Self::Field(alias, name, _) => {
@@ -338,6 +346,7 @@ impl NamedSelection {
                     vec![name.as_str()]
                 }
             }
+
             Self::Path(alias, path) => {
                 if let Some(alias) = alias {
                     vec![alias.name.as_str()]
@@ -353,7 +362,17 @@ impl NamedSelection {
                     vec![]
                 }
             }
+
             Self::Group(alias, _) => vec![alias.name.as_str()],
+
+            // The names returned here represent the union of output keys
+            // selected across all branches of the conditional spread, so asking
+            // for the .names() of this NamedSelection::Spread
+            //
+            //   ... if (condition) { a b } else { b c }
+            //
+            // returns vec!["a", "b", "c"].
+            Self::Spread(spread) => spread.names(),
         }
     }
 
@@ -393,6 +412,128 @@ impl ExternalVarPaths for NamedSelection {
             Self::Path(_, path) => path.external_var_paths(),
             _ => vec![],
         }
+    }
+}
+
+// ConditionalSelection ::= "..." ConditionalTest
+
+pub(super) type ConditionalSelection = WithRange<ConditionalTest>;
+
+impl ConditionalSelection {
+    pub(super) fn parse(input: Span) -> ParseResult<Self> {
+        tuple((ranged_span("..."), ConditionalTest::parse))(input).map(
+            |(input, (ellipsis, test))| {
+                let range = merge_ranges(ellipsis.range(), test.range());
+                (input, WithRange::new(test, range))
+            },
+        )
+    }
+}
+
+// ConditionalElse ::= "else" (ConditionalTest | SubSelection)
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(super) enum ConditionalElse {
+    Else(SubSelection),
+    ElseIf(ConditionalTest),
+}
+
+// ConditionalTest ::= "if" "(" Path ")" SubSelection ConditionalElse?
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct ConditionalTest {
+    pub(super) test: WithRange<LitExpr>,
+    pub(super) when_true: SubSelection,
+    // The WithRange wrapper here allows the else keyword to be included in the
+    // range tracking for when_else.
+    pub(super) when_else: Option<WithRange<ConditionalElse>>,
+    pub(super) range: OffsetRange,
+}
+
+impl Ranged<ConditionalTest> for ConditionalTest {
+    fn range(&self) -> OffsetRange {
+        self.range.clone()
+    }
+}
+
+impl ConditionalTest {
+    pub(super) fn parse(input: Span) -> ParseResult<Self> {
+        tuple((
+            spaces_or_comments,
+            ranged_span("if"),
+            spaces_or_comments,
+            ranged_span("("),
+            LitExpr::parse,
+            spaces_or_comments,
+            ranged_span(")"),
+            SubSelection::parse,
+            opt(tuple((
+                delimited(spaces_or_comments, ranged_span("else"), spaces_or_comments),
+                alt((
+                    map(Self::parse, ConditionalElse::ElseIf),
+                    map(SubSelection::parse, ConditionalElse::Else),
+                )),
+            ))),
+        ))(input)
+        .map(
+            |(input, (_, if_span, _, _, test, _, _, when_true, when_else))| {
+                if let Some((else_span, cond_else)) = when_else {
+                    let else_range = merge_ranges(
+                        else_span.range(),
+                        match &cond_else {
+                            ConditionalElse::Else(sub) => sub.range(),
+                            ConditionalElse::ElseIf(else_if) => else_if.range(),
+                        },
+                    );
+                    (
+                        input,
+                        Self {
+                            test,
+                            when_true,
+                            when_else: Some(WithRange::new(cond_else, else_range.clone())),
+                            range: merge_ranges(if_span.range(), else_range.clone()),
+                        },
+                    )
+                } else {
+                    let full_range = merge_ranges(if_span.range(), when_true.range());
+                    (
+                        input,
+                        Self {
+                            test,
+                            when_true,
+                            when_else: None,
+                            range: full_range,
+                        },
+                    )
+                }
+            },
+        )
+    }
+
+    // Returns all output names used across all possible branches of the
+    // ConditionalTest structure (including else and else-if branches).
+    pub(crate) fn names(&self) -> Vec<&str> {
+        let mut name_set = IndexSet::default();
+        name_set.extend(self.when_true.names());
+        if let Some(when_else) = self.when_else.as_ref() {
+            match when_else.as_ref() {
+                ConditionalElse::Else(sub) => name_set.extend(sub.names()),
+                ConditionalElse::ElseIf(test) => name_set.extend(test.names()),
+            }
+        }
+        name_set.into_iter().collect()
+    }
+
+    pub(crate) fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
+        let mut selections = vec![];
+        selections.extend(self.when_true.selections_iter());
+        if let Some(when_else) = self.when_else.as_ref() {
+            match when_else.as_ref() {
+                ConditionalElse::Else(sub) => selections.extend(sub.selections_iter()),
+                ConditionalElse::ElseIf(test) => selections.extend(test.selections_iter()),
+            }
+        }
+        selections.into_iter()
     }
 }
 
@@ -677,6 +818,16 @@ impl PathList {
             ));
         }
 
+        // Given a selection like `id ... if (test) { name }`, we need to
+        // recognize the ... as a whole token rather than as a ranged_span(".")
+        // following the id token, suggesting the beginning of an id.* path.
+        if ranged_span("...")(input).is_ok() {
+            return Err(nom_error_message(
+                input,
+                "Conditional spread ... should not appear mid-path",
+            ));
+        }
+
         // In previous versions of this code, a .key could appear at depth 0 (at
         // the beginning of a path), which was useful to disambiguate a KeyPath
         // consisting of a single key from a field selection.
@@ -892,7 +1043,7 @@ impl SubSelection {
     // name to the output object. This is more complicated than returning
     // self.selections.iter() because some NamedSelection::Path elements can
     // contribute multiple names if they do no have an Alias.
-    pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
+    pub(crate) fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
         // TODO Implement a NamedSelectionIterator to traverse nested selections
         // lazily, rather than using an intermediary vector.
         let mut selections = vec![];
@@ -917,6 +1068,9 @@ impl SubSelection {
                         debug_assert!(false, "PathSelection without Alias or SubSelection");
                     }
                 }
+                NamedSelection::Spread(spread) => {
+                    selections.extend(spread.selections_iter());
+                }
                 _ => {
                     selections.push(selection);
                 }
@@ -925,12 +1079,12 @@ impl SubSelection {
         selections.into_iter()
     }
 
-    pub fn append_selection(&mut self, selection: NamedSelection) {
-        self.selections.push(selection);
-    }
-
-    pub fn last_selection_mut(&mut self) -> Option<&mut NamedSelection> {
-        self.selections.last_mut()
+    pub(crate) fn names(&self) -> Vec<&str> {
+        let mut name_set = IndexSet::default();
+        for selection in &self.selections {
+            name_set.extend(selection.names());
+        }
+        name_set.into_iter().collect()
     }
 }
 
@@ -947,7 +1101,7 @@ impl ExternalVarPaths for SubSelection {
 // Alias ::= Key ":"
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Alias {
+pub(crate) struct Alias {
     pub(super) name: WithRange<Key>,
     pub(super) range: OffsetRange,
 }
@@ -959,14 +1113,15 @@ impl Ranged<Alias> for Alias {
 }
 
 impl Alias {
-    pub fn new(name: &str) -> Self {
+    pub(crate) fn new(name: &str) -> Self {
         Self {
             name: WithRange::new(Key::field(name), None),
             range: None,
         }
     }
 
-    pub fn quoted(name: &str) -> Self {
+    #[allow(unused)]
+    pub(crate) fn quoted(name: &str) -> Self {
         Self {
             name: WithRange::new(Key::quoted(name), None),
             range: None,
@@ -982,7 +1137,7 @@ impl Alias {
         )
     }
 
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         self.name.as_str()
     }
 }
@@ -2979,5 +3134,61 @@ mod tests {
                 range: Some(0..42),
             }),
         );
+    }
+
+    #[test]
+    fn test_conditional_selections() {
+        assert_debug_snapshot!(selection!(
+            r#"
+            ... if (kind->eq("book")) {
+                isbn
+                title
+                author { name }
+            }
+            "#
+        ));
+
+        assert_debug_snapshot!(selection!(
+            r#"
+            id
+            ... if (kind->eq("book")) {
+                isbn
+                title
+                author { name }
+            }
+            "#
+        ));
+
+        assert_debug_snapshot!(selection!(
+            r#"
+            ... if (kind->eq("book")) {
+                isbn
+                title
+                author { name }
+            } else if (kind->eq("movie")) {
+                title
+                director { name }
+            } else {
+                title
+            }
+            "#
+        ));
+
+        assert_debug_snapshot!(selection!(
+            r#"
+            id
+            ... if (kind->eq("book")) {
+                isbn
+                title
+                author { name }
+            } else if (kind->eq("movie")) {
+                title
+                director { name }
+            } else {
+                title
+            }
+            year
+            "#
+        ));
     }
 }

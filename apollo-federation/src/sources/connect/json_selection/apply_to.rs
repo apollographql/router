@@ -256,6 +256,7 @@ impl ApplyToInternal for NamedSelection {
                     ));
                 }
             }
+
             Self::Path(alias_opt, path_selection) => {
                 let (value_opt, apply_errors) =
                     path_selection.apply_to_path(data, vars, input_path);
@@ -308,6 +309,7 @@ impl ApplyToInternal for NamedSelection {
                     ));
                 }
             }
+
             Self::Group(alias, sub_selection) => {
                 let (value_opt, apply_errors) = sub_selection.apply_to_path(data, vars, input_path);
                 errors.extend(apply_errors);
@@ -315,9 +317,56 @@ impl ApplyToInternal for NamedSelection {
                     output.insert(alias.name(), value);
                 }
             }
+
+            Self::Spread(spread) => {
+                let (spread_opt, spread_errors) = spread.apply_to_path(data, vars, input_path);
+                errors.extend(spread_errors);
+                if let Some(JSON::Object(spread)) = spread_opt {
+                    // TODO Better merge strategy for conflicting fields
+                    output.extend(spread);
+                }
+            }
         };
 
         (Some(JSON::Object(output)), errors)
+    }
+}
+
+impl ApplyToInternal for ConditionalTest {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        vars: &VarsWithPathsMap,
+        input_path: &InputPath<JSON>,
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        let (test_value, test_errors) = self.test.apply_to_path(data, vars, input_path);
+        if let Some(JSON::Bool(true)) = test_value {
+            self.when_true
+                .apply_to_path(data, vars, input_path)
+                .prepend_errors(test_errors)
+        } else if let Some(when_else) = &self.when_else {
+            when_else
+                .apply_to_path(data, vars, input_path)
+                .prepend_errors(test_errors)
+        } else {
+            (None, test_errors)
+        }
+    }
+}
+
+impl ApplyToInternal for ConditionalElse {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        vars: &VarsWithPathsMap,
+        input_path: &InputPath<JSON>,
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        match self {
+            Self::Else(selection) => selection.apply_to_path(data, vars, input_path),
+            Self::ElseIf(conditional_test) => {
+                conditional_test.apply_to_path(data, vars, input_path)
+            }
+        }
     }
 }
 
@@ -2053,6 +2102,121 @@ mod tests {
         assert_eq!(
             selection!("$.another.'pesky string literal!'.\"identifier\"").apply_to(&data),
             (Some(json!(123)), vec![],),
+        );
+    }
+
+    #[test]
+    fn test_conditional_fragments() {
+        let book = json!({
+            "kind": "book",
+            "title": "The Great Gatsby",
+            "author": "F. Scott Fitzgerald",
+        });
+
+        let movie = json!({
+            "kind": "movie",
+            "title": "The Great Gatsby",
+            "director": "Baz Luhrmann",
+        });
+
+        let product = json!({
+            "kind": "product",
+            "title": "Jay Gatsby Action Figure",
+            "price": 19.99,
+        });
+
+        let selection = selection!(
+            r#"
+            title
+            ... if (kind->eq("book")) {
+                author
+            } else if (kind->eq("movie")) {
+                director
+            } else {
+                kind
+            }
+            "#
+        );
+
+        assert_eq!(
+            selection.apply_to(&book),
+            (
+                Some(json!({
+                    "title": "The Great Gatsby",
+                    "author": "F. Scott Fitzgerald"
+                })),
+                vec![]
+            )
+        );
+        assert_eq!(
+            selection.apply_to(&movie),
+            (
+                Some(json!({
+                    "title": "The Great Gatsby",
+                    "director": "Baz Luhrmann"
+                })),
+                vec![]
+            )
+        );
+        assert_eq!(
+            selection.apply_to(&product),
+            (
+                Some(json!({
+                    "title": "Jay Gatsby Action Figure",
+                    "kind": "product"
+                })),
+                vec![]
+            )
+        );
+
+        let selection_with_typenames = selection!(
+            r#"
+            title
+            ... if (kind->eq("book")) {
+                __typename: $("Book")
+                author
+            } else if (kind->eq("movie")) {
+                __typename: $("Movie")
+                director
+            } else {
+                __typename: $("Product")
+                kind
+            }
+            "#
+        );
+
+        assert_eq!(
+            selection_with_typenames.apply_to(&book),
+            (
+                Some(json!({
+                    "title": "The Great Gatsby",
+                    "__typename": "Book",
+                    "author": "F. Scott Fitzgerald"
+                })),
+                vec![]
+            )
+        );
+        assert_eq!(
+            selection_with_typenames.apply_to(&movie),
+            (
+                Some(json!({
+                    "title": "The Great Gatsby",
+                    "__typename": "Movie",
+                    "director": "Baz Luhrmann"
+                })),
+                vec![]
+            )
+        );
+        assert_eq!(
+            selection_with_typenames.apply_to(&product),
+            (
+                Some(json!({
+                    "title": "Jay Gatsby Action Figure",
+                    "__typename": "Product",
+                    "kind": "product"
+                })),
+                vec![]
+            )
         );
     }
 }

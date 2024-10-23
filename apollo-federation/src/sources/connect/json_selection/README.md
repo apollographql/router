@@ -83,11 +83,18 @@ below.
 ```ebnf
 JSONSelection        ::= PathSelection | NamedSelection*
 SubSelection         ::= "{" NamedSelection* "}"
-NamedSelection       ::= NamedPathSelection | PathWithSubSelection | NamedFieldSelection | NamedGroupSelection
+NamedSelection       ::= NamedPathSelection
+                       | PathWithSubSelection
+                       | NamedFieldSelection
+                       | NamedGroupSelection
+                       | ConditionalSelection
 NamedPathSelection   ::= Alias PathSelection
 NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Key ":"
+ConditionalSelection ::= "..." ConditionalTest
+ConditionalTest      ::= "if" "(" Path ")" SubSelection ConditionalElse?
+ConditionalElse      ::= "else" (ConditionalTest | SubSelection)
 Path                 ::= VarPath | KeyPath | AtPath | ExprPath
 PathSelection        ::= Path SubSelection?
 PathWithSubSelection ::= Path SubSelection
@@ -350,6 +357,37 @@ from the input JSON to match the desired output shape.
 
 In addition to renaming, `Alias` can provide names to otherwise anonymous
 structures, such as those selected by `PathSelection` or `NamedGroupSelection`.
+
+### `ConditionalSelection ::=`
+
+![ConditionalSelection](./grammar/ConditionalSelection.svg)
+
+The `...` token signifies the beginning of a `ConditionalSelection` element,
+which is a kind of named selection that may appear multiple times within any
+`SubSelection`.
+
+The `...` is always followed by a `ConditionalTest`, since unconditional spreads
+are rarely useful in this language, and can almost always be rewritten by
+unwrapping the fields and removing the `...`.
+
+### `ConditionalTest ::=`
+
+![ConditionalTest](./grammar/ConditionalTest.svg)
+
+`ConditionalTest` uses the `if` keyword followed by a parenthesized `Path` that
+should evaluate to a boolean value. The `Path` is used to determine whether the
+`SubSelection` or `ConditionalElse` should be selected.
+
+### `ConditionalElse ::=`
+
+![ConditionalElse](./grammar/ConditionalElse.svg)
+
+`ConditionalElse` is an optional trailing clause of `ConditionalTest`, which
+allows for typical `if`/`else`-style boolean control flow.
+
+Note that `ConditionalElse` may expand to an `else` keyword followed by a
+`ConditionalTest`, so the `ConditionalTest` and `ConditionalElse` rules are
+mutually recursive.
 
 ### `Path ::=`
 

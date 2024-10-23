@@ -183,6 +183,30 @@ pub(crate) mod strip_ranges {
                     Self::Path(stripped_alias, path.strip_ranges())
                 }
                 Self::Group(alias, sub) => Self::Group(alias.strip_ranges(), sub.strip_ranges()),
+                Self::Spread(spread) => Self::Spread(WithRange::new(spread.strip_ranges(), None)),
+            }
+        }
+    }
+
+    impl StripRanges for ConditionalTest {
+        fn strip_ranges(&self) -> Self {
+            Self {
+                test: self.test.strip_ranges(),
+                when_true: self.when_true.strip_ranges(),
+                when_else: self
+                    .when_else
+                    .as_ref()
+                    .map(|w| WithRange::new(w.strip_ranges(), None)),
+                range: None,
+            }
+        }
+    }
+
+    impl StripRanges for ConditionalElse {
+        fn strip_ranges(&self) -> Self {
+            match self {
+                Self::Else(sub) => Self::Else(sub.strip_ranges()),
+                Self::ElseIf(test) => Self::ElseIf(test.strip_ranges()),
             }
         }
     }
