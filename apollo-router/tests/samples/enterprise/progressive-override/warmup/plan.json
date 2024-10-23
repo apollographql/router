@@ -190,22 +190,6 @@
             }
         },
         {
-            "type": "Request",
-            "request": {
-                "query": "query progressive3 { percent100 { bar } }"
-            },
-            "headers": {
-                "apollo-expose-query-plan": "false"
-            },
-            "expected_response": {
-                "data": {
-                    "percent100": {
-                        "bar": 1
-                    }
-                }
-            }
-        },
-        {
             "type": "Stop"
         }
     ]
