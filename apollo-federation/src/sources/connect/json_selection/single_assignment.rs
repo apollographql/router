@@ -28,6 +28,26 @@ pub(crate) struct Assignment<'schema, 'selection> {
     right: ExpressionPath<'selection>,
 }
 
+// --- Errors ----------------------------------------------------------------------------------------------------------
+
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub(crate) enum AssignmentError {
+    #[error("Type `{0}` does not exist")]
+    TypeMissing(String),
+
+    #[error("Field `{0}` does not exist on type `{1}`")]
+    FieldDoesNotExist(String, String),
+
+    #[error("Type `{0}` is not an object or interface")]
+    TypeIsNotComposite(String),
+
+    #[error("Assignment to leaf field `{0}` must not have subselections")]
+    AssignmentToLeafField(String),
+
+    #[error("Assignment to composite field `{0}` must have have subselections")]
+    AssignmentToCompositeField(String),
+}
+
 // --- Left ------------------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -51,12 +71,12 @@ impl<'schema> ExtendedCompositeType<'schema> {
 }
 
 impl<'schema> TryFrom<&'schema ExtendedType> for ExtendedCompositeType<'schema> {
-    type Error = ();
+    type Error = AssignmentError;
 
     fn try_from(ty: &'schema ExtendedType) -> Result<Self, Self::Error> {
         match ty {
             ExtendedType::Object(_) | ExtendedType::Interface(_) => Ok(Self(ty)),
-            _ => Err(()),
+            _ => Err(AssignmentError::TypeIsNotComposite(ty.name().to_string())),
         }
     }
 }
@@ -65,6 +85,16 @@ impl<'schema> TryFrom<&'schema ExtendedType> for ExtendedCompositeType<'schema> 
 pub(crate) struct FieldWithParent<'schema> {
     def: &'schema Component<FieldDefinition>,
     parent: ExtendedCompositeType<'schema>,
+}
+
+impl FieldWithParent<'_> {
+    fn is_leaf(&self, schema: &Valid<Schema>) -> bool {
+        let name = self.def.ty.inner_named_type();
+        let Some(ty) = schema.types.get(name) else {
+            return false;
+        };
+        return ty.is_leaf();
+    }
 }
 
 impl<'schema> std::fmt::Debug for FieldWithParent<'schema> {
@@ -83,32 +113,44 @@ impl<'schema> std::fmt::Debug for FieldWithParent<'schema> {
 pub(crate) struct FieldPath<'schema>(Vec<FieldWithParent<'schema>>);
 
 impl<'schema> FieldPath<'schema> {
+    fn leaf(&self) -> &FieldWithParent<'schema> {
+        self.0
+            .last()
+            .expect("FieldPath is not empty; it's always created with a starting field")
+    }
+
     fn add(&self, field_with_parent: FieldWithParent<'schema>) -> Self {
         let mut new = self.clone();
         new.0.push(field_with_parent);
         new
     }
 
-    fn next_parent_type(&self, schema: &'schema Valid<Schema>) -> ExtendedCompositeType<'schema> {
+    fn next_parent_type(
+        &self,
+        schema: &'schema Valid<Schema>,
+    ) -> Result<ExtendedCompositeType<'schema>, AssignmentError> {
         let output_named_type_name = self.0.last().unwrap().def.ty.inner_named_type();
-        let output_named_type = schema.types.get(output_named_type_name).unwrap();
-        let composite_type: ExtendedCompositeType = output_named_type
-            .try_into()
-            .expect("Field selections should only be applied to objects or interfaces");
-        composite_type
+        let output_named_type =
+            schema
+                .types
+                .get(output_named_type_name)
+                .ok_or(AssignmentError::TypeMissing(
+                    output_named_type_name.to_string(),
+                ))?;
+        let composite_type: ExtendedCompositeType = output_named_type.try_into()?;
+        Ok(composite_type)
     }
 
     fn next_field(
         &self,
         schema: &'schema Valid<Schema>,
         field_name: &str,
-    ) -> Result<FieldWithParent<'schema>, String> {
-        let composite_type = self.next_parent_type(schema);
+    ) -> Result<FieldWithParent<'schema>, AssignmentError> {
+        let composite_type = self.next_parent_type(schema)?;
         let field_definition = composite_type.field(field_name).ok_or_else(|| {
-            format!(
-                "Field `{}` does not exist on type `{}`",
-                field_name,
-                composite_type.name()
+            AssignmentError::FieldDoesNotExist(
+                field_name.to_string(),
+                composite_type.name().to_string(),
             )
         })?;
         Ok(FieldWithParent {
@@ -244,8 +286,8 @@ impl JSONSelection {
         &'sel self,
         schema: &'schema Valid<Schema>,
         starting_from: (&'schema ExtendedType, &'schema Component<FieldDefinition>),
-    ) -> (Vec<Assignment<'schema, 'sel>>, Vec<String>) {
-        let mut errors: Vec<String> = vec![];
+    ) -> (Vec<Assignment<'schema, 'sel>>, Vec<AssignmentError>) {
+        let mut errors: Vec<AssignmentError> = vec![];
         let starting_from = FieldWithParent {
             def: starting_from.1,
             parent: starting_from.0.try_into().unwrap(),
@@ -266,7 +308,7 @@ pub(super) trait SingleAssignmentInternal {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>>;
 }
 
@@ -278,7 +320,7 @@ impl SingleAssignmentInternal for JSONSelection {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         match self {
             Self::Named(sub_selection) => {
@@ -300,7 +342,7 @@ impl SingleAssignmentInternal for NamedSelection {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         tracing::info!("{field_path:?} = {}", self.pretty_print());
         match self {
@@ -327,16 +369,11 @@ impl SingleAssignmentInternal for NamedSelection {
 
                 match (selection, output_type.is_leaf()) {
                     (Some(_), true) => {
-                        errors.push(format!(
-                            "Assignment to leaf field `{coord}` must not have subselections",
-                        ));
+                        errors.push(AssignmentError::AssignmentToLeafField(coord));
                         vec![]
                     }
                     (None, false) => {
-                        errors.push(
-                            "Assignment to composite field `{coord}` must have have subselections"
-                                .into(),
-                        );
+                        errors.push(AssignmentError::AssignmentToCompositeField(coord));
                         vec![]
                     }
                     (None, true) => {
@@ -432,12 +469,19 @@ impl SingleAssignmentInternal for SubSelection {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         tracing::info!(
             "{field_path:?} = {}",
             self.pretty_print_with_indentation(true, 0)
         );
+
+        if field_path.leaf().is_leaf(schema) {
+            let coord = format!("{:?}", field_path.leaf());
+            errors.push(AssignmentError::AssignmentToLeafField(coord));
+            return vec![];
+        }
+
         self.selections
             .iter()
             .flat_map(|s| {
@@ -461,7 +505,7 @@ impl SingleAssignmentInternal for PathSelection {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         tracing::info!(
             "{field_path:?} = {}",
@@ -481,7 +525,7 @@ impl SingleAssignmentInternal for WithRange<PathList> {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         tracing::info!(
             "{field_path:?} = {}",
@@ -503,10 +547,22 @@ impl SingleAssignmentInternal for WithRange<PathList> {
                         errors,
                     )
                 } else {
-                    vec![Assignment {
-                        left: field_path,
-                        right: expression_path,
-                    }]
+                    let is_leaf = field_path.leaf().is_leaf(schema);
+                    let ends_with_method = expression_path
+                        .0
+                        .last()
+                        .map(|e| matches!(e, Expression::Method(_, _)))
+                        .unwrap_or(false);
+                    let coord = format!("{:?}", field_path.leaf());
+                    if !is_leaf && ends_with_method {
+                        errors.push(AssignmentError::AssignmentToCompositeField(coord));
+                        vec![]
+                    } else {
+                        vec![Assignment {
+                            left: field_path,
+                            right: expression_path,
+                        }]
+                    }
                 }
             }
 
@@ -594,7 +650,7 @@ impl SingleAssignmentInternal for WithRange<LitExpr> {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         tracing::info!(
             "{field_path:?} = {}",
@@ -603,10 +659,19 @@ impl SingleAssignmentInternal for WithRange<LitExpr> {
 
         match self.as_ref() {
             LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => {
-                vec![Assignment {
-                    left: field_path,
-                    right: expression_path.add(Expression::LitExpr(self)),
-                }]
+                let output_type_name = field_path.leaf().def.ty.inner_named_type();
+                let output_type = schema.types.get(output_type_name).expect("type exists");
+                let coord = format!("{:?}", field_path.leaf());
+
+                if output_type.is_leaf() {
+                    vec![Assignment {
+                        left: field_path,
+                        right: expression_path.add(Expression::LitExpr(self)),
+                    }]
+                } else {
+                    errors.push(AssignmentError::AssignmentToCompositeField(coord));
+                    vec![]
+                }
             }
 
             LitExpr::Array(arr) => {
@@ -626,35 +691,38 @@ impl SingleAssignmentInternal for WithRange<LitExpr> {
                 }
             }
 
-            LitExpr::Object(index_map) => {
-                index_map
-                    .iter()
-                    .flat_map(|(key, value)| {
-                        let field_name = key.as_str();
+            LitExpr::Object(index_map) => index_map
+                .iter()
+                .flat_map(|(key, value)| {
+                    let field_name = key.as_str();
 
-                        let next_field = match field_path.next_field(schema, field_name) {
-                            Ok(f) => f,
-                            Err(e) => {
+                    let next_field = match field_path.next_field(schema, field_name) {
+                        Ok(f) => f,
+                        Err(e) => match e {
+                            AssignmentError::TypeIsNotComposite(_) => {
+                                let coord = format!("{:?}", field_path.leaf());
+                                errors.push(AssignmentError::AssignmentToLeafField(coord));
+                                return vec![];
+                            }
+                            _ => {
                                 errors.push(e);
                                 return vec![];
                             }
-                        };
+                        },
+                    };
 
-                        // let output_type = next_field.def.ty.inner_named_type();
-                        // let output_type = schema.types.get(output_type).unwrap();
+                    let field_path = field_path.add(next_field);
+                    let expression_path = expression_path.add(Expression::Key(key));
 
-                        let field_path = field_path.add(next_field);
-                        let expression_path = expression_path.add(Expression::Key(key));
+                    value.build_single_assignment(
+                        schema,
+                        field_path.clone(),
+                        expression_path,
+                        errors,
+                    )
+                })
+                .collect(),
 
-                        value.build_single_assignment(
-                            schema,
-                            field_path.clone(),
-                            expression_path,
-                            errors,
-                        )
-                    })
-                    .collect()
-            }
             LitExpr::Path(path) => {
                 let (expressions, sub_selection) = path.path.flatten_with_tail();
                 let expression_path = expression_path.add_tail(expressions);
@@ -683,19 +751,19 @@ trait SingleAssignmentHelper {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>>;
 }
 
 /// This is a special case for when we encounter a LitExpr::Object inside another
-/// literal (and array).
+/// literal (mostly arrays).
 ///
 /// With an array, we look at the first item and use that to determine the shape
 /// of the values in the array. (We don't current have a solution for polymorphic arrays).
 ///
 /// Because we're using the first item as an example of the shape, we don't want
 /// to actually use its literal values for assignment. Instead, we'll just terminate
-/// with the relevant selections for this assignment. When we evaluate the expression
+/// with the relevant one step before that. When we evaluate the expression
 /// path, we'll apply the selection to each item in the array.
 impl SingleAssignmentHelper for WithRange<LitExpr> {
     #[tracing::instrument(skip_all, name = "LitExpr(ObjectSpecialCase)")]
@@ -704,7 +772,7 @@ impl SingleAssignmentHelper for WithRange<LitExpr> {
         schema: &'schema Valid<Schema>,
         field_path: FieldPath<'schema>,
         expression_path: ExpressionPath<'sel>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
         match self.as_ref() {
             LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => {
@@ -725,10 +793,17 @@ impl SingleAssignmentHelper for WithRange<LitExpr> {
 
                     let next_field = match field_path.next_field(schema, field_name) {
                         Ok(f) => f,
-                        Err(e) => {
-                            errors.push(e);
-                            return vec![];
-                        }
+                        Err(e) => match e {
+                            AssignmentError::TypeIsNotComposite(_) => {
+                                let coord = format!("{:?}", field_path.leaf());
+                                errors.push(AssignmentError::AssignmentToLeafField(coord));
+                                return vec![];
+                            }
+                            _ => {
+                                errors.push(e);
+                                return vec![];
+                            }
+                        },
                     };
 
                     let field_path = field_path.add(next_field);
@@ -770,8 +845,10 @@ impl SingleAssignmentHelper for WithRange<LitExpr> {
 mod tests {
     use apollo_compiler::Schema;
     use insta::assert_debug_snapshot;
+    use itertools::Itertools;
 
     use super::JSONSelection;
+    use crate::sources::connect::json_selection::single_assignment::AssignmentError;
 
     #[test_log::test]
     fn test0() {
@@ -793,7 +870,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -832,7 +909,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -867,7 +944,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -905,7 +982,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -945,7 +1022,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -1003,7 +1080,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -1072,7 +1149,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -1122,7 +1199,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -1181,7 +1258,7 @@ mod tests {
         let parent_type = schema.types.get("Query").unwrap();
         let connector_field = schema.type_field("Query", "f").unwrap();
         let (assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
-        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(errors, Vec::<AssignmentError>::new());
         assert_debug_snapshot!(assignments, @r###"
         [
             Assignment {
@@ -1202,5 +1279,116 @@ mod tests {
             },
         ]
         "###)
+    }
+
+    #[test_log::test]
+    fn test_mismatches() {
+        let (_, s) = JSONSelection::parse(
+            "
+        a                           # good
+        b                           # missing
+        c                           # composite
+        d { x }                     # leaf
+        e: $(1)                     # composite
+        f: $({ x: 1 })              # leaf
+        g: $->echo(@)               # composite
+        h: $->entries { key value } # leaf
+        i: $([{ g: 1 }])            # leaf
+        ",
+        )
+        .unwrap();
+        let schema = Schema::parse_and_validate(
+            r#"
+            type Query {
+                f: T
+            }
+
+            type T {
+                a: Int
+                c: X
+                d: Int
+                e: X
+                f: Int
+                g: X
+                h: Int
+                i: Int
+            }
+
+            type X {
+              x: Int
+            }
+            "#,
+            "",
+        )
+        .unwrap();
+        let parent_type = schema.types.get("Query").unwrap();
+        let connector_field = schema.type_field("Query", "f").unwrap();
+        let (_assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
+        pretty_assertions::assert_eq!(
+            errors.iter().map(|e| e.to_string()).collect_vec(),
+            vec![
+                "Field `b` does not exist on type `T`".to_string(),
+                "Assignment to composite field `T.c: X` must have have subselections".to_string(),
+                "Assignment to leaf field `T.d: Int` must not have subselections".to_string(),
+                "Assignment to composite field `T.e: X` must have have subselections".to_string(),
+                "Assignment to leaf field `T.f: Int` must not have subselections".to_string(),
+                "Assignment to composite field `T.g: X` must have have subselections".to_string(),
+                "Assignment to leaf field `T.h: Int` must not have subselections".to_string(),
+                "Assignment to leaf field `T.i: Int` must not have subselections".to_string(),
+            ]
+        );
+    }
+
+    #[test_log::test]
+    fn test_matches() {
+        let (_, s) = JSONSelection::parse(
+            "
+        a                           # good
+        c                           # leaf
+        d { x }                     # composite
+        e: $(1)                     # leaf
+        f: $({ x: 1 })              # composite
+        g: $->echo(@)               # left
+        h: $->entries { key value } # composite
+        i: $([{ x: 1 }])            # composite
+        ",
+        )
+        .unwrap();
+        let schema = Schema::parse_and_validate(
+            r#"
+            type Query {
+                f: T
+            }
+
+            type T {
+                a: Int
+                c: Int
+                d: X
+                e: Int
+                f: X
+                g: Int
+                h: KV
+                i: X
+            }
+
+            type X {
+              x: Int
+            }
+
+            type KV {
+              key: String
+              value: Int
+            }
+            "#,
+            "",
+        )
+        .unwrap();
+        let parent_type = schema.types.get("Query").unwrap();
+        let connector_field = schema.type_field("Query", "f").unwrap();
+        let (_assignments, errors) = s.single_assignment(&schema, (parent_type, connector_field));
+        pretty_assertions::assert_eq!(
+            errors.iter().map(|e| e.to_string()).collect_vec(),
+            Vec::<String>::new()
+        );
     }
 }
