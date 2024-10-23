@@ -1160,12 +1160,29 @@ async fn subscription_without_header() {
 async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{... on Query{currentUser{activeOrganization{__typename id}}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
-            ).build()),
+            serde_json::json!{{
+                "query": "
+                    { ..._generated_onQuery1_0 }
+
+                    fragment _generated_onQuery1_0 on Query {
+                      currentUser { activeOrganization { __typename id} }
+                    }
+                ",
+            }},
+            serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+        ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
+                "query": "
+                    query($representations: [_Any!]!) {
+                      _entities(representations: $representations) {
+                        ..._generated_onOrganization1_0
+                      }
+                    }
+                    fragment _generated_onOrganization1_0 on Organization {
+                      suborga { id name }
+                    }
+                ",
                 "variables": {
                     "representations":[{"__typename": "Organization", "id":"0"}]
                 }
@@ -1273,7 +1290,14 @@ async fn root_typename_with_defer_in_defer() {
             ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id name}}}}",
+                "query":"
+                    query($representations:[_Any!]!){
+                        _entities(representations:$representations) { ..._generated_onOrganization1_0 }
+                    }
+                    fragment _generated_onOrganization1_0 on Organization {
+                        suborga {__typename id name}
+                    }
+                ",
                 "variables": {
                     "representations":[{"__typename": "Organization", "id":"0"}]
                 }
