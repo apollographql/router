@@ -1,3 +1,5 @@
+mod const_lifting;
+
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
@@ -588,17 +590,15 @@ impl SingleAssignmentInternal for WithRange<PathList> {
                         expression_path,
                         errors,
                     )
+                } else if !field_path.leaf().is_leaf_type(schema) {
+                    let coord = format!("{:?}", field_path.leaf());
+                    errors.push(AssignmentError::AssignmentToCompositeField(coord));
+                    vec![]
                 } else {
-                    if !field_path.leaf().is_leaf_type(schema) {
-                        let coord = format!("{:?}", field_path.leaf());
-                        errors.push(AssignmentError::AssignmentToCompositeField(coord));
-                        vec![]
-                    } else {
-                        vec![Assignment {
-                            left: field_path,
-                            right: expression_path,
-                        }]
-                    }
+                    vec![Assignment {
+                        left: field_path,
+                        right: expression_path,
+                    }]
                 }
             }
 
