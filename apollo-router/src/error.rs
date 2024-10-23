@@ -26,6 +26,11 @@ use crate::json_ext::Value;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
 
+/// Return up to this many GraphQL parsing or validation errors.
+///
+/// Any remaining errors get silently dropped.
+const MAX_VALIDATION_ERRORS: usize = 100;
+
 /// Error types for execution.
 ///
 /// Note that these are not actually returned to the client, but are instead converted to JSON for
@@ -333,6 +338,7 @@ impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect())
     }
 }
@@ -605,6 +611,7 @@ impl IntoGraphQLErrors for ParseErrors {
                     .extension_code("GRAPHQL_PARSING_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect())
     }
 }
@@ -635,6 +642,7 @@ impl ValidationErrors {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect()
     }
 }
@@ -647,7 +655,11 @@ impl IntoGraphQLErrors for ValidationErrors {
 impl From<DiagnosticList> for ValidationErrors {
     fn from(errors: DiagnosticList) -> Self {
         Self {
-            errors: errors.iter().map(|e| e.unstable_to_json_compat()).collect(),
+            errors: errors
+                .iter()
+                .map(|e| e.unstable_to_json_compat())
+                .take(MAX_VALIDATION_ERRORS)
+                .collect(),
         }
     }
 }
