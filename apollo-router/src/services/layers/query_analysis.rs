@@ -4,6 +4,7 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use ageing::Priority;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::validation::Valid;
@@ -89,7 +90,7 @@ impl QueryAnalysisLayer {
         // parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
-        compute_task::execute(move || {
+        compute_task::enqueue(Priority::Zero, move || {
             span.in_scope(|| {
                 Query::parse_document(
                     &query,
@@ -99,6 +100,7 @@ impl QueryAnalysisLayer {
                 )
             })
         })
+        .expect("SCHEDULING ERROR NEEDS TO BE MAPPED")
         .await
         .expect("parse_document task panicked")
     }

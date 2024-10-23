@@ -2,6 +2,7 @@ use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use ageing::Priority;
 use apollo_compiler::executable::Selection;
 use serde_json_bytes::json;
 
@@ -131,9 +132,12 @@ impl IntrospectionCache {
         }
         let schema = schema.clone();
         let doc = doc.clone();
-        let response = compute_task::execute(move || Self::execute_introspection(&schema, &doc))
-            .await
-            .expect("Introspection panicked");
+        let response = compute_task::enqueue(Priority::Two, move || {
+            Self::execute_introspection(&schema, &doc)
+        })
+        .expect("NEED TO MAP SCHEDULE FAIL")
+        .await
+        .expect("Introspection panicked");
         storage.insert(cache_key, response.clone()).await;
         response
     }
