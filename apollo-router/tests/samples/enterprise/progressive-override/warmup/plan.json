@@ -1,0 +1,212 @@
+{
+    "enterprise": true,
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "Subgraph1": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query progressive1__Subgraph1__0{percent100{__typename id}}",
+                                    "operationName": "progressive1__Subgraph1__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "percent100": {
+                                            "__typename": "T",
+                                            "id": "1"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Subgraph2": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query progressive1__Subgraph2__1($representations:[_Any!]!){_entities(representations:$representations){...on T{foo}}}",
+                                    "operationName": "progressive1__Subgraph2__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "T",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "foo": 1
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query progressive2__Subgraph2__0{percent0{foo}}",
+                                    "operationName": "progressive2__Subgraph2__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "percent0": {
+                                            "foo": 2
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query progressive1 { percent100 { foo } }"
+            },
+            "headers": {
+                "apollo-expose-query-plan": "false"
+            },
+            "expected_response": {
+                "data": {
+                    "percent100": {
+                        "foo": 1
+                    }
+                }
+            }
+        },
+        {
+            "type": "ReloadConfiguration",
+            "configuration_path": "./configuration2.yaml"
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "Subgraph1": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query progressive1__Subgraph1__0{percent100{__typename id}}",
+                                    "operationName": "progressive1__Subgraph1__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "percent100": {
+                                            "__typename": "T",
+                                            "id": "1"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Subgraph2": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query progressive1__Subgraph2__1($representations:[_Any!]!){_entities(representations:$representations){...on T{foo}}}",
+                                    "operationName": "progressive1__Subgraph2__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "T",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "foo": 1
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query progressive2__Subgraph2__0{percent0{foo}}",
+                                    "operationName": "progressive2__Subgraph2__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "percent0": {
+                                            "foo": 2
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query progressive1 { percent100 { foo } }"
+            },
+            "headers": {
+                "apollo-expose-query-plan": "false"
+            },
+            "expected_response": {
+                "data": {
+                    "percent100": {
+                        "foo": 1
+                    }
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query progressive3 { percent100 { bar } }"
+            },
+            "headers": {
+                "apollo-expose-query-plan": "false"
+            },
+            "expected_response": {
+                "data": {
+                    "percent100": {
+                        "bar": 1
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}
