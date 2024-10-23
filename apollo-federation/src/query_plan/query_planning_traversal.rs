@@ -653,7 +653,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let (first_group, second_group) = self.closed_branches.split_at(sole_path_branch_index);
 
         let initial_tree;
-        snapshot!("FetchDependencyGraph", "", "Generating initial dep graph");
+        snapshot!(
+            "FetchDependencyGraph",
+            "digraph {}", // empty graph (in GraphViz Dot format)
+            "Generating initial dep graph (empty graph)"
+        );
         let mut initial_dependency_graph = self.new_dependency_graph();
         let federated_query_graph = &self.parameters.federated_query_graph;
         let root = &self.parameters.head;
@@ -678,7 +682,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 self.parameters.config.type_conditioned_fetching,
             )?;
             snapshot!(
-                initial_dependency_graph,
+                "FetchDependencyGraph",
+                initial_dependency_graph.to_dot(),
                 "Updated dep graph with initial tree"
             );
             if first_group.is_empty() {
@@ -975,7 +980,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             )?;
         }
 
-        snapshot!(dependency_graph, "updated_dependency_graph");
+        snapshot!(
+            "FetchDependencyGraph",
+            dependency_graph.to_dot(),
+            "updated_dependency_graph"
+        );
         Ok(())
     }
 
