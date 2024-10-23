@@ -346,7 +346,15 @@ impl SingleAssignmentInternal for NamedSelection {
         expression_path: ExpressionPath<'sel>,
         errors: &mut Vec<AssignmentError>,
     ) -> Vec<Assignment<'schema, 'sel>> {
-        tracing::info!("{field_path:?} = {}", self.pretty_print());
+        tracing::info!(
+            "{field_path:?} = {} ({})",
+            self.pretty_print(),
+            match self {
+                NamedSelection::Field(_, _, _) => "Field",
+                NamedSelection::Path(_, _) => "Path",
+                NamedSelection::Group(_, _) => "Group",
+            }
+        );
         match self {
             Self::Field(alias, key, selection) => {
                 let field_name = alias
@@ -1305,6 +1313,12 @@ mod tests {
         i: $([{ g: 1 }])            # leaf
         j: z.y.x                    # composite
         k: z.y.x { x }              # leaf
+        m.n {
+          o                         # composite
+          p { x }                   # leaf
+        }
+        q: { x }                    # leaf
+        r: s.t { x }                # leaf
         ",
         )
         .unwrap();
@@ -1325,6 +1339,10 @@ mod tests {
                 i: Int
                 j: X
                 k: Int
+                o: X
+                p: Int
+                q: Int
+                r: Int
             }
 
             type X {
@@ -1350,6 +1368,10 @@ mod tests {
                 "Assignment to leaf field `T.i: Int` must not have subselections".to_string(),
                 "Assignment to composite field `T.j: X` must have have subselections".to_string(),
                 "Assignment to leaf field `T.k: Int` must not have subselections".to_string(),
+                "Assignment to composite field `T.o: X` must have have subselections".to_string(),
+                "Assignment to leaf field `T.p: Int` must not have subselections".to_string(),
+                "Assignment to leaf field `T.q: Int` must not have subselections".to_string(),
+                "Assignment to leaf field `T.r: Int` must not have subselections".to_string(),
             ]
         );
     }
@@ -1368,6 +1390,12 @@ mod tests {
         i: $([{ x: 1 }])            # composite
         j: z.y.x                    # leaf
         k: z.y.x { x }              # composite
+        m.n {
+          o                         # leaf
+          p { x }                   # composite
+        }
+        q: { x }                    # composite
+        r: s.t { x }                # composite
         ",
         )
         .unwrap();
@@ -1388,6 +1416,10 @@ mod tests {
                 i: X
                 j: Int
                 k: X
+                o: Int
+                p: X
+                q: X
+                r: X
             }
 
             type X {
