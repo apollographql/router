@@ -5,19 +5,13 @@ description: Secure your federated GraphQL API by creating an allowlist of trust
 minVersion: 1.25.0
 ---
 
-<SummitCallout
-  topic="graph security"
-  workshopName="Securing your graph: A defense-in-depth strategy"
-  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712945157460001NjSZ"
-/>
-
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 <PQIntro />
 
 ## Differences from automatic persisted queries
 
-The Apollo Router Core also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router updates its APQ cache over time with _any_ operations it receives.
+The Apollo Router Core also supports a related feature called [automatic persisted queries](/router/configuration/in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router updates its APQ cache over time with _any_ operations it receives.
 
 For more details on differences between APQ and this feature, see the [GraphOS persisted queries documentation](/graphos/operations/persisted-queries#differences-from-automatic-persisted-queries).
 
@@ -76,7 +70,7 @@ If used with the [`safelist`](#safelist) option, the router logs unregistered an
 
 <ExperimentalFeature />
 
-By default, the router [prewarms the query plan cache](./in-memory-caching#cache-warm-up) using all operations on the PQL when a new schema is loaded, but not at startup. Using the `experimental_prewarm_query_plan_cache` option, you can tell the router to prewarm the cache using the PQL on startup as well, or tell it not to prewarm the cache when reloading the schema. (This does not affect whether the router prewarms the query plan cache with recently-used operations from its in-memory cache.) Prewarming the cache means can reduce request latency by ensuring that operations are pre-planned when requests are received, but can make startup or schema reloads slower.
+By default, the router [prewarms the query plan cache](/router/configuration/in-memory-caching#cache-warm-up) using all operations on the PQL when a new schema is loaded, but not at startup. Using the `experimental_prewarm_query_plan_cache` option, you can tell the router to prewarm the cache using the PQL on startup as well, or tell it not to prewarm the cache when reloading the schema. (This does not affect whether the router prewarms the query plan cache with recently-used operations from its in-memory cache.) Prewarming the cache means can reduce request latency by ensuring that operations are pre-planned when requests are received, but can make startup or schema reloads slower.
 
 ```yaml title="router.yaml"
 persisted_queries:
@@ -116,7 +110,7 @@ apq:
 
 <Note>
 
-To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
+To enable safelisting, you _must_ turn off [automatic persisted queries](/router/configuration/in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
 
 </Note>
 
@@ -140,10 +134,10 @@ apq:
 
 <Note>
 
-To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
+To enable safelisting, you _must_ turn off [automatic persisted queries](/router/configuration/in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
 
 </Note>
 
 ## Limitations
 
-* **Unsupported with offline license**. An GraphOS Router using an [offline Enterprise license](../enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
+* **Unsupported with offline license**. An GraphOS Router using an [offline Enterprise license](/router/enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.

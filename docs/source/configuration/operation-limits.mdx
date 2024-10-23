@@ -4,21 +4,15 @@ subtitle: Set constraints on depth, height, aliases, and root fields
 description: Ensure your GraphQL operations are secure with GraphOS Router's operation limits. Set constraints on depth, height, aliases, and root fields.
 ---
 
-<SummitCallout
-  topic="graph security"
-  workshopName="Securing your graph: A defense-in-depth strategy"
-  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712945157460001NjSZ"
-/>
-
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 You can define **operation limits** in your router's configuration to reject potentially malicious requests. An operation that exceeds _any_ specified limit is rejected (unless you run your router in [`warn_only` mode](#warn_only-mode)).
 
 ## Setup
 
-To use operation limits, you must run v1.17 or later of the GraphOS Router. [Download the latest version.](../quickstart#download-options)
+To use operation limits, you must run v1.17 or later of the GraphOS Router. [Download the latest version.](/router/quickstart#download-options)
 
-You define operation limits in your router's [YAML config file](./overview/#yaml-config-file), like so:
+You define operation limits in your router's [YAML config file](/router/configuration/overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
 limits:
@@ -123,7 +117,7 @@ If you run your router in `warn_only` mode, operations that exceed defined limit
 
 Running in `warn_only` mode can be useful while you're testing to determine the most appropriate limits to set for your supergraph.
 
-You can enable or disable `warn_only` mode in your router's [YAML config file](./overview/#yaml-config-file), like so:
+You can enable or disable `warn_only` mode in your router's [YAML config file](/router/configuration/overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
 limits:

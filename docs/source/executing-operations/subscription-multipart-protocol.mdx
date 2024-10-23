@@ -4,7 +4,7 @@ subtitle: Enable clients to receive real-time updates via multipart HTTP protoco
 description: Enable real-time updates via multipart HTTP protocol for GraphQL subscriptions with the GraphOS Router. Learn about execution, heartbeats, and error handling.
 ---
 
-To execute GraphQL subscription operations on the GraphOS Router, client apps do _not_ communicate over WebSocket. Instead, they use **HTTP with multipart responses**. This multipart protocol is built on the same [Incremental Delivery over HTTP](https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md) spec that the GraphOS Router uses to support [the `@defer` directive](./defer-support/).
+To execute GraphQL subscription operations on the GraphOS Router, client apps do _not_ communicate over WebSocket. Instead, they use **HTTP with multipart responses**. This multipart protocol is built on the same [Incremental Delivery over HTTP](https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md) spec that the GraphOS Router uses to support [the `@defer` directive](/router/executing-operations/defer-support/).
 
 Use this reference if you're adding protocol support to a new GraphQL client library. [Apollo Client](/react/data/subscriptions#http), [Apollo Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [Apollo iOS](/ios/fetching/subscriptions#http) all support this protocol. Apollo Client also provides network adapters for the [Relay](/react/data/subscriptions#relay) and [urql](/react/data/subscriptions#urql) libraries.
 

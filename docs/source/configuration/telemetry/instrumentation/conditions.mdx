@@ -4,7 +4,7 @@ subtitle: Set conditions for when events or instruments are triggered
 description: Set conditions for when events or instruments are triggered in the Apollo GraphOS Router.
 ---
 
-You can set conditions for when an [instrument](./instruments) should be mutated or an [event](./events) should be triggered.
+You can set conditions for when an [instrument](/router/configuration/telemetry/instrumentation/instruments) should be mutated or an [event](/router/configuration/telemetry/instrumentation/events) should be triggered.
 
 
 ## Condition configuration
@@ -35,7 +35,7 @@ telemetry:
 
 #### `exists`
 
-The `exists` condition is testing if [selectors](./selectors) is present.
+The `exists` condition is testing if [selectors](/router/configuration/telemetry/instrumentation/selectors) is present.
 
 For example, the following condition checks the value of `x-req-header` exists:
 
@@ -46,7 +46,7 @@ exists:
 
 #### `eq`
 
-The `eq` condition is an equality test between [selectors](./selectors) or values.
+The `eq` condition is an equality test between [selectors](/router/configuration/telemetry/instrumentation/selectors) or values.
 
 For example, the following condition checks the value of `x-req-header` is equal to `val`:
 

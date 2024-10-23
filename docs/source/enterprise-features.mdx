@@ -31,10 +31,10 @@ For details on these features, see [this blog post](https://blog.apollographql.c
 To enable support for GraphOS Router Enterprise features:
 
 - Your organization must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
-- You must run GraphOS Router v1.12. [Download the latest version.](./quickstart#download-options)
+- You must run GraphOS Router v1.12. [Download the latest version.](/router/quickstart#download-options)
     - Certain Enterprise features might require a later router version. See a particular feature's documentation for details.
 - Your router instances must connect to GraphOS with a **graph API key** and **graph ref** associated with your organization.
-    - You connect your router to GraphOS by setting [these environment variables](./configuration/overview/#environment-variables) when starting the router.
+    - You connect your router to GraphOS by setting [these environment variables](/router/configuration/overview/#environment-variables) when starting the router.
     - If your router _already_ connects to your GraphOS Enterprise organization, no further action is required.
 
 After enabling support, you can begin using all Enterprise features. Consult [the documentation for each feature](#list-of-features) to learn more.
@@ -82,7 +82,7 @@ With an offline license, a router can either be fully disconnected from GraphOS 
 
 <Note>
 
-A router using an offline license requires [the use of local manifests](./configuration/persisted-queries/#experimental_local_manifests) when using [safelisting with persisted queries](./configuration/persisted-queries), otherwise it will not work as designed when the router is disconnected from Uplink.
+A router using an offline license requires [the use of local manifests](/router/configuration/persisted-queries/#experimental_local_manifests) when using [safelisting with persisted queries](/router/configuration/persisted-queries), otherwise it will not work as designed when the router is disconnected from Uplink.
 
 </Note>
 
@@ -100,9 +100,9 @@ Follow these steps to configure an GraphOS Router to use an offline Enterprise l
 
 1. Provide the offline license to your router on startup. The router accepts an offline license in a few ways:
 
-    1. [`--license <license_path>`](./configuration/overview/#--license) CLI option, with an argument containing an absolute or relative path to an offline license file
-    1. [`APOLLO_ROUTER_LICENSE_PATH`](./configuration/overview/#--license) environment variable, containing an absolute or relative path to an offline license file 
-    1. [`APOLLO_ROUTER_LICENSE`](./configuration/overview/#--license) environment variable, containing the stringified contents of an offline license file
+    1. [`--license <license_path>`](/router/configuration/overview/#--license) CLI option, with an argument containing an absolute or relative path to an offline license file
+    1. [`APOLLO_ROUTER_LICENSE_PATH`](/router/configuration/overview/#--license) environment variable, containing an absolute or relative path to an offline license file 
+    1. [`APOLLO_ROUTER_LICENSE`](/router/configuration/overview/#--license) environment variable, containing the stringified contents of an offline license file
 
     <Note>
 
@@ -113,11 +113,11 @@ Follow these steps to configure an GraphOS Router to use an offline Enterprise l
 
 1. Configure the router to use a local supergraph schema by setting one of the following:
 
-    * [`--s/-supergraph`](./configuration/overview/#-s----supergraph) CLI option, with an argument containing an absolute or relative path to supergraph schema file
-    * [`APOLLO_SUPERGRAPH_PATH`](./configuration/overview/#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
-    * [`APOLLO_SUPERGRAPH_URLS`](./configuration/overview/#-s----supergraph) environment variable, containing URLs to supergraph schemas
+    * [`--s/-supergraph`](/router/configuration/overview/#-s----supergraph) CLI option, with an argument containing an absolute or relative path to supergraph schema file
+    * [`APOLLO_SUPERGRAPH_PATH`](/router/configuration/overview/#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
+    * [`APOLLO_SUPERGRAPH_URLS`](/router/configuration/overview/#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
-1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](./configuration/overview#apollo_graph_ref) environment variables. 
+1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](/router/configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](/router/configuration/overview#apollo_graph_ref) environment variables. 
 
     These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 
@@ -168,7 +168,7 @@ These steps work both for running the router executable directly (`./router`) an
 
 ## Disabling Enterprise features
 
-To disable an Enterprise feature, remove all of its associated configuration keys from your router's [YAML config file](./configuration/overview/#yaml-config-file).
+To disable an Enterprise feature, remove all of its associated configuration keys from your router's [YAML config file](/router/configuration/overview/#yaml-config-file).
 
 ## Grace period for expired plans
 
