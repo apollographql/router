@@ -1,0 +1,13 @@
+---
+source: apollo-federation/src/sources/connect/json_selection/parser.rs
+expression: "JSONSelection::parse(\".data\")"
+---
+Err(
+    Failure(
+        JSONSelectionParseError {
+            message: "Key paths cannot start with just .key (use $.key instead)",
+            fragment: ".data",
+            offset: 0,
+        },
+    ),
+)
