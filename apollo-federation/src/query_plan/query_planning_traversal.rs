@@ -305,7 +305,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             f: &mut std::fmt::Formatter<'_>,
             data: &QueryPlanningTraversal,
         ) -> std::fmt::Result {
-            writeln!(f, "Query planning open branches:")?;
             for branch in &data.open_branches {
                 let selection = branch.selections.last().unwrap();
                 format_open_branch(f, &(selection, &branch.open_branch.0))?;
@@ -329,7 +328,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             snapshot!(
                 "BranchStack",
                 self.branch_stack_to_string(),
-                "Query planning open branches:"
+                "Query planning open branches"
             );
             let Some(mut current_branch) = self.open_branches.pop() else {
                 return Err(FederationError::internal(
@@ -380,18 +379,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let operation_element = selection.element()?;
         let mut new_options = vec![];
         let mut no_followups: bool = false;
-
-        snapshot!(
-            "OpenBranch",
-            open_branch_to_string(selection, options),
-            "open branch"
-        );
-
-        snapshot!(
-            "OperationElement",
-            operation_element.to_string(),
-            "Handling open branch"
-        );
 
         for option in options.iter_mut() {
             let followups_for_option = option.advance_with_operation_element(
