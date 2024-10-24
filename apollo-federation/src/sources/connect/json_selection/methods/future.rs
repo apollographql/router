@@ -745,3 +745,67 @@ fn and_method(
         )
     }
 }
+
+// Returns Some(data) unmodified, but adds an error to the Vec<ApplyToError>
+// output vector. Together with conditional fragments, the ->withError method
+// can help with conditionally returning errors as well as data:
+//
+//   ... if (some.condition) $->withError("Bad outcome") { id name }
+//
+// Note that $->withError(...) returns $, so the above path selection is
+// equivalent to $ { id name } (but with an error attached).
+impl_arrow_method!(WithErrorMethod, ArrowMethodImpl, with_error_method);
+fn with_error_method(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &WithRange<PathList>,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    let mut errors = vec![];
+
+    if let Some(error_arg) = method_args.and_then(|method_args| method_args.args.first()) {
+        let (error_opt, error_errors) = error_arg.apply_to_path(data, vars, input_path);
+        errors.extend(error_errors);
+
+        match error_opt {
+            Some(JSON::String(s)) => {
+                // If the ->withError argument is a string, use it as the
+                // ApplyToError message.
+                errors.push(ApplyToError::new(
+                    s.as_str().to_string(),
+                    input_path.to_vec(),
+                    error_arg.range(),
+                ));
+            }
+
+            Some(value) => {
+                // If the ->withError argument is not a string, JSON-stringify
+                // it and use that as the ApplyToError message.
+                errors.push(ApplyToError::new(
+                    value.to_string(),
+                    input_path.to_vec(),
+                    error_arg.range(),
+                ));
+            }
+
+            None => {
+                // Assume error_arg.apply_to_path already reported error_errors
+                // explaining why error_opt is None.
+            }
+        };
+    } else {
+        errors.push(ApplyToError::new(
+            format!("Method ->{} requires an argument", method_name.as_ref()),
+            input_path.to_vec(),
+            method_name.range(),
+        ));
+    }
+
+    // We can still continue after the errors, since data->withError always
+    // returns data no matter what arguments it was called with, and should
+    // never interrupt control flow.
+    tail.apply_to_path(data, vars, input_path)
+        .prepend_errors(errors)
+}

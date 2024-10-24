@@ -49,6 +49,7 @@ pub(super) enum ArrowMethod {
     Not,
     Or,
     And,
+    WithError,
 }
 
 #[macro_export]
@@ -117,6 +118,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Not => &future::NotMethod,
             Self::Or => &future::OrMethod,
             Self::And => &future::AndMethod,
+            Self::WithError => &future::WithErrorMethod,
         }
     }
 }
@@ -153,6 +155,7 @@ impl ArrowMethod {
             "not" => Some(Self::Not),
             "or" => Some(Self::Or),
             "and" => Some(Self::And),
+            "withError" | "with_error" => Some(Self::WithError),
             _ => None,
         };
 
