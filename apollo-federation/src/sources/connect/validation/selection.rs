@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::iter::once;
 use std::ops::Range;
 
@@ -5,17 +6,13 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::SelectionCoordinate;
-use super::require_value_is_str;
 use super::Code;
 use super::Message;
 use super::Name;
@@ -25,19 +22,34 @@ use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
 pub(super) fn validate_selection(
-    coordinate: ConnectDirectiveCoordinate,
+    connect_directive_coordinate: ConnectDirectiveCoordinate,
     schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Result<(), Message> {
-    let (selection_arg, json_selection) = get_json_selection(coordinate, &schema.sources)?;
-    let field = coordinate.field_coordinate.field;
+    let selection_coordinate = SelectionCoordinate::from(connect_directive_coordinate);
+    let argument = connect_directive_coordinate
+        .directive
+        .arguments
+        .iter()
+        .find(|arg| arg.name == CONNECT_SELECTION_ARGUMENT_NAME)
+        .ok_or_else(|| Message {
+            code: Code::GraphQLError,
+            message: format!("{selection_coordinate} is required."),
+            locations: connect_directive_coordinate
+                .directive
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })?;
+    let (value, json_selection) =
+        get_json_selection(selection_coordinate, &schema.sources, &argument.value)?;
+    let field = connect_directive_coordinate.field_coordinate.field;
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
         // TODO: Validate scalar return types
@@ -55,110 +67,46 @@ pub(super) fn validate_selection(
     };
 
     SelectionValidator {
-        root: PathPart::Root(coordinate.field_coordinate.object),
+        root: PathPart::Root(connect_directive_coordinate.field_coordinate.object),
         schema,
         path: Vec::new(),
-        selection_arg,
+        selection_arg: SelectionArg {
+            value,
+            coordinate: selection_coordinate,
+        },
         seen_fields,
     }
     .walk(group)
 }
 
-pub(super) fn validate_body_selection(
-    connect_directive: &Node<Directive>,
-    parent_type: &Node<ObjectType>,
-    field: &Component<FieldDefinition>,
-    schema: &Schema,
-    selection_node: &Node<Value>,
-) -> Result<(), Message> {
-    let coordinate =
-        connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
-
-    let selection_str = require_value_is_str(selection_node, &coordinate, &schema.sources)?;
-
-    let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
-        code: Code::InvalidJsonSelection,
-        message: format!("{coordinate} is not a valid JSONSelection: {err}"),
-        locations: selection_node
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-
-    if selection.is_empty() {
-        return Err(Message {
-            code: Code::InvalidJsonSelection,
-            message: format!("{coordinate} is empty"),
-            locations: selection_node
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        });
-    }
-
-    // TODO: validate JSONSelection
-    Ok(())
-}
-
-fn get_json_selection<'a>(
-    connect_directive: ConnectDirectiveCoordinate<'a>,
+/// Parse JSONSelection from a value in the GraphQL AST.
+pub(super) fn get_json_selection<'a>(
+    coordinate: impl Display,
     source_map: &'a SourceMap,
-) -> Result<(SelectionArg<'a>, JSONSelection), Message> {
-    let coordinate = SelectionCoordinate::from(connect_directive);
-    let selection_arg = connect_directive
-        .directive
-        .arguments
-        .iter()
-        .find(|arg| arg.name == CONNECT_SELECTION_ARGUMENT_NAME)
-        .ok_or_else(|| Message {
-            code: Code::GraphQLError,
-            message: format!("{coordinate} is required."),
-            locations: connect_directive
-                .directive
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
-        })?;
-    let selection_str =
-        GraphQLString::new(&selection_arg.value, source_map).map_err(|_| Message {
-            code: Code::GraphQLError,
-            message: format!("{coordinate} must be a string."),
-            locations: selection_arg
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
-        })?;
+    value: &'a Node<Value>,
+) -> Result<(GraphQLString<'a>, JSONSelection), Message> {
+    let selection_str = GraphQLString::new(value, source_map).map_err(|_| Message {
+        code: Code::GraphQLError,
+        message: format!("{coordinate} must be a string."),
+        locations: value.line_column_range(source_map).into_iter().collect(),
+    })?;
 
     let (_rest, selection) =
         JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
             code: Code::InvalidJsonSelection,
             message: format!("{coordinate} is not a valid JSONSelection: {err}",),
-            locations: selection_arg
-                .value
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
+            locations: value.line_column_range(source_map).into_iter().collect(),
         })?;
 
     if selection.is_empty() {
         return Err(Message {
             code: Code::InvalidJsonSelection,
             message: format!("{coordinate} is empty",),
-            locations: selection_arg
-                .value
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
+            locations: value.line_column_range(source_map).into_iter().collect(),
         });
     }
 
-    Ok((
-        SelectionArg {
-            value: selection_str,
-            coordinate,
-        },
-        selection,
-    ))
+    Ok((selection_str, selection))
 }
 
 struct SelectionArg<'schema> {
