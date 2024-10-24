@@ -46,6 +46,7 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
+use crate::utils::logging::make_string;
 use crate::utils::logging::snapshot;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
@@ -156,6 +157,28 @@ impl BestQueryPlanInfo {
             cost: Default::default(),
         }
     }
+}
+
+// PORT_NOTE: This is a (partial) port of `QueryPlanningTraversal.debugStack` JS method.
+fn format_open_branch(
+    f: &mut std::fmt::Formatter<'_>,
+    data: &(&Selection, &Vec<SimultaneousPathsWithLazyIndirectPaths>),
+) -> std::fmt::Result {
+    let selection = data.0;
+    let options = data.1;
+    writeln!(f, "{selection}:")?;
+    for option in options {
+        writeln!(f, "- {option}")?;
+    }
+    Ok(())
+}
+
+#[allow(dead_code)] // suppress warning: tracing utility
+fn open_branch_to_string(
+    selection: &Selection,
+    options: &Vec<SimultaneousPathsWithLazyIndirectPaths>,
+) -> String {
+    make_string(&(selection, options), format_open_branch)
 }
 
 impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
@@ -275,6 +298,24 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         Ok(self.best_plan)
     }
 
+    // PORT_NOTE: This is a port of `QueryPlanningTraversal.debugStack` JS method.
+    #[allow(dead_code)] // suppress warning: tracing utility
+    fn branch_stack_to_string(&self) -> String {
+        fn format_branch_stack(
+            f: &mut std::fmt::Formatter<'_>,
+            data: &QueryPlanningTraversal,
+        ) -> std::fmt::Result {
+            writeln!(f, "Query planning open branches:")?;
+            for branch in &data.open_branches {
+                let selection = branch.selections.last().unwrap();
+                format_open_branch(f, &(selection, &branch.open_branch.0))?;
+            }
+            Ok(())
+        }
+
+        make_string(self, format_branch_stack)
+    }
+
     #[cfg_attr(
         feature = "snapshot_tracing",
         tracing::instrument(
@@ -284,7 +325,17 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
-        while let Some(mut current_branch) = self.open_branches.pop() {
+        while !self.open_branches.is_empty() {
+            snapshot!(
+                "BranchStack",
+                self.branch_stack_to_string(),
+                "Query planning open branches:"
+            );
+            let Some(mut current_branch) = self.open_branches.pop() else {
+                return Err(FederationError::internal(
+                    "Branch stack unexpectedly empty during query plan traversal",
+                ));
+            };
             let Some(current_selection) = current_branch.selections.pop() else {
                 return Err(FederationError::internal(
                     "Sub-stack unexpectedly empty during query plan traversal",
@@ -293,7 +344,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             let (terminate_planning, new_branch) =
                 self.handle_open_branch(&current_selection, &mut current_branch.open_branch.0)?;
             if terminate_planning {
-                trace!("Planning termianted!");
+                trace!("Planning terminated!");
                 // We clear both open branches and closed ones as a means to terminate the plan
                 // computation with no plan.
                 self.open_branches = vec![];
@@ -330,12 +381,16 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let mut new_options = vec![];
         let mut no_followups: bool = false;
 
-        snapshot!(name = "Options", options, "options");
+        snapshot!(
+            "OpenBranch",
+            open_branch_to_string(selection, options),
+            "open branch"
+        );
 
         snapshot!(
             "OperationElement",
             operation_element.to_string(),
-            "operation_element"
+            "Handling open branch"
         );
 
         for option in options.iter_mut() {

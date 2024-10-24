@@ -50,3 +50,23 @@ macro_rules! snapshot {
 }
 
 pub(crate) use snapshot;
+
+#[allow(unreachable_pub)] // suppress warning: tracing utility
+pub fn make_string<T>(
+    data: &T,
+    writer: fn(&mut std::fmt::Formatter<'_>, &T) -> std::fmt::Result,
+) -> String {
+    // One-off struct to implement `Display` for `data` using `writer`.
+    struct Stringify<'a, T> {
+        data: &'a T,
+        writer: fn(&mut std::fmt::Formatter<'_>, &T) -> std::fmt::Result,
+    }
+
+    impl<'a, T> std::fmt::Display for Stringify<'a, T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            (self.writer)(f, self.data)
+        }
+    }
+
+    Stringify { data, writer }.to_string()
+}
