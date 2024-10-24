@@ -209,6 +209,7 @@ static_assertions = "1.1.0"
 strum_macros = "0.26.0"
 sys-info = "0.9.1"
 thiserror = "1.0.61"
+threadpool = "1.8.1"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time"] }
