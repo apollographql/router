@@ -167,6 +167,8 @@ virtualservice:
   # gatewayNames: []
   #  - "gateway-1"
   #  - "gateway-2"
+  # Hosts: "" # configurable but will default to '*'
+  #  - somehost.domain.com
   # http:
   #   main:
   #     # set enabled to true to add
