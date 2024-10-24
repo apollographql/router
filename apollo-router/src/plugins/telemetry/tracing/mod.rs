@@ -16,6 +16,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::config_new::spans::Spans;
+use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use crate::plugins::telemetry::config::TracingCommon;
 
@@ -50,17 +51,19 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
     }
 
     fn on_end(&self, span: SpanData) {
-        if span
-            .attributes
-            .iter()
-            .any(|(key, _)| key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-        {
+        if span.attributes.iter().any(|(key, _)| {
+            key.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                || key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX)
+        }) {
             let attributes_len = span.attributes.len();
             let span = SpanData {
                 attributes: span
                     .attributes
                     .into_iter()
-                    .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                    .filter(|(k, _)| {
+                        !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                            && !k.as_str().starts_with(APOLLO_CONNECTOR_PREFIX)
+                    })
                     .fold(
                         EvictedHashMap::new(attributes_len as u32, attributes_len),
                         |mut m, (k, v)| {

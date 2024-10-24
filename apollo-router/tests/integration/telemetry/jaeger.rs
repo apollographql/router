@@ -1,6 +1,7 @@
 extern crate core;
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -206,6 +207,38 @@ async fn test_default_operation() -> Result<(), BoxError> {
         id,
         &query,
         Some("ExampleQuery1"),
+        &["client", "router", "subgraph"],
+        false,
+    )
+    .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_rest_connectors() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .supergraph(PathBuf::from("tests/fixtures/supergraph_connect.graphql"))
+        .config(include_str!("fixtures/jaeger.connectors.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query Posts { posts { id body status } }","variables":{}});
+
+    let (id, result) = router.execute_query(&query).await;
+    assert!(!result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .is_empty());
+    // TODO use the same mechanism than for otlp tests with a builder and so one
+    validate_trace(
+        id,
+        &query,
+        Some("Posts"),
         &["client", "router", "subgraph"],
         false,
     )

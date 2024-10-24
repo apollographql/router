@@ -26,7 +26,7 @@ use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
 use crate::json_ext::ValueExt;
-use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
+use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
