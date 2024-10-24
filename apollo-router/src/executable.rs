@@ -331,6 +331,8 @@ pub fn main() -> Result<()> {
     #[cfg(feature = "dhat-ad-hoc")]
     create_ad_hoc_profiler();
 
+    dotenvy::dotenv()?;
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
