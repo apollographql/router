@@ -46,8 +46,15 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-use crate::utils::logging::make_string;
+use crate::utils::logging::format_open_branch;
 use crate::utils::logging::snapshot;
+
+#[cfg(feature = "snapshot_tracing")]
+mod snapshot_helper {
+    // A module to import functions only used within `snapshot!(...)` macros.
+    pub(crate) use crate::utils::logging::open_branch_to_string;
+    pub(crate) use crate::utils::logging::open_branches_to_string;
+}
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we
@@ -114,11 +121,31 @@ pub(crate) struct QueryPlanningTraversal<'a, 'b> {
 }
 
 #[derive(Debug, Serialize)]
-struct OpenBranchAndSelections {
+pub(crate) struct OpenBranchAndSelections {
     /// The options for this open branch.
     open_branch: OpenBranch,
     /// A stack of the remaining selections to plan from the node this open branch ends on.
     selections: Vec<Selection>,
+}
+
+impl std::fmt::Display for OpenBranchAndSelections {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Some((current_selection, remaining_selections)) = self.selections.split_last() else {
+            return Ok(());
+        };
+        format_open_branch(f, &(current_selection, &self.open_branch.0))?;
+        write!(f, " * Remaining selections:")?;
+        if remaining_selections.is_empty() {
+            writeln!(f, " (none)")?;
+        } else {
+            // Print in reverse order since remaining selections are processed in that order.
+            writeln!(f)?; // newline
+            for selection in remaining_selections.iter().rev() {
+                writeln!(f, "   - {selection}")?;
+            }
+        }
+        Ok(())
+    }
 }
 
 struct PlanInfo {
@@ -157,29 +184,6 @@ impl BestQueryPlanInfo {
             cost: Default::default(),
         }
     }
-}
-
-// PORT_NOTE: This is a (partial) port of `QueryPlanningTraversal.debugStack` JS method.
-fn format_open_branch(
-    f: &mut std::fmt::Formatter<'_>,
-    data: &(&Selection, &Vec<SimultaneousPathsWithLazyIndirectPaths>),
-) -> std::fmt::Result {
-    let selection = data.0;
-    let options = data.1;
-    writeln!(f, "{selection}")?;
-    writeln!(f, " * Options:")?;
-    for option in options {
-        writeln!(f, "   - {option}")?;
-    }
-    Ok(())
-}
-
-#[allow(dead_code)] // suppress warning: tracing utility
-fn open_branch_to_string(
-    selection: &Selection,
-    options: &Vec<SimultaneousPathsWithLazyIndirectPaths>,
-) -> String {
-    make_string(&(selection, options), format_open_branch)
 }
 
 impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
@@ -299,35 +303,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         Ok(self.best_plan)
     }
 
-    // PORT_NOTE: This is a port of `QueryPlanningTraversal.debugStack` JS method.
-    #[allow(dead_code)] // suppress warning: tracing utility
-    fn branch_stack_to_string(&self) -> String {
-        fn format_branch_stack(
-            f: &mut std::fmt::Formatter<'_>,
-            data: &QueryPlanningTraversal,
-        ) -> std::fmt::Result {
-            // Print from the stack top to the bottom.
-            for branch in data.open_branches.iter().rev() {
-                let (current_selection, remaining_selections) =
-                    branch.selections.split_last().unwrap();
-                format_open_branch(f, &(current_selection, &branch.open_branch.0))?;
-                write!(f, " * Remaining selections:")?;
-                if remaining_selections.is_empty() {
-                    writeln!(f, " (none)")?;
-                } else {
-                    // Print in reverse order since remaining selections are processed in that order.
-                    writeln!(f)?; // newline
-                    for selection in remaining_selections.iter().rev() {
-                        writeln!(f, "   - {selection}")?;
-                    }
-                }
-            }
-            Ok(())
-        }
-
-        make_string(self, format_branch_stack)
-    }
-
     #[cfg_attr(
         feature = "snapshot_tracing",
         tracing::instrument(
@@ -339,8 +314,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while !self.open_branches.is_empty() {
             snapshot!(
-                "BranchStack",
-                self.branch_stack_to_string(),
+                "OpenBranches",
+                snapshot_helper::open_branches_to_string(&self.open_branches),
                 "Query planning open branches"
             );
             let Some(mut current_branch) = self.open_branches.pop() else {
@@ -395,7 +370,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
         snapshot!(
             "OpenBranch",
-            open_branch_to_string(selection, options),
+            snapshot_helper::open_branch_to_string(selection, options),
             "open branch"
         );
 

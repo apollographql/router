@@ -1,3 +1,9 @@
+#![allow(dead_code)]
+
+use crate::operation::Selection;
+use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
+use crate::query_plan::query_planning_traversal::OpenBranchAndSelections;
+
 /// This macro is a wrapper around `tracing::trace!` and should not be confused with our snapshot
 /// testing. This primary goal of this macro is to add the necessary context to logging statements
 /// so that external tools (like the snapshot log visualizer) can show how various key data
@@ -51,22 +57,57 @@ macro_rules! snapshot {
 
 pub(crate) use snapshot;
 
-#[allow(unreachable_pub)] // suppress warning: tracing utility
-pub fn make_string<T>(
+pub(crate) fn make_string<T: ?Sized>(
     data: &T,
     writer: fn(&mut std::fmt::Formatter<'_>, &T) -> std::fmt::Result,
 ) -> String {
     // One-off struct to implement `Display` for `data` using `writer`.
-    struct Stringify<'a, T> {
+    struct Stringify<'a, T: ?Sized> {
         data: &'a T,
         writer: fn(&mut std::fmt::Formatter<'_>, &T) -> std::fmt::Result,
     }
 
-    impl<'a, T> std::fmt::Display for Stringify<'a, T> {
+    impl<'a, T: ?Sized> std::fmt::Display for Stringify<'a, T> {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             (self.writer)(f, self.data)
         }
     }
 
     Stringify { data, writer }.to_string()
+}
+
+// PORT_NOTE: This is a (partial) port of `QueryPlanningTraversal.debugStack` JS method.
+pub(crate) fn format_open_branch(
+    f: &mut std::fmt::Formatter<'_>,
+    (selection, options): &(&Selection, &Vec<SimultaneousPathsWithLazyIndirectPaths>),
+) -> std::fmt::Result {
+    writeln!(f, "{selection}")?;
+    writeln!(f, " * Options:")?;
+    for option in *options {
+        writeln!(f, "   - {option}")?;
+    }
+    Ok(())
+}
+
+pub(crate) fn open_branch_to_string(
+    selection: &Selection,
+    options: &Vec<SimultaneousPathsWithLazyIndirectPaths>,
+) -> String {
+    make_string(&(selection, options), format_open_branch)
+}
+
+// PORT_NOTE: This is a port of `QueryPlanningTraversal.debugStack` JS method.
+pub(crate) fn format_open_branches(
+    f: &mut std::fmt::Formatter<'_>,
+    open_branches: &[OpenBranchAndSelections],
+) -> std::fmt::Result {
+    // Print from the stack top to the bottom.
+    for branch in open_branches.iter().rev() {
+        writeln!(f, "{branch}")?;
+    }
+    Ok(())
+}
+
+pub(crate) fn open_branches_to_string(open_branches: &[OpenBranchAndSelections]) -> String {
+    make_string(open_branches, format_open_branches)
 }
