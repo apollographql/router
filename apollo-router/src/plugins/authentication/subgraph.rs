@@ -19,6 +19,7 @@ use http::HeaderMap;
 use http::Request;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
@@ -31,7 +32,7 @@ use crate::services::SubgraphRequest;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
@@ -64,7 +65,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 }
 
 /// Configuration of the DefaultChainProvider
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
@@ -78,7 +79,7 @@ pub(crate) struct DefaultChainConfig {
 }
 
 /// Specify assumed role configuration.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
@@ -91,7 +92,7 @@ pub(crate) struct AssumeRoleProvider {
 }
 
 /// Configure AWS sigv4 auth.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
@@ -170,7 +171,7 @@ impl AWSSigV4Config {
     }
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]

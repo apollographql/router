@@ -1326,6 +1326,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Authentication",
       "properties": {
+        "connector": {
+          "$ref": "#/definitions/ConnectorConfiguration_for_AuthConfig",
+          "description": "#/definitions/ConnectorConfiguration_for_AuthConfig",
+          "nullable": true
+        },
         "router": {
           "$ref": "#/definitions/RouterConf",
           "description": "#/definitions/RouterConf",
@@ -1763,6 +1768,7 @@ expression: "&schema"
             "$ref": "#/definitions/AuthConfig",
             "description": "#/definitions/AuthConfig"
           },
+          "default": {},
           "description": "Create a configuration that will apply only to a specific subgraph.",
           "type": "object"
         }
@@ -1939,6 +1945,19 @@ expression: "&schema"
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
           "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorConfiguration_for_AuthConfig": {
+      "properties": {
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/AuthConfig",
+            "description": "#/definitions/AuthConfig"
+          },
+          "default": {},
+          "type": "object"
         }
       },
       "type": "object"
