@@ -166,9 +166,10 @@ fn format_open_branch(
 ) -> std::fmt::Result {
     let selection = data.0;
     let options = data.1;
-    writeln!(f, "{selection}:")?;
+    writeln!(f, "{selection}")?;
+    writeln!(f, " * Options:")?;
     for option in options {
-        writeln!(f, "- {option}")?;
+        writeln!(f, "   - {option}")?;
     }
     Ok(())
 }
@@ -305,9 +306,21 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             f: &mut std::fmt::Formatter<'_>,
             data: &QueryPlanningTraversal,
         ) -> std::fmt::Result {
-            for branch in &data.open_branches {
-                let selection = branch.selections.last().unwrap();
-                format_open_branch(f, &(selection, &branch.open_branch.0))?;
+            // Print from the stack top to the bottom.
+            for branch in data.open_branches.iter().rev() {
+                let (current_selection, remaining_selections) =
+                    branch.selections.split_last().unwrap();
+                format_open_branch(f, &(current_selection, &branch.open_branch.0))?;
+                write!(f, " * Remaining selections:")?;
+                if remaining_selections.is_empty() {
+                    writeln!(f, " (none)")?;
+                } else {
+                    // Print in reverse order since remaining selections are processed in that order.
+                    writeln!(f)?; // newline
+                    for selection in remaining_selections.iter().rev() {
+                        writeln!(f, "   - {selection}")?;
+                    }
+                }
             }
             Ok(())
         }
@@ -379,6 +392,12 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let operation_element = selection.element()?;
         let mut new_options = vec![];
         let mut no_followups: bool = false;
+
+        snapshot!(
+            "OpenBranch",
+            open_branch_to_string(selection, options),
+            "open branch"
+        );
 
         for option in options.iter_mut() {
             let followups_for_option = option.advance_with_operation_element(
