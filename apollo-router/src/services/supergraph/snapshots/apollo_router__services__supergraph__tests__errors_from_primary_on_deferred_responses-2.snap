@@ -24,7 +24,10 @@ expression: stream.next_response().await.unwrap()
           "path": [
             "computer",
             "errorField"
-          ]
+          ],
+          "extensions": {
+            "service": "computers"
+          }
         }
       ]
     }

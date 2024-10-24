@@ -23,7 +23,10 @@ expression: stream.next_response().await.unwrap()
             "activeOrganization",
             "suborga",
             0
-          ]
+          ],
+          "extensions": {
+            "service": "orga"
+          }
         }
       ]
     },
@@ -56,7 +59,10 @@ expression: stream.next_response().await.unwrap()
             "activeOrganization",
             "suborga",
             2
-          ]
+          ],
+          "extensions": {
+            "service": "orga"
+          }
         }
       ]
     }

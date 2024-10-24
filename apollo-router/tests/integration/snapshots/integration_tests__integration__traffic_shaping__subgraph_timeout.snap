@@ -2,4 +2,4 @@
 source: apollo-router/tests/integration/traffic_shaping.rs
 expression: response
 ---
-"{\"data\":null,\"errors\":[{\"message\":\"Request timed out\",\"path\":[],\"extensions\":{\"code\":\"REQUEST_TIMEOUT\"}}]}"
+"{\"data\":null,\"errors\":[{\"message\":\"Request timed out\",\"path\":[],\"extensions\":{\"code\":\"REQUEST_TIMEOUT\",\"service\":\"products\"}}]}"
