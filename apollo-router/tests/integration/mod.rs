@@ -12,6 +12,7 @@ mod operation_limits;
 mod operation_name;
 mod query_planner;
 mod subgraph_response;
+mod supergraph;
 mod traffic_shaping;
 mod typename;
 

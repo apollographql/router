@@ -202,6 +202,7 @@ pub(super) fn serve_router_on_listen_addr(
     address: ListenAddr,
     router: axum::Router,
     main_graphql_port: bool,
+    http_config: Http,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -243,6 +244,7 @@ pub(super) fn serve_router_on_listen_addr(
                             }
 
                             let address = address.clone();
+                            let mut http_config = http_config.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
@@ -261,11 +263,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
-                                            let connection = Http::new()
-                                            .http1_keep_alive(true)
-                                            .http1_header_read_timeout(Duration::from_secs(10))
-                                            .serve_connection(stream, app);
 
+                                        let connection = http_config.serve_connection(stream, app);
                                         tokio::pin!(connection);
                                         tokio::select! {
                                             // the connection finished first
@@ -291,9 +290,7 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
-                                        let connection = Http::new()
-                                        .http1_keep_alive(true)
-                                        .serve_connection(stream, app);
+                                        let connection = http_config.serve_connection(stream, app);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -329,9 +326,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             let protocol = stream.get_ref().1.alpn_protocol();
                                             let http2 = protocol == Some(&b"h2"[..]);
 
-                                            let connection = Http::new()
-                                            .http1_keep_alive(true)
-                                            .http1_header_read_timeout(Duration::from_secs(10))
+                                        let connection = http_config
                                             .http2_only(http2)
                                             .serve_connection(stream, app);
 

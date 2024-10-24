@@ -6592,6 +6592,14 @@ expression: "&schema"
           "description": "abort request handling when the client drops the connection. Default: false. When set to true, some parts of the request pipeline like telemetry will not work properly, but request handling will stop immediately when the client connection is closed.",
           "type": "boolean"
         },
+        "experimental_http1_max_headers": {
+          "default": null,
+          "description": "Set the maximum number of headers for HTTP1 protocol\n\nIf server receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".\n\nDefault is 100.",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "experimental_log_on_broken_pipe": {
           "default": false,
           "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
