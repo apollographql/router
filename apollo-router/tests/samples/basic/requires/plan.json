@@ -1,0 +1,244 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestA__accounts__0{a{__typename id a}}",
+                                    "operationName": "TestA__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "a": {
+                                            "__typename": "A",
+                                            "id": "1",
+                                            "a": "a"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestA__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on A{b{b}}}}",
+                                    "operationName": "TestA__reviews__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "A",
+                                                "a": "a",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "b": {
+                                                    "b": "b"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestA__products__2($representations:[_Any!]!){_entities(representations:$representations){...on A{c{c}}}}",
+                                    "operationName": "TestA__products__2",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "A",
+                                                "b": {
+                                                    "b": "b"
+                                                },
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "c": {
+                                                    "c": "c"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestA { a { c { c } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "a": {
+                        "c": {
+                            "c": "c"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__accounts__0{d{__typename id}}",
+                                    "operationName": "TestD__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "d": {
+                                            "__typename": "D",
+                                            "id": "1"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on D{i{__typename x}}}}",
+                                    "operationName": "TestD__reviews__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "D",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "i": [
+                                                    {
+                                                        "x": "xy"
+                                                    },
+                                                    {
+                                                        "x": "xz"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__products__2($representations:[_Any!]!){_entities(representations:$representations){...on D{j}}}",
+                                    "operationName": "TestD__products__2",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "D",
+                                                "i": [
+                                                    {
+                                                        "x": "xy",
+                                                        "y": "y"
+                                                    },
+                                                    {
+                                                        "x": "xz",
+                                                        "z": "z"
+                                                    }
+                                                ],
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "j": "j"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestD { d { j } }"
+            },
+            "headers": {
+                "Apollo-Expose-Query-Plan": "true"
+            },
+            "expected_response": {
+                "data": {
+                    "d": {
+                        "j": "j"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}
