@@ -476,6 +476,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use futures::future::join_all;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
@@ -485,6 +486,7 @@ mod test {
 
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
@@ -962,5 +964,55 @@ mod test {
             .unwrap()
             .errors
             .is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_collects_metric_for_query_deduplication() {
+        async {
+            let config = serde_yaml::from_str::<serde_json::Value>(
+                r#"
+        all:
+            deduplicate_query: true
+        "#,
+            )
+            .unwrap();
+            // Build a traffic shaping plugin
+            let plugin = get_traffic_shaping_plugin(&config).await;
+
+            let mut tasks = Vec::new();
+            let product_mocks = vec![
+            (
+                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","operationName":"TopProducts__products__0","variables":{"first":2}}"#,
+                r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
+            ),
+            (
+                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"data":{"_entities":[{"name":"Table"},{"name":"Couch"}]}}"#
+            )
+            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+            let product_service = MockSubgraph::new(product_mocks).with_delay(std::time::Duration::from_millis(50));
+
+            let tf_plugin = plugin.as_any().downcast_ref::<TrafficShaping>().unwrap();
+            let sub_plugin = tf_plugin.subgraph_service_internal("products", product_service.clone());
+            for _ in 0..5 {
+                let mut sub_service  = sub_plugin.clone();
+                tasks.push(async move {
+                    let request = SubgraphRequest::fake_builder().build();
+
+                    let _response = sub_service
+                        .ready()
+                        .await
+                        .unwrap()
+                        .call(request)
+                        .await
+                        .unwrap();
+                });
+            }
+            join_all(tasks).await;
+
+            assert_counter!("apollo.router.deduplicated.queries", 4);
+        }
+        .with_metrics()
+        .await
     }
 }

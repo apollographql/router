@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
