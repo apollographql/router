@@ -11,8 +11,8 @@ redirectFrom:
 
 GraphOS Router is the runtime of the GraphOS platform. It executes client operations by planning and executing subgraph queries, then merging them into client responses. It's also the single entry point and gateway to your federated GraphQL API.
 
-<img src='../img/get-started/super-routing-1.svg' class="dark:hidden"/>
-<img src='../img/get-started/super-routing-1-dark.svg' class="hidden dark:block"/>
+<img src='../images/get-started/super-routing-1.svg' class="dark:hidden"/>
+<img src='../images/get-started/super-routing-1-dark.svg' class="hidden dark:block"/>
 
 ### Runtime of GraphOS platform 
 
@@ -24,8 +24,8 @@ Unlike API gateways that offer capabilities to manage API endpoints, the router 
 
 Whenever your router receives an incoming GraphQL operation, it needs to figure out how to use your subgraphs to populate data for each of that operation's fields. To do this, the router generates a _query plan_:
 
-<img src='../img/get-started/qp.svg' class="dark:hidden"/>
-<img src='../img/get-started/qp-dark.svg' class="hidden dark:block"/>
+<img src='../images/get-started/qp.svg' class="dark:hidden"/>
+<img src='../images/get-started/qp-dark.svg' class="hidden dark:block"/>
 
 A query plan is a blueprint for dividing a single incoming operation into one or more operations that are each resolvable by a single subgraph. Some of these operations depend on the results of other operations, so the query plan also defines any required ordering for their execution. The router's query planner determines the optimal set of subgraph queries for each client operation, then it merges the subgraph responses into a single response for the client. 
 
@@ -47,8 +47,8 @@ As the entry point to your supergraph, a GraphOS Router must be able to process 
 
 You can choose for Apollo to provision and manage the runtime infrastructure for your routers. Apollo hosts and deploys each instance of router in the cloud. Each _cloud-hosted router_ instance is fully integrated and configurable within GraphOS.
 
-<img src='../img/get-started/super-routing-2.svg' class="dark:hidden"/>
-<img src='../img/get-started/super-routing-2-dark.svg' class="hidden dark:block"/>
+<img src='../images/get-started/super-routing-2.svg' class="dark:hidden"/>
+<img src='../images/get-started/super-routing-2-dark.svg' class="hidden dark:block"/>
 
 <Note>
 
@@ -60,8 +60,8 @@ While cloud routers are hosted in the cloud, GraphQL subgraph servers are still 
 
 You can choose to manage the runtime infrastructure for your routers by yourself. Using container images of router, you can host and deploy your router instances from your own infrastructure. These _self-hosted router_ instances allow you full control over their deployment.
 
-<img src='../img/get-started/super-routing-3.svg' class="dark:hidden"/>
-<img src='../img/get-started/super-routing-3-dark.svg' class="hidden dark:block"/>
+<img src='../images/get-started/super-routing-3.svg' class="dark:hidden"/>
+<img src='../images/get-started/super-routing-3-dark.svg' class="hidden dark:block"/>
 
 ### Common router core
 
