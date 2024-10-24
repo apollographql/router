@@ -62,6 +62,7 @@ use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
+use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ACTUAL;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ESTIMATED;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_RESULT;
@@ -150,9 +151,10 @@ const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
 ];
 
 /// Additional attributes to include when sending to the OTLP protocol.
-const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
+const OTLP_EXT_INCLUDE_ATTRS: [Key; 6] = [
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
+    SUBGRAPH_GRAPHQL_DOCUMENT,
     opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
