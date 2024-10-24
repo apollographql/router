@@ -14,6 +14,7 @@ mod query_planner;
 mod subgraph_response;
 mod traffic_shaping;
 mod typename;
+mod supergraph;
 
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;
