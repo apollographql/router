@@ -47,6 +47,7 @@ pub(crate) struct BothModeComparisonJob {
     pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
     pub(crate) plan_options: QueryPlanOptions,
+    pub(crate) span: Option<tracing::Span>,
 }
 
 type Queue = crossbeam_channel::Sender<BothModeComparisonJob>;
@@ -59,8 +60,14 @@ fn queue() -> &'static Queue {
         for _ in 0..WORKER_THREAD_COUNT {
             let job_receiver = receiver.clone();
             std::thread::spawn(move || {
-                for job in job_receiver {
-                    job.execute()
+                for mut job in job_receiver {
+                    let span = job.span.take();
+                    if let Some(span) = span {
+                        let _guard = span.enter();
+                        job.execute()
+                    } else {
+                        job.execute()
+                    }
                 }
             });
         }
