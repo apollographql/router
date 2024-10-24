@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/steelthread.yaml > apollo-router/src/plugins/connectors/testdata/steelthread.graphql
-federation_version: =2.10.0-alpha.0
+federation_version: =2.10.0-preview.0
 subgraphs:
   connectors:
     routing_url: none
@@ -57,7 +57,12 @@ subgraphs:
           user(id: ID!): User
             @connect(
               source: "json"
-              http: { GET: "/users/{$$args.id}" }
+              http: {
+                GET: "/users/{$$args.id}"
+                headers: [
+                 {name: "x-from-args" value: "before {$$args.id} after"}
+                ]
+              }
               selection: """
               id
               name
@@ -78,6 +83,17 @@ subgraphs:
           id: ID!
           name: String
           username: String
+          nickname: String
+            @connect(
+              source: "json"
+              http: {
+                GET: "/users/{$$this.id}/nicknames"
+                headers: [
+                 {name: "x-from-this" value: "before {$$this.id} after"}
+                ]
+              }
+              selection: "$.first"
+            )
           c: String @external
           d: String
             @requires(fields: "c")
