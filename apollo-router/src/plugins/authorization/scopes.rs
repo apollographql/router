@@ -1191,6 +1191,7 @@ mod tests {
     type Query {
         test: String
         itf: I!
+        a: A
     }
     interface I @requiresScopes(scopes: [["itf"]]) {
         id: ID
@@ -1294,6 +1295,40 @@ mod tests {
             scopes: ["itf".to_string(), "a".to_string(), "b".to_string()]
                 .into_iter()
                 .collect(),
+            result: doc,
+            paths
+        });
+
+        static QUERY3: &str = r#"
+        query {
+            test
+            a {
+                id
+            }
+        }
+        "#;
+
+        let extracted_scopes = extract(INTERFACE_SCHEMA, QUERY3);
+        let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY3, HashSet::new());
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY3,
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
+            result: doc,
+            paths
+        });
+
+        let (doc, paths) = filter(
+            INTERFACE_SCHEMA,
+            QUERY3,
+            ["itf".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY3,
+            extracted_scopes: &extracted_scopes,
+            scopes: ["a".to_string(), "b".to_string()].into_iter().collect(),
             result: doc,
             paths
         });
