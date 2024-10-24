@@ -1310,11 +1310,15 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                   "name": "arg",
                   "description": null,
                   "type": {
-                    "kind": "INPUT_OBJECT",
-                    "name": "In",
-                    "ofType": null
+                    "kind": "LIST",
+                    "name": null,
+                    "ofType": {
+                      "kind": "INPUT_OBJECT",
+                      "name": "In",
+                      "ofType": null
+                    }
                   },
-                  "defaultValue": "{b: 4, a: 2}",
+                  "defaultValue": "[{b: 4, a: 2}]",
                   "isDeprecated": false,
                   "deprecationReason": null
                 }

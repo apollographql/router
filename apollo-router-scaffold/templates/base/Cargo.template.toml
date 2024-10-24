@@ -22,11 +22,10 @@ apollo-router = { path ="{{integration_test}}apollo-router" }
 apollo-router = { git="https://github.com/apollographql/router.git", branch="{{branch}}" }
 {{else}}
 # Note if you update these dependencies then also update xtask/Cargo.toml
-apollo-router = "1.55.0"
+apollo-router = "1.57.0"
 {{/if}}
 {{/if}}
 async-trait = "0.1.52"
-futures = "0.3.21"
 schemars = "0.8.10"
 serde = "1.0.149"
 serde_json = "1.0.79"
