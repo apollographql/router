@@ -55,6 +55,7 @@ lazy_static! {
         public_methods.insert("match");
         // public_methods.insert("matchIf");
         // public_methods.insert("match_if");
+        // public_methods.insert("mapValues");
         // public_methods.insert("add");
         // public_methods.insert("sub");
         // public_methods.insert("mul");
@@ -114,6 +115,11 @@ lazy_static! {
         // easy, since the last pair can be [true, <default>].
         methods.insert("matchIf".to_string(), future::match_if_method);
         methods.insert("match_if".to_string(), future::match_if_method);
+
+        // Takes an object with unknown keys, binds @ to each of those keys'
+        // values, evaluates the first argument against each @ value, then
+        // produces a new object with the same keys but newly mapped values.
+        methods.insert("mapValues".to_string(), future::map_values_method);
 
         // Arithmetic methods
         methods.insert("add".to_string(), future::add_method);
