@@ -3443,7 +3443,11 @@ pub(crate) fn compute_nodes_for_tree(
             }
         }
     }
-    snapshot!(dependency_graph, "updated_dependency_graph");
+    snapshot!(
+        "FetchDependencyGraph",
+        dependency_graph.to_dot(),
+        "Fetch dependency graph updated by compute_nodes_for_tree"
+    );
     Ok(created_nodes)
 }
 
