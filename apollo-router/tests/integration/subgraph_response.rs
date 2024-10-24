@@ -130,7 +130,7 @@ async fn test_valid_extensions_service_is_preserved_for_subgraph_error() -> Resu
                 "message": "Some error on subgraph",
                 "path": ["topProducts"],
                 "extensions": {
-                    "service": 3.14,
+                    "service": 42,
                 }
             }]
         })))
@@ -152,7 +152,7 @@ async fn test_valid_extensions_service_is_preserved_for_subgraph_error() -> Resu
                 "message": "Some error on subgraph",
                 "path":["topProducts"],
                 "extensions": {
-                    "service": 3.14
+                    "service": 42,
                 }
             }]
         })
@@ -335,7 +335,7 @@ async fn test_invalid_error_locations_with_single_negative_one_location() -> Res
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [{ "line": -1, "column": -1 }],
-                "path": ["topProducts"],
+                "path": ["topProducts"]
             }]
         })))
         .build()
