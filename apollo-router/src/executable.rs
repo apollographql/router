@@ -340,7 +340,11 @@ pub fn main() -> Result<()> {
         builder.worker_threads(nb);
     }
     let runtime = builder.build()?;
-    runtime.block_on(Executable::builder().start())
+    if std::env::current_exe()?.ends_with("router") {
+        runtime.block_on(Executable::builder().start())
+    } else {
+        runtime.block_on(Executable::builder_rhai().start_rhai())
+    }
 }
 
 /// Entry point into creating a router executable with more customization than [`main`].
@@ -464,6 +468,30 @@ impl Executable {
             .await?;
         }
         result
+    }
+
+    /// Returns a builder that can parse command-line options and run a Router
+    /// in an existing Tokio runtime and be used to test rhai code.
+    #[builder(entry = "builder_rhai", exit = "start_rhai", visibility = "pub")]
+    async fn start_rhai(
+        _shutdown: Option<ShutdownSource>,
+        _schema: Option<SchemaSource>,
+        _config: Option<ConfigurationSource>,
+    ) -> Result<()> {
+        use crate::router_rhai;
+
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() != 4 {
+            eprintln!("usage: {} <scripts> <main> <function>", args[0]);
+            eprintln!(
+                "example: {} apollo-router/tests/fixtures request_response_test.rhai process_subgraph_response_om_ok",
+                args[0]
+            );
+            return Err(anyhow::anyhow!("invalid arguments provided"));
+        }
+        router_rhai::base_process_function(&args[1], &args[2], &args[3])
+            .await
+            .map_err(|e| anyhow::Error::new(e))
     }
 
     async fn inner_start(
