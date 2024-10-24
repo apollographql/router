@@ -1,0 +1,89 @@
+---
+title: Secure Subgraphs
+subtitle: Restrict access to your cloud supergraph using secrets
+description: Generate a shared secret and configure your graph router and subgraphs to secure your federated GraphQL API.
+redirectFrom:
+    - /graphos/graphs/securing-a-subgraph
+---
+
+To keep your supergraph secure, it's important that your individual subgraphs are [queried only by your router](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs). That's because your subgraphs expose powerful fields that the router uses to execute operations across them. External clients should not have access to these fields.
+
+To restrict subgraph communication to only your router, Apollo recommends creating a separate shared secret for each of your subgraphs. Whenever your router queries a subgraph, it includes that subgraph's corresponding secret in an HTTP header.
+
+## Secure your graph using secrets
+
+This article describes steps for securing your subgraphs when using a [cloud supergraph](/graphos/routing/cloud).
+
+<Tip>
+
+As with all changes, we recommend first performing these steps for a non-production variant of your supergraph.
+
+</Tip>
+
+### Step 1. Generate a shared secret
+
+You can generate a random secret using a variety of tools. For example, most password managers provide this functionality.
+
+Here are some shell commands that generate a suitably random secret if you have the corresponding tool installed:
+
+- `openssl rand -base64 256`
+- `python -c "import secrets; print(secrets.token_urlsafe(256))"`
+- `node -e "console.log(require('crypto').randomBytes(256).toString('base64'));"`
+
+### Step 2. Add the secret to your router config
+
+Your cloud supergraph's router needs to know the shared secret so it can include it in all requests to the corresponding subgraph. You add the secret in the **Cloud Routing** section of your graph variant's Settings page.
+
+<Tip>
+
+For details, see [Managing secrets](/graphos/routing/cloud/configuration#managing-secrets).
+
+</Tip>
+
+After you define the secret, you can inject its value into your router's configuration as an environment variable, as shown below. We recommend setting the value in a header named `Router-Authorization` (and again, create a separate secret for each subgraph):
+
+```yaml
+headers:
+  subgraphs:
+    products:
+      request:
+        - insert:
+            name: 'Router-Authorization'
+            value: '${env.PRODUCTS_SUBGRAPH_SECRET}'
+    users:
+      request:
+        - insert:
+            name: 'Router-Authorization'
+            value: '${env.USERS_SUBGRAPH_SECRET}'
+```
+
+### Step 3. Configure the subgraph to require the secret
+
+The exact steps you take to require the shared secret in your subgraph depend on:
+
+- The language and framework your subgraph uses
+- The service you use to host your subgraph
+
+Most cloud providers include a mechanism for saving secrets that are then made available to your application as environment variables. Your subgraph should read the secret from an environment variable and reject any incoming requests that don't include that secret in the specified header.
+
+<Note>
+
+All subgraph templates [provided by the Rover CLI](/graphos/graphs/creating-a-subgraph#starting-from-a-template) include this functionality out of the box. To use it, set the value of the `ROUTER_SECRET` environment variable.
+
+If you have an existing subgraph that wasn't created from a template, you can check a similar template's source code for an example.
+
+</Note>
+
+### Step 4. Test the configuration
+
+After adding the shared secret to both your router and subgraph, do the following to confirm that communication has been secured as intended:
+
+1. Verify that your router can still communicate with the subgraph by executing a test query against the router from the Explorer.
+   - Make sure the query includes at least one field from the relevant subgraph!
+2. Verify that other clients can't communicate with the subgraph by executing a test query against the subgraph directly.
+   - This query should fail with an authorization error.
+
+## Next steps
+
+You can use router configurations such as JWT authentication, authorization, and safelisting to further secure your graph.
+Checkout the Router Configuration [security section](../../routing/security) to learn more.
