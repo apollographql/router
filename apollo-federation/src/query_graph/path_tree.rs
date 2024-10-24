@@ -226,11 +226,20 @@ where
 
         struct ByUniqueEdge<'inputs, TTrigger, GraphPathIter> {
             target_node: NodeIndex,
-            by_unique_trigger:
-                IndexMap<&'inputs Arc<TTrigger>, PathTreeChildInputs<'inputs, GraphPathIter>>,
+            by_unique_trigger: IndexMap<
+                &'inputs Arc<TTrigger>,
+                PathTreeChildInputs<'inputs, TTrigger, GraphPathIter>,
+            >,
         }
 
-        struct PathTreeChildInputs<'inputs, GraphPathIter> {
+        struct PathTreeChildInputs<'inputs, TTrigger, GraphPathIter> {
+            /// trigger: the final trigger value
+            ///   - Two equivalent triggers can have minor differences in the sibling_typename.
+            ///     This field holds the final trigger value that will be used.
+            /// PORT_NOTE: The JS QP used the last trigger value. So, we are following that
+            ///            to avoid mismatches. But, it can be revisited.
+            ///            We may want to keep or merge the sibling_typename values.
+            trigger: &'inputs Arc<TTrigger>,
             conditions: Option<Arc<OpPathTree>>,
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
         }
@@ -263,6 +272,7 @@ where
             match for_edge.by_unique_trigger.entry(trigger) {
                 Entry::Occupied(entry) => {
                     let existing = entry.into_mut();
+                    existing.trigger = trigger;
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
                     existing
                         .sub_paths_and_selections
@@ -271,6 +281,7 @@ where
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(PathTreeChildInputs {
+                        trigger,
                         conditions: conditions.clone(),
                         sub_paths_and_selections: vec![(graph_path_iter, selection)],
                     });
@@ -280,10 +291,10 @@ where
 
         let mut childs = Vec::new();
         for (edge, by_unique_edge) in merged {
-            for (trigger, child) in by_unique_edge.by_unique_trigger {
+            for (_, child) in by_unique_edge.by_unique_trigger {
                 childs.push(Arc::new(PathTreeChild {
                     edge,
-                    trigger: trigger.clone(),
+                    trigger: child.trigger.clone(),
                     conditions: child.conditions.clone(),
                     tree: Arc::new(Self::from_paths(
                         graph.clone(),

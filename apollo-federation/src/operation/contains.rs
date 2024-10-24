@@ -14,8 +14,9 @@ pub(super) fn is_deferred_selection(directives: &executable::DirectiveList) -> b
 /// Options for the `.containment()` family of selection functions.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ContainmentOptions {
-    /// If the right-hand side has a __typename selection but the left-hand side does not,
-    /// still consider the left-hand side to contain the right-hand side.
+    /// During query planning, we may add `__typename` selections to sets that did not have it
+    /// initially. If the right-hand side has a `__typename` selection but the left-hand side
+    /// does not, this option still considers the left-hand side to contain the right-hand side.
     pub(crate) ignore_missing_typename: bool,
 }
 

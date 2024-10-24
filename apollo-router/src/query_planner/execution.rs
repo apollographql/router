@@ -311,6 +311,8 @@ impl PlanNode {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         } else {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
+                            // primary response should be an empty object
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -331,11 +333,6 @@ impl PlanNode {
                         let v = parameters
                             .query
                             .variable_value(
-                                parameters
-                                    .supergraph_request
-                                    .body()
-                                    .operation_name
-                                    .as_deref(),
                                 condition.as_str(),
                                 &parameters.supergraph_request.body().variables,
                             )
