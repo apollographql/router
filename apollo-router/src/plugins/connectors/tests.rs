@@ -1361,7 +1361,12 @@ async fn test_interface_object() {
 }
 
 mod quickstart_tests {
+    use http::Uri;
+
     use super::*;
+    use crate::test_harness::http_snapshot::SnapshotServer;
+
+    const SNAPSHOT_DIR: &str = "./src/plugins/connectors/testdata/quickstart_api_snapshots/";
 
     macro_rules! map {
         ($($tt:tt)*) => {
@@ -1369,98 +1374,31 @@ mod quickstart_tests {
         };
     }
 
-    async fn execute(query: &str, variables: JsonMap) -> (serde_json::Value, MockServer) {
-        let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/posts")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                },
-                {
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }]
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET")).and(path("/posts/1")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!(
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                }
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET")).and(path("/posts/2")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET"))
-            .and(path("/users/1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-              "id": 1,
-              "name": "Leanne Graham",
-              "username": "Bret",
-              "email": "Sincere@april.biz",
-              "address": {
-                "street": "Kulas Light",
-                "suite": "Apt. 556",
-                "city": "Gwenborough",
-                "zipcode": "92998-3874",
-                "geo": {
-                  "lat": "-37.3159",
-                  "lng": "81.1496"
-                }
-              },
-              "phone": "1-770-736-8031 x56442",
-              "website": "hildegard.org",
-              "company": {
-                "name": "Romaguera-Crona",
-                "catchPhrase": "Multi-layered client-server neural-net",
-                "bs": "harness real-time e-markets"
-              }
-            })))
-            .mount(&mock_server)
-            .await;
-        Mock::given(method("GET")).and(path("/users/1/posts")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                },
-                {
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }]
-            )),
-        ).mount(&mock_server).await;
+    async fn execute(
+        query: &str,
+        variables: JsonMap,
+        snapshot_file_name: &str,
+    ) -> serde_json::Value {
+        let snapshot_path = [SNAPSHOT_DIR, snapshot_file_name, ".json"].concat();
 
-        let res = super::execute(
-            &QUICKSTART_SCHEMA.replace("https://jsonplaceholder.typicode.com", &mock_server.uri()),
-            &mock_server.uri(),
+        let server = SnapshotServer::spawn(
+            snapshot_path,
+            Uri::from_str("https://jsonPlaceholder.typicode.com/").unwrap(),
+            true,
+            false,
+            Some(vec![CONTENT_TYPE.to_string()]),
+        )
+        .await;
+
+        super::execute(
+            &QUICKSTART_SCHEMA.replace("https://jsonplaceholder.typicode.com", &server.uri()),
+            &server.uri(),
             query,
             variables,
             None,
             |_| {},
         )
-        .await;
-
-        (res, mock_server)
+        .await
     }
 
     #[tokio::test]
@@ -1475,7 +1413,7 @@ mod quickstart_tests {
           }
         "#;
 
-        let (response, server) = execute(query, Default::default()).await;
+        let response = execute(query, Default::default(), "query_1").await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1495,11 +1433,6 @@ mod quickstart_tests {
           }
         }
         "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![Matcher::new().method("GET").path("/posts").build()],
-        );
     }
 
     #[tokio::test]
@@ -1514,7 +1447,7 @@ mod quickstart_tests {
           }
         "#;
 
-        let (response, server) = execute(query, map!({ "postId": "1" })).await;
+        let response = execute(query, map!({ "postId": "1" }), "query_2").await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1527,11 +1460,6 @@ mod quickstart_tests {
           }
         }
         "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![Matcher::new().method("GET").path("/posts/1").build()],
-        );
     }
 
     #[tokio::test]
@@ -1550,7 +1478,7 @@ mod quickstart_tests {
           }
       "#;
 
-        let (response, server) = execute(query, map!({ "postId": "1" })).await;
+        let response = execute(query, map!({ "postId": "1" }), "query_3").await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1567,14 +1495,6 @@ mod quickstart_tests {
           }
         }
         "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/posts/1").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-            ],
-        );
     }
 
     #[tokio::test]
@@ -1596,7 +1516,7 @@ mod quickstart_tests {
           }
       "#;
 
-        let (response, server) = execute(query, map!({ "userId": "1" })).await;
+        let response = execute(query, map!({ "userId": "1" }), "query_4").await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1626,17 +1546,6 @@ mod quickstart_tests {
           }
         }
         "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/users/1").build(),
-                Matcher::new().method("GET").path("/users/1/posts").build(),
-                Matcher::new().method("GET").path("/posts/1").build(),
-                Matcher::new().method("GET").path("/posts/2").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-            ],
-        );
     }
 }
 
