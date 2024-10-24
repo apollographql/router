@@ -79,7 +79,7 @@ pub(crate) fn make_string<T: ?Sized>(
 // PORT_NOTE: This is a (partial) port of `QueryPlanningTraversal.debugStack` JS method.
 pub(crate) fn format_open_branch(
     f: &mut std::fmt::Formatter<'_>,
-    (selection, options): &(&Selection, &Vec<SimultaneousPathsWithLazyIndirectPaths>),
+    (selection, options): &(&Selection, &[SimultaneousPathsWithLazyIndirectPaths]),
 ) -> std::fmt::Result {
     writeln!(f, "{selection}")?;
     writeln!(f, " * Options:")?;
@@ -91,7 +91,7 @@ pub(crate) fn format_open_branch(
 
 pub(crate) fn open_branch_to_string(
     selection: &Selection,
-    options: &Vec<SimultaneousPathsWithLazyIndirectPaths>,
+    options: &[SimultaneousPathsWithLazyIndirectPaths],
 ) -> String {
     make_string(&(selection, options), format_open_branch)
 }
