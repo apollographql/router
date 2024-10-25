@@ -53,9 +53,7 @@ impl JSONSelection {
 
     pub fn is_empty(&self) -> bool {
         match self {
-            JSONSelection::Named(subselect) => {
-                subselect.selections.is_empty() && subselect.star.is_none()
-            }
+            JSONSelection::Named(subselect) => subselect.selections.is_empty(),
             JSONSelection::Path(path) => *path.path == PathList::Empty,
         }
     }
@@ -688,7 +686,6 @@ impl ExternalVarPaths for PathList {
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
-    pub(super) star: Option<StarSelection>,
     pub(super) range: OffsetRange,
 }
 
@@ -716,7 +713,6 @@ impl SubSelection {
                 remainder,
                 Self {
                     selections: sub.selections,
-                    star: sub.star,
                     range,
                 },
             )
@@ -724,34 +720,15 @@ impl SubSelection {
     }
 
     fn parse_naked(input: Span) -> IResult<Span, Self> {
-        tuple((
-            spaces_or_comments,
-            many0(NamedSelection::parse),
-            // Note that when a * selection is used, it must be the last
-            // selection in the SubSelection, since it does not count as a
-            // NamedSelection, and is stored as a separate field from the
-            // selections vector.
-            opt(StarSelection::parse),
-        ))(input)
-        .map(|(remainder, (_, selections, star))| {
-            let range = merge_ranges(
-                selections.first().and_then(|first| first.range()),
-                selections.last().and_then(|last| last.range()),
-            );
-            let range = if let Some(star) = star.as_ref() {
-                merge_ranges(range, star.range())
-            } else {
-                range
-            };
-            (
-                remainder,
-                Self {
-                    selections,
-                    star,
-                    range,
-                },
-            )
-        })
+        preceded(spaces_or_comments, many0(NamedSelection::parse))(input).map(
+            |(remainder, selections)| {
+                let range = merge_ranges(
+                    selections.first().and_then(|first| first.range()),
+                    selections.last().and_then(|last| last.range()),
+                );
+                (remainder, Self { selections, range })
+            },
+        )
     }
 
     // Returns an Iterator over each &NamedSelection that contributes a single
@@ -791,18 +768,6 @@ impl SubSelection {
         selections.into_iter()
     }
 
-    pub fn has_star(&self) -> bool {
-        self.star.is_some()
-    }
-
-    pub fn set_star(&mut self, star: Option<StarSelection>) {
-        self.star = star;
-    }
-
-    pub fn star_iter(&self) -> impl Iterator<Item = &StarSelection> {
-        self.star.iter()
-    }
-
     pub fn append_selection(&mut self, selection: NamedSelection) {
         self.selections.push(selection);
     }
@@ -819,60 +784,6 @@ impl ExternalVarPaths for SubSelection {
             paths.extend(selection.external_var_paths());
         }
         paths
-    }
-}
-
-// StarSelection ::= Alias? "*" SubSelection?
-
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct StarSelection {
-    pub(super) alias: Option<Alias>,
-    pub(super) selection: Option<Box<SubSelection>>,
-    pub(super) range: OffsetRange,
-}
-
-impl Ranged<StarSelection> for StarSelection {
-    fn range(&self) -> OffsetRange {
-        self.range.clone()
-    }
-}
-
-impl StarSelection {
-    pub(crate) fn alias(&self) -> Option<&Alias> {
-        self.alias.as_ref()
-    }
-
-    pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
-        tuple((
-            // The spaces_or_comments separators are necessary here because
-            // Alias::parse and SubSelection::parse only consume surrounding
-            // spaces when they match, and they are both optional here.
-            opt(Alias::parse),
-            spaces_or_comments,
-            ranged_span("*"),
-            opt(SubSelection::parse),
-        ))(input)
-        .map(|(remainder, (alias, _, star, selection))| {
-            let range = star.range();
-            let range = if let Some(alias) = alias.as_ref() {
-                merge_ranges(alias.range(), range)
-            } else {
-                range
-            };
-            let range = if let Some(selection) = selection.as_ref() {
-                merge_ranges(range, selection.range())
-            } else {
-                range
-            };
-            (
-                remainder,
-                Self {
-                    alias,
-                    selection: selection.map(Box::new),
-                    range,
-                },
-            )
-        })
     }
 }
 
@@ -2625,171 +2536,6 @@ mod tests {
     }
 
     #[test]
-    fn test_star_selection() {
-        fn check_parsed(input: &str, expected: StarSelection) {
-            let (remainder, parsed) = StarSelection::parse(Span::new(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
-            assert_eq!(parsed.strip_ranges(), expected);
-        }
-
-        check_parsed(
-            "rest: *",
-            StarSelection {
-                alias: Some(Alias::new("rest")),
-                ..Default::default()
-            },
-        );
-
-        check_parsed(
-            "*",
-            StarSelection {
-                ..Default::default()
-            },
-        );
-
-        check_parsed(
-            " * ",
-            StarSelection {
-                ..Default::default()
-            },
-        );
-        check_parsed(
-            " * { hello } ",
-            StarSelection {
-                selection: Some(Box::new(SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        None,
-                        Key::field("hello").into_with_range(),
-                        None,
-                    )],
-                    ..Default::default()
-                })),
-                ..Default::default()
-            },
-        );
-
-        check_parsed(
-            "hi: * { hello }",
-            StarSelection {
-                alias: Some(Alias::new("hi")),
-                selection: Some(Box::new(SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        None,
-                        Key::field("hello").into_with_range(),
-                        None,
-                    )],
-                    ..Default::default()
-                })),
-                ..Default::default()
-            },
-        );
-
-        check_parsed(
-            "alias: * { x y z rest: * }",
-            StarSelection {
-                alias: Some(Alias::new("alias")),
-                selection: Some(Box::new(SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(None, Key::field("x").into_with_range(), None),
-                        NamedSelection::Field(None, Key::field("y").into_with_range(), None),
-                        NamedSelection::Field(None, Key::field("z").into_with_range(), None),
-                    ],
-                    star: Some(StarSelection {
-                        alias: Some(Alias::new("rest")),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            },
-        );
-
-        assert_eq!(
-            selection!(" before alias: * { * { a b c } } ").strip_ranges(),
-            JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Key::field("before").into_with_range(),
-                    None
-                )],
-                star: Some(StarSelection {
-                    alias: Some(Alias::new("alias")),
-                    selection: Some(Box::new(SubSelection {
-                        selections: vec![],
-                        star: Some(StarSelection {
-                            selection: Some(Box::new(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(
-                                        None,
-                                        Key::field("a").into_with_range(),
-                                        None
-                                    ),
-                                    NamedSelection::Field(
-                                        None,
-                                        Key::field("b").into_with_range(),
-                                        None
-                                    ),
-                                    NamedSelection::Field(
-                                        None,
-                                        Key::field("c").into_with_range(),
-                                        None
-                                    ),
-                                ],
-                                ..Default::default()
-                            })),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    })),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-        );
-
-        assert_eq!(
-            selection!(" before group: { * { a b c } } after ").strip_ranges(),
-            JSONSelection::Named(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Key::field("before").into_with_range(), None),
-                    NamedSelection::Group(
-                        Alias::new("group"),
-                        SubSelection {
-                            selections: vec![],
-                            star: Some(StarSelection {
-                                selection: Some(Box::new(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("a").into_with_range(),
-                                            None
-                                        ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("b").into_with_range(),
-                                            None
-                                        ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("c").into_with_range(),
-                                            None
-                                        ),
-                                    ],
-                                    ..Default::default()
-                                })),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        },
-                    ),
-                    NamedSelection::Field(None, Key::field("after").into_with_range(), None),
-                ],
-                ..Default::default()
-            }),
-        );
-    }
-
-    #[test]
     fn test_external_var_paths() {
         fn parse(input: &str) -> PathSelection {
             PathSelection::parse(Span::new(input))
@@ -2877,7 +2623,6 @@ mod tests {
                     None,
                 )],
                 range: Some(0..5),
-                ..Default::default()
             }),
         );
 
@@ -2890,7 +2635,6 @@ mod tests {
                     None,
                 )],
                 range: Some(2..7),
-                ..Default::default()
             }),
         );
 
@@ -2914,11 +2658,9 @@ mod tests {
                             ),
                         ],
                         range: Some(9..20),
-                        ..Default::default()
                     }),
                 )],
                 range: Some(2..20),
-                ..Default::default()
             }),
         );
 
@@ -3014,7 +2756,6 @@ mod tests {
                                                         ),
                                                     ],
                                                     range: Some(28..37),
-                                                    ..Default::default()
                                                 }),
                                                 Some(28..37),
                                             ),
@@ -3033,7 +2774,6 @@ mod tests {
                     ),
                 ],
                 range: Some(0..42),
-                ..Default::default()
             }),
         );
     }

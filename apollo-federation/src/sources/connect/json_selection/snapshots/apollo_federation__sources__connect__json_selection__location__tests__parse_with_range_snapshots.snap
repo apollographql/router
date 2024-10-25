@@ -94,7 +94,6 @@ Named(
                                                                                 None,
                                                                             ),
                                                                         ],
-                                                                        star: None,
                                                                         range: Some(
                                                                             46..54,
                                                                         ),
@@ -102,7 +101,6 @@ Named(
                                                                 ),
                                                             ),
                                                         ],
-                                                        star: None,
                                                         range: Some(
                                                             32..55,
                                                         ),
@@ -381,7 +379,6 @@ Named(
                                             None,
                                         ),
                                     ],
-                                    star: None,
                                     range: Some(
                                         250..259,
                                     ),
@@ -453,60 +450,15 @@ Named(
                                 None,
                             ),
                         ],
-                        star: Some(
-                            StarSelection {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "rest",
-                                            ),
-                                            range: Some(
-                                                319..323,
-                                            ),
-                                        },
-                                        range: Some(
-                                            319..324,
-                                        ),
-                                    },
-                                ),
-                                selection: Some(
-                                    SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                WithRange {
-                                                    node: Field(
-                                                        "data",
-                                                    ),
-                                                    range: Some(
-                                                        329..333,
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                        ],
-                                        star: None,
-                                        range: Some(
-                                            327..335,
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    319..335,
-                                ),
-                            },
-                        ),
                         range: Some(
-                            91..345,
+                            91..316,
                         ),
                     },
                 ),
             ),
         ],
-        star: None,
         range: Some(
-            9..345,
+            9..316,
         ),
     },
 )

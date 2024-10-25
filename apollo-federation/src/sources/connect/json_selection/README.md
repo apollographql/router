@@ -81,9 +81,8 @@ worry if it doesn't seem helpful yet, as every rule will be explained in detail
 below.
 
 ```ebnf
-JSONSelection        ::= PathSelection | NakedSubSelection
-NakedSubSelection    ::= NamedSelection* StarSelection?
-SubSelection         ::= "{" NakedSubSelection "}"
+JSONSelection        ::= PathSelection | NamedSelection*
+SubSelection         ::= "{" NamedSelection* "}"
 NamedSelection       ::= NamedPathSelection | PathWithSubSelection | NamedFieldSelection | NamedGroupSelection
 NamedPathSelection   ::= Alias PathSelection
 NamedFieldSelection  ::= Alias? Key SubSelection?
@@ -107,7 +106,6 @@ LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
 LitObject            ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
 LitProperty          ::= Key ":" LitExpr
 LitArray             ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
-StarSelection        ::= Alias? "*" SubSelection?
 NO_SPACE             ::= !SpacesOrComments
 SpacesOrComments     ::= (Spaces | Comment)+
 Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
@@ -222,7 +220,7 @@ feel free to take your time and enjoy the journey.
 The `JSONSelection` non-terminal is the top-level entry point for the grammar,
 and appears nowhere else within the rest of the grammar. It can be either a
 `PathSelection` (for selecting a single anonymous value from a given path) or a
-`NakedSubSelection` (for selecting multiple named items).
+`NamedSelection*` (for selecting zero or more named items).
 
 When the `PathSelection` syntax is chosen at this level, and the path does not
 have a trailing `SubSelection` (which ensures the result is an object with
@@ -230,36 +228,15 @@ statically known properties), the entire `JSONSelection` must be that single
 path, without any other named selections. If the `PathSelection` does have a
 trailing `SubSelection`, it may be mixed together with other named selections,
 though in that case it will be parsed as a `PathWithSubSelection` within a
-`NakedSubSelection`, instead of a `PathSelection`.
-
-### `NakedSubSelection ::=`
-
-![NakedSubSelection](./grammar/NakedSubSelection.svg)
-
-A `NakedSubSelection` is a `SubSelection` without the surrounding `{` and `}`
-braces. It can appear at the top level of a `JSONSelection`, but otherwise
-appears only as part of the `SubSelection` rule, meaning it must have braces
-everywhere except at the top level.
-
-Because a `NakedSubSelection` can contain any number of `NamedSelection` items
-(including zero), and may have no `StarSelection`, it's possible for the
-`NakedSelection` to be fully empty. In these unusual cases, whitespace and
-comments are still allowed, and the result of the selection will always be an
-empty object.
-
-In the Rust implementation, there is no dedicated `NakedSubSelection` struct, as
-we use the `SubSelection` struct to represent the meaningful contents of the
-selection, regardless of whether it has braces. The `NakedSubSelection`
-non-terminal is just a grammatical convenience, to avoid repetition between
-`JSONSelection` and `SubSelection`.
+`SubSelection`, instead of a standalone `PathSelection`.
 
 ### `SubSelection ::=`
 
 ![SubSelection](./grammar/SubSelection.svg)
 
-A `SubSelection` is a `NakedSubSelection` surrounded by `{` and `}`, and is used
-to select specific properties from the preceding object, much like a nested
-selection set in a GraphQL operation.
+A `SubSelection` is a sequence of zero or more `NamedSelection` items surrounded
+by `{` and `}`, and is used to select specific properties from the preceding
+object, much like a nested selection set in a GraphQL operation.
 
 Note that `SubSelection` may appear recursively within itself, as part of one of
 the various `NamedSelection` rules. This recursion allows for arbitrarily deep
@@ -269,9 +246,9 @@ nesting of selections, which is necessary to handle complex JSON structures.
 
 ![NamedSelection](./grammar/NamedSelection.svg)
 
-Every possible production of the `NamedSelection` non-terminal corresponds to a
-named property in the output object, though each one obtains its value from the
-input object in a slightly different way.
+Every production of the `NamedSelection` non-terminal adds named properties to
+the output object, though they obtain their properties/values from the input
+object in different ways.
 
 ### `NamedPathSelection ::=`
 
@@ -281,62 +258,48 @@ Since `PathSelection` returns an anonymous value extracted from the given path,
 if you want to use a `PathSelection` alongside other `NamedSelection` items, you
 can prefix it with an `Alias`, turning it into a `NamedPathSelection`.
 
-For example, you cannot omit the `pathName:` alias in the following
-`NakedSubSelection`, because `some.nested.path` has no output name by itself:
+For example, the `abc:` alias in this example causes the `{ a b c }` object
+selected from `some.nested.path` to be nested under an `abc` output key:
 
 ```graphql
-position { x y }
-pathName: some.nested.path { a b c }
-scalarField
+id
+name
+abc: some.nested.path { a b c }
 ```
 
-The ordering of alternatives in the `NamedSelection` rule is important, so the
-`NamedPathSelection` alternative can be considered before `NamedFieldSelection`
-and `NamedQuotedSelection`, because a `NamedPathSelection` such as `pathName:
-some.nested.path` has a prefix that looks like a `NamedFieldSelection`:
-`pathName: some`, causing an error when the parser encounters the remaining
-`.nested.path` text. Some parsers would resolve this ambiguity by forbidding `.`
-in the lookahead for `Named{Field,Quoted}Selection`, but negative lookahead is
-tricky for this parser (see similar discussion regarding `NO_SPACE`), so instead
-we greedily parse `NamedPathSelection` first, when possible, since that ensures
-the whole path will be consumed.
+This selection produces an output object with keys `id`, `name`, and `abc`,
+where `abc` is an object with keys `a`, `b`, and `c`.
+
+#### Related syntax: `PathWithSubSelection`
+
+You can also flatten the `{ a b c }` properties to the top level by omitting the
+alias, but this syntax parses as a `PathWithSubSelection` instead of a
+`NamedPathSelection`:
+
+```graphql
+id
+name
+some.nested.path { a b c }
+```
+
+This selection produces an output object with keys `id`, `name`, `a`, `b`, and
+`c`. Additionally, `some.nested.path` must evaluate to a single object, rather
+than an array objects or a scalar value, which is not a limitation of the
+`NamedPathSelection` syntax.
 
 ### `NamedFieldSelection ::=`
 
 ![NamedFieldSelection](./grammar/NamedFieldSelection.svg)
 
 The `NamedFieldSelection` non-terminal is the option most closely resembling
-GraphQL field selections, where the field name must be an `Identifier`, may have
-an `Alias`, and may have a `SubSelection` to select nested properties (which
-requires the field's value to be an object rather than a scalar).
+GraphQL field selections, where the field name must be `Key` (`Identifier` or
+quoted string literal), may have an `Alias`, and may have a `SubSelection` to
+select nested properties (assuming the field's value is an object).
 
 In practice, whitespace is often required to keep multiple consecutive
 `NamedFieldSelection` identifiers separate, but is not strictly necessary when
 there is no ambiguity, as when an identifier follows a preceding subselection:
 `a{b}c`.
-
-### `NamedQuotedSelection ::=`
-
-![NamedQuotedSelection](./grammar/NamedQuotedSelection.svg)
-
-Since arbitrary JSON objects can have properties that are not identifiers, we
-need a version of `NamedFieldSelection` that allows for quoted property names as
-opposed to identifiers.
-
-However, since our goal is always to produce an output that is safe for GraphQL
-consumption, an `Alias` is strictly required in this case, and it must be a
-valid GraphQL `Identifier`:
-
-```graphql
-first
-second: "second property" { x y z }
-third { a b }
-```
-
-Besides extracting the `first` and `third` fields in typical GraphQL fashion,
-this selection extracts the `second property` field as `second`, subselecting
-`x`, `y`, and `z` from the extracted object. The final object will have the
-properties `first`, `second`, and `third`.
 
 ### `NamedGroupSelection ::=`
 
@@ -386,8 +349,7 @@ Analogous to a GraphQL alias, the `Alias` syntax allows for renaming properties
 from the input JSON to match the desired output shape.
 
 In addition to renaming, `Alias` can provide names to otherwise anonymous
-structures, such as those selected by `PathSelection`, `NamedGroupSelection`, or
-`StarSelection` syntax.
+structures, such as those selected by `PathSelection` or `NamedGroupSelection`.
 
 ### `Path ::=`
 
@@ -432,7 +394,7 @@ type Query {
 ```
 
 If you need to select other named properties, you can still use a
-`PathSelection` as part of a `NakedSubSelection`, as long as you give it an
+`PathSelection` within a `NamedSelection*` sequence, as long as you give it an
 `Alias`:
 
 ```graphql
@@ -604,7 +566,7 @@ $.data { id name }
 
 This will produce a single object with `id` and `name` fields, without the
 enclosing `data` property. Equivalently, you could manually unroll this example
-to the following `NakedSubSelection`:
+to the following `NamedSelection*` sequence:
 
 ```graphql
 id: data.id
@@ -613,12 +575,6 @@ name: data.name
 
 In this case, the `$.` is no longer necessary because `data.id` and `data.name`
 are unambiguously `KeyPath` selections.
-
-> For backwards compatibility with earlier versions of the `JSONSelection`
-syntax that did not support the `$` variable, you can also use a leading `.`
-character (so `.data { id name }`, or even `.data.id` or `.data.name`) to mean
-the same thing as `$.`, but this is no longer recommended, since `.data` is easy
-to mistype and misread, compared to `$.data`.
 
 ### `AtPath ::=`
 
@@ -924,61 +880,6 @@ from JSON, which allows double-quoted strings only.
 A list of `LitExpr` items within square brackets, as in JavaScript.
 
 Trailing commas are not currently allowed, but could be supported in the future.
-
-### `StarSelection ::=`
-
-![StarSelection](./grammar/StarSelection.svg)
-
-The `StarSelection` non-terminal is uncommon when working with GraphQL, since it
-selects all remaining properties of an object, which can be difficult to
-represent using static GraphQL types, without resorting to the catch-all `JSON`
-scalar type. Still, a `StarSelection` can be useful for consuming JSON
-dictionaries with dynamic keys, or for capturing unexpected properties for
-debugging purposes.
-
-When used, a `StarSelection` must come after any `NamedSelection` items within a
-given `NakedSubSelection`.
-
-A common use case for `StarSelection` is capturing all properties not otherwise
-selected using a field called `allOtherFields`, which must have a generic `JSON`
-type in the GraphQL schema:
-
-```graphql
-knownField
-anotherKnownField
-allOtherFields: *
-```
-
-Note that `knownField` and `anotherKnownField` will not be included in the
-`allOtherFields` output, since they are selected explicitly. In this sense, the
-`*` functions a bit like object `...rest` syntax in JavaScript.
-
-If you happen to know these other fields all have certain properties, you can
-restrict the `*` selection to just those properties:
-
-```graphql
-knownField { id name }
-allOtherFields: * { id }
-```
-
-Sometimes a REST API will return a dictionary result with an unknown set of
-dynamic keys but values of some known type, such as a map of ISBN numbers to
-`Book` objects:
-
-```graphql
-booksByISBN: result.books { * { title author { name } }
-```
-
-Because the set of ISBN numbers is statically unknowable, the type of
-`booksByISBN` would have to be `JSON` in the GraphQL schema, but it can still be
-useful to select known properties from the `Book` objects within the
-`result.books` dictionary, so you don't return more GraphQL data than necessary.
-
-The grammar technically allows a `StarSelection` with neither an `Alias` nor a
-`SubSelection`, but this is not a useful construct from a GraphQL perspective,
-since it provides no output fields that can be reliably typed by a GraphQL
-schema. This form has some use cases when working with `JSONSelection` outside
-of GraphQL, but they are not relevant here.
 
 ### `NO_SPACE ::= !SpacesOrComments`
 

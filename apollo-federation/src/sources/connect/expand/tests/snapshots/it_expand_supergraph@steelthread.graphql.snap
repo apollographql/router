@@ -21,7 +21,6 @@ type User {
   id: ID!
   name: String
   username: String
-  rest: JSON
   c: String
   d: String
 }

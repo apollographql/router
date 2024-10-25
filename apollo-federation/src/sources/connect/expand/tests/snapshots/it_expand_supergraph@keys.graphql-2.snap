@@ -89,7 +89,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         None,
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..6,
                 ),
@@ -204,7 +203,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         None,
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..6,
                 ),
@@ -301,7 +299,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         None,
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..6,
                 ),
@@ -416,7 +413,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         None,
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..6,
                 ),
@@ -554,7 +550,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         },
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..17,
                 ),
@@ -668,7 +663,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                 },
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..12,
                         ),
@@ -704,7 +698,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         None,
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..6,
                 ),
@@ -818,7 +811,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                 },
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..12,
                         ),
@@ -895,7 +887,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         },
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..17,
                 ),

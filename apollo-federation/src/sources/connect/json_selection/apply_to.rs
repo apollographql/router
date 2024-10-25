@@ -511,112 +511,22 @@ impl ApplyToInternal for SubSelection {
             vars
         };
 
-        let (data_map, data_really_primitive) = match data {
-            JSON::Object(data_map) => (data_map.clone(), false),
-            _primitive => (JSONMap::new(), true),
-        };
-
         let mut output = JSONMap::new();
         let mut errors = Vec::new();
-        let mut input_names = IndexSet::default();
 
         for named_selection in self.selections.iter() {
             let (value, apply_errors) = named_selection.apply_to_path(data, &vars, input_path);
             errors.extend(apply_errors);
-
             // If value is an object, extend output with its keys and their values.
-            if let Some(JSON::Object(key_and_value)) = value {
-                output.extend(key_and_value);
-            }
-
-            // If there is a star selection, we need to keep track of the
-            // *original* names of the fields that were explicitly selected,
-            // because we will need to omit them from what the * matches.
-            if self.star.is_some() {
-                match named_selection {
-                    NamedSelection::Field(_, name, _) => {
-                        input_names.insert(name.as_str());
-                    }
-                    NamedSelection::Path(_, path_selection) => {
-                        if let PathList::Key(key, _) = path_selection.path.as_ref() {
-                            input_names.insert(key.as_str());
-                        }
-                    }
-                    // The contents of groups do not affect the keys matched by
-                    // * selections in the parent object (outside the group).
-                    NamedSelection::Group(_, _) => {}
-                };
+            if let Some(JSON::Object(named_properties)) = value {
+                output.extend(named_properties);
             }
         }
 
-        match &self.star {
-            // Aliased but not subselected, e.g. "a b c rest: *"
-            Some(StarSelection {
-                alias: Some(alias),
-                selection: None,
-                ..
-            }) => {
-                let mut star_output = JSONMap::new();
-                for (key, value) in &data_map {
-                    if !input_names.contains(key.as_str()) {
-                        star_output.insert(key.clone(), value.clone());
-                    }
-                }
-                output.insert(alias.name(), JSON::Object(star_output));
-            }
-            // Aliased and subselected, e.g. "alias: * { hello }"
-            Some(StarSelection {
-                alias: Some(alias),
-                selection: Some(selection),
-                ..
-            }) => {
-                let mut star_output = JSONMap::new();
-                for (key, value) in &data_map {
-                    if !input_names.contains(key.as_str()) {
-                        let (selected_opt, apply_errors) =
-                            selection.apply_to_path(value, &vars, input_path);
-                        errors.extend(apply_errors);
-                        if let Some(selected) = selected_opt {
-                            star_output.insert(key.clone(), selected);
-                        }
-                    }
-                }
-                output.insert(alias.name(), JSON::Object(star_output));
-            }
-            // Not aliased but subselected, e.g. "parent { * { hello } }"
-            Some(StarSelection {
-                alias: None,
-                selection: Some(selection),
-                ..
-            }) => {
-                for (key, value) in &data_map {
-                    if !input_names.contains(key.as_str()) {
-                        let (selected_opt, apply_errors) =
-                            selection.apply_to_path(value, &vars, input_path);
-                        errors.extend(apply_errors);
-                        if let Some(selected) = selected_opt {
-                            output.insert(key.clone(), selected);
-                        }
-                    }
-                }
-            }
-            // Neither aliased nor subselected, e.g. "parent { * }" or just "*"
-            Some(StarSelection {
-                alias: None,
-                selection: None,
-                ..
-            }) => {
-                for (key, value) in &data_map {
-                    if !input_names.contains(key.as_str()) {
-                        output.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-            // No * selection present, e.g. "parent { just some properties }"
-            None => {}
-        };
-
-        if data_really_primitive && output.is_empty() {
+        // If data was a primitive value (neither array nor object), and no
+        // output properties were generated, return data as is, along with any
+        // errors that occurred.
+        if !matches!(data, JSON::Object(_)) && output.is_empty() {
             return (Some(data.clone()), errors);
         }
 
@@ -774,179 +684,6 @@ mod tests {
                         "world 1",
                         "world 2",
                     ],
-                },
-            }),
-        );
-    }
-
-    #[test]
-    fn test_apply_to_star_selections() {
-        let data = json!({
-            "englishAndGreekLetters": {
-                "a": { "en": "ay", "gr": "alpha" },
-                "b": { "en": "bee", "gr": "beta" },
-                "c": { "en": "see", "gr": "gamma" },
-                "d": { "en": "dee", "gr": "delta" },
-                "e": { "en": "ee", "gr": "epsilon" },
-                "f": { "en": "eff", "gr": "phi" },
-            },
-            "englishAndSpanishNumbers": [
-                { "en": "one", "es": "uno" },
-                { "en": "two", "es": "dos" },
-                { "en": "three", "es": "tres" },
-                { "en": "four", "es": "cuatro" },
-                { "en": "five", "es": "cinco" },
-                { "en": "six", "es": "seis" },
-            ],
-            "asciiCharCodes": {
-                "A": 65,
-                "B": 66,
-                "C": 67,
-                "D": 68,
-                "E": 69,
-                "F": 70,
-                "G": 71,
-            },
-            "books": {
-                "9780262533751": {
-                    "title": "The Geometry of Meaning",
-                    "author": "Peter Gärdenfors",
-                },
-                "978-1492674313": {
-                    "title": "P is for Pterodactyl: The Worst Alphabet Book Ever",
-                    "author": "Raj Haldar",
-                },
-                "9780262542456": {
-                    "title": "A Biography of the Pixel",
-                    "author": "Alvy Ray Smith",
-                },
-            }
-        });
-
-        let check_ok = |selection: JSONSelection, expected_json: JSON| {
-            let (actual_json, errors) = selection.apply_to(&data);
-            assert_eq!(actual_json, Some(expected_json));
-            assert_eq!(errors, vec![]);
-        };
-
-        check_ok(
-            selection!("englishAndGreekLetters { * { en }}"),
-            json!({
-                "englishAndGreekLetters": {
-                    "a": { "en": "ay" },
-                    "b": { "en": "bee" },
-                    "c": { "en": "see" },
-                    "d": { "en": "dee" },
-                    "e": { "en": "ee" },
-                    "f": { "en": "eff" },
-                },
-            }),
-        );
-
-        check_ok(
-            selection!("englishAndGreekLetters { C: c.en * { gr }}"),
-            json!({
-                "englishAndGreekLetters": {
-                    "a": { "gr": "alpha" },
-                    "b": { "gr": "beta" },
-                    "C": "see",
-                    "d": { "gr": "delta" },
-                    "e": { "gr": "epsilon" },
-                    "f": { "gr": "phi" },
-                },
-            }),
-        );
-
-        check_ok(
-            selection!("englishAndGreekLetters { A: a B: b rest: * }"),
-            json!({
-                "englishAndGreekLetters": {
-                    "A": { "en": "ay", "gr": "alpha" },
-                    "B": { "en": "bee", "gr": "beta" },
-                    "rest": {
-                        "c": { "en": "see", "gr": "gamma" },
-                        "d": { "en": "dee", "gr": "delta" },
-                        "e": { "en": "ee", "gr": "epsilon" },
-                        "f": { "en": "eff", "gr": "phi" },
-                    },
-                },
-            }),
-        );
-
-        check_ok(
-            selection!("$.'englishAndSpanishNumbers' { en rest: * }"),
-            json!([
-                { "en": "one", "rest": { "es": "uno" } },
-                { "en": "two", "rest": { "es": "dos" } },
-                { "en": "three", "rest": { "es": "tres" } },
-                { "en": "four", "rest": { "es": "cuatro" } },
-                { "en": "five", "rest": { "es": "cinco" } },
-                { "en": "six", "rest": { "es": "seis" } },
-            ]),
-        );
-
-        // To include/preserve all remaining properties from an object in the output
-        // object, we support a naked * selection (no alias or subselection). This
-        // is useful when the values of the properties are scalar, so a subselection
-        // isn't possible, and we want to preserve all properties of the original
-        // object. These unnamed properties may not be useful for GraphQL unless the
-        // whole object is considered as opaque JSON scalar data, but we still need
-        // to support preserving JSON when it has scalar properties.
-        check_ok(
-            selection!("asciiCharCodes { ay: A bee: B * }"),
-            json!({
-                "asciiCharCodes": {
-                    "ay": 65,
-                    "bee": 66,
-                    "C": 67,
-                    "D": 68,
-                    "E": 69,
-                    "F": 70,
-                    "G": 71,
-                },
-            }),
-        );
-
-        check_ok(
-            selection!("asciiCharCodes { * } gee: asciiCharCodes.G"),
-            json!({
-                "asciiCharCodes": data.get("asciiCharCodes").unwrap(),
-                "gee": 71,
-            }),
-        );
-
-        check_ok(
-            selection!("books { * { title } }"),
-            json!({
-                "books": {
-                    "9780262533751": {
-                        "title": "The Geometry of Meaning",
-                    },
-                    "978-1492674313": {
-                        "title": "P is for Pterodactyl: The Worst Alphabet Book Ever",
-                    },
-                    "9780262542456": {
-                        "title": "A Biography of the Pixel",
-                    },
-                },
-            }),
-        );
-
-        check_ok(
-            selection!("books { authorsByISBN: * { author } }"),
-            json!({
-                "books": {
-                    "authorsByISBN": {
-                        "9780262533751": {
-                            "author": "Peter Gärdenfors",
-                        },
-                        "978-1492674313": {
-                            "author": "Raj Haldar",
-                        },
-                        "9780262542456": {
-                            "author": "Alvy Ray Smith",
-                        },
-                    },
                 },
             }),
         );

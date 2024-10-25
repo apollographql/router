@@ -229,7 +229,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                             None,
                                                                                         ),
                                                                                     ],
-                                                                                    star: None,
                                                                                     range: Some(
                                                                                         81..92,
                                                                                     ),
@@ -237,7 +236,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                             ),
                                                                         ),
                                                                     ],
-                                                                    star: None,
                                                                     range: Some(
                                                                         49..94,
                                                                     ),
@@ -245,7 +243,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             ),
                                                         ),
                                                     ],
-                                                    star: None,
                                                     range: Some(
                                                         12..96,
                                                     ),
@@ -285,7 +282,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         None,
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..2,
                 ),
@@ -406,7 +402,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 },
                             ),
                         ],
-                        star: None,
                         range: Some(
                             0..24,
                         ),
@@ -442,7 +437,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         None,
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..7,
                 ),
@@ -588,7 +582,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         None,
                                     ),
                                 ],
-                                star: None,
                                 range: Some(
                                     16..45,
                                 ),
@@ -596,7 +589,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         ),
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..45,
                 ),
@@ -808,7 +800,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                         None,
                                                     ),
                                                 ],
-                                                star: None,
                                                 range: Some(
                                                     73..94,
                                                 ),
@@ -816,7 +807,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         ),
                                     ),
                                 ],
-                                star: None,
                                 range: Some(
                                     31..96,
                                 ),
@@ -909,7 +899,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         None,
                                     ),
                                 ],
-                                star: None,
                                 range: Some(
                                     119..156,
                                 ),
@@ -917,7 +906,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         ),
                     ),
                 ],
-                star: None,
                 range: Some(
                     0..156,
                 ),
