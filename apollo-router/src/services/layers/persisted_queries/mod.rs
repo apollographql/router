@@ -14,6 +14,7 @@ use tower::BoxError;
 use self::manifest_poller::FreeformGraphQLAction;
 use super::query_analysis::ParsedDocument;
 use crate::graphql::Error as GraphQLError;
+use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::Configuration;
@@ -110,9 +111,10 @@ impl PersistedQueryLayer {
         } else {
             // if there is no query, look up the persisted query in the manifest
             // and put the body on the `supergraph_request`
-            if let Some(persisted_query_body) =
-                manifest_poller.get_operation_body(persisted_query_id)
-            {
+            if let Some(persisted_query_body) = manifest_poller.get_operation_body(
+                persisted_query_id,
+                request.context.get(CLIENT_NAME).unwrap_or_default(),
+            ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
                 body.extensions.remove("persistedQuery");
