@@ -1,0 +1,88 @@
+---
+title: Debugging Subgraph Requests from the GraphOS Router or @apollo/gateway
+subtitle: Log query plans and subgraph calls to help debug problematic queries
+description: Log query plans and subgraph calls with the Apollo GraphOS Router and @apollo/gateway to help debug problematic queries.
+published: 2023-04-13
+id: TN0039
+tags: [federation, gateway, router, subgraphs]
+redirectFrom:
+  - /technotes/TN0039-debugging-subgraph-requests/
+---
+
+As your graph grows, you may need to debug a problematic query for one reason or another. The GraphOS Router and `@apollo/gateway` both serve as an entry point into your federated graph and offer ways to debug requests.
+
+Each client request goes through a process called [query planning](/graphos/explorer/additional-features/#query-plans-for-supergraphs) that generates the subgraph requests to execute. You can log out the query plan in both the router and gateway.
+
+## Output query plans with headers
+
+With router v0.16.0+ and `@apollo/gateway` v2.5.4+, you can pass the following headers to return the query plans in the GraphQL response extensions:
+
+- Including the `Apollo-Query-Plan-Experimental` header returns the query plan in the response extensions
+- Additionally, including the `Apollo-Query-Plan-Experimental-Format` header with one of the supported options changes the output format:
+  - A value of `prettified` returns a human-readable string of the query plan
+  - A value of `internal` returns a JSON representation of the query plan
+
+## Log router subgraph calls
+
+If, instead, you want to debug your subgraph HTTP requests in a router instance, you can use [Rhai scripts](/router/customizations/rhai) to log the necessary information out. An example Rhai script is shown below.
+
+<Caution>
+
+While it's possible to log out the variables, Apollo strongly recommends not
+doing so to avoid leaking sensitive information into your logs.
+
+</Caution>
+
+```rhai
+fn subgraph_service(service, subgraph) {
+  service.map_request(|request| {
+      log_info(`Subgraph: ${subgraph} Query: ${request.subgraph.body.query}`);
+  });
+}
+```
+
+The above uses an inline closure within the `map_request` function of the `subgraph_service` hook to log the subgraph-related information.
+
+To enable query plans, you must run the router with the `--dev` flag and leverage [Apollo Sandbox](https://studio.apollographql.com/sandbox) to [display your query plans](/graphos/explorer/additional-features/#query-plans-for-supergraphs).
+
+As an alternative to using `--dev`, you can also enable query plans via the below configuration option, however, Apollo strongly discourages this as the feature may be removed or renamed in the future.
+
+```yaml
+plugins:
+  experimental.expose_query_plan: true
+```
+
+## Log `@apollo/gateway` subgraph calls
+
+To debug queries to your subgraphs within an `@apollo/gateway` instance, you can use a [`buildService` function](/apollo-server/using-federation/api/apollo-gateway/#configuring-the-subgraph-fetcher) to log the operation name and body.
+
+<Caution>
+
+While it's possible to log out the variables, Apollo strongly recommends not
+doing so to avoid leaking sensitive information into your logs.
+
+</Caution>
+
+```ts
+class DebugDataSource extends RemoteGraphQLDataSource {
+  willSendRequest({
+    request
+  }: GraphQLDataSourceProcessOptions<
+    Record<string, any>
+  >): void | Promise<void> {
+    console.log(`Operation name: ${request.operationName}`);
+    console.log(`Query body: ${request.query}`);
+  }
+}
+const gateway = new ApolloGateway({
+  debug: true,
+  supergraphSdl,
+  buildService({url}) {
+    return new DebugDataSource({url});
+  }
+});
+```
+
+The above snippet creates a new class called `DebugDataSource` to log out the operation name and body using the `willSendRequest` hook, which is called before execution.
+
+Lastly, it also enables the `debug` setting on the gateway configuration to print out query plans in the logs for further debugging if needed.

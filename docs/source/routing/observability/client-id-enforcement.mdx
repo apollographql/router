@@ -1,0 +1,143 @@
+---
+title: Client ID Enforcement
+subtitle: Require client details and operation names to help monitor schema usage
+description: Improve GraphQL operation monitoring by tagging operations with with client details. See code examples for Apollo GraphOS Router and Apollo Server.
+published: 2022-05-31
+id: TN0001
+tags: [server, observability, router]
+redirectFrom:
+  - /technotes/TN0001-client-id-enforcement/
+---
+
+As part of GraphOS Studio metrics reporting, servers can [tag reported operations with the requesting client's name and version](/graphos/metrics/client-awareness). This helps graph maintainers understand which clients are using which fields in the schema.
+
+Clients can (and should) also [name their GraphQL operations](/react/data/operation-best-practices/#name-all-operations), which provides more context around how and where data is being used.
+
+Together, these pieces of information help teams monitor their graph and make changes to it safely. We strongly encourage that your GraphQL gateway require client details and operation names from all requesting clients.
+
+## Enforcing in GraphOS Router
+
+The GraphOS Router supports client awareness by default if the client sets the `apollographql-client-name` and `apollographql-client-id` in their requests. These values can be overridden using the [router configuration file](/router/managed-federation/client-awareness/) directly.
+
+Client headers can also be enforced using a [Rhai script](/router/customizations/rhai) on every incoming request.
+
+```rhai title="client-id.rhai"
+fn supergraph_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+  }
+
+fn process_request(request) {
+  log_info("processing request");
+  let valid_clients = ["1", "2"];
+  let valid_client_names = ["apollo-client"];
+
+  if ("apollographql-client-version" in request.headers && "apollographql-client-name" in request.headers) {
+    let client_header = request.headers["apollographql-client-version"];
+    let name_header = request.headers["apollographql-client-name"];
+
+    if !valid_clients.contains(client_header) {
+      log_error("Invalid client ID provided");
+      throw #{
+        status: 401,
+        message: "Invalid client ID provided"
+      };
+    }
+    if !valid_client_names.contains(name_header) {
+      log_error("Invalid client name provided");
+      throw #{
+        status: 401,
+        message: "Invalid client name provided"
+      };
+    }
+  }
+  else {
+    log_error("No client headers set");
+    throw #{
+      status: 401,
+      message: "No client headers set"
+    };
+  }
+}
+```
+
+<Tip>
+
+If you're an enterprise customer looking for more material on this topic, try the [Enterprise best practices: Router extensibility](https://www.apollographql.com/tutorials/router-extensibility) course on Odyssey.
+
+Not an enterprise customer? [Learn about GraphOS for Enterprise.](https://www.apollographql.com/pricing)
+
+</Tip>
+
+## Enforcing in Apollo Server
+
+If you're using Apollo Server for your gateway, you can require client metadata in every incoming request with a [custom plugin](/apollo-server/integrations/plugins/):
+
+<Tip>
+
+The header names used below are the default headers sent by Apollo Client, but you can change them to whatever names your client uses. Additionally, these changes must be reflected in the [usage reporting plugin](/apollo-server/api/plugin/usage-reporting/#generateclientinfo) to report client headers to GraphOS. For an example, see [using custom client id headers](/apollo-server/monitoring/metrics#using-custom-headers).
+
+</Tip>
+
+<MultiCodeBlock>
+
+```ts title="index.ts"
+function clientEnforcementPlugin(): ApolloServerPlugin<BaseContext> {
+  return {
+    async requestDidStart() {
+      return {
+        async didResolveOperation(requestContext) {
+          const clientName = requestContext.request.http.headers.get("apollographql-client-name");
+          const clientVersion = requestContext.request.http.headers.get("apollographql-client-version");
+
+          if (!clientName) {
+            const logString = `Execution Denied: Operation has no identified client`;
+            requestContext.logger.debug(logString);
+            throw new GraphQLError(logString);
+          }
+
+          if (!clientVersion) {
+            const logString = `Execution Denied: Client ${clientName} has no identified version`;
+            requestContext.logger.debug(logString);
+            throw new GraphQLError(logString);
+          }
+
+          if (!requestContext.operationName) {
+            const logString = `Unnamed Operation: ${requestContext.queryHash}. All operations must be named`;
+            requestContext.logger.debug(logString);
+
+            throw new GraphQLError(logString);
+          }
+        },
+      };
+    },
+  };
+}
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+  plugins: [clientEnforcementPlugin()],
+});
+```
+
+</MultiCodeBlock>
+
+## Adding enforcement for existing clients
+
+If clients are already consuming your graph and are not providing client metadata, adding universal enforcement will break those clients. To resolve this you should take the following steps:
+
+### Use other headers
+
+If you have other existing headers in your HTTP requests that can be parsed to extract some client info, you can extract the info from there.
+
+#### GraphOS Router
+
+Client awareness headers should be overridden using the [router configuration file](/router/managed-federation/client-awareness/#overriding-client-awareness-headers) to use the appropriate header names.
+
+#### Apollo Server
+
+If you do change the identifying headers, also update the [Usage Reporting Plugin](/apollo-server/api/plugin/usage-reporting) to use the new headers so that the proper client info is also sent to Studio.
+
+### Ask clients to update their requests
+
+The long-term fix will require that clients start sending the required headers needed to extract client info. While clients are working on updating their requests you can add the plugin code to your gateway, but instead of throwing an error you can log a warning so that the gateway team can track when all requests have been updated.

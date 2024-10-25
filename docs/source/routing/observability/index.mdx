@@ -1,0 +1,32 @@
+---
+title: Observability with GraphOS
+subtitle: Capture and export signals about supergraph health with GraphOS and router telemetry
+---
+
+Apollo GraphOS provides the observability signals and tools that your team needs to maintain the health and performance of your deployed supergraphs.
+
+## Understand runtime health with router telemetry 
+
+Both the GraphOS Router and Apollo Router Core run a request-handling pipeline with multiple stages that starts with receiving requests and ends with sending back responses. The continuous operation and throughput of this request pipeline, or "request lifecycle," reflects the health of a running supergraph. Observability of the router request lifecycle is therefore key to understanding the health of a supergraph.
+
+<Wistia WistiaId="009wt60p7a" />
+
+To enable observability, the router supports telemetry that can be added and customized in every stage of the router request lifecycle. You can add logs, metrics, and traces, and you can export them to your application performance monitoring (APM) solution.
+
+To learn more, go to [Router Telemetry](/graphos/routing/observability/telemetry), then browse the pages in [Router Telemetry](/graphos/reference/router/telemetry/log-exporters/overview) reference docs.
+
+## Automate supergraph metrics collection with GraphOS
+
+Everything connected to GraphOS—including clients, routers, and subgraphs—can report metrics about GraphQL operations they send and service. GraphOS thus is the hub for collecting operation metrics, and its Studio IDE offers tools to visualize and analyze those operations and their field usage. 
+
+The metrics that GraphOS collects can also be forwarded to your APM solution, such as Datadog.
+
+
+## Next steps 
+
+To learn about metrics collection, browse the [GraphOS Metrics Collection](/graphos/platform/insights/sending-operation-metrics) docs.
+
+To learn about subgraph observability, browse the [Subgraph Observability](/graphos/routing/observability/subgraph-error-inclusion) docs.
+
+To learn about client observability, browse the [Client Observability](/graphos/routing/observability/client-id-enforcement/) docs.
+
