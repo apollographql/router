@@ -1,10 +1,10 @@
-### Add `preview_datadog_agent_sampling` ([PR #6017](https://github.com/apollographql/router/pull/6017))
+### Enable accurate Datadog APM metrics ([PR #6017](https://github.com/apollographql/router/pull/6017))
 
-The sampler option in the `telemetry.exporters.tracing.common.sampler` is not datadog aware.
+The router supports a new preview feature, the `preview_datadog_agent_sampling` option, to enable sending all spans to the Datadog Agent so APM metrics and views are accurate.
 
-To get accurate APM metrics all spans must be sent to the datadog agent with a `psr` or `sampling.priority` attribute set appropriately to record the sampling decision.
+Previously, the sampler option in `telemetry.exporters.tracing.common.sampler` wasn't Datadog-aware. To get accurate Datadog APM metrics, all spans must be sent to the Datadog Agent with a `psr` or `sampling.priority` attribute set appropriately to record the sampling decision.
 
-`preview_datadog_agent_sampling` option in the router.yaml enables this behavior and should be used when exporting to the datadog agent via OTLP or datadog native. 
+The `preview_datadog_agent_sampling` option enables accurate Datadog APM metrics. It should be used when exporting to the Datadog Agent, via OTLP or Datadog-native. 
 
 ```yaml
 telemetry:
@@ -19,16 +19,16 @@ telemetry:
         
 ```
 
-By using these options, you can decrease your Datadog bill as you will only be sending a percentage of spans from the Datadog agent to datadog. 
+Using these options can decrease your Datadog bill, because you will be sending only a percentage of spans from the Datadog Agent to Datadog. 
 
 > [!IMPORTANT]
 > Users must enable `preview_datadog_agent_sampling` to get accurate APM metrics. Users that have been using recent versions of the router will have to modify their configuration to retain full APM metrics. 
 
 > [!IMPORTANT]
-> The Router does not support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
-> Configuring `traces_per_second` in the Datadog agent will NOT dynamically adjust the Router's sampling rate to meet the target rate.
+> The router doesn't support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+> Configuring `traces_per_second` in the Datadog Agent won't dynamically adjust the router's sampling rate to meet the target rate.
 
 > [!IMPORTANT]
-> Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
+> Sending all spans to the Datadog Agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and Datadog native exporters.
 
-See the updated Datadog tracing documentation for more information on configuration options and their implications.
+Learn more by reading the [updated Datadog tracing documentation](https://apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog) for more information on configuration options and their implications.

@@ -1,7 +1,6 @@
-### Datadog priority sampling resolution is lost ([PR #6017](https://github.com/apollographql/router/pull/6017))
+### Fix transmitted header value for Datadog priority sampling resolution ([PR #6017](https://github.com/apollographql/router/pull/6017))
 
-Previously a `x-datadog-sampling-priority` of `-1` would be converted to `0` for downstream requests and `2` would be converted to `1`.
-This means that when propagating to downstream services a value of USER_REJECT would be transmitted as AUTO_REJECT.
+The router now transmits correct values of `x-datadog-sampling-priority` to downstream services.
 
-This PR fixes this by ensuring that the `x-datadog-sampling-priority` is transmitted as is to downstream services.
+Previously, an `x-datadog-sampling-priority` of `-1` was incorrectly converted to `0` for downstream requests, and `2` was incorrectly converted to `1`. When propagating to downstream services, this resulted in values of `USER_REJECT` being incorrectly transmitted as `AUTO_REJECT`.
 
