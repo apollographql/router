@@ -35,6 +35,9 @@ fn process_common_request(check_context_method_and_id, check_body, request) {
     if request.uri.path != "/" {
         throw(`query: expected: "/", actual: ${request.uri.path}`);
     }
+    if request.uri.port != {} {
+        throw(`query: expected: {}, actual: ${request.uri.port}`);
+    }
 }
 
 fn process_router_request(request){
@@ -96,6 +99,10 @@ fn process_subgraph_request(request) {
     process_common_request(true, true, request);
     // subgraph doesn't have a context member
     process_common_request(false, true, request.subgraph);
+
+    if request.subgraph_request_id == () {
+        throw(`subgraph request must have a subgraph request id`);
+    }
 }
 
 fn test_response_is_primary(response) {
@@ -152,6 +159,18 @@ fn process_common_response(response) {
     }
 }
 
+fn test_parse_request_details(request){
+    if request.uri.host != "not-default" {
+        throw(`query: expected: not-default, actual: ${request.uri.host}`);
+    }
+    if request.uri.path != "/path" {
+        throw(`query: expected: "/path", actual: ${request.uri.path}`);
+    }
+    if request.uri.port != 8080 {
+        throw(`query: expected: 8080, actual: ${request.uri.port}`);
+    }
+}
+
 fn process_router_response(response) {
     test_response_is_primary(response);
     process_common_response(response);
@@ -191,6 +210,9 @@ fn process_subgraph_response(response) {
     process_common_response(response);
     test_response_body(response);
     test_response_status_code(response);
+     if response.subgraph_request_id == () {
+        throw(`subgraph response must have a subgraph request id`);
+    }
 }
 
 fn process_subgraph_response_om_forbidden(response) {
