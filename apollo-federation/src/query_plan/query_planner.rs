@@ -551,7 +551,15 @@ impl QueryPlanner {
             statistics,
         };
 
-        snapshot!(plan, "query plan");
+        snapshot!(
+            "QueryPlan",
+            plan.to_string(),
+            "QueryPlan from build_query_plan"
+        );
+        snapshot!(
+            plan.statistics,
+            "QueryPlanningStatistics from build_query_plan"
+        );
 
         Ok(plan)
     }

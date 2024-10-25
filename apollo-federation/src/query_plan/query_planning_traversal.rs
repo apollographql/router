@@ -404,7 +404,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             }
         }
 
-        snapshot!(new_options, "new_options");
+        snapshot!(
+            "OpenBranch",
+            snapshot_helper::open_branch_to_string(selection, &new_options),
+            "new_options"
+        );
 
         if no_followups {
             // This operation element is valid from this option, but is guarantee to yield no result
@@ -725,15 +729,25 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             if first_group.is_empty() {
                 // Well, we have the only possible plan; it's also the best.
                 let cost = self.cost(&mut initial_dependency_graph)?;
-                self.best_plan = BestQueryPlanInfo {
+                let best_plan = BestQueryPlanInfo {
                     fetch_dependency_graph: initial_dependency_graph,
                     path_tree: initial_tree.into(),
                     cost,
-                }
-                .into();
+                };
 
-                snapshot!(self.best_plan, "best_plan");
+                snapshot!(
+                    "FetchDependencyGraph",
+                    best_plan.fetch_dependency_graph.to_dot(),
+                    "best_plan.fetch_dependency_graph"
+                );
+                snapshot!(
+                    "OpPathTree",
+                    best_plan.path_tree.to_string(),
+                    "best_plan.path_tree"
+                );
+                snapshot!(best_plan.cost, "best_plan.cost");
 
+                self.best_plan = best_plan.into();
                 return Ok(());
             }
         }
@@ -764,14 +778,25 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             other_trees,
             /*plan_builder*/ self,
         )?;
-        self.best_plan = BestQueryPlanInfo {
+        let best_plan = BestQueryPlanInfo {
             fetch_dependency_graph: best.fetch_dependency_graph,
             path_tree: best.path_tree,
             cost,
-        }
-        .into();
+        };
 
-        snapshot!(self.best_plan, "best_plan");
+        snapshot!(
+            "FetchDependencyGraph",
+            best_plan.fetch_dependency_graph.to_dot(),
+            "best_plan.fetch_dependency_graph"
+        );
+        snapshot!(
+            "OpPathTree",
+            best_plan.path_tree.to_string(),
+            "best_plan.path_tree"
+        );
+        snapshot!(best_plan.cost, "best_plan.cost");
+
+        self.best_plan = best_plan.into();
         Ok(())
     }
 
