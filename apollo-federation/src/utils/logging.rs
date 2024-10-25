@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::operation::Selection;
+use crate::query_graph::graph_path::ClosedBranch;
 use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
 use crate::query_plan::query_planning_traversal::OpenBranchAndSelections;
 
@@ -28,17 +29,6 @@ use crate::query_plan::query_planning_traversal::OpenBranchAndSelections;
 /// ```
 macro_rules! snapshot {
     ($value:expr, $msg:literal) => {
-        #[cfg(feature = "snapshot_tracing")]
-        tracing::trace!(
-            snapshot = std::any::type_name_of_val(&$value),
-            data = ron::ser::to_string(&$value).expect(concat!(
-                "Could not serialize value for a snapshot with message: ",
-                $msg
-            )),
-            $msg
-        );
-    };
-    (name = $name:literal, $value:expr, $msg:literal) => {
         #[cfg(feature = "snapshot_tracing")]
         tracing::trace!(
             snapshot = std::any::type_name_of_val(&$value),
@@ -110,4 +100,22 @@ pub(crate) fn format_open_branches(
 
 pub(crate) fn open_branches_to_string(open_branches: &[OpenBranchAndSelections]) -> String {
     make_string(open_branches, format_open_branches)
+}
+
+pub(crate) fn format_closed_branches(
+    f: &mut std::fmt::Formatter<'_>,
+    closed_branches: &[ClosedBranch],
+) -> std::fmt::Result {
+    writeln!(f, "All branches:")?;
+    for (i, closed_branch) in closed_branches.iter().enumerate() {
+        writeln!(f, "{i}:")?;
+        for closed_path in &closed_branch.0 {
+            writeln!(f, " - {closed_path}")?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn closed_branches_to_string(closed_branches: &[ClosedBranch]) -> String {
+    make_string(closed_branches, format_closed_branches)
 }

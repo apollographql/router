@@ -11,6 +11,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
+use tracing::trace;
 
 use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
@@ -749,11 +750,7 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
-    snapshot!(
-        "FetchDependencyGraph",
-        "digraph {}", // empty graph (in GraphViz Dot format)
-        "Starting process to construct a parallel fetch dependency graph (empty graph)"
-    );
+    trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
     snapshot!(

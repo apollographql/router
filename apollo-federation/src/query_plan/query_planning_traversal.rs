@@ -52,6 +52,7 @@ use crate::utils::logging::snapshot;
 #[cfg(feature = "snapshot_tracing")]
 mod snapshot_helper {
     // A module to import functions only used within `snapshot!(...)` macros.
+    pub(crate) use crate::utils::logging::closed_branches_to_string;
     pub(crate) use crate::utils::logging::open_branch_to_string;
     pub(crate) use crate::utils::logging::open_branches_to_string;
 }
@@ -650,8 +651,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
         snapshot!(
-            name = "ClosedBranches",
-            self.closed_branches,
+            "ClosedBranches",
+            snapshot_helper::closed_branches_to_string(&self.closed_branches),
             "closed_branches"
         );
 
@@ -662,8 +663,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         self.reduce_options_if_needed();
 
         snapshot!(
-            name = "ClosedBranches",
-            self.closed_branches,
+            "ClosedBranches",
+            snapshot_helper::closed_branches_to_string(&self.closed_branches),
             "closed_branches_after_reduce"
         );
 
@@ -693,11 +694,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let (first_group, second_group) = self.closed_branches.split_at(sole_path_branch_index);
 
         let initial_tree;
-        snapshot!(
-            "FetchDependencyGraph",
-            "digraph {}", // empty graph (in GraphViz Dot format)
-            "Generating initial dep graph (empty graph)"
-        );
+        trace!("Generating initial fetch dependency graph");
         let mut initial_dependency_graph = self.new_dependency_graph();
         let federated_query_graph = &self.parameters.federated_query_graph;
         let root = &self.parameters.head;
