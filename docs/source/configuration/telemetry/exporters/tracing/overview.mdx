@@ -111,10 +111,20 @@ telemetry:
 
 - `parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to disable it (setting `parent_based_sampler: false`) if your router is exposed directly to the internet.
 
+<MinVersion version="1.59">
+
 ### `preview_datadog_agent_sampling`
 
-The Datadog APM view relies on traces to generate metrics. For this to be accurate 100% of requests must be sampled and sent to the Datadog agent.
-To prevent ALL traces from then being sent to Datadog, you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+</MinVersion>
+
+<PreviewFeature />
+
+
+Enable accurate Datadog APM views with the `preview_datadog_agent_sampling` option. 
+
+The Datadog APM view relies on traces to generate metrics. For this to be accurate, all requests must be sampled and sent to the Datadog Agent.
+
+To both enable accurate APM views and prevent _all_ traces from being sent to Datadog, you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -126,13 +136,7 @@ telemetry:
         preview_datadog_agent_sampling: true
 ```
 
-<Note>
-    The Router does not support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
-    Configuring `traces_per_second` in the Datadog agent will not dynamically adjust the Router's sampling rate to meet the target rate.
-</Note>
-<Note>
-    Using `preview_datadog_agent_sampling` will send ALL spans to the Datadog agent. This will have an impact on the resource usage and performance of both the Router and Datadog agent.
-</Note>
+To learn more details and limitations about this option, go to [`preview_datadog_agent_sampling`](/router/configuration/telemetry/exporters/tracing/datadog#preview_datadog_agent_sampling) in DataDog trace exporter docs.
 
 ### `propagation`
 
