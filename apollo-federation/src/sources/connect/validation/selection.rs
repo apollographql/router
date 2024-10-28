@@ -262,9 +262,9 @@ impl SelectionValidator<'_, '_> {
         Ok(())
     }
 
-    fn get_selection_location<T>(
+    fn get_selection_location(
         &self,
-        selection: &impl Ranged<T>,
+        selection: &impl Ranged,
     ) -> impl Iterator<Item = Range<LineColumn>> {
         selection
             .range()
