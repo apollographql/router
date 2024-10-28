@@ -405,10 +405,6 @@ impl Selection {
     }
 
     /// Returns true if the selection key is `__typename` *without directives*.
-    ///
-    /// # Errors
-    /// Returns an error if the selection contains a fragment spread, or if any of the
-    /// @skip/@include directives are invalid (per GraphQL validation rules).
     pub(crate) fn is_typename_field(&self) -> bool {
         if let Selection::Field(field) = self {
             *field.field.response_name() == TYPENAME_FIELD && field.field.directives.is_empty()
@@ -417,6 +413,11 @@ impl Selection {
         }
     }
 
+    /// Returns the conditions for inclusion of this selection.
+    ///
+    /// # Errors
+    /// Returns an error if the selection contains a fragment spread, or if any of the
+    /// @skip/@include directives are invalid (per GraphQL validation rules).
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         let self_conditions = Conditions::from_directives(self.directives())?;
         if let Conditions::Boolean(false) = self_conditions {
@@ -1668,6 +1669,13 @@ impl SelectionSet {
         }
     }
 
+    /// Returns the conditions for inclusion of this selection set.
+    ///
+    /// This tries to be smart about including or excluding the whole selection set.
+    /// - If all selections have the same condition, returns that condition.
+    /// - If selections in the set have different conditions, the selection set must always be
+    /// included, so the individual selections can be evaluated.
+    ///
     /// # Errors
     /// Returns an error if the selection set contains a fragment spread, or if any of the
     /// @skip/@include directives are invalid (per GraphQL validation rules).
