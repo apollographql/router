@@ -88,9 +88,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         },
                         None,
                     ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "unselected",
+                            ),
+                            range: Some(
+                                7..17,
+                            ),
+                        },
+                        None,
+                    ),
                 ],
                 range: Some(
-                    0..6,
+                    0..17,
                 ),
             },
         ),
@@ -202,9 +214,129 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         },
                         None,
                     ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "unselected",
+                            ),
+                            range: Some(
+                                7..17,
+                            ),
+                        },
+                        None,
+                    ),
                 ],
                 range: Some(
-                    0..6,
+                    0..17,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: Some(
+            Explicit,
+        ),
+    },
+    "one_Query_unselected_0": Connector {
+        id: ConnectId {
+            label: "one. http: GET http://localhost/ts/{$args.unselected}",
+            subgraph_name: "one",
+            source_name: None,
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.unselected),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: None,
+            connect_template: URLTemplate {
+                base: Some(
+                    Url {
+                        scheme: "http",
+                        cannot_be_a_base: false,
+                        username: "",
+                        password: None,
+                        host: Some(
+                            Domain(
+                                "localhost",
+                            ),
+                        ),
+                        port: None,
+                        path: "/",
+                        query: None,
+                        fragment: None,
+                    },
+                ),
+                path: [
+                    Component {
+                        parts: [
+                            Text(
+                                "ts",
+                            ),
+                        ],
+                    },
+                    Component {
+                        parts: [
+                            Var(
+                                Variable {
+                                    var_type: Args,
+                                    path: "unselected",
+                                    location: 21..37,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id2",
+                            ),
+                            range: Some(
+                                3..6,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "accessibleByUnselected",
+                            ),
+                            range: Some(
+                                7..29,
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                range: Some(
+                    0..29,
                 ),
             },
         ),
