@@ -27,8 +27,8 @@ pub(super) fn new_span(input: &str) -> Span {
 // produce a range directly from their children, so they do not need to be
 // wrapped as WithRange<PathSelection> or WithRange<NamedSelection>.
 // Additionally, AST nodes that are structs can store their own range as a
-// field, so they can implement Ranged<T> without the WithRange<T> wrapper.
-pub(crate) trait Ranged<T> {
+// field, so they can implement Ranged without the WithRange<T> wrapper.
+pub(crate) trait Ranged {
     fn range(&self) -> OffsetRange;
 }
 
@@ -39,7 +39,7 @@ pub(crate) trait Ranged<T> {
 // the file, following nom_locate's span.location_offset() convention.
 pub(crate) type OffsetRange = Option<std::ops::Range<usize>>;
 
-// The most common implementation of the Ranged<T> trait is the WithRange<T>
+// The most common implementation of the Ranged trait is the WithRange<T>
 // struct, used to wrap any AST node that (a) needs its own location information
 // (because that information is not derivable from its children) and (b) cannot
 // easily store that information by adding another struct field (most often
@@ -86,7 +86,7 @@ where
     }
 }
 
-impl<T> Ranged<T> for WithRange<T> {
+impl<T> Ranged for WithRange<T> {
     fn range(&self) -> OffsetRange {
         self.range.clone()
     }
