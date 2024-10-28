@@ -24,6 +24,7 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use either::Either;
 use lazy_static::lazy_static;
 use serde::Serialize;
 use strum::IntoEnumIterator;
@@ -485,16 +486,16 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
         &'a self,
         schema: &'a Schema,
     ) -> Result<
-        Box<dyn Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition> + 'a>,
+        impl Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition> + Captures<&'a ()>,
         FederationError,
     > {
         match self {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
-                Ok(Box::new(type_.fields(schema)?.map(|field| field.into())))
-            }
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
-                Ok(Box::new(type_.fields(schema)?.map(|field| field.into())))
-            }
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => Ok(Either::Left(
+                type_.fields(schema)?.map(|field| field.into()),
+            )),
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => Ok(Either::Right(
+                type_.fields(schema)?.map(|field| field.into()),
+            )),
         }
     }
 }

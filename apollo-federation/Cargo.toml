@@ -37,7 +37,7 @@ strum = "0.26.0"
 strum_macros = "0.26.0"
 thiserror = "1.0"
 url = "2"
-either = "1.12"
+either = "1.13"
 tracing = "0.1.40"
 ron = { version = "0.8.1", optional = true }
 nom_locate = "4.2.0"

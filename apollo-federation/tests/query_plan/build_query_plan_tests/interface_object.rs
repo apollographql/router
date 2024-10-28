@@ -826,3 +826,133 @@ fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
       "###
     );
 }
+
+#[test]
+fn test_interface_object_advance_with_non_collecting_and_type_preserving_transitions_ordering() {
+    let planner = planner!(
+        S1: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+
+            type Query {
+                test: A
+            }
+        "#,
+        S2: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S3: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S4: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        Y1: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Y2: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Z: r#"
+            type I @interfaceObject @key(fields: "alt_id { id }") {
+                alt_id: AltID!
+                data: String!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            {
+                test {
+                    data
+                }
+            }
+        "#,
+
+        // Make sure we fetch S1 -> Y1 -> Z, not S1 -> Y2 -> Z.
+        // That's following JS QP's behavior.
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            test {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Y1") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Z") {
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on I {
+                data
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
