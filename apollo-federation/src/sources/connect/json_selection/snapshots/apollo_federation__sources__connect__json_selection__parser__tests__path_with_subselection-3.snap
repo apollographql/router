@@ -90,7 +90,6 @@ Named(
                                                                 None,
                                                             ),
                                                         ],
-                                                        star: None,
                                                         range: Some(
                                                             71..87,
                                                         ),
@@ -192,7 +191,6 @@ Named(
                                                                 None,
                                                             ),
                                                         ],
-                                                        star: None,
                                                         range: Some(
                                                             140..164,
                                                         ),
@@ -220,7 +218,6 @@ Named(
                 },
             ),
         ],
-        star: None,
         range: Some(
             13..164,
         ),

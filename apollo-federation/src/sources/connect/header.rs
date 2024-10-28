@@ -113,7 +113,12 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 }
 
 fn namespace(input: &str) -> IResult<&str, &str> {
-    recognize(alt((tag("$config"), tag("$context"))))(input)
+    recognize(alt((
+        tag("$args"),
+        tag("$config"),
+        tag("$context"),
+        tag("$this"),
+    )))(input)
 }
 
 fn path(input: &str) -> IResult<&str, &str> {

@@ -62,7 +62,6 @@ Path(
                                                     None,
                                                 ),
                                             ],
-                                            star: None,
                                             range: Some(
                                                 36..52,
                                             ),

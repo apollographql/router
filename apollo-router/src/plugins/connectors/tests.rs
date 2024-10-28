@@ -84,6 +84,12 @@ pub(crate) mod mock_api {
         )
     }
 
+    pub(crate) fn user_2_nicknames() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/users/2/nicknames"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(["cat"])))
+    }
+
     pub(crate) fn users_error() -> Mock {
         Mock::given(method("GET")).and(path("/users")).respond_with(
             ResponseTemplate::new(404).set_body_json(serde_json::json!([
@@ -442,7 +448,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username d rest } }",
+        "query { users { id name username d } }",
         Default::default(),
         None,
         |_| {},
@@ -457,23 +463,13 @@ async fn test_root_field_plus_entity_plus_requires() {
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret",
-            "d": "1-770-736-8031 x56442",
-            "rest": {
-              "phone": "1-770-736-8031 x56442",
-              "email": "Sincere@april.biz",
-              "website": "hildegard.org"
-            }
+            "d": "1-770-736-8031 x56442"
           },
           {
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette",
-            "d": "1-770-736-8031 x56442",
-            "rest": {
-              "phone": "1-770-736-8031 x56442",
-              "email": "Shanna@melissa.tv",
-              "website": "anastasia.net"
-            }
+            "d": "1-770-736-8031 x56442"
           }
         ]
       }
@@ -675,6 +671,45 @@ async fn test_headers() {
             )
             .path("/users")
             .build()],
+    );
+}
+
+#[tokio::test]
+async fn test_args_and_this_in_header() {
+    let mock_server = MockServer::start().await;
+    mock_api::user_2().mount(&mock_server).await;
+    mock_api::user_2_nicknames().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { user(id: 2){ id nickname } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-from-args").unwrap(),
+                    HeaderValue::from_str("before 2 after").unwrap(),
+                )
+                .path("/users/2")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-from-this").unwrap(),
+                    HeaderValue::from_str("before 2 after").unwrap(),
+                )
+                .path("/users/2/nicknames")
+                .build(),
+        ],
     );
 }
 

@@ -196,7 +196,7 @@ impl SelectionValidator<'_, '_> {
                         new_object_name = object.name,
                     ),
                     // TODO: make a helper function for easier range collection
-                    locations: self.get_selection_location(field.selection)
+                    locations: self.get_range_location(field.inner_range())
                         // Skip over fields which duplicate the location of the selection
                         .chain(if depth > 1 {ancestor_field.and_then(|def| def.line_column_range(&self.schema.sources))} else {None})
                         .chain(field.definition.line_column_range(&self.schema.sources))
@@ -220,12 +220,36 @@ impl SelectionValidator<'_, '_> {
             })
             .into_iter()
     }
+
+    fn get_range_location(
+        &self,
+        selection: Option<Range<usize>>,
+    ) -> impl Iterator<Item = Range<LineColumn>> {
+        selection
+            .as_ref()
+            .and_then(|range| {
+                self.selection_arg
+                    .value
+                    .line_col_for_subslice(range.clone(), self.schema)
+            })
+            .into_iter()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 struct Field<'schema> {
     selection: &'schema NamedSelection,
     definition: &'schema Node<FieldDefinition>,
+}
+
+impl<'schema> Field<'schema> {
+    fn next_subselection(&self) -> Option<&'schema SubSelection> {
+        self.selection.next_subselection()
+    }
+
+    fn inner_range(&self) -> Option<Range<usize>> {
+        self.selection.range()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -265,7 +289,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
         &self,
         field: &Field<'schema>,
     ) -> Result<Option<Group<'schema>>, Self::Error> {
-        let Some(selection) = field.selection.next_subselection() else {
+        let Some(selection) = field.next_subselection() else {
             return Ok(None);
         };
         let Some(ty) = self
@@ -309,9 +333,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
                 }
             }
             results
-        }).chain(
-            self.validate_star_selection(group).into_iter().map(Err)
-        ).collect()
+        }).collect()
     }
 
     fn exit_group(&mut self) -> Result<(), Self::Error> {
@@ -332,9 +354,9 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
             message: format!(
                 "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
             ),
-            locations: self.get_selection_location(field.selection).collect(),
+            locations: self.get_range_location(field.inner_range()).collect(),
         })?;
-        let is_group = field.selection.next_subselection().is_some();
+        let is_group = field.next_subselection().is_some();
 
         self.seen_fields.insert((
             self.last_field().ty().name.clone(),
@@ -348,7 +370,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                     "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
                     parent_type = self.last_field().ty().name,
                 ),
-                locations: self.get_selection_location(field.selection).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
             });
         }
 
@@ -363,7 +385,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                         "{coordinate} selects a group `{field_name}{{}}`, but `{parent_type}.{field_name}` is of type `{type_name}` which is not an object.",
                         parent_type = self.last_field().ty().name,
                     ),
-                    locations: self.get_selection_location(field.selection).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                    locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
                 })
             },
             (ExtendedType::Object(_), false) => {
@@ -373,7 +395,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                         "`{parent_type}.{field_name}` is an object, so {coordinate} must select a group `{field_name}{{}}`.",
                         parent_type = self.last_field().ty().name,
                     ),
-                    locations: self.get_selection_location(field.selection).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                    locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
                 })
             },
             (_, false) => Ok(()),
@@ -381,7 +403,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
     }
 }
 
-impl SelectionValidator<'_, '_> {
+impl<'schema, 'a> SelectionValidator<'schema, 'a> {
     fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
         once(self.root).chain(self.path.iter().copied())
     }
@@ -399,104 +421,4 @@ impl SelectionValidator<'_, '_> {
     fn last_field(&self) -> &PathPart {
         self.path.last().unwrap_or(&self.root)
     }
-
-    /// When using `*`, it must be mapped to a field via an alias, and the field
-    /// must be a non-list custom scalar.
-    fn validate_star_selection(&self, group: &Group) -> Vec<Message> {
-        let coordinate = self.selection_arg.coordinate;
-        group
-            .selection
-            .star_iter()
-            .filter_map(|star| {
-                let Some(alias) = star.alias() else {
-                    return Some(Message {
-                        code: Code::InvalidStarSelection,
-                        message: format!(
-                            "{coordinate} contains `*` without an alias. Use `fieldName: *` to map properties to a field.",
-                        ),
-                        locations: self.get_selection_location(star).collect(),
-                    });
-                };
-                let field_name = alias.name();
-
-                let Some(definition) = group.ty.fields.get(field_name) else {
-                    return Some(Message {
-                        code: Code::SelectedFieldNotFound,
-                        message: format!(
-                            "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                            parent_type = group.ty.name,
-                        ),
-                        locations: self.get_selection_location(alias).collect(),
-                    });
-                };
-
-                let locations = self.get_selection_location(star).chain(definition.line_column_range(&self.schema.sources));
-
-                if definition.ty.is_list() {
-                    return Some(Message {
-                        code: Code::InvalidStarSelection,
-                        message: format!(
-                            "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a list. It must be a non-list custom scalar.",
-                            field_name = field_name,
-                            parent_type = group.ty.name,
-                            ty = definition.ty
-                        ),
-                        locations: locations.collect(),
-                    });
-                }
-
-                let Some(ty) = self.schema.types.get(definition.ty.inner_named_type()) else {
-                    return Some(Message {
-                        code: Code::GraphQLError,
-                        message: format!(
-                            "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
-                            type_name = definition.ty.inner_named_type()
-                        ),
-                        locations: locations.collect(),
-                    });
-                };
-
-                if !ty.is_scalar() {
-                    return Some(Message {
-                        code: Code::InvalidStarSelection,
-                        message: format!(
-                            "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns {ty_kind} type. It must be a non-list custom scalar.",
-                            field_name = field_name,
-                            parent_type = group.ty.name,
-                            ty = definition.ty,
-                            ty_kind = type_sentence_part(ty)
-                        ),
-                        locations: locations.collect(),
-                    });
-                }
-
-                if ty.is_built_in() {
-                    return Some(Message {
-                        code: Code::InvalidStarSelection,
-                        message: format!(
-                            "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a built-in scalar type. It must be a non-list custom scalar.",
-                            field_name = field_name,
-                            parent_type = group.ty.name,
-                            ty = definition.ty
-                        ),
-                        locations: locations.collect(),
-                    });
-                }
-
-                None
-            })
-            .collect()
-    }
-}
-
-fn type_sentence_part(ty: &ExtendedType) -> String {
-    match ty {
-        ExtendedType::Object(_) => "an object",
-        ExtendedType::Interface(_) => "an interface",
-        ExtendedType::Union(_) => "a union",
-        ExtendedType::Enum(_) => "an enum",
-        ExtendedType::InputObject(_) => "an input object",
-        ExtendedType::Scalar(_) => "a scalar",
-    }
-    .to_string()
 }

@@ -13,7 +13,6 @@ use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::PathSelection;
-use crate::sources::connect::json_selection::StarSelection;
 use crate::sources::connect::json_selection::SubSelection;
 
 impl std::fmt::Display for JSONSelection {
@@ -77,17 +76,10 @@ impl PrettyPrintable for SubSelection {
 impl SubSelection {
     /// Prints all of the selections in a subselection
     fn print_subselections(&self, indentation: usize) -> String {
-        let selections = self
-            .selections
+        self.selections
             .iter()
-            .map(|s| s.pretty_print_with_indentation(false, indentation));
-
-        let star = self
-            .star
-            .as_ref()
-            .map(|s| s.pretty_print_with_indentation(false, indentation));
-
-        selections.chain(star).join("\n")
+            .map(|s| s.pretty_print_with_indentation(false, indentation))
+            .join("\n")
     }
 }
 
@@ -306,38 +298,12 @@ impl PrettyPrintable for NamedSelection {
     }
 }
 
-impl PrettyPrintable for StarSelection {
-    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        let mut result = String::new();
-
-        if !inline {
-            result.push_str(indent_chars(indentation).as_str());
-        }
-
-        if let Some(alias) = &self.alias {
-            result.push_str(alias.name.as_str());
-            result.push_str(": ");
-        }
-
-        result.push('*');
-
-        if let Some(sub) = &self.selection {
-            let sub = sub.pretty_print_with_indentation(true, indentation);
-            result.push(' ');
-            result.push_str(sub.as_str());
-        }
-
-        result
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::location::Span;
     use crate::sources::connect::json_selection::pretty::indent_chars;
     use crate::sources::connect::json_selection::NamedSelection;
     use crate::sources::connect::json_selection::PrettyPrintable;
-    use crate::sources::connect::json_selection::StarSelection;
     use crate::sources::connect::JSONSelection;
     use crate::sources::connect::PathSelection;
     use crate::sources::connect::SubSelection;
@@ -370,23 +336,6 @@ mod tests {
             prettified_indented, expected_indented,
             "pretty printing indented did not match: {prettified_indented} != {expected_indented}"
         );
-    }
-
-    #[test]
-    fn it_prints_a_star_selection() {
-        let (unmatched, star_selection) = StarSelection::parse(Span::new("rest: *")).unwrap();
-        assert!(unmatched.is_empty());
-
-        test_permutations(star_selection, "rest: *");
-    }
-
-    #[test]
-    fn it_prints_a_star_selection_with_subselection() {
-        let (unmatched, star_selection) =
-            StarSelection::parse(Span::new("rest: * { a b }")).unwrap();
-        assert!(unmatched.is_empty());
-
-        test_permutations(star_selection, "rest: * {\n  a\n  b\n}");
     }
 
     #[test]
