@@ -401,7 +401,7 @@ A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` error code can reconnec
 
 ### WebSocket auth support
 
-By default, if you've configured your router to [propagate](/router/configuration/header-propagation/) HTTP `Authorization` headers to your subgraph, then the router automatically sets corresponding `connectionParams` when initiating a WebSocket connection to that subgraph.
+By default, if you've configured your router to [propagate](/graphos/routing/header-propagation/) HTTP `Authorization` headers to your subgraph, then the router automatically sets corresponding `connectionParams` when initiating a WebSocket connection to that subgraph.
 
 For example, when your router sends the [`connection_init` message](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md#connectioninit) to a subgraph, it includes the value of the `Authorization` header via the following payload:
 

@@ -8,7 +8,7 @@ description:  Protect sensitive data by enabling JWT authentication in the Apoll
 
 Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The GraphOS Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
-By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](/router/configuration/header-propagation/) to propagate tokens to your subgraphs.
+By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](/graphos/routing/header-propagation/) to propagate tokens to your subgraphs.
 
 <Tip>
 
@@ -254,7 +254,7 @@ fn process_request(request) {
 
 <Tip>
 
-Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](/router/configuration/header-propagation/) to subgraphs.
+Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](/graphos/routing/header-propagation/) to subgraphs.
 
 </Tip>
 
@@ -739,7 +739,7 @@ This matching strategy is necessary because some identity providers (IdPs) don't
 
 Because the GraphOS Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs-as-headers) to enable fine-grained access control.
 
-If you _do_ need to pass entire JWTs to subgraphs, you can do so via the GraphOS Router's general-purpose [HTTP header propagation settings](/router/configuration/header-propagation).
+If you _do_ need to pass entire JWTs to subgraphs, you can do so via the GraphOS Router's general-purpose [HTTP header propagation settings](/graphos/routing/header-propagation).
 
 ## Observability
 

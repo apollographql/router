@@ -58,7 +58,7 @@ Cloud Dedicated doesn't automatically scan your resource shares for new Lattice 
 
 Because AWS Sigv4 relies on the [HTTP `Authorization` request header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Authorization) for [signing requests](https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html), you may receive an error like this: `You must be authenticated to access this resource. Please provide a valid Bearer Token in the Authorization header.`
 
-If your subgraphs rely on the `Authorization` header for authentication, your router must [rename](/router/configuration/header-propagation/#propagate) it. For example:
+If your subgraphs rely on the `Authorization` header for authentication, your router must [rename](/graphos/routing/header-propagation/#propagate) it. For example:
 
 ```yaml title="router.yaml"
 # ...other configuration...
