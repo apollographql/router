@@ -5,11 +5,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
 ---
 directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
-type Contact {
-  phone: String
-  email: String
-}
-
 scalar JSON
 
 type Query {

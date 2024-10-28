@@ -1,6 +1,3 @@
-# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/realistic.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/realistic.graphql
-# this is currently manually edited to add Status enum and EmailAddress scalars to the input type
-federation_version: =2.10.0-alpha.0
 subgraphs:
   connectors:
     routing_url: none
@@ -66,7 +63,6 @@ subgraphs:
           phone: String
           website: String
           company: CompanyInfo
-          status: String # Status
         }
 
         type Address {
@@ -86,7 +82,7 @@ subgraphs:
           name: String
           catchPhrase: String
           bs: String
-          email: String # EmailAddress
+          email: EmailAddress
         }
 
         input CompanyInput {
@@ -109,8 +105,8 @@ subgraphs:
         input CreateUserInput {
           name: String!
           username: String!
-          email: String # EmailAddress!
-          status: String # Status!
+          email: EmailAddress!
+          status: Status!
           address: AddressInput
         }
 

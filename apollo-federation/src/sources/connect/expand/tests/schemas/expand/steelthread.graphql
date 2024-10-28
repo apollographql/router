@@ -24,13 +24,6 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Contact
-  @join__type(graph: CONNECTORS)
-{
-  phone: String
-  email: String
-}
-
 input join__ContextArgument {
   name: String!
   type: String!

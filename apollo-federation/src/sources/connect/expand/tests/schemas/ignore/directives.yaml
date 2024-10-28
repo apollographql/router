@@ -1,5 +1,3 @@
-# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/ignore/directives.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/ignore/directives.graphql
-federation_version: =2.8.1
 subgraphs:
   one:
     routing_url: none
