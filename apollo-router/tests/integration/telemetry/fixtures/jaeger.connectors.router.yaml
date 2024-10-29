@@ -1,0 +1,55 @@
+telemetry:
+  instrumentation:
+    spans:
+      connector:
+        attributes:
+          connector.source.name: true
+          connector.http.method: true
+          connector.http.response.status_code:
+            connector_http_response_status: code
+          connector.url.template: true
+          connector.http.response.header.content-type:
+            connector_http_response_header: "content-type"
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+      propagation:
+        jaeger: true
+      common:
+        service_name: router
+        sampler: always_on
+      jaeger:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        collector:
+          endpoint: http://127.0.0.1:14268/api/traces
+    logging:
+      experimental_when_header:
+        - name: apollo-router-log-request
+          value: test
+          headers: true # default: false
+          body: true # default: false
+        # log request for all requests coming from Iphones
+        - name: custom-header
+          match: ^foo.*
+          headers: true
+
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+
+supergraph:
+  listen: "127.0.0.1:50642"
+health_check:
+  enabled: true
+  listen: "127.0.0.1:50642"
+preview_connectors:
+  subgraphs:
+    posts: # The name of the subgraph
+      sources:
+        routerHealth: # Refers to @source(name: "routerHealth")
+          override_url: http://127.0.0.1:50642

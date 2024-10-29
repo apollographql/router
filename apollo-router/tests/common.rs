@@ -297,7 +297,9 @@ impl IntegrationTest {
         let url = format!("http://{address}/");
 
         // Add a default override for products, if not specified
-        subgraph_overrides.entry("products".into()).or_insert(url);
+        subgraph_overrides
+            .entry("products".into())
+            .or_insert(url.clone());
 
         // Insert the overrides into the config
         let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
@@ -387,7 +389,6 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
-
         router
             .args(dbg!([
                 "--hr",
@@ -413,7 +414,6 @@ impl IntegrationTest {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
-
                 // Extract the bind address from a log line that looks like this: GraphQL endpoint exposed at http://127.0.0.1:51087/
                 if let Some(captures) = bind_address_regex.captures(&line) {
                     let address = captures.name("address").unwrap().as_str();
