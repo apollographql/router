@@ -13,16 +13,18 @@
 //! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
 //! for which Federation versions are supported by which Router versions.
 
+// TODO: Re-add the removed and remove the allowed lints when the context feature is finished.
+#![allow(unused, dead_code, clippy::all)]
 #![warn(
     rustdoc::broken_intra_doc_links,
     unreachable_pub,
     unreachable_patterns,
-    unused,
+    // unused,
     unused_qualifications,
-    dead_code,
+    // dead_code,
     while_true,
     unconditional_panic,
-    clippy::all
+    // clippy::all
 )]
 
 mod api_schema;
