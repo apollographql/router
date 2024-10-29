@@ -23,14 +23,12 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::dual_query_planner::opt_plan_node_matches;
 use super::fetch::QueryHash;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
-use crate::configuration::QueryPlanReuseMode;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -64,6 +62,7 @@ pub(crate) enum ConfigMode {
     //FIXME: add the Rust planner structure once it is hashable and serializable,
     // for now use the JS config as it expected to be identical to the Rust one
     Rust(Arc<apollo_federation::query_plan::query_planner::QueryPlannerConfig>),
+    Both(Arc<QueryPlannerConfig>),
     BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
 }
@@ -81,8 +80,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
-    experimental_reuse_query_plans: QueryPlanReuseMode,
-    config_mode: Arc<QueryHash>,
+    config_mode_hash: Arc<QueryHash>,
 }
 
 fn init_query_plan_from_redis(
@@ -140,12 +138,16 @@ where
             }
             crate::configuration::QueryPlannerMode::Both => {
                 "PLANNER-BOTH".hash(&mut hasher);
-                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
+                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+                    .hash(&mut hasher);
                 ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
                     .hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::BothBestEffort => {
+                "PLANNER-BOTH-BEST-EFFORT".hash(&mut hasher);
                 ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
+                    .hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
                     .hash(&mut hasher);
             }
         };
@@ -158,11 +160,7 @@ where
             subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
-            experimental_reuse_query_plans: configuration
-                .supergraph
-                .query_planning
-                .experimental_reuse_query_plans,
-            config_mode,
+            config_mode_hash: config_mode,
         })
     }
 
@@ -176,7 +174,7 @@ where
         persisted_query_layer: &PersistedQueryLayer,
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
-        experimental_reuse_query_plans: QueryPlanReuseMode,
+        experimental_reuse_query_plans: bool,
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         let _timer = Timer::new(|duration| {
@@ -211,6 +209,7 @@ where
                                 metadata,
                                 plan_options,
                                 config_mode: _,
+                                schema_id: _,
                             },
                             _,
                         )| WarmUpCachingQueryKey {
@@ -219,7 +218,7 @@ where
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
-                            config_mode: self.config_mode.clone(),
+                            config_mode: self.config_mode_hash.clone(),
                         },
                     )
                     .take(count)
@@ -264,7 +263,7 @@ where
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
-                        config_mode: self.config_mode.clone(),
+                        config_mode: self.config_mode_hash.clone(),
                     });
                 }
             }
@@ -274,7 +273,6 @@ where
 
         let mut count = 0usize;
         let mut reused = 0usize;
-        let mut could_have_reused = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
             operation_name,
@@ -296,25 +294,19 @@ where
             let caching_key = CachingQueryKey {
                 query: query.clone(),
                 operation: operation_name.clone(),
-                hash: if experimental_reuse_query_plans == QueryPlanReuseMode::Reuse {
-                    CachingQueryHash::Reuse(doc.hash.clone())
-                } else {
-                    CachingQueryHash::DoNotReuse {
-                        query_hash: doc.hash.clone(),
-                        schema_hash: self.schema.schema_id.clone(),
-                    }
-                },
-                metadata: metadata.clone(),
-                plan_options: plan_options.clone(),
-                config_mode: self.config_mode.clone(),
+                hash: doc.hash.clone(),
+                schema_id: Arc::clone(&self.schema.schema_id),
+                metadata,
+                plan_options,
+                config_mode: self.config_mode_hash.clone(),
             };
 
-            let mut should_measure = None;
-            if let Some(warmup_hash) = hash.clone() {
-                if experimental_reuse_query_plans == QueryPlanReuseMode::Reuse {
-                    if let Some(ref previous_cache) = &previous_cache {
-                        // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                        if warmup_hash.schema_aware_query_hash() == &*doc.hash {
+            if experimental_reuse_query_plans {
+                // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
+                if let Some(ref previous_cache) = previous_cache {
+                    // if the query hash did not change with the schema update, we can reuse the previously cached entry
+                    if let Some(hash) = hash {
+                        if hash == doc.hash {
                             if let Some(entry) =
                                 { previous_cache.lock().await.get(&caching_key).cloned() }
                             {
@@ -324,17 +316,6 @@ where
                             }
                         }
                     }
-                } else if self.experimental_reuse_query_plans == QueryPlanReuseMode::Measure
-                    && warmup_hash.schema_aware_query_hash() == &*doc.hash
-                {
-                    should_measure = Some(CachingQueryKey {
-                        query: query.clone(),
-                        operation: operation_name.clone(),
-                        hash: warmup_hash.clone(),
-                        metadata: metadata.clone(),
-                        plan_options: plan_options.clone(),
-                        config_mode: self.config_mode.clone(),
-                    });
                 }
             };
 
@@ -370,8 +351,8 @@ where
                 });
 
                 let request = QueryPlannerRequest {
-                    query: query.clone(),
-                    operation_name: operation_name.clone(),
+                    query,
+                    operation_name,
                     context: context.clone(),
                 };
 
@@ -384,44 +365,6 @@ where
                     Ok(QueryPlannerResponse { content, .. }) => {
                         if let Some(content) = content.clone() {
                             count += 1;
-
-                            // we want to measure query plan reuse
-                            if let Some(reused_cache_key) = should_measure {
-                                if let Some(previous) = &previous_cache {
-                                    let previous_plan = {
-                                        let mut cache = previous.lock().await;
-                                        cache.get(&reused_cache_key).cloned()
-                                    };
-
-                                    if let Some(previous_content) =
-                                        previous_plan.and_then(|res| res.ok())
-                                    {
-                                        if let (
-                                            QueryPlannerContent::Plan {
-                                                plan: previous_plan,
-                                            },
-                                            QueryPlannerContent::Plan { plan: new_plan },
-                                        ) = (previous_content, &content)
-                                        {
-                                            let matched = opt_plan_node_matches(
-                                                &Some(&*previous_plan.root),
-                                                &Some(&*new_plan.root),
-                                            );
-
-                                            if matched.is_ok() {
-                                                could_have_reused += 1;
-                                            }
-                                            u64_counter!(
-                                                "apollo.router.operations.query_planner.reuse",
-                                                "Measure possible mismatches when reusing query plans",
-                                                1,
-                                                "is_matched" = matched.is_ok()
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-
                             tokio::spawn(async move {
                                 entry.insert(Ok(content.clone())).await;
                             });
@@ -439,26 +382,6 @@ where
         }
 
         tracing::debug!("warmed up the query planner cache with {count} queries planned and {reused} queries reused");
-
-        match experimental_reuse_query_plans {
-            QueryPlanReuseMode::DoNotReuse => {}
-            QueryPlanReuseMode::Reuse => {
-                u64_counter!(
-                    "apollo.router.query.planning.warmup.reused",
-                    "The number of query plans that were reused instead of regenerated during query planner warm up",
-                    reused as u64,
-                    query_plan_reuse_active = true
-                );
-            }
-            QueryPlanReuseMode::Measure => {
-                u64_counter!(
-                    "apollo.router.query.planning.warmup.reused",
-                    "The number of query plans that were reused instead of regenerated during query planner warm up",
-                    could_have_reused as u64,
-                    query_plan_reuse_active = false
-                );
-            }
-        }
     }
 }
 
@@ -572,17 +495,11 @@ where
         let caching_key = CachingQueryKey {
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
-            hash: if self.experimental_reuse_query_plans == QueryPlanReuseMode::Reuse {
-                CachingQueryHash::Reuse(doc.hash.clone())
-            } else {
-                CachingQueryHash::DoNotReuse {
-                    query_hash: doc.hash.clone(),
-                    schema_hash: self.schema.schema_id.clone(),
-                }
-            },
+            hash: doc.hash.clone(),
+            schema_id: Arc::clone(&self.schema.schema_id),
             metadata,
             plan_options,
-            config_mode: self.config_mode.clone(),
+            config_mode: self.config_mode_hash.clone(),
         };
 
         let context = request.context.clone();
@@ -727,8 +644,9 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
+    pub(crate) schema_id: Arc<String>,
     pub(crate) operation: Option<String>,
-    pub(crate) hash: CachingQueryHash,
+    pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: Arc<QueryHash>,
@@ -762,58 +680,11 @@ impl std::fmt::Display for CachingQueryKey {
     }
 }
 
-// TODO: this is an intermediate type to hold the query hash while query plan reuse is still experimental
-// this will be replaced by the schema aware query hash once the option is removed
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CachingQueryHash {
-    Reuse(Arc<QueryHash>),
-    DoNotReuse {
-        query_hash: Arc<QueryHash>,
-        schema_hash: Arc<String>,
-    },
-}
-
-impl CachingQueryHash {
-    fn schema_aware_query_hash(&self) -> &QueryHash {
-        match self {
-            CachingQueryHash::Reuse(hash) => hash,
-            CachingQueryHash::DoNotReuse { query_hash, .. } => query_hash,
-        }
-    }
-}
-
-impl Hash for CachingQueryHash {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            CachingQueryHash::Reuse(hash) => hash.hash(state),
-            CachingQueryHash::DoNotReuse {
-                schema_hash,
-                query_hash,
-            } => {
-                schema_hash.hash(state);
-                query_hash.hash(state);
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for CachingQueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CachingQueryHash::Reuse(hash) => write!(f, "query:{}", hash),
-            CachingQueryHash::DoNotReuse {
-                schema_hash,
-                query_hash,
-            } => write!(f, "schema:{}:query:{}", schema_hash, query_hash),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
-    pub(crate) hash: Option<CachingQueryHash>,
+    pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: Arc<QueryHash>,

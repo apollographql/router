@@ -911,7 +911,7 @@ pub(crate) struct QueryPlanning {
 
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
-    pub(crate) experimental_reuse_query_plans: QueryPlanReuseMode,
+    pub(crate) experimental_reuse_query_plans: bool,
 
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
@@ -925,20 +925,6 @@ impl QueryPlanning {
             AvailableParallelism::Fixed(n) => Ok(n),
         }
     }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum QueryPlanReuseMode {
-    /// Do not reuse query plans across schema and configuration updates
-    #[default]
-    DoNotReuse,
-    /// Do not reuse query plans across schema and configuration updates, but check if query plans
-    /// could have been reused, by comparing the query plan with the previous query plan
-    Measure,
-    /// Reuse query plans across schema and configuration updates for some queries
-    /// if the update would not affect these queries
-    Reuse,
 }
 
 /// Cache configuration

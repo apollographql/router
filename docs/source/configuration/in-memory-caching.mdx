@@ -96,10 +96,8 @@ It can be activated through this option:
 supergraph:
   query_planning:
     warmed_up_queries: 100
-    experimental_reuse_query_plans: reuse # possible values: do_not_reuse (default), reuse, measure
+    experimental_reuse_query_plans: true
 ```
-
-To check if the Router deployment would benefit from this option, set the option to `measure`. The router will then check, when warming up the cache, if a query plan could have been reused instead of generated, by comparing old and new query plans. It will be visible in the counter metric `apollo.router.query.planning.warmup.reused`, with its attribute `query_plan_reuse_active` set to `true` in "reuse" mode, or `false` in "measure" mode.
 
 ## Caching automatic persisted queries (APQ)
 

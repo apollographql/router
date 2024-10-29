@@ -4431,31 +4431,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "QueryPlanReuseMode": {
-      "oneOf": [
-        {
-          "description": "Do not reuse query plans across schema and configuration updates",
-          "enum": [
-            "do_not_reuse"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Do not reuse query plans across schema and configuration updates, but check if query plans could have been reused, by comparing the query plan with the previous query plan",
-          "enum": [
-            "measure"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Reuse query plans across schema and configuration updates for some queries if the update would not affect these queries",
-          "enum": [
-            "reuse"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "QueryPlannerMode": {
       "description": "Query planner modes.",
       "oneOf": [
@@ -4518,8 +4493,9 @@ expression: "&schema"
           "type": "integer"
         },
         "experimental_reuse_query_plans": {
-          "$ref": "#/definitions/QueryPlanReuseMode",
-          "description": "#/definitions/QueryPlanReuseMode"
+          "default": false,
+          "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
+          "type": "boolean"
         },
         "warmed_up_queries": {
           "default": null,
