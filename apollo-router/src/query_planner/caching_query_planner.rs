@@ -342,6 +342,7 @@ where
                     document: doc,
                     metadata: caching_key.metadata,
                     context: context.clone(),
+                    plan_options: caching_key.plan_options,
                 };
 
                 let res = match service.ready().await {
@@ -516,6 +517,7 @@ where
                 .context(context)
                 .document(doc)
                 .metadata(caching_key.metadata)
+                .plan_options(caching_key.plan_options)
                 .build();
 
             // some clients might timeout and cancel the request before query planning is finished,

@@ -578,6 +578,7 @@ mod tests {
     use ahash::HashMapExt;
     use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
+    use router_bridge::planner::PlanOptions;
     use test_log::test;
     use tower::Service;
 
@@ -691,6 +692,7 @@ mod tests {
                 ctx,
                 query,
                 CacheKeyMetadata::default(),
+                PlanOptions::default(),
             ))
             .await
             .unwrap();

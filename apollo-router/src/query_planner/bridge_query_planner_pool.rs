@@ -300,6 +300,7 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 
 mod tests {
     use opentelemetry_sdk::metrics::data::Gauge;
+    use router_bridge::planner::PlanOptions;
 
     use super::*;
     use crate::metrics::FutureMetricsExt;
@@ -337,6 +338,7 @@ mod tests {
                 context,
                 doc,
                 CacheKeyMetadata::default(),
+                PlanOptions::default(),
             ))
             .await
             .unwrap();

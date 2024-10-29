@@ -597,20 +597,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             document,
             metadata,
             context,
+            plan_options,
         } = req;
 
-        // let metadata = context
-        //     .extensions()
-        //     .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned().unwrap_or_default());
         let this = self.clone();
         let fut = async move {
-            let mut doc = document; /*match context
-                                        .extensions()
-                                        .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-                                    {
-                                        None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
-                                        Some(d) => d,
-                                    };*/
+            let mut doc = document;
 
             let api_schema = this.schema.api_schema();
             match add_defer_labels(api_schema, &doc.ast) {
@@ -642,13 +634,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
                 }
             }
-
-            let plan_options = PlanOptions {
-                override_conditions: context
-                    .get(LABELS_TO_OVERRIDE_KEY)
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            };
 
             let res = this
                 .get(

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use derivative::Derivative;
+use router_bridge::planner::PlanOptions;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
@@ -25,6 +26,7 @@ pub(crate) struct Request {
     pub(crate) context: Context,
     pub(crate) document: ParsedDocument,
     pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
+    pub(crate) plan_options: PlanOptions,
 }
 
 #[buildstructor::buildstructor]
@@ -39,6 +41,7 @@ impl Request {
         context: Context,
         document: ParsedDocument,
         metadata: crate::plugins::authorization::CacheKeyMetadata,
+        plan_options: PlanOptions,
     ) -> Request {
         Self {
             query,
@@ -46,6 +49,7 @@ impl Request {
             context,
             document,
             metadata,
+            plan_options,
         }
     }
 }
