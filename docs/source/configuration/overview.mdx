@@ -589,11 +589,17 @@ Starting with v1.49.0, the router can run a Rust-native query planner. This nati
 
 <Tip>
 
-Starting with v1.56.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following option in your `router.yaml`:
+Starting with v1.57.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following option in your `router.yaml`:
 
 ```yaml title="router.yaml"
 experimental_query_planner_mode: new
 ```
+
+<Note>
+
+In router v1.56, running the most performant and resource-efficient native query planner also requires setting `experimental_introspection_mode: new`.
+
+</Note>
 
 You can also improve throughput by reducing the size of queries sent to subgraphs with the following option:
 
