@@ -54,10 +54,11 @@ log_trace("trace-level log message");
 
 ## Terminating client requests
 
-Your Rhai script can terminate the associated client request that triggered it. To do so, it throws an exception. This returns an `Internal Server Error` to the client with a `500` response code.
+Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from the supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -75,6 +76,7 @@ The key must be a number and the message must be something which can be converte
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -93,6 +95,7 @@ You can also `throw` a valid GraphQL response, which will be deserialized and de
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our request
     let f = |request| {
@@ -359,6 +362,10 @@ Router.APOLLO_AUTHENTICATION_JWT_CLAIMS // Context key to access authentication 
 Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS // Context key to modify or access the custom connection params when using subscriptions in WebSocket to subgraphs (cf subscription docs)
 Router.APOLLO_ENTITY_CACHE_KEY // Context key to access the entity cache key
 Router.APOLLO_OPERATION_ID // Context key to get the value of apollo operation id (studio trace id) from the context
+Router.APOLLO_COST_ESTIMATED_KEY // Context key to get the estimated cost of an operation
+Router.APOLLO_COST_ACTUAL_KEY // Context key to get the actual cost of an operation
+Router.APOLLO_COST_STRATEGY_KEY // Context key to get the strategy used to calculate cost
+Router.APOLLO_COST_RESULT_KEY // Context key to get the cost result of an operation
 ```
 
 ## `Request` interface
@@ -376,6 +383,7 @@ request.body.variables
 request.body.extensions
 request.uri.host
 request.uri.path
+request.uri.port
 ```
 
 <Note>
@@ -394,7 +402,10 @@ request.subgraph.body.variables
 request.subgraph.body.extensions
 request.subgraph.uri.host
 request.subgraph.uri.path
+request.subgraph.uri.port
 ```
+
+**For `subgraph_service` callbacks only,** the `request` object provides the non modifiable field `request.subgraph_request_id` which is a unique ID corresponding to the subgraph request.
 
 ### `request.context`
 
@@ -540,6 +551,17 @@ print(`${request.uri.path}`); // log the request path
 request.uri.path += "/added-context"; // Add an extra element to the query path
 ```
 
+### `request.uri.port`
+
+This is the port component of the request's URI, as an integer. If no port is explicitly defined in the URI, this value defaults to an empty value.
+
+Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.port` in a `subgraph_service` callback _does_ modify the URI that the router uses to communicate with the corresponding subgraph.
+
+```rhai
+print(`${request.uri.port}`); // log the request port
+request.uri.port = 4040; // Changes the port to be 4040
+```
+
 ### `request.subgraph.*`
 
 The `request.subgraph` object is available _only_ for `map_request` callbacks registered in `subgraph_service`. This object has the exact same fields as `request` itself, but these fields apply to the HTTP request that the router will send to the corresponding subgraph.
@@ -573,6 +595,8 @@ response.body.extensions
 ```
 
 All of the above fields are read/write.
+
+**For `subgraph_service` callbacks only,** the `response` object provides the non modifiable field `response.subgraph_request_id` which is a unique ID corresponding to the subgraph request, and the same id that can be obtained on the request side.
 
 The following fields are identical in behavior to their `request` counterparts:
 

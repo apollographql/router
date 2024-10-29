@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use rhai::Engine;
@@ -32,6 +33,7 @@ use crate::plugin::DynPlugin;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
+use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
@@ -348,6 +350,20 @@ map
 }
 
 #[tokio::test]
+async fn it_can_process_router_request() {
+    let mut request = RhaiRouterFirstRequest::default();
+    request.request.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_str("application/json").unwrap(),
+    );
+    *request.request.method_mut() = http::Method::GET;
+
+    call_rhai_function_with_arg("process_router_request", request)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
 async fn it_can_process_supergraph_request() {
     let request = SupergraphRequest::canned_builder()
         .operation_name("canned")
@@ -429,6 +445,18 @@ async fn it_can_process_subgraph_response() {
         .status_code(StatusCode::OK)
         .build();
     call_rhai_function_with_arg("process_subgraph_response", response)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
+async fn it_can_parse_request_uri() {
+    let mut request = SupergraphRequest::canned_builder()
+        .operation_name("canned")
+        .build()
+        .expect("build canned supergraph request");
+    *request.supergraph_request.uri_mut() = "https://not-default:8080/path".parse().unwrap();
+    call_rhai_function_with_arg("test_parse_request_details", request)
         .await
         .expect("test failed");
 }
@@ -641,7 +669,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)'".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 251, position 5)'".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -669,7 +697,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         assert_eq!(
             processed_error.message,
             Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 234, position 5)'"
+                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 262, position 5)'"
                     .to_string()
             )
         );
@@ -782,6 +810,66 @@ async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
 
     let headers = service_response.response.headers().clone();
     assert!(headers.get("x-custom-header").is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_call()
+        .times(1)
+        .returning(move |req: SupergraphRequest| {
+            Ok(SupergraphResponse::fake_builder()
+                .context(req.context)
+                .build()
+                .unwrap())
+        });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"demand_control.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let context = Context::new();
+    context.insert_estimated_cost(50.0).unwrap();
+    context.insert_actual_cost(35.0).unwrap();
+    context
+        .insert_cost_strategy("test_strategy".to_string())
+        .unwrap();
+    context.insert_cost_result("COST_OK".to_string()).unwrap();
+    let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
+
+    let service_response = router_service.ready().await?.call(supergraph_req).await?;
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let headers = service_response.response.headers().clone();
+    let demand_control_header = headers
+        .get("demand-control-estimate")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("50.0"));
+
+    let demand_control_header = headers
+        .get("demand-control-actual")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("35.0"));
+
+    let demand_control_header = headers
+        .get("demand-control-strategy")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("test_strategy"));
+
+    let demand_control_header = headers
+        .get("demand-control-result")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("COST_OK"));
 
     Ok(())
 }

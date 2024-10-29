@@ -1,3 +1,28 @@
+// The redis cache keys in this file have to change whenever the following change:
+// * the supergraph schema
+// * experimental_query_planner_mode
+// * federation version
+//
+// How to get the new cache key:
+// If you have redis running locally, you can skip step 1 and proceed with steps 2-3.
+// 1. run `docker-compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
+// 2. Run the `redis-cli` command from the shell and start the redis `monitor` command.
+// 3. Run the failing test and yank the updated cache key from the redis logs. It will be the key following `SET`, for example:
+// ```bash
+// 1724831727.472732 [0 127.0.0.1:56720] "SET"
+// "plan:0:v2.8.5:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:4f9f0183101b2f249a364b98adadfda6e5e2001d1f2465c988428cf1ac0b545f"
+// "{\"Ok\":{\"Plan\":{\"plan\":{\"usage_reporting\":{\"statsReportKey\":\"#
+// -\\n{topProducts{name
+// name}}\",\"referencedFieldsByType\":{\"Product\":{\"fieldNames\":[\"name\"],\"isInterface\":false},\"Query\":{\"fieldNames\":[\"topProducts\"],\"isInterface\":false}}},\"root\":{\"kind\":\"Fetch\",\"serviceName\":\"products\",\"variableUsages\":[],\"operation\":\"{topProducts{name
+// name2:name}}\",\"operationName\":null,\"operationKind\":\"query\",\"id\":null,\"inputRewrites\":null,\"outputRewrites\":null,\"contextRewrites\":null,\"schemaAwareHash\":\"121b9859eba2d8fa6dde0a54b6e3781274cf69f7ffb0af912e92c01c6bfff6ca\",\"authorization\":{\"is_authenticated\":false,\"scopes\":[],\"policies\":[]}},\"formatted_query_plan\":\"QueryPlan
+// {\\n  Fetch(service: \\\"products\\\") {\\n    {\\n      topProducts {\\n
+// name\\n        name2: name\\n      }\\n    }\\n
+// n  },\\n}\",\"query\":{\"string\":\"{\\n  topProducts {\\n    name\\n
+// name2: name\\n
+// }\\n}\\n\",\"fragments\":{\"map\":{}},\"operations\":[{\"name\":null,\"kind\":\"query\",\"type_name\":\"Query\",\"selection_set\":[{\"Field\":{\"name\":\"topProducts\",\"alias\":null,\"selection_set\":[{\"Field\":{\"name\":\"name\",\"alias\":null,\"selection_set\":null,\"field_type\":{\"Named\":\"String\"},\"include_skip\":{\"include\":\"Yes\",\"skip\":\"No\"}}},{\"Field\":{\"name\":\"name\",\"alias\":\"name2\",\"selection_set\":null,\"field_type\":{\"Named\":\"String\"},\"include_skip\":{\"include\":\"Yes\",\"skip\":\"No\"}}}],\"field_type\":{\"List\":{\"Named\":\"Product\"}},\"include_skip\":{\"include\":\"Yes\",\"skip\":\"No\"}}}],\"variables\":{}}],\"subselections\":{},\"unauthorized\":{\"paths\":[],\"errors\":{\"log\":true,\"response\":\"errors\"}},\"filtered_query\":null,\"defer_stats\":{\"has_defer\":false,\"has_unconditional_defer\":false,\"conditional_defer_variable_names\":[]},\"is_original\":true,\"schema_aware_hash\":[20,152,93,92,189,0,240,140,9,65,84,255,4,76,202,231,69,183,58,121,37,240,0,109,198,125,1,82,12,42,179,189]},\"query_metrics\":{\"depth\":2,\"height\":3,\"root_fields\":1,\"aliases\":1},\"estimated_size\":0}}}}"
+// "EX" "10"
+// ```
+
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
@@ -21,12 +46,12 @@ use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_cache() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
     // If this test fails and the cache key format changed you'll need to update the key here.
-    // 1. Force this test to run locally by removing the cfg() line at the top of this file.
-    // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
-    // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
-    // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:0:v2.9.0:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8ecc6cbc98bab2769e6666a72ba47a4ebd90e6f62256ddcbdc7f352a805e0fe6";
+    // Look at the top of the file for instructions on getting the new cache key.
+    let known_cache_key = "plan:0:v2.9.3:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:68e167191994b73c1892549ef57d0ec4cd76d518fad4dac5350846fe9af0b3f1";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -157,6 +182,10 @@ async fn query_planner_cache() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apq() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -296,7 +325,11 @@ async fn apq() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn entity_cache() -> Result<(), BoxError> {
+async fn entity_cache_basic() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -369,7 +402,8 @@ async fn entity_cache() -> Result<(), BoxError> {
                         "enabled": false,
                         "redis": {
                             "urls": ["redis://127.0.0.1:6379"],
-                            "ttl": "2s"
+                            "ttl": "2s",
+                            "pool_size": 3
                         },
                     },
                     "subgraphs": {
@@ -539,6 +573,10 @@ async fn entity_cache() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entity_cache_authorization() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -863,6 +901,10 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn connection_failure_blocks_startup() {
+    if !graph_os_enabled() {
+        return;
+    }
+
     let _ = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
@@ -921,13 +963,13 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:cda2b4e476fdce9c4c435627b26cedd177cfbe04ab335fc3e3d895c0d79d965e",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d239cf1d493e71f4bcb05e727c38e4cf55b32eb806791fa415bb6f6c8e5352e5",
     )
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "extraction of subgraphs from supergraph is not yet implemented"]
+#[ignore = "the cache key for different query planner modes is currently different"]
 async fn query_planner_redis_update_planner_mode() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"),
@@ -937,41 +979,65 @@ async fn query_planner_redis_update_planner_mode() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn query_planner_redis_update_introspection() {
-    test_redis_query_plan_config_update(
-        include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:259dd917e4de09b5469629849b91e8ffdfbed2587041fad68b5963369bb13283",
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_defer() {
+    // If this test fails and the cache key format changed you'll need to update
+    // the key here.  Look at the top of the file for instructions on getting
+    // the new cache key.
+    //
+    // You first need to follow the process and update the key in
+    // `test_redis_query_plan_config_update`, and then update the key in this
+    // test.
+    //
+    // This test requires graphos license, so make sure you have
+    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
+    // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:e4376fe032160ce16399e520c6e815da6cb5cf4dc94a06175b86b64a9bf80201",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:752b870a0241594f54b7b593f16ab6cf6529eb5c9fe3d24e6bc4a618c24a5b81",
     )
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_type_conditional_fetching() {
+    // If this test fails and the cache key format changed you'll need to update
+    // the key here.  Look at the top of the file for instructions on getting
+    // the new cache key.
+    //
+    // You first need to follow the process and update the key in
+    // `test_redis_query_plan_config_update`, and then update the key in this
+    // test.
+    //
+    // This test requires graphos license, so make sure you have
+    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
+    // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:83d899fcb42d2202c39fc8350289b8247021da00ecf3d844553c190c49410507",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:e2145b320a44bebbd687c714dcfd046c032e56fe394aedcf50d9ab539f4354ea",
     )
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_reuse_query_fragments() {
+    // If this test fails and the cache key format changed you'll need to update
+    // the key here.  Look at the top of the file for instructions on getting
+    // the new cache key.
+    //
+    // You first need to follow the process and update the key in
+    // `test_redis_query_plan_config_update`, and then update the key in this
+    // test.
+    //
+    // This test requires graphos license, so make sure you have
+    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
+    // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d48f92f892bd67071694c0538a7e657ff8e0c52e1718f475190c17b503e9e8c3",
+        "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8b6c1838a55cbc6327adb5507f103eed1d5b1071e9acb9c67e098c5b9ea2887e",
     )
     .await;
 }
@@ -980,9 +1046,10 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     if !graph_os_enabled() {
         return;
     }
-    // This test shows that the redis key changes when the query planner config changes.
-    // The test starts a router with a specific config, executes a query, and checks the redis cache key.
-    // Then it updates the config, executes the query again, and checks the redis cache key.
+    // This test shows that the redis key changes when the query planner config
+    // changes.  The test starts a router with a specific config, executes a
+    // query, and checks the redis cache key.  Then it updates the config,
+    // executes the query again, and checks the redis cache key.
     let mut router = IntegrationTest::builder()
         .config(include_str!(
             "fixtures/query_planner_redis_config_update.router.yaml"
@@ -994,7 +1061,10 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:0966f1528d47cee30b6140a164be16148dd360ee10b87744991e9d35af8e8a27";
+    // If the tests above are failing, this is the key that needs to be changed first.
+    let starting_key = "plan:0:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:41ae54204ebb1911412cf23e8f1d458cb08d6fabce16f255f7a497fd2b6fe213";
+    assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
+
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;

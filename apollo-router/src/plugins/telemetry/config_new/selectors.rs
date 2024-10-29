@@ -14,7 +14,6 @@ use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
-use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::cost::CostValue;
@@ -124,6 +123,17 @@ pub(crate) enum RouterSelector {
     RequestMethod {
         /// The request method enabled or not
         request_method: bool,
+    },
+    /// A value from context.
+    RequestContext {
+        /// The request context key.
+        request_context: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
     },
     /// A header from the response
     ResponseHeader {
@@ -661,6 +671,16 @@ impl Selector for RouterSelector {
             RouterSelector::RequestMethod { request_method } if *request_method => {
                 Some(request.router_request.method().to_string().into())
             }
+            RouterSelector::RequestContext {
+                request_context,
+                default,
+                ..
+            } => request
+                .context
+                .get_json_value(request_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::RequestHeader {
                 request_header,
                 default,
@@ -812,6 +832,7 @@ impl Selector for RouterSelector {
                 matches!(
                     self,
                     RouterSelector::RequestHeader { .. }
+                        | RouterSelector::RequestContext { .. }
                         | RouterSelector::RequestMethod { .. }
                         | RouterSelector::TraceId { .. }
                         | RouterSelector::StudioOperationId { .. }
@@ -1090,14 +1111,28 @@ impl Selector for SupergraphSelector {
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::Cost { cost } => ctx.extensions().with_lock(|lock| {
-                lock.get::<CostContext>().map(|cost_result| match cost {
-                    CostValue::Estimated => cost_result.estimated.into(),
-                    CostValue::Actual => cost_result.actual.into(),
-                    CostValue::Delta => cost_result.delta().into(),
-                    CostValue::Result => cost_result.result.into(),
-                })
-            }),
+            SupergraphSelector::Cost { cost } => match cost {
+                CostValue::Estimated => ctx
+                    .get_estimated_cost()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Actual => ctx
+                    .get_actual_cost()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Delta => ctx
+                    .get_cost_delta()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Result => ctx
+                    .get_cost_result()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+            },
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
                 if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
                     == Some(serde_json_bytes::Value::Bool(true))
@@ -1840,6 +1875,98 @@ mod test {
             None
         );
     }
+
+    #[test]
+    fn router_request_context() {
+        let selector = RouterSelector::RequestContext {
+            request_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn router_response_context() {
+        let selector = RouterSelector::ResponseContext {
+            response_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_request(
+                &crate::services::RouterRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
     #[test]
     fn router_response_header() {
         let selector = RouterSelector::ResponseHeader {
@@ -2161,55 +2288,6 @@ mod test {
                             .unwrap()
                     )
                     .build()
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn router_response_context() {
-        let selector = RouterSelector::ResponseContext {
-            response_context: "context_key".to_string(),
-            redact: None,
-            default: Some("defaulted".into()),
-        };
-        let context = crate::context::Context::new();
-        let _ = context.insert("context_key".to_string(), "context_value".to_string());
-        assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::RouterResponse::fake_builder()
-                        .context(context.clone())
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
-            "context_value".into()
-        );
-
-        assert_eq!(
-            selector
-                .on_error(&BoxError::from(String::from("my error")), &context)
-                .unwrap(),
-            "context_value".into()
-        );
-
-        assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::RouterResponse::fake_builder()
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
-            "defaulted".into()
-        );
-        assert_eq!(
-            selector.on_request(
-                &crate::services::RouterRequest::fake_builder()
-                    .context(context)
-                    .build()
-                    .unwrap()
             ),
             None
         );

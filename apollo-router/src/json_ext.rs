@@ -5,6 +5,7 @@
 use std::cmp::min;
 use std::fmt;
 
+use num_traits::ToPrimitive;
 use once_cell::sync::Lazy;
 use regex::Captures;
 use regex::Regex;
@@ -144,6 +145,14 @@ pub(crate) trait ValueExt {
     /// function to handle `PathElement::Fragment`).
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
+
+    /// value type
+    fn json_type_name(&self) -> &'static str;
+
+    /// Convert this value to an instance of `apollo_compiler::ast::Value`
+    fn to_ast(&self) -> apollo_compiler::ast::Value;
+
+    fn as_i32(&self) -> Option<i32>;
 }
 
 impl ValueExt for Value {
@@ -467,6 +476,52 @@ impl ValueExt for Value {
                 .map_or(true, |typename| {
                     typename == maybe_type || schema.is_subtype(maybe_type, typename)
                 })
+    }
+
+    fn json_type_name(&self) -> &'static str {
+        match self {
+            Value::Array(_) => "array",
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Object(_) => "object",
+        }
+    }
+
+    fn to_ast(&self) -> apollo_compiler::ast::Value {
+        match self {
+            Value::Null => apollo_compiler::ast::Value::Null,
+            Value::Bool(b) => apollo_compiler::ast::Value::Boolean(*b),
+            Value::Number(n) if n.is_f64() => {
+                apollo_compiler::ast::Value::Float(n.as_f64().expect("is float").into())
+            }
+            Value::Number(n) => {
+                apollo_compiler::ast::Value::Int((n.as_i64().expect("is int") as i32).into())
+            }
+            Value::String(s) => apollo_compiler::ast::Value::String(s.as_str().to_string()),
+            Value::Array(inner_vars) => apollo_compiler::ast::Value::List(
+                inner_vars
+                    .iter()
+                    .map(|v| apollo_compiler::Node::new(v.to_ast()))
+                    .collect(),
+            ),
+            Value::Object(inner_vars) => apollo_compiler::ast::Value::Object(
+                inner_vars
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            apollo_compiler::Name::new(k.as_str()).expect("is valid name"),
+                            apollo_compiler::Node::new(v.to_ast()),
+                        )
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    fn as_i32(&self) -> Option<i32> {
+        self.as_i64()?.to_i32()
     }
 }
 
@@ -1164,16 +1219,23 @@ mod tests {
         Schema::parse(
             r#"
            schema
-             @core(feature: "https://specs.apollo.dev/core/v0.1"),
-             @core(feature: "https://specs.apollo.dev/join/v0.1")
+             @link(url: "https://specs.apollo.dev/link/v1.0")
+             @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
            {
              query: Query
            }
-           directive @core(feature: String!) repeatable on SCHEMA
+
            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+           directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
+           scalar link__Import
 
            enum join__Graph {
-               FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+             FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+           }
+
+           enum link__Purpose {
+             SECURITY
+             EXECUTION
            }
 
            type Query {

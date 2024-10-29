@@ -34,6 +34,7 @@ traffic_shaping:
         retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
         retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
       experimental_http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
+      dns_resolution_strategy: ipv4_then_ipv6 # Changes DNS resolution strategy for subgraph.
 ```
 
 ### Preset values
@@ -42,6 +43,7 @@ The preset values of `traffic_shaping` that's enabled by default:
 
 - `timeout: 30s` for all timeouts
 - `experimental_http2: enable`
+- `dns_resolution_strategy: ipv4_then_ipv6`
 
 ## Client side traffic shaping
 
@@ -185,6 +187,23 @@ traffic_shaping:
 ### HTTP/2
 
 <HttpConnection type="subgraph" />
+
+### DNS resolution strategy
+
+You can also change DNS resolution strategy applied to subgraphs's URL:
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    dns_resolution_strategy: ipv4_then_ipv6
+
+```
+
+Possible strategies are:
+* `ipv4_only` - Only query for `A` (IPv4) records.
+* `ipv6_only` - Only query for `AAAA` (IPv6) records.
+* `ipv4_and_ipv6` - Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel.
+* `ipv6_then_ipv4` - Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records.
+* `ipv4_then_ipv6`(default) - Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records.
 
 ### Ordering
 

@@ -17,7 +17,9 @@ use apollo_federation::link::spec::APOLLO_SPEC_DOMAIN;
 use apollo_federation::link::Link;
 use tower::BoxError;
 
-use super::DemandControlError;
+use crate::json_ext::Object;
+use crate::json_ext::ValueExt;
+use crate::plugins::demand_control::DemandControlError;
 
 const COST_DIRECTIVE_NAME: Name = name!("cost");
 const COST_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__cost");
@@ -88,7 +90,7 @@ impl CostDirective {
             .get(&COST_DIRECTIVE_NAME)
             .and_then(|name| directives.get(name))
             .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
-            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
+            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
     }
@@ -101,7 +103,7 @@ impl CostDirective {
             .get(&COST_DIRECTIVE_NAME)
             .and_then(|name| directives.get(name))
             .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
-            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
+            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
     }
@@ -118,7 +120,7 @@ impl IncludeDirective {
         let directive = field
             .directives
             .get("include")
-            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|skip| skip.specified_argument_by_name("if"))
             .and_then(|arg| arg.to_bool())
             .map(|cond| Self { is_included: cond });
 
@@ -165,10 +167,10 @@ impl DefinitionListSizeDirective {
             .or(definition.directives.get(&LIST_SIZE_DIRECTIVE_DEFAULT_NAME));
         if let Some(directive) = directive {
             let assumed_size = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
                 .and_then(|arg| arg.to_i32());
             let slicing_argument_names = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
                 .and_then(|arg| arg.as_list())
                 .map(|arg_list| {
                     arg_list
@@ -178,7 +180,7 @@ impl DefinitionListSizeDirective {
                         .collect()
                 });
             let sized_fields = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
                 .and_then(|arg| arg.as_list())
                 .map(|arg_list| {
                     arg_list
@@ -188,7 +190,9 @@ impl DefinitionListSizeDirective {
                         .collect()
                 });
             let require_one_slicing_argument = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME)
+                .specified_argument_by_name(
+                    &LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME,
+                )
                 .and_then(|arg| arg.to_bool())
                 .unwrap_or(true);
 
@@ -203,9 +207,10 @@ impl DefinitionListSizeDirective {
         }
     }
 
-    pub(in crate::plugins::demand_control) fn with_field(
+    pub(in crate::plugins::demand_control) fn with_field_and_variables(
         &self,
         field: &Field,
+        variables: &Object,
     ) -> Result<ListSizeDirective, DemandControlError> {
         let mut slicing_arguments: HashMap<&str, i32> = HashMap::new();
         if let Some(slicing_argument_names) = self.slicing_argument_names.as_ref() {
@@ -223,6 +228,13 @@ impl DefinitionListSizeDirective {
             for argument in &field.arguments {
                 if slicing_argument_names.contains(argument.name.as_str()) {
                     if let Some(numeric_value) = argument.value.to_i32() {
+                        slicing_arguments.insert(&argument.name, numeric_value);
+                    } else if let Some(numeric_value) = argument
+                        .value
+                        .as_variable()
+                        .and_then(|variable_name| variables.get(variable_name.as_str()))
+                        .and_then(|variable| variable.as_i32())
+                    {
                         slicing_arguments.insert(&argument.name, numeric_value);
                     }
                 }
@@ -265,7 +277,7 @@ impl RequiresDirective {
         let requires_arg = definition
             .directives
             .get("join__field")
-            .and_then(|requires| requires.argument_by_name("requires"))
+            .and_then(|requires| requires.specified_argument_by_name("requires"))
             .and_then(|arg| arg.as_str());
 
         if let Some(arg) = requires_arg {
@@ -292,7 +304,7 @@ impl SkipDirective {
         let directive = field
             .directives
             .get("skip")
-            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|skip| skip.specified_argument_by_name("if"))
             .and_then(|arg| arg.to_bool())
             .map(|cond| Self { is_skipped: cond });
 

@@ -1,24 +1,23 @@
 //! Calls out to nodejs query planner
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::execution::InputCoercionError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
-use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -30,7 +29,6 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
-use crate::configuration::IntrospectionMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -38,7 +36,7 @@ use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
-use crate::introspection::Introspection;
+use crate::introspection::IntrospectionCache;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::metrics::meter_provider;
@@ -65,9 +63,8 @@ use crate::spec::SpecError;
 use crate::Configuration;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
-const JS_QP_MODE: &str = "js";
+pub(crate) const JS_QP_MODE: &str = "js";
 const UNSUPPORTED_CONTEXT: &str = "context";
-const UNSUPPORTED_OVERRIDES: &str = "overrides";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
@@ -79,11 +76,11 @@ pub(crate) struct BridgeQueryPlanner {
     planner: PlannerMode,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
+    introspection: Arc<IntrospectionCache>,
 }
 
 #[derive(Clone)]
@@ -93,11 +90,7 @@ pub(crate) enum PlannerMode {
         js: Arc<Planner<QueryPlanResult>>,
         rust: Arc<QueryPlanner>,
     },
-    Rust {
-        rust: Arc<QueryPlanner>,
-        // TODO: remove when those other uses are fully ported to Rust
-        js_for_api_schema_and_introspection_and_operation_signature: Arc<Planner<QueryPlanResult>>,
-    },
+    Rust(Arc<QueryPlanner>),
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -120,25 +113,19 @@ impl PlannerMode {
     async fn new(
         schema: &Schema,
         configuration: &Configuration,
-        old_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        old_planner: &Option<Arc<Planner<QueryPlanResult>>>,
         rust_planner: Option<Arc<QueryPlanner>>,
     ) -> Result<Self, ServiceBuildError> {
         Ok(match configuration.experimental_query_planner_mode {
-            QueryPlannerMode::New => Self::Rust {
-                js_for_api_schema_and_introspection_and_operation_signature: Self::js(
-                    &schema.raw_sdl,
-                    configuration,
-                    old_planner,
-                )
-                .await?,
-                rust: rust_planner
+            QueryPlannerMode::New => Self::Rust(
+                rust_planner
                     .expect("expected Rust QP instance for `experimental_query_planner_mode: new`"),
-            },
+            ),
             QueryPlannerMode::Legacy => {
-                Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
+                Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
             }
             QueryPlannerMode::Both => Self::Both {
-                js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
+                js: Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?,
                 rust: rust_planner.expect(
                     "expected Rust QP instance for `experimental_query_planner_mode: both`",
                 ),
@@ -146,11 +133,11 @@ impl PlannerMode {
             QueryPlannerMode::BothBestEffort => {
                 if let Some(rust) = rust_planner {
                     Self::Both {
-                        js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
+                        js: Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?,
                         rust,
                     }
                 } else {
-                    Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
+                    Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
                 }
             }
         })
@@ -190,6 +177,7 @@ impl PlannerMode {
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: configuration.supergraph.defer_support,
                 },
+            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
             debug: Default::default(),
         };
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
@@ -203,9 +191,6 @@ impl PlannerMode {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
                 SingleFederationError::UnsupportedFeature { message: _, kind } => match kind {
-                    apollo_federation::error::UnsupportedFeatureKind::ProgressiveOverrides => {
-                        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES))
-                    }
                     apollo_federation::error::UnsupportedFeatureKind::Context => {
                         metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT))
                     }
@@ -222,13 +207,13 @@ impl PlannerMode {
         Ok(Arc::new(result.map_err(ServiceBuildError::QpInitError)?))
     }
 
-    async fn js(
+    async fn js_planner(
         sdl: &str,
         configuration: &Configuration,
-        old_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        old_js_planner: &Option<Arc<Planner<QueryPlanResult>>>,
     ) -> Result<Arc<Planner<QueryPlanResult>>, ServiceBuildError> {
         let query_planner_configuration = configuration.js_query_planner_config();
-        let planner = match old_planner {
+        let planner = match old_js_planner {
             None => Planner::new(sdl.to_owned(), query_planner_configuration).await?,
             Some(old_planner) => {
                 old_planner
@@ -237,19 +222,6 @@ impl PlannerMode {
             }
         };
         Ok(Arc::new(planner))
-    }
-
-    fn js_for_api_schema_and_introspection_and_operation_signature(
-        &self,
-    ) -> &Arc<Planner<QueryPlanResult>> {
-        match self {
-            PlannerMode::Js(js) => js,
-            PlannerMode::Both { js, .. } => js,
-            PlannerMode::Rust {
-                js_for_api_schema_and_introspection_and_operation_signature,
-                ..
-            } => js_for_api_schema_and_introspection_and_operation_signature,
-        }
     }
 
     async fn plan(
@@ -269,7 +241,8 @@ impl PlannerMode {
 
                 let result = js.plan(filtered_query, operation, plan_options).await;
 
-                metric_query_planning_plan_duration(JS_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
 
                 let mut success = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -283,30 +256,48 @@ impl PlannerMode {
                 }
                 Ok(success)
             }
-            PlannerMode::Rust { rust, .. } => {
-                let start = Instant::now();
+            PlannerMode::Rust(rust_planner) => {
+                let doc = doc.clone();
+                let rust_planner = rust_planner.clone();
+                let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
+                    let start = Instant::now();
 
-                let result = operation
-                    .as_deref()
-                    .map(|n| Name::new(n).map_err(FederationError::from))
-                    .transpose()
-                    .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
-                    .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+                    let query_plan_options = QueryPlanOptions {
+                        override_conditions: plan_options.override_conditions,
+                    };
 
-                metric_query_planning_plan_duration(RUST_QP_MODE, start);
+                    let result = operation
+                        .as_deref()
+                        .map(|n| Name::new(n).map_err(FederationError::from))
+                        .transpose()
+                        .and_then(|operation| {
+                            rust_planner.build_query_plan(
+                                &doc.executable,
+                                operation,
+                                query_plan_options,
+                            )
+                        })
+                        .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
-                let plan = result?;
+                    let elapsed = start.elapsed().as_secs_f64();
+                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+
+                    result.map(|plan| {
+                        let root_node = convert_root_query_plan_node(&plan);
+                        (plan, root_node)
+                    })
+                })
+                .await
+                .expect("query planner panicked")?;
+                if let Some(node) = &mut root_node {
+                    init_query_plan_root_node(node)?;
+                }
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
                 let usage_reporting = UsageReporting {
                     stats_report_key: Default::default(),
                     referenced_fields_by_type: Default::default(),
                 };
-
-                let mut root_node = convert_root_query_plan_node(&plan);
-                if let Some(node) = &mut root_node {
-                    init_query_plan_root_node(node)?;
-                }
 
                 Ok(PlanSuccess {
                     usage_reporting,
@@ -327,10 +318,11 @@ impl PlannerMode {
                 let start = Instant::now();
 
                 let result = js
-                    .plan(filtered_query, operation.clone(), plan_options)
+                    .plan(filtered_query, operation.clone(), plan_options.clone())
                     .await;
 
-                metric_query_planning_plan_duration(JS_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
 
                 let mut js_result = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -345,8 +337,12 @@ impl PlannerMode {
                     }
                 }
 
+                let query_plan_options = QueryPlanOptions {
+                    override_conditions: plan_options.override_conditions,
+                };
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),
+                    js_duration: elapsed,
                     document: doc.executable.clone(),
                     operation_name: operation,
                     // Exclude usage reporting from the Result sent for comparison
@@ -354,6 +350,7 @@ impl PlannerMode {
                         .as_ref()
                         .map(|success| success.data.clone())
                         .map_err(|e| e.errors.clone()),
+                    plan_options: query_plan_options,
                 }
                 .schedule();
 
@@ -368,7 +365,7 @@ impl PlannerMode {
         let js = match self {
             PlannerMode::Js(js) => js,
             PlannerMode::Both { js, .. } => js,
-            PlannerMode::Rust { rust, .. } => {
+            PlannerMode::Rust(rust) => {
                 return Ok(rust
                     .subgraph_schemas()
                     .iter()
@@ -394,24 +391,12 @@ impl BridgeQueryPlanner {
         configuration: Arc<Configuration>,
         old_js_planner: Option<Arc<Planner<QueryPlanResult>>>,
         rust_planner: Option<Arc<QueryPlanner>>,
+        introspection_cache: Arc<IntrospectionCache>,
     ) -> Result<Self, ServiceBuildError> {
         let planner =
-            PlannerMode::new(&schema, &configuration, old_js_planner, rust_planner).await?;
+            PlannerMode::new(&schema, &configuration, &old_js_planner, rust_planner).await?;
 
         let subgraph_schemas = Arc::new(planner.subgraphs().await?);
-
-        let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(
-                Introspection::new(
-                    planner
-                        .js_for_api_schema_and_introspection_and_operation_signature()
-                        .clone(),
-                )
-                .await?,
-            ))
-        } else {
-            None
-        };
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
@@ -423,18 +408,20 @@ impl BridgeQueryPlanner {
             planner,
             schema,
             subgraph_schemas,
-            introspection,
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
             signature_normalization_algorithm,
+            introspection: introspection_cache,
         })
     }
 
-    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
-        self.planner
-            .js_for_api_schema_and_introspection_and_operation_signature()
-            .clone()
+    pub(crate) fn js_planner(&self) -> Option<Arc<Planner<QueryPlanResult>>> {
+        match &self.planner {
+            PlannerMode::Js(js) => Some(js.clone()),
+            PlannerMode::Both { js, .. } => Some(js.clone()),
+            PlannerMode::Rust(_) => None,
+        }
     }
 
     #[cfg(test)]
@@ -464,19 +451,19 @@ impl BridgeQueryPlanner {
             operation_name,
         )?;
 
-        let (fragments, operations, defer_stats, schema_aware_hash) =
+        let (fragments, operation, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
-            &operations,
+            &operation,
             &fragments.map,
             &defer_stats,
         )?;
         Ok(Query {
             string: query,
             fragments,
-            operations,
+            operation,
             filtered_query: None,
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
@@ -487,235 +474,6 @@ impl BridgeQueryPlanner {
             is_original: true,
             schema_aware_hash,
         })
-    }
-
-    async fn introspection(
-        &self,
-        key: QueryKey,
-        doc: ParsedDocument,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let Some(introspection) = &self.introspection else {
-            return Ok(QueryPlannerContent::IntrospectionDisabled);
-        };
-        let mode = self.configuration.experimental_introspection_mode;
-        let response = if mode != IntrospectionMode::New && doc.executable.operations.len() > 1 {
-            // TODO: add an operation_name parameter to router-bridge to fix this?
-            let error = graphql::Error::builder()
-                .message(
-                    "Schema introspection is currently not supported \
-                     with multiple operations in the same document",
-                )
-                .extension_code("INTROSPECTION_WITH_MULTIPLE_OPERATIONS")
-                .build();
-            return Ok(QueryPlannerContent::Response {
-                response: Box::new(graphql::Response::builder().error(error).build()),
-            });
-        } else {
-            match mode {
-                IntrospectionMode::Legacy => introspection
-                    .execute(key.filtered_query)
-                    .await
-                    .map_err(QueryPlannerError::Introspection)?,
-                IntrospectionMode::New => self.rust_introspection(&key, &doc)?,
-                IntrospectionMode::Both => {
-                    let rust_result = match self.rust_introspection(&key, &doc) {
-                        Ok(response) => {
-                            if response.errors.is_empty() {
-                                Ok(response)
-                            } else {
-                                Err(QueryPlannerError::Introspection(IntrospectionError {
-                                    message: Some(
-                                        response
-                                            .errors
-                                            .into_iter()
-                                            .map(|e| e.to_string())
-                                            .collect::<Vec<_>>()
-                                            .join(", "),
-                                    ),
-                                }))
-                            }
-                        }
-                        Err(e) => Err(e),
-                    };
-                    let js_result = introspection
-                        .execute(key.filtered_query)
-                        .await
-                        .map_err(QueryPlannerError::Introspection);
-                    self.compare_introspection_responses(js_result.clone(), rust_result);
-                    js_result?
-                }
-            }
-        };
-
-        Ok(QueryPlannerContent::Response {
-            response: Box::new(response),
-        })
-    }
-
-    fn rust_introspection(
-        &self,
-        key: &QueryKey,
-        doc: &ParsedDocument,
-    ) -> Result<graphql::Response, QueryPlannerError> {
-        let schema = self.schema.api_schema();
-        let operation = doc.get_operation(key.operation_name.as_deref())?;
-        apollo_compiler::execution::check_introspection_max_depth(&doc.executable, operation)
-            .map_err(|_e| {
-                QueryPlannerError::Introspection(IntrospectionError {
-                    message: Some("Maximum introspection depth exceeded".to_owned()),
-                })
-            })?;
-        let variable_values = Default::default();
-        let variable_values =
-            apollo_compiler::execution::coerce_variable_values(schema, operation, &variable_values)
-                .map_err(|e| {
-                    let message = match &e {
-                        InputCoercionError::SuspectedValidationBug(e) => &e.message,
-                        InputCoercionError::ValueError { message, .. } => message,
-                    };
-                    QueryPlannerError::Introspection(IntrospectionError {
-                        message: Some(message.clone()),
-                    })
-                })?;
-        let response = apollo_compiler::execution::execute_introspection_only_query(
-            schema,
-            &doc.executable,
-            operation,
-            &variable_values,
-        );
-        Ok(response.into())
-    }
-
-    fn compare_introspection_responses(
-        &self,
-        mut js_result: Result<graphql::Response, QueryPlannerError>,
-        mut rust_result: Result<graphql::Response, QueryPlannerError>,
-    ) {
-        let is_matched;
-        match (&mut js_result, &mut rust_result) {
-            (Err(_), Err(_)) => {
-                is_matched = true;
-            }
-            (Err(err), Ok(_)) => {
-                is_matched = false;
-                tracing::warn!("JS introspection error: {err}")
-            }
-            (Ok(_), Err(err)) => {
-                is_matched = false;
-                tracing::warn!("Rust introspection error: {err}")
-            }
-            (Ok(js_response), Ok(rust_response)) => {
-                if let (Some(js_data), Some(rust_data)) =
-                    (&mut js_response.data, &mut rust_response.data)
-                {
-                    json_sort_arrays(js_data);
-                    json_sort_arrays(rust_data);
-                }
-                is_matched = js_response.data == rust_response.data;
-                if is_matched {
-                    tracing::debug!("Introspection match! 🎉")
-                } else {
-                    tracing::debug!("Introspection mismatch");
-                    tracing::trace!("Introspection diff:\n{}", {
-                        let rust = rust_response
-                            .data
-                            .as_ref()
-                            .map(|d| serde_json::to_string_pretty(&d).unwrap())
-                            .unwrap_or_default();
-                        let js = js_response
-                            .data
-                            .as_ref()
-                            .map(|d| serde_json::to_string_pretty(&d).unwrap())
-                            .unwrap_or_default();
-                        let diff = similar::TextDiff::from_lines(&js, &rust);
-                        diff.unified_diff()
-                            .context_radius(10)
-                            .header("JS", "Rust")
-                            .to_string()
-                    })
-                }
-            }
-        }
-
-        u64_counter!(
-            "apollo.router.operations.introspection.both",
-            "Comparing JS v.s. Rust introspection",
-            1,
-            "generation.is_matched" = is_matched,
-            "generation.js_error" = js_result.is_err(),
-            "generation.rust_error" = rust_result.is_err()
-        );
-
-        fn json_sort_arrays(value: &mut Value) {
-            match value {
-                Value::Array(array) => {
-                    for item in array.iter_mut() {
-                        json_sort_arrays(item)
-                    }
-                    array.sort_by(json_compare)
-                }
-                Value::Object(object) => {
-                    for (_key, value) in object {
-                        json_sort_arrays(value)
-                    }
-                }
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
-            }
-        }
-
-        fn json_compare(a: &Value, b: &Value) -> Ordering {
-            match (a, b) {
-                (Value::Null, Value::Null) => Ordering::Equal,
-                (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
-                (Value::Number(a), Value::Number(b)) => {
-                    a.as_f64().unwrap().total_cmp(&b.as_f64().unwrap())
-                }
-                (Value::String(a), Value::String(b)) => a.cmp(b),
-                (Value::Array(a), Value::Array(b)) => iter_cmp(a, b, json_compare),
-                (Value::Object(a), Value::Object(b)) => {
-                    iter_cmp(a, b, |(key_a, a), (key_b, b)| {
-                        debug_assert_eq!(key_a, key_b); // Response object keys are in selection set order
-                        json_compare(a, b)
-                    })
-                }
-                _ => json_discriminant(a).cmp(&json_discriminant(b)),
-            }
-        }
-
-        // TODO: use `Iterator::cmp_by` when available:
-        // https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.cmp_by
-        // https://github.com/rust-lang/rust/issues/64295
-        fn iter_cmp<T>(
-            a: impl IntoIterator<Item = T>,
-            b: impl IntoIterator<Item = T>,
-            cmp: impl Fn(T, T) -> Ordering,
-        ) -> Ordering {
-            use itertools::Itertools;
-            for either_or_both in a.into_iter().zip_longest(b) {
-                match either_or_both {
-                    itertools::EitherOrBoth::Both(a, b) => {
-                        let ordering = cmp(a, b);
-                        if ordering != Ordering::Equal {
-                            return ordering;
-                        }
-                    }
-                    itertools::EitherOrBoth::Left(_) => return Ordering::Less,
-                    itertools::EitherOrBoth::Right(_) => return Ordering::Greater,
-                }
-            }
-            Ordering::Equal
-        }
-
-        fn json_discriminant(value: &Value) -> u8 {
-            match value {
-                Value::Null => 0,
-                Value::Bool(_) => 1,
-                Value::Number(_) => 2,
-                Value::String(_) => 3,
-                Value::Array(_) => 4,
-                Value::Object(_) => 5,
-            }
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -871,11 +629,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         operation_name.as_deref(),
                     )
                     .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-                    doc = Arc::new(ParsedDocumentInner {
-                        executable: Arc::new(executable_document),
-                        ast: modified_query,
-                        hash: Arc::new(QueryHash(hash)),
-                    });
+                    doc = ParsedDocumentInner::new(
+                        modified_query,
+                        Arc::new(executable_document),
+                        operation_name.as_deref(),
+                        Arc::new(QueryHash(hash)),
+                    )?;
                     context
                         .extensions()
                         .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
@@ -943,6 +702,41 @@ impl BridgeQueryPlanner {
         mut key: QueryKey,
         mut doc: ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let mut query_metrics = Default::default();
+        let mut selections = self
+            .parse_selections(
+                key.original_query.clone(),
+                key.operation_name.as_deref(),
+                &doc,
+                &mut query_metrics,
+            )
+            .await?;
+
+        if selections.operation.selection_set.is_empty() {
+            // All selections have @skip(true) or @include(false)
+            // Return an empty response now to avoid dealing with an empty query plan later
+            return Ok(QueryPlannerContent::Response {
+                response: Box::new(
+                    graphql::Response::builder()
+                        .data(Value::Object(Default::default()))
+                        .build(),
+                ),
+            });
+        }
+
+        match self
+            .introspection
+            .maybe_execute(&self.schema, &key, &doc)
+            .await
+        {
+            ControlFlow::Continue(()) => (),
+            ControlFlow::Break(response) => {
+                return Ok(QueryPlannerContent::CachedIntrospectionResponse {
+                    response: Box::new(response),
+                })
+            }
+        }
+
         let filter_res = if self.enable_authorization_directives {
             match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
@@ -971,16 +765,6 @@ impl BridgeQueryPlanner {
             None
         };
 
-        let mut query_metrics = Default::default();
-        let mut selections = self
-            .parse_selections(
-                key.original_query.clone(),
-                key.operation_name.as_deref(),
-                &doc,
-                &mut query_metrics,
-            )
-            .await?;
-
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
             let executable_document = new_doc
@@ -993,91 +777,13 @@ impl BridgeQueryPlanner {
                 key.operation_name.as_deref(),
             )
             .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-            doc = Arc::new(ParsedDocumentInner {
-                executable: Arc::new(executable_document),
-                ast: new_doc,
-                hash: Arc::new(QueryHash(hash)),
-            });
+            doc = ParsedDocumentInner::new(
+                new_doc,
+                Arc::new(executable_document),
+                key.operation_name.as_deref(),
+                Arc::new(QueryHash(hash)),
+            )?;
             selections.unauthorized.paths = unauthorized_paths;
-        }
-
-        if selections
-            .operation(key.operation_name.as_deref())
-            .is_some_and(|op| op.selection_set.is_empty())
-        {
-            // All selections have @skip(true) or @include(false)
-            // Return an empty response now to avoid dealing with an empty query plan later
-            return Ok(QueryPlannerContent::Response {
-                response: Box::new(
-                    graphql::Response::builder()
-                        .data(Value::Object(Default::default()))
-                        .build(),
-                ),
-            });
-        }
-
-        let operation = doc
-            .executable
-            .operations
-            .get(key.operation_name.as_deref())
-            .ok();
-        let mut has_root_typename = false;
-        let mut has_schema_introspection = false;
-        let mut has_other_root_fields = false;
-        if let Some(operation) = operation {
-            for field in operation.root_fields(&doc.executable) {
-                match field.name.as_str() {
-                    "__typename" => has_root_typename = true,
-                    "__schema" | "__type" if operation.is_query() => {
-                        has_schema_introspection = true
-                    }
-                    _ => has_other_root_fields = true,
-                }
-            }
-            if has_root_typename && !has_schema_introspection && !has_other_root_fields {
-                // Fast path for __typename alone
-                if operation
-                    .selection_set
-                    .selections
-                    .iter()
-                    .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
-                {
-                    let root_type_name: serde_json_bytes::ByteString =
-                        operation.object_type().as_str().into();
-                    let data = Value::Object(
-                        operation
-                            .root_fields(&doc.executable)
-                            .filter(|field| field.name == "__typename")
-                            .map(|field| {
-                                (
-                                    field.response_key().as_str().into(),
-                                    Value::String(root_type_name.clone()),
-                                )
-                            })
-                            .collect(),
-                    );
-                    return Ok(QueryPlannerContent::Response {
-                        response: Box::new(graphql::Response::builder().data(data).build()),
-                    });
-                } else {
-                    // fragments might use @include or @skip
-                }
-            }
-        } else {
-            // Should be unreachable as QueryAnalysisLayer would have returned an error
-        }
-
-        if has_schema_introspection {
-            if has_other_root_fields {
-                let error = graphql::Error::builder()
-                    .message("Mixed queries with both schema introspection and concrete fields are not supported")
-                    .extension_code("MIXED_INTROSPECTION")
-                    .build();
-                return Ok(QueryPlannerContent::Response {
-                    response: Box::new(graphql::Response::builder().error(error).build()),
-                });
-            }
-            return self.introspection(key, doc).await;
         }
 
         if key.filtered_query != key.original_query {
@@ -1158,11 +864,11 @@ pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
     output
 }
 
-pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: Instant) {
+pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning.",
-        start.elapsed().as_secs_f64(),
+        elapsed,
         "planner" = planner
     );
 }
@@ -1238,12 +944,14 @@ mod tests {
     #[test(tokio::test)]
     async fn federation_versions() {
         async {
-            let sdl = include_str!("../testdata/minimal_supergraph.graphql");
+            let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
-                .await
-                .unwrap();
+            let introspection = Arc::new(IntrospectionCache::new(&config));
+            let _planner =
+                BridgeQueryPlanner::new(schema.into(), config, None, None, introspection)
+                    .await
+                    .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1255,12 +963,14 @@ mod tests {
         .await;
 
         async {
-            let sdl = include_str!("../testdata/minimal_fed2_supergraph.graphql");
+            let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
-                .await
-                .unwrap();
+            let introspection = Arc::new(IntrospectionCache::new(&config));
+            let _planner =
+                BridgeQueryPlanner::new(schema.into(), config, None, None, introspection)
+                    .await
+                    .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1274,12 +984,19 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap());
+        let config = Default::default();
+        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
-        let planner = BridgeQueryPlanner::new(schema.clone(), Default::default(), None, None)
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlanner::new(
+            schema.clone(),
+            Default::default(),
+            None,
+            None,
+            Arc::new(IntrospectionCache::new(&config)),
+        )
+        .await
+        .unwrap();
 
         let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
@@ -1303,8 +1020,8 @@ mod tests {
                 &doc,
                 query_metrics
             )
-            .await
-            .unwrap_err();
+                .await
+                .unwrap_err();
 
         match err {
             QueryPlannerError::EmptyPlan(usage_reporting) => {
@@ -1320,10 +1037,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let result = plan(EXAMPLE_SCHEMA, "", "", None, PlanOptions::default()).await;
+        let query = "";
+        let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default()).await;
 
         assert_eq!(
-            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
+            "spec error: parsing error: syntax error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
@@ -1339,7 +1057,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Response { response } = result {
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -1360,7 +1078,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Response { response } = result {
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query","__typename":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -1377,9 +1095,15 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlanner::new(
+            schema.into(),
+            configuration.clone(),
+            None,
+            None,
+            Arc::new(IntrospectionCache::new(&configuration)),
+        )
+        .await
+        .unwrap();
 
         macro_rules! s {
             ($query: expr) => {
@@ -1402,7 +1126,7 @@ mod tests {
             }
         }}"#);
         // Aliases
-        // FIXME: uncomment myName alias when this is fixed:
+        // FIXME: uncomment myName alias when this is fixed:
         // https://github.com/apollographql/router/issues/3263
         s!(r#"query Q { me {
             username
@@ -1685,17 +1409,22 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(schema, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlanner::new(
+            schema.into(),
+            configuration.clone(),
+            None,
+            None,
+            Arc::new(IntrospectionCache::new(&configuration)),
+        )
+        .await
+        .unwrap();
 
         let doc = Query::parse_document(
             original_query,
             operation_name.as_deref(),
             &planner.schema(),
             &configuration,
-        )
-        .unwrap();
+        )?;
 
         planner
             .get(
@@ -1813,7 +1542,8 @@ mod tests {
     #[test]
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
-        metric_query_planning_plan_duration(RUST_QP_MODE, start);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
@@ -1821,7 +1551,8 @@ mod tests {
         );
 
         let start = Instant::now();
-        metric_query_planning_plan_duration(JS_QP_MODE, start);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
@@ -1842,13 +1573,6 @@ mod tests {
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.error_kind" = "context",
-            "init.is_success" = false
-        );
-        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES));
-        assert_counter!(
-            "apollo.router.lifecycle.query_planner.init",
-            1,
-            "init.error_kind" = "overrides",
             "init.is_success" = false
         );
         metric_rust_qp_init(Some(UNSUPPORTED_FED1));
