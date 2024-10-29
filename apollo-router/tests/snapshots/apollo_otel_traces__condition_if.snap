@@ -271,7 +271,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.operation_signature
                 value:
-                  stringValue: "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if,label:\"\"){reviews{author{name}}reviews{author{name}}}}}"
+                  stringValue: "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}"
               - key: apollo_private.query.aliases
                 value:
                   intValue: 0

@@ -35,7 +35,6 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
@@ -48,7 +47,6 @@ use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
-use crate::Context;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -259,7 +257,7 @@ where
         let mut count = 0usize;
         let mut reused = 0usize;
         for WarmUpCachingQueryKey {
-            mut query,
+            query,
             operation_name,
             hash,
             metadata,
@@ -267,7 +265,6 @@ where
             config_mode: _,
         } in all_cache_keys
         {
-            let context = Context::new();
             let doc = match query_analysis
                 .parse_document(&query, operation_name.as_deref())
                 .await
@@ -324,16 +321,6 @@ where
                         continue;
                     }
                 };
-
-                let schema = self.schema.api_schema();
-                if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
-                    query = modified_query.to_string();
-                }
-
-                context.extensions().with_lock(|mut lock| {
-                    lock.insert::<ParsedDocument>(doc.clone());
-                    lock.insert(caching_key.metadata.clone())
-                });
 
                 let request = QueryPlannerRequest {
                     query,
@@ -498,16 +485,10 @@ where
             .await;
         if entry.is_first() {
             let query_planner::CachingRequest {
-                mut query,
+                query,
                 operation_name,
                 context,
             } = request;
-
-            let schema = self.schema.api_schema();
-            // FIXME: does this work with authorization?
-            if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
-                query = modified_query.to_string();
-            }
 
             let request = QueryPlannerRequest::builder()
                 .query(query)
@@ -701,6 +682,7 @@ mod tests {
     use crate::spec::Query;
     use crate::spec::Schema;
     use crate::Configuration;
+    use crate::Context;
 
     mock! {
         #[derive(Debug)]
