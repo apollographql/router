@@ -29,7 +29,6 @@ use tracing_futures::Instrument;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
-use crate::configuration::QueryPlanReuseMode;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
@@ -942,7 +941,7 @@ impl SupergraphCreator {
         persisted_query_layer: &PersistedQueryLayer,
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
-        experimental_reuse_query_plans: QueryPlanReuseMode,
+        experimental_reuse_query_plans: bool,
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         self.query_planner_service
