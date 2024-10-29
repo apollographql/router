@@ -236,7 +236,7 @@ impl JoinSpecDefinition {
                 application,
                 &JOIN_USEROVERRIDDEN_ARGUMENT_NAME,
             )?,
-            context_arguments: directive_op,
+            context_arguments: todo!(),
         })
     }
 

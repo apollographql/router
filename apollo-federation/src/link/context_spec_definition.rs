@@ -1,6 +1,5 @@
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -12,7 +11,6 @@ use apollo_compiler::Node;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;

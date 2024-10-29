@@ -47,10 +47,8 @@ pub use self::subgraph::ValidFederationSubgraphs;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::link::context_spec_definition::CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::cost_spec_definition::CostSpecDefinition;
-use crate::link::federation_spec_definition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -766,13 +764,13 @@ fn extract_object_type_content(
             )?;
         }
 
-        if let Some((context_spec_def, name_in_supergraph)) = context {
+        if let Some((_context_spec_def, name_in_supergraph)) = &context {
             for directive in type_.directives.get_all(name_in_supergraph.as_str()) {
                 if let Some(context_name) =
                     FederationSpecDefinition::context_directive_arguments(directive).ok()
                 {
                     // todo should I return an error if there isn't a value?
-                    let arr: std::str::Split<'_, &str> = context_name.name.split("__");
+                    let mut arr = context_name.name.split("__");
                     if let Some(subgraph_name) = arr.next() {
                         let subgraph_name = Name::new(subgraph_name)?;
                         let subgraph = get_subgraph(
@@ -787,14 +785,11 @@ fn extract_object_type_content(
                                     .to_owned(),
                             })?;
                         if let Some(context_in_subgraph) = arr.last() {
-                            pos.insert_directive(
-                                &mut subgraph.schema,
-                                (federation_spec_definition.context_directive(
-                                    &subgraph.schema,
-                                    context_in_subgraph.to_string(),
-                                )?)
-                                .into(),
-                            );
+                            let context_directive = federation_spec_definition.context_directive(
+                                &subgraph.schema,
+                                context_in_subgraph.to_string(),
+                            )?;
+                            pos.insert_directive(&mut subgraph.schema, context_directive.into())?;
                         } else {
                             todo!();
                         }
@@ -1539,7 +1534,7 @@ fn add_subgraph_field(
                 name,
                 type_,
                 context,
-                selection,
+                selection: _,
             } = args;
             let mut split = context.split("__");
             split.next();
@@ -1548,7 +1543,7 @@ fn add_subgraph_field(
             };
             let from_context_directive = federation_spec_definition
                 .from_context_directive(&subgraph.schema, context_name_in_subgraph.to_string())?;
-            let mut directives = std::iter::once(from_context_directive).collect();
+            let directives = std::iter::once(from_context_directive).collect();
             let ty = decode_type(type_)?;
             let _subgraph_type = subgraph.schema.get_type(ty.inner_named_type().clone())?;
             let node = Node::new(InputValueDefinition {
