@@ -80,8 +80,8 @@ input CreateUserInput
 {
   name: String!
   username: String!
-  email: EmailAddress
-  status: Status
+  email: EmailAddress!
+  status: Status!
   address: AddressInput
 }
 
@@ -151,5 +151,4 @@ type User
   phone: String
   website: String
   company: CompanyInfo
-  status: Status
 }
