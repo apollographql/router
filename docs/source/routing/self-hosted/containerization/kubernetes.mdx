@@ -176,13 +176,13 @@ To enable metrics endpoints in your deployed router through a YAML configuration
 
 ## Deploy with Rhai scripts
 
-The router supports [Rhai scripting](/router/customizations/rhai) to add custom functionality.
+The router supports [Rhai scripting](/graphos/routing/customization/rhai) to add custom functionality.
 
 Enabling Rhai scripts in your deployed router requires mounting an extra volume for your Rhai scripts and getting your scripts onto the volume. That can be done by following steps in [a separate example for creating a custom in-house router chart](https://github.com/apollographql/in-house-router-example). The example creates a new (in-house) chart that wraps (and depends on) the released router chart, and the new chart has templates that add the necessary configuration to allow Rhai scripts for a deployed router.
 
 ## Deploy with a coprocessor
 
-The router supports [external coprocessing](/router/customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](/router/customizations/rhai/#router-request-lifecycle).
+The router supports [external coprocessing](/router/customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle).
 
 A deployed coprocessor has its own application image and container in the router pod. 
 

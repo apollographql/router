@@ -10,15 +10,15 @@ You can create **customizations** for the GraphOS Router or Apollo Router Core t
 
 The GraphOS Router supports the following customization types:
 
-- [**Rhai scripts**](/router/customizations/rhai/)
+- [**Rhai scripts**](/graphos/routing/customization/rhai/)
     - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
 - [**External co-processing**](/router/customizations/coprocessor/) ([Enterprise feature](/router/enterprise-features/))
     - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
     - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 
-The Apollo Router Core supports customization only through [Rhai scripts](/router/customizations/rhai/).
+The Apollo Router Core supports customization only through [Rhai scripts](/graphos/routing/customization/rhai/).
 
-Because [Rhai scripts](/router/customizations/rhai/) are easier to deploy, we recommend using them if they support your use case. Use external co-processing if your customization needs to do any of the following (which Rhai scripts _don't_ support):
+Because [Rhai scripts](/graphos/routing/customization/rhai/) are easier to deploy, we recommend using them if they support your use case. Use external co-processing if your customization needs to do any of the following (which Rhai scripts _don't_ support):
 
 - Read or write to disk
 - Make network requests
@@ -295,4 +295,4 @@ This guidance applies if you are:
 
 ## Customization creation
 
-To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](/router/customizations/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.
+To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](/graphos/routing/customization/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.

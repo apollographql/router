@@ -4,11 +4,11 @@ subtitle: APIs for router customizations
 description: This reference documents the symbols and behaviors that are specific to Rhai customizations for the Apollo GraphOS Router and Apollo Router Core. Includes entry point hooks, logging, and more.
 ---
 
-This reference documents the symbols and behaviors that are specific to [Rhai customizations](/router/customizations/rhai/) for the GraphOS Router and Apollo Router Core.
+This reference documents the symbols and behaviors that are specific to [Rhai customizations](/graphos/routing/customization/rhai/) for the GraphOS Router and Apollo Router Core.
 
 ## Entry point hooks
 
-Your Rhai script's [main file](/router/customizations/rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](/router/customizations/rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](/graphos/routing/customization/rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn router_service(service) {}
@@ -17,7 +17,7 @@ fn execution_service(service) {}
 fn subgraph_service(service, subgraph) {}
 ```
 
-Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](/router/customizations/rhai/#service-callbacks), like so:
+Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](/graphos/routing/customization/rhai/#service-callbacks), like so:
 
 ```rhai title="main.rhai"
 fn supergraph_service(service) {

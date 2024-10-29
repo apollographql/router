@@ -22,7 +22,7 @@ When your coprocessor responds to these requests, its response body can modify [
 
 ## How it works
 
-Whenever your router receives a client request, at various **stages** in the [request-handling lifecycle](/router/customizations/rhai/#router-request-lifecycle) it can send HTTP POST requests to your coprocessor:
+Whenever your router receives a client request, at various **stages** in the [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle) it can send HTTP POST requests to your coprocessor:
 
 ```mermaid
 flowchart TB;
@@ -50,7 +50,7 @@ flowchart TB;
 
 This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
-As shown in the diagram above, the `RouterService`, `SupergraphService`, `ExecutionService`, and `SubgraphService` steps of the [request-handling lifecycle](/router/customizations/rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
+As shown in the diagram above, the `RouterService`, `SupergraphService`, `ExecutionService`, and `SubgraphService` steps of the [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
@@ -765,7 +765,7 @@ A unique ID corresponding to the client request associated with this coprocessor
 </td>
 <td>
 
-Indicates which stage of the router's [request-handling lifecycle](/router/customizations/rhai/#router-request-lifecycle) this coprocessor request corresponds to.
+Indicates which stage of the router's [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle) this coprocessor request corresponds to.
 
 This value is one of the following:
 

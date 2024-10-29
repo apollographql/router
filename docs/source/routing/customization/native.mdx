@@ -23,7 +23,7 @@ In these cases, you can create custom plugins for the router.
 
 When designing a new plugin, you first want to determine which of the router's **services** the plugin should hook into to achieve its use case.
 
-For descriptions of these services, see [Router request lifecycle](/router/customizations/rhai#router-request-lifecycle).
+For descriptions of these services, see [Router request lifecycle](/graphos/routing/customization/rhai#router-request-lifecycle).
 
 ## Building a plugin
 
@@ -322,7 +322,7 @@ There is no sequencing for plugin registration, and registrations might even exe
 
 Within a given service (router, subgraph, etc.), a _request_ is handled in the following order:
 
-* [Rhai script](/router/customizations/rhai)
+* [Rhai script](/graphos/routing/customization/rhai)
 * [External coprocessor](/router/customizations/coprocessor)
 * Rust plugins, in the same order they're declared in your [YAML configuration file](/router/configuration/overview/#yaml-config-file).
 

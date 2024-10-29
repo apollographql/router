@@ -19,7 +19,7 @@ Together, these pieces of information help teams monitor their graph and make ch
 
 The GraphOS Router supports client awareness by default if the client sets the `apollographql-client-name` and `apollographql-client-id` in their requests. These values can be overridden using the [router configuration file](/router/managed-federation/client-awareness/) directly.
 
-Client headers can also be enforced using a [Rhai script](/router/customizations/rhai) on every incoming request.
+Client headers can also be enforced using a [Rhai script](/graphos/routing/customization/rhai) on every incoming request.
 
 ```rhai title="client-id.rhai"
 fn supergraph_service(service) {

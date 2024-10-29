@@ -80,7 +80,7 @@ The GraphOS Router provides access controls via **authorization directives** tha
 
 - The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define.
 - The [`@authenticated`](#authenticated) directive allows access to the annotated field or type for _authenticated requests only_.
-- The [`@policy`](#policy) directive offloads authorization validation to a [Rhai script](/router/customizations/rhai/) or a [coprocessor](/router/customizations/coprocessor) and integrates the result in the router. It's useful when your authorization policies go beyond simple authentication and scopes.
+- The [`@policy`](#policy) directive offloads authorization validation to a [Rhai script](/graphos/routing/customization/rhai/) or a [coprocessor](/router/customizations/coprocessor) and integrates the result in the router. It's useful when your authorization policies go beyond simple authentication and scopes.
 
 For example, imagine you're building a social media platform that includes a `Users` subgraph. You can use the [`@requiresScopes`](#requiresscopes) directive to declare that viewing other users' information requires the `read:user` scope:
 
@@ -169,7 +169,7 @@ claims["scope"] = "scope1 scope2 scope3"
 
 <ExpansionPanel title="What if my request scopes aren't in OAuth2 format?">
 
-If the `apollo_authentication::JWT::claims` object holds scopes in another format, for example, an array of strings, or at a key other than `"scope"`, you can edit the claims with a [Rhai script](/router/customizations/rhai).
+If the `apollo_authentication::JWT::claims` object holds scopes in another format, for example, an array of strings, or at a key other than `"scope"`, you can edit the claims with a [Rhai script](/graphos/routing/customization/rhai).
 
 The example below extracts an array of scopes from the `"roles"` claim and reformats them as a space-separated string.
 
@@ -479,7 +479,7 @@ If _every_ requested field requires authentication and a request is unauthentica
 
 </MinVersion>
 
-The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](/router/customizations/rhai/) or [coprocessor](/router/customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation than verifying the presence of a claim value in a list (example: checking specific values in headers).
+The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](/graphos/routing/customization/rhai/) or [coprocessor](/router/customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation than verifying the presence of a claim value in a list (example: checking specific values in headers).
 
 <Tip>
 
@@ -522,7 +522,7 @@ scalar federation__Policy
 directive @policy(policies: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
-Using the `@policy` directive requires a [Supergraph plugin](/router/customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](/router/customizations/rhai/) or [coprocessor](/router/customizations/coprocessor). Refer to the following [example use case](#example-policy-use-case) for more information. (Although a [native plugin](/router/customizations/native) can also evaluate authorization policies, we don't recommend using it.)
+Using the `@policy` directive requires a [Supergraph plugin](/router/customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](/graphos/routing/customization/rhai/) or [coprocessor](/router/customizations/coprocessor). Refer to the following [example use case](#example-policy-use-case) for more information. (Although a [native plugin](/router/customizations/native) can also evaluate authorization policies, we don't recommend using it.)
 
 #### Combining policies with `AND`/`OR` logic
 

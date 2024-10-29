@@ -217,15 +217,15 @@ authorization:
 
 Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic within a Rhai script or external coprocessor at the supergraph service level (for more on these options, see [Router Customizations](/router/customizations/overview/)).
 
-Below are 2 example [Rhai script](/router/customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
+Below are 2 example [Rhai script](/graphos/routing/customization/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
 ### Example: Forwarding claims to subgraphs as headers
 
-Below is an example [Rhai script](/router/customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+Below is an example [Rhai script](/graphos/routing/customization/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
 <Note>
 
-This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](/router/customizations/rhai#router-request-lifecycle)
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](/graphos/routing/customization/rhai#router-request-lifecycle)
 
 </Note>
 
@@ -260,11 +260,11 @@ Explicitly listing claims and _always_ setting headers for them is strongly reco
 
 ### Example: Forwarding claims to subgraphs as GraphQL extensions
 
-Below is an example [Rhai script](/router/customizations/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+Below is an example [Rhai script](/graphos/routing/customization/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
 <Note>
 
-This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](/router/customizations/rhai#router-request-lifecycle)
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](/graphos/routing/customization/rhai#router-request-lifecycle)
 
 </Note>
 
@@ -286,11 +286,11 @@ fn process_request(request) {
 
 ### Example: Throwing errors for invalid claims
 
-Below is an example [Rhai script](/router/customizations/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+Below is an example [Rhai script](/graphos/routing/customization/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
 <Note>
 
-This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](/router/customizations/rhai#router-request-lifecycle)
+This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](/graphos/routing/customization/rhai#router-request-lifecycle)
 
 </Note>
 
@@ -315,7 +315,7 @@ fn process_request(request) {
 
 ### Example `main.rhai`
 
-In order to use the above Rhai examples, you must import them into your [`main.rhai`](/router/customizations/rhai#the-main-file) like this:
+In order to use the above Rhai examples, you must import them into your [`main.rhai`](/graphos/routing/customization/rhai#the-main-file) like this:
 
 <ExpansionPanel title="Click to expand">
 

@@ -286,7 +286,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     
     Additionally, callbacks for `subgraph_service` can access and modify the sub-operation request that the router will send to the corresponding subgraph via `request.subgraph`.
     
-    For reference, see the fields of [`request`](/router/customizations/rhai-api/#request-interface).
+    For reference, see the fields of [`request`](/graphos/reference/router/rhai/#request-interface).
     
 * `map_response` callbacks are called in each service as execution proceeds back "to the left" from subgraphs resolving their individual sub-operations:
 
@@ -545,4 +545,4 @@ Syntax highlighting can make it easier to spot errors in a script. We recommend 
 
 ### Logging
 
-For tracking down runtime errors, insert [logging](/router/customizations/rhai-api#logging) statements to narrow down the issue.
+For tracking down runtime errors, insert [logging](/graphos/reference/router/rhai#logging) statements to narrow down the issue.
