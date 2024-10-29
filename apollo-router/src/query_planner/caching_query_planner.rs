@@ -412,16 +412,16 @@ where
         let qp = self.clone();
         Box::pin(async move {
             let context = request.context.clone();
-            qp.plan(request).await.inspect(|response| {
+            qp.plan(request).await.inspect(|_response| {
                 if let Some(usage_reporting) = context
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
-                    let _ = response.context.insert(
+                    let _ = context.insert(
                         APOLLO_OPERATION_ID,
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
-                    let _ = response.context.insert(
+                    let _ = context.insert(
                         "apollo_operation_signature",
                         usage_reporting.stats_report_key.clone(),
                     );
@@ -528,11 +528,7 @@ where
                     let res = self.delegate.ready().await?.call(request).await;
 
                     match res {
-                        Ok(QueryPlannerResponse {
-                            content,
-                            context,
-                            errors,
-                        }) => {
+                        Ok(QueryPlannerResponse { content, errors }) => {
                             if let Some(content) = content.clone() {
                                 let can_cache = match &content {
                                     // Already cached in an introspection-specific, small-size,
@@ -556,11 +552,7 @@ where
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                                 });
                             }
-                            Ok(QueryPlannerResponse {
-                                content,
-                                context,
-                                errors,
-                            })
+                            Ok(QueryPlannerResponse { content, errors })
                         }
                         Err(error) => {
                             let e = Arc::new(error);
@@ -599,10 +591,7 @@ where
                         });
                     }
 
-                    Ok(QueryPlannerResponse::builder()
-                        .content(content)
-                        .context(context)
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(content).build())
                 }
                 Err(error) => {
                     if let Some(usage_reporting) = error.usage_reporting() {
@@ -856,10 +845,7 @@ mod tests {
                     plan: Arc::new(query_plan),
                 };
 
-                Ok(QueryPlannerResponse::builder()
-                    .content(qp_content)
-                    .context(Context::new())
-                    .build())
+                Ok(QueryPlannerResponse::builder().content(qp_content).build())
             });
             planner
         });
@@ -893,15 +879,15 @@ mod tests {
             .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
 
         for _ in 0..5 {
-            assert!(planner
+            let _ = planner
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
                     context.clone(),
                 ))
                 .await
-                .unwrap()
-                .context
+                .unwrap();
+            assert!(context
                 .extensions()
                 .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>()));
         }
@@ -934,10 +920,7 @@ mod tests {
                         ),
                     };
 
-                    Ok(QueryPlannerResponse::builder()
-                        .content(qp_content)
-                        .context(Context::new())
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
                 });
                 planner
             });

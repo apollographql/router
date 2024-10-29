@@ -88,7 +88,6 @@ pub(crate) struct Response {
     /// Optional in case of error
     pub(crate) content: Option<QueryPlannerContent>,
     pub(crate) errors: Vec<graphql::Error>,
-    pub(crate) context: Context,
 }
 
 /// Query, QueryPlan and Introspection data.
@@ -108,14 +107,9 @@ impl Response {
     #[builder]
     pub(crate) fn new(
         content: Option<QueryPlannerContent>,
-        context: Context,
         errors: Vec<graphql::Error>,
     ) -> Response {
-        Self {
-            content,
-            context,
-            errors,
-        }
+        Self { content, errors }
     }
 }
 

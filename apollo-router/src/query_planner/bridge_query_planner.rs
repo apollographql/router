@@ -650,7 +650,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
                     .content(query_planner_content)
-                    .context(context)
                     .build()),
                 Err(e) => Err(e),
             }
