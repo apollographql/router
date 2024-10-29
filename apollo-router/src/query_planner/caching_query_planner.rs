@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
@@ -514,7 +513,7 @@ where
             let request = QueryPlannerRequest::builder()
                 .query(query)
                 .and_operation_name(operation_name)
-                .context(context)
+                .context(context.clone())
                 .document(doc)
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)
@@ -569,6 +568,11 @@ where
                             tokio::spawn(async move {
                                 entry.insert(Err(err)).await;
                             });
+                            if let Some(usage_reporting) = e.usage_reporting() {
+                                context.extensions().with_lock(|mut lock| {
+                                    lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
+                                });
+                            }
                             Err(CacheResolverError::RetrievalError(e))
                         }
                     }
@@ -601,23 +605,10 @@ where
                         .build())
                 }
                 Err(error) => {
-                    match error.deref() {
-                        QueryPlannerError::PlanningErrors(pe) => {
-                            request.context.extensions().with_lock(|mut lock| {
-                                lock.insert::<Arc<UsageReporting>>(Arc::new(
-                                    pe.usage_reporting.clone(),
-                                ))
-                            });
-                        }
-                        QueryPlannerError::SpecError(e) => {
-                            request.context.extensions().with_lock(|mut lock| {
-                                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
-                                    stats_report_key: e.get_error_key().to_string(),
-                                    referenced_fields_by_type: HashMap::new(),
-                                }))
-                            });
-                        }
-                        _ => {}
+                    if let Some(usage_reporting) = error.usage_reporting() {
+                        context.extensions().with_lock(|mut lock| {
+                            lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
+                        });
                     }
 
                     Err(CacheResolverError::RetrievalError(error))

@@ -43,7 +43,6 @@ use crate::metrics::meter_provider;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
-use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
@@ -653,25 +652,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     .content(query_planner_content)
                     .context(context)
                     .build()),
-                Err(e) => {
-                    match &e {
-                        QueryPlannerError::PlanningErrors(pe) => {
-                            context.extensions().with_lock(|mut lock| {
-                                lock.insert(Arc::new(pe.usage_reporting.clone()))
-                            });
-                        }
-                        QueryPlannerError::SpecError(e) => {
-                            context.extensions().with_lock(|mut lock| {
-                                lock.insert(Arc::new(UsageReporting {
-                                    stats_report_key: e.get_error_key().to_string(),
-                                    referenced_fields_by_type: HashMap::new(),
-                                }))
-                            });
-                        }
-                        _ => (),
-                    }
-                    Err(e)
-                }
+                Err(e) => Err(e),
             }
         };
 
