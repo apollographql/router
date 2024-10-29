@@ -23,17 +23,6 @@ pub(crate) enum Selection {
     InlineFragment(InlineFragment),
 }
 
-impl Selection {
-    pub(crate) fn selection_set(&self) -> Option<&[Selection]> {
-        match self {
-            Selection::Field(Field { selections, .. }) => selections.as_deref(),
-            Selection::InlineFragment(InlineFragment { selections, .. }) => {
-                Some(selections.as_slice())
-            }
-        }
-    }
-}
-
 /// The field that is used
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

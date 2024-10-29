@@ -383,6 +383,7 @@ request.body.variables
 request.body.extensions
 request.uri.host
 request.uri.path
+request.uri.port
 ```
 
 <Note>
@@ -401,7 +402,10 @@ request.subgraph.body.variables
 request.subgraph.body.extensions
 request.subgraph.uri.host
 request.subgraph.uri.path
+request.subgraph.uri.port
 ```
+
+**For `subgraph_service` callbacks only,** the `request` object provides the non modifiable field `request.subgraph_request_id` which is a unique ID corresponding to the subgraph request.
 
 ### `request.context`
 
@@ -547,6 +551,17 @@ print(`${request.uri.path}`); // log the request path
 request.uri.path += "/added-context"; // Add an extra element to the query path
 ```
 
+### `request.uri.port`
+
+This is the port component of the request's URI, as an integer. If no port is explicitly defined in the URI, this value defaults to an empty value.
+
+Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.port` in a `subgraph_service` callback _does_ modify the URI that the router uses to communicate with the corresponding subgraph.
+
+```rhai
+print(`${request.uri.port}`); // log the request port
+request.uri.port = 4040; // Changes the port to be 4040
+```
+
 ### `request.subgraph.*`
 
 The `request.subgraph` object is available _only_ for `map_request` callbacks registered in `subgraph_service`. This object has the exact same fields as `request` itself, but these fields apply to the HTTP request that the router will send to the corresponding subgraph.
@@ -580,6 +595,8 @@ response.body.extensions
 ```
 
 All of the above fields are read/write.
+
+**For `subgraph_service` callbacks only,** the `response` object provides the non modifiable field `response.subgraph_request_id` which is a unique ID corresponding to the subgraph request, and the same id that can be obtained on the request side.
 
 The following fields are identical in behavior to their `request` counterparts:
 
