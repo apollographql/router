@@ -69,7 +69,7 @@ The router expects the file referenced in the `certificate_chain` value to be a 
 
 You can only configure these certificates via the router's configuration since using `SSL_CERT_FILE` also overrides certificates for sending telemetry and communicating with Apollo Uplink.
 
-If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled. You can generate it with the following command line command from a certificate signing request, in this example, `server.csr`:
+If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` turned off. You can generate it with the following command line command from a certificate signing request, in this example, `server.csr`:
 
 ```
 openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
@@ -80,7 +80,7 @@ You can generate a `v3.ext` extension file like so:
 ```
 subjectKeyIdentifier   = hash
 authorityKeyIdentifier = keyid:always,issuer:always
-# this has to be disabled
+# this has to be turned off
 # basicConstraints       = CA:TRUE
 keyUsage               = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment, keyAgreement, keyCertSign
 subjectAltName         = DNS:local.apollo.dev

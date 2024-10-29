@@ -3,6 +3,12 @@ title: Cloud Routing
 subtitle: Cloud-hosted routers for cloud supergraphs
 ---
 
+<Note>
+
+Apollo has paused new sign-ups for Serverless and Dedicated plans while we improve our offerings based on user feedback. This means cloud routing is temporarily unavailable to new users. In the meantime, you can explore other GraphOS features with a [free trial](https://studio.apollographql.com/signup?referrer=docs-content).
+
+</Note>
+
 When you create a cloud supergraph, GraphOS provisions and manages a _cloud router_. Routers act as entry points to your GraphQL APIs. Individual GraphQL APIs are called _subgraphs_ in this architecture.
 
 ```mermaid
@@ -43,11 +49,15 @@ Cloud supergraphs use [Apollo Federation 2](/federation/) for their core archite
 
 ## Cloud router types and availability
 
-Cloud supergraphs are only available to organizations with Serverless and Dedicated plans.
+Cloud supergraphs are only available to organizations with Serverless and Dedicated plans<sup>**</sup>.
 Serverless cloud routers run on shared infrastructure. Dedicated cloud routers run on dedicated infrastructure that you control and scale.
 Cloud routers aren't available with Enterprise or legacy Free or Team plans.
 
-<CloudPlanPause />
+<Note>
+
+<sup>**</sup>We've paused new sign-ups for Serverless and Dedicated plans while we improve our offerings based on user feedback. In the meantime, you can explore GraphOS features with a [free trial](https://studio.apollographql.com/signup?referrer=docs-content).
+
+</Note>
 
 ## Cloud router regions
 
@@ -112,7 +122,7 @@ Router releases go through rigorous testing before deployment on GraphOS Cloud. 
 
 <Note>
 
-Opting out of router updates to cloud routers isn't currently supported. Advanced version management will be available in Dedicated in 2024.
+Opting out of router updates to cloud routers isn't currently supported.
 
 </Note>
 

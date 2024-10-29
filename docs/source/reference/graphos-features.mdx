@@ -48,7 +48,7 @@ flowchart LR;
   router--"Fetches supergraph schema<br/>and license"-->uplink;
 ```
 
-A router instance retains its license for the duration of its execution. If you terminate a router instance and then later start a new instance on the same machine, it must fetch a new license. 
+A router instance retains its license for the duration of its execution. If you stop a router instance and then later start a new instance on the same machine, it must fetch a new license. 
 
 Licenses are served via [Apollo Uplink](/graphos/routing/uplink), the same multi-cloud endpoint that your router uses to fetch its supergraph schema from GraphOS. Because of this, licenses introduce no additional network dependencies, meaning your router's uptime remains unaffected. To learn more about multi-cloud Uplink, read the [Apollo blog post](https://www.apollographql.com/blog/announcement/backend/introducing-multi-cloud-support-for-apollo-uplink).
 
@@ -145,7 +145,7 @@ These steps work both for running the router executable directly (`./router`) an
     APOLLO_GRAPH_REF="..." APOLLO_KEY="..." ./router --supergraph schema.graphql
     ```
 
-    - The value of `APOLLO_GRAPH_REF` is the graph ref for the new, license-specific variant you created (e.g., `docs-example-graph@local-licenses`).
+    - The value of `APOLLO_GRAPH_REF` is the graph ref for the new, license-specific variant you created (for example, `docs-example-graph@local-licenses`).
     - The value of `APOLLO_KEY` is the graph API key you created.
 
 4. Your router will fetch an Enterprise license while using its locally composed supergraph schema.
@@ -160,13 +160,13 @@ These steps work both for running the router executable directly (`./router`) an
 | `License not found.`        | The router connected to GraphOS with credentials that are not associated with a GraphOS Enterprise plan. |
 | `License has expired.`      | Your organization's GraphOS Enterprise subscription has ended. **Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans).** |
 
-## Disabling Enterprise features
+## Turning off Enterprise features
 
-To disable an Enterprise feature, remove all of its associated configuration keys from your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file).
+To turn off an Enterprise feature, remove all of its associated configuration keys from your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file).
 
 ## Grace period for expired plans
 
-If your organization terminates its GraphOS Enterprise subscription, your router's Enterprise license is considered expired at the end of your final paid subscription period. GraphOS provides a grace period for expired licenses so that you can disable Enterprise features before they produce breaking errors in your router.
+If your organization terminates its GraphOS Enterprise subscription, your router's Enterprise license is considered expired at the end of your final paid subscription period. GraphOS provides a grace period for expired licenses so that you can turn off Enterprise features before they produce breaking errors in your router.
 
 If your router has an expired Enterprise license, its behavior degrades according to the following schedule, _if_ any Enterprise features are still enabled:
 
@@ -174,4 +174,4 @@ If your router has an expired Enterprise license, its behavior degrades accordin
 - **After 14 days,** your router begins a **soft outage**: it continues processing client requests, but it emits logs and metrics that indicate it's experiencing an outage.
 - **After 28 days,** your router begins a **hard outage**. It no longer processes incoming client requests and continues emitting logs and metrics from the soft outage.
 
-Your router resumes normal functioning whenever you renew your GraphOS Enterprise subscription or disable all [Enterprise features](#list-of-features).
+Your router resumes normal functioning whenever you renew your GraphOS Enterprise subscription or turn off all [Enterprise features](#list-of-features).
