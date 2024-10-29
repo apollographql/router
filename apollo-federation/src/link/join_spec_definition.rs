@@ -1,3 +1,4 @@
+use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
@@ -5,10 +6,12 @@ use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_enum_argument;
 use crate::link::argument::directive_optional_string_argument;
@@ -20,6 +23,8 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+
+use super::argument::directive_optional_list_argument;
 
 pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: Name = name!("Graph");
 pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: Name = name!("graph");
@@ -45,6 +50,7 @@ pub(crate) const JOIN_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("overrideLabel"
 pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
+pub(crate) const JOIN_MEMBER_CONTEXT_ARGUMENT: Name = name!("contextArgument");
 
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -64,6 +70,73 @@ pub(crate) struct ContextArgument<'doc> {
     pub(crate) type_: &'doc str,
     pub(crate) context: &'doc str,
     pub(crate) selection: &'doc str,
+}
+
+impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
+    type Error = FederationError;
+
+    fn try_from(value: &'doc Value) -> Result<Self, Self::Error> {
+        fn insert_value<'a>(
+            name: &str,
+            field: &mut Option<&'a Value>,
+            value: &'a Value,
+        ) -> Result<(), FederationError> {
+            if let Some(first_value) = field {
+                internal_error!(
+                    "Duplicate contextArgument for '{name}' field: {first_value} and {value}"
+                )
+            }
+            field.insert(value);
+            Ok(())
+        }
+
+        fn field_or_else<'a>(
+            field_name: &'static str,
+            field: Option<&'a Value>,
+        ) -> Result<&'a str, FederationError> {
+            field
+                .ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "'{field_name}' field was missing from contextArgument"
+                    ))
+                })?
+                .as_str()
+                .ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "'{field_name}' field of contextArgument was not a string"
+                    ))
+                })
+        }
+
+        let Value::Object(names) = value else {
+            internal_error!("Item in contextArgument list is not an object {value}")
+        };
+        let mut name = None;
+        let mut type_ = None;
+        let mut context = None;
+        let mut selection = None;
+        for (arg_name, value) in names.as_slice() {
+            match arg_name.as_str() {
+                "name" => insert_value(&arg_name, &mut name, value)?,
+                "type" => insert_value(&arg_name, &mut type_, value)?,
+                "context" => insert_value(&arg_name, &mut context, value)?,
+                "selection" => insert_value(&arg_name, &mut selection, value)?,
+                _ => internal_error!("Found unknown contextArgument {arg_name}"),
+            }
+        }
+
+        let name = field_or_else("name", name)?;
+        let type_ = field_or_else("type_", type_)?;
+        let context = field_or_else("context", context)?;
+        let selection = field_or_else("selection", selection)?;
+
+        Ok(Self {
+            name,
+            type_,
+            context,
+            selection,
+        })
+    }
 }
 
 pub(crate) struct FieldDirectiveArguments<'doc> {
@@ -236,7 +309,17 @@ impl JoinSpecDefinition {
                 application,
                 &JOIN_USEROVERRIDDEN_ARGUMENT_NAME,
             )?,
-            context_arguments: todo!(),
+            context_arguments: directive_optional_list_argument(
+                application,
+                &JOIN_MEMBER_CONTEXT_ARGUMENT,
+            )?
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|value| ContextArgument::try_from(value.as_ref()))
+                    .try_collect()
+            })
+            .transpose()?,
         })
     }
 

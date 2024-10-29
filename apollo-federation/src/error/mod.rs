@@ -17,7 +17,7 @@ use crate::subgraph::spec::FederationSpecError;
 #[macro_export]
 macro_rules! internal_error {
     ( $( $arg:tt )+ ) => {
-        return Err($crate::error::FederationError::internal(format!( $( $arg )+ )).into());
+        return Err($crate::error::FederationError::internal(format!( $( $arg )+ )).into())
     }
 }
 
