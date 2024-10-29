@@ -303,6 +303,7 @@ mod tests {
 
     use super::*;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::authorization::CacheKeyMetadata;
     use crate::spec::Query;
     use crate::Context;
 
@@ -326,11 +327,19 @@ mod tests {
 
             let doc = Query::parse_document(&query, None, &schema, &config).unwrap();
             let context = Context::new();
-            context.extensions().with_lock(|mut lock| lock.insert(doc));
+            context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(doc.clone()));
 
-            pool.call(QueryPlannerRequest::new(query, None, context))
-                .await
-                .unwrap();
+            pool.call(QueryPlannerRequest::new(
+                query,
+                None,
+                context,
+                doc,
+                CacheKeyMetadata::default(),
+            ))
+            .await
+            .unwrap();
 
             let metrics = crate::metrics::collect_metrics();
             let heap_used = metrics.find("apollo.router.v8.heap.used").unwrap();

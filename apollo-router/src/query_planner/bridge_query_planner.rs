@@ -594,21 +594,23 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let QueryPlannerRequest {
             query: original_query,
             operation_name,
+            document,
+            metadata,
             context,
         } = req;
 
-        let metadata = context
-            .extensions()
-            .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned().unwrap_or_default());
+        // let metadata = context
+        //     .extensions()
+        //     .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned().unwrap_or_default());
         let this = self.clone();
         let fut = async move {
-            let mut doc = match context
-                .extensions()
-                .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-            {
-                None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
-                Some(d) => d,
-            };
+            let mut doc = document; /*match context
+                                        .extensions()
+                                        .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
+                                    {
+                                        None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
+                                        Some(d) => d,
+                                    };*/
 
             let api_schema = this.schema.api_schema();
             match add_defer_labels(api_schema, &doc.ast) {

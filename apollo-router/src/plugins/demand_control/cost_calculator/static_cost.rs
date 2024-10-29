@@ -583,6 +583,7 @@ mod tests {
 
     use super::*;
     use crate::introspection::IntrospectionCache;
+    use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::QueryPlannerContent;
@@ -681,10 +682,16 @@ mod tests {
 
         let ctx = Context::new();
         ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query));
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query.clone()));
 
         let planner_res = planner
-            .call(QueryPlannerRequest::new(query_str.to_string(), None, ctx))
+            .call(QueryPlannerRequest::new(
+                query_str.to_string(),
+                None,
+                ctx,
+                query,
+                CacheKeyMetadata::default(),
+            ))
             .await
             .unwrap();
         let query_plan = match planner_res.content.unwrap() {

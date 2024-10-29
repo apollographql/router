@@ -332,13 +332,15 @@ where
                 }
 
                 context.extensions().with_lock(|mut lock| {
-                    lock.insert::<ParsedDocument>(doc);
-                    lock.insert(caching_key.metadata)
+                    lock.insert::<ParsedDocument>(doc.clone());
+                    lock.insert(caching_key.metadata.clone())
                 });
 
                 let request = QueryPlannerRequest {
                     query,
                     operation_name,
+                    document: doc,
+                    metadata: caching_key.metadata,
                     context: context.clone(),
                 };
 
@@ -503,6 +505,7 @@ where
             } = request;
 
             let schema = self.schema.api_schema();
+            // FIXME: does this work with authorization?
             if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
                 query = modified_query.to_string();
             }
@@ -511,6 +514,8 @@ where
                 .query(query)
                 .and_operation_name(operation_name)
                 .context(context)
+                .document(doc)
+                .metadata(caching_key.metadata)
                 .build();
 
             // some clients might timeout and cancel the request before query planning is finished,
