@@ -9,12 +9,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
 
+use super::layers::query_analysis::ParsedDocument;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
 use crate::Context;
-
-use super::layers::query_analysis::ParsedDocument;
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
