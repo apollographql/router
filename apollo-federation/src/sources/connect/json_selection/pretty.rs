@@ -8,6 +8,8 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
+use super::parser::Alias;
+use super::parser::Key;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -119,8 +121,9 @@ impl PrettyPrintable for PathList {
                 result.push_str(rest.as_str());
             }
             Self::Key(key, tail) => {
+                result.push('.');
+                result.push_str(key.pretty_print().as_str());
                 let rest = tail.pretty_print_with_indentation(true, indentation);
-                result.push_str(key.dotted().as_str());
                 result.push_str(rest.as_str());
             }
             Self::Expr(expr, tail) => {
@@ -203,22 +206,41 @@ impl PrettyPrintable for LitExpr {
             Self::Null => result.push_str("null"),
             Self::Object(map) => {
                 result.push('{');
+
+                if !map.is_empty() {
+                    if inline {
+                        result.push(' ');
+                    } else {
+                        result.push('\n');
+                    }
+                }
+
                 let mut is_first = true;
                 for (key, value) in map {
                     if is_first {
                         is_first = false;
-                    } else {
+                    } else if inline {
                         result.push_str(", ");
+                    } else {
+                        result.push_str(",\n");
                     }
-                    let key = serde_json_bytes::Value::String(key.as_str().into()).to_string();
-                    result.push_str(key.as_str());
+                    result.push_str(key.pretty_print().as_str());
                     result.push_str(": ");
                     result.push_str(
                         value
-                            .pretty_print_with_indentation(true, indentation)
+                            .pretty_print_with_indentation(true, indentation + 1)
                             .as_str(),
                     );
                 }
+
+                if !map.is_empty() {
+                    if inline {
+                        result.push(' ');
+                    } else {
+                        result.push('\n');
+                    }
+                }
+
                 result.push('}');
             }
             Self::Array(vec) => {
@@ -259,17 +281,11 @@ impl PrettyPrintable for NamedSelection {
         match self {
             Self::Field(alias, field_key, sub) => {
                 if let Some(alias) = alias {
-                    result.push_str(alias.name.as_str());
-                    result.push_str(": ");
+                    result.push_str(alias.pretty_print().as_str());
+                    result.push(' ');
                 }
 
-                if field_key.is_quoted() {
-                    let safely_quoted =
-                        serde_json_bytes::Value::String(field_key.as_str().into()).to_string();
-                    result.push_str(safely_quoted.as_str());
-                } else {
-                    result.push_str(field_key.as_str());
-                }
+                result.push_str(field_key.pretty_print().as_str());
 
                 if let Some(sub) = sub {
                     let sub = sub.pretty_print_with_indentation(true, indentation);
@@ -279,15 +295,15 @@ impl PrettyPrintable for NamedSelection {
             }
             Self::Path(alias_opt, path) => {
                 if let Some(alias) = alias_opt {
-                    result.push_str(alias.name.as_str());
-                    result.push_str(": ");
+                    result.push_str(alias.pretty_print().as_str());
+                    result.push(' ');
                 }
                 let path = path.pretty_print_with_indentation(true, indentation);
                 result.push_str(path.trim_start());
             }
             Self::Group(alias, sub) => {
-                result.push_str(alias.name.as_str());
-                result.push_str(": ");
+                result.push_str(alias.pretty_print().as_str());
+                result.push(' ');
 
                 let sub = sub.pretty_print_with_indentation(true, indentation);
                 result.push_str(sub.as_str());
@@ -295,6 +311,31 @@ impl PrettyPrintable for NamedSelection {
         };
 
         result
+    }
+}
+
+impl PrettyPrintable for Alias {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        let mut result = String::new();
+
+        if !inline {
+            result.push_str(indent_chars(indentation).as_str());
+        }
+
+        let name = self.name.pretty_print_with_indentation(true, indentation);
+        result.push_str(name.as_str());
+        result.push(':');
+
+        result
+    }
+}
+
+impl PrettyPrintable for Key {
+    fn pretty_print_with_indentation(&self, _inline: bool, _indentation: usize) -> String {
+        match self {
+            Self::Field(name) => name.clone(),
+            Self::Quoted(name) => serde_json_bytes::Value::String(name.as_str().into()).to_string(),
+        }
     }
 }
 
