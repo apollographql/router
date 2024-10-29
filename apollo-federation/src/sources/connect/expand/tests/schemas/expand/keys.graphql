@@ -57,8 +57,11 @@ enum link__Purpose {
 type Query
   @join__type(graph: ONE)
 {
-  t(id: ID!): T @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.id}"}, selection: "id id2", entity: true})
-  t2(id: ID!, id2: ID!): T @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.id}?id2={$args.id2}"}, selection: "id id2", entity: true})
+  t(id: ID!): T @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.id}"}, selection: "id id2 unselected", entity: true})
+  t2(id: ID!, id2: ID!): T @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.id}?id2={$args.id2}"}, selection: "id id2 unselected", entity: true})
+
+  """ Uses the `unselected` field as a key, but doesn't select it """
+  unselected(unselected: ID!): T @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.unselected}"}, selection: "id id2 accessibleByUnselected", entity: true})
 }
 
 type R
@@ -71,9 +74,12 @@ type R
 type T
   @join__type(graph: ONE, key: "id")
   @join__type(graph: ONE, key: "id id2")
+  @join__type(graph: ONE, key: "unselected")
 {
   id: ID!
   id2: ID!
+  unselected: ID!
+  accessibleByUnselected: ID!
   r1: R @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/rs/{$this.id}"}, selection: "id id2"})
   r2: R @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/rs/{$this.id}?id2={$this.id2}"}, selection: "id id2"})
   r3: R @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost/rs/{$this.id}"}, selection: "id id2: $this.id2"})

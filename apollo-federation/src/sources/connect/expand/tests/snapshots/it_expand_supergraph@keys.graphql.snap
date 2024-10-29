@@ -8,6 +8,8 @@ directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE
 type Query {
   t(id: ID!): T
   t2(id: ID!, id2: ID!): T
+  " Uses the `unselected` field as a key, but doesn't select it "
+  unselected(unselected: ID!): T
 }
 
 type R {
@@ -18,6 +20,8 @@ type R {
 type T {
   id: ID!
   id2: ID!
+  unselected: ID!
+  accessibleByUnselected: ID!
   r1: R
   r2: R
   r3: R

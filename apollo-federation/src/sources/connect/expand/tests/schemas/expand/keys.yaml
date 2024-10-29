@@ -4,25 +4,34 @@ subgraphs:
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
           @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
         type Query {
           t(id: ID!): T
             @connect(                                                                                                   # expect `key: "id"`
               http: { GET: "http://localhost/ts/{$$args.id}" }
-              selection: "id id2"
+              selection: "id id2 unselected"
               entity: true
             )
-          t2(id: ID! id2: ID!): T
+          t2(id: ID!, id2: ID!): T
             @connect(                                                                                                   # expect `key: "id id2"`
               http: { GET: "http://localhost/ts/{$$args.id}?id2={$$args.id2}" }
-              selection: "id id2"
+              selection: "id id2 unselected"
+              entity: true
+            )
+          """ Uses the `unselected` field as a key, but doesn't select it """
+          unselected(unselected: ID!): T
+            @connect(
+              http: { GET: "http://localhost/ts/{$$args.unselected}" }
+              selection: "id id2 accessibleByUnselected"
               entity: true
             )
         }
-        type T @key(fields: "id") @key(fields: "id id2") {
+        type T @key(fields: "id") @key(fields: "id id2") @key(fields: "unselected") {
           id: ID!
           id2: ID!
+          unselected: ID!
+          accessibleByUnselected: ID!
           r1: R @connect(http: { GET: "http://localhost/rs/{$$this.id}" }, selection: "id id2")                         # expect `key: "id"``
           r2: R @connect(http: { GET: "http://localhost/rs/{$$this.id}?id2={$$this.id2}" }, selection: "id id2")        # expect `key: "id id2"`
           r3: R @connect(http: { GET: "http://localhost/rs/{$$this.id}" }, selection: "id id2: $$this.id2")             # expect `key: "id id2"`
