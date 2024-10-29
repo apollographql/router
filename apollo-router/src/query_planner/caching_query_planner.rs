@@ -340,7 +340,6 @@ where
                     operation_name,
                     document: doc,
                     metadata: caching_key.metadata,
-                    context: context.clone(),
                     plan_options: caching_key.plan_options,
                 };
 
@@ -513,7 +512,6 @@ where
             let request = QueryPlannerRequest::builder()
                 .query(query)
                 .and_operation_name(operation_name)
-                .context(context.clone())
                 .document(doc)
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)

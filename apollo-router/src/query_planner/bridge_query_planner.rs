@@ -595,7 +595,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             operation_name,
             document,
             metadata,
-            context,
             plan_options,
         } = req;
 
@@ -628,9 +627,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         operation_name.as_deref(),
                         Arc::new(QueryHash(hash)),
                     )?;
-                    context
-                        .extensions()
-                        .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
                 }
             }
 

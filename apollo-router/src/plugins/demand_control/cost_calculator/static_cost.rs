@@ -689,7 +689,6 @@ mod tests {
             .call(QueryPlannerRequest::new(
                 query_str.to_string(),
                 None,
-                ctx,
                 query,
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),

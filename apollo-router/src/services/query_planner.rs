@@ -23,7 +23,6 @@ assert_impl_all!(Request: Send);
 pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
-    pub(crate) context: Context,
     pub(crate) document: ParsedDocument,
     pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
@@ -38,7 +37,6 @@ impl Request {
     pub(crate) fn new(
         query: String,
         operation_name: Option<String>,
-        context: Context,
         document: ParsedDocument,
         metadata: crate::plugins::authorization::CacheKeyMetadata,
         plan_options: PlanOptions,
@@ -46,7 +44,6 @@ impl Request {
         Self {
             query,
             operation_name,
-            context,
             document,
             metadata,
             plan_options,

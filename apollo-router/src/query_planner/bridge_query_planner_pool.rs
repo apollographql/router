@@ -335,7 +335,6 @@ mod tests {
             pool.call(QueryPlannerRequest::new(
                 query,
                 None,
-                context,
                 doc,
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
