@@ -80,30 +80,34 @@ telemetry:
 
 <ExperimentalFeature />
 
-Beginning in v1.49.0, the router supports sending traces to Studio via the more detailed OTel (OpenTelemetry) protocol.
+Beginning in v1.49.0, the router supports sending traces to Studio via the OpenTelemetry protocol (OTLP).
+Support for OTLP traces has historically only been available for third-party APM tools. With this option,
+Studio can now provide a much more granular and detailed view of router internals than the previous Apollo tracing protocol.
 Support for OTel traces has historically only been available for 3rd party APM tools. With this option,
 Studio can now provide a much more granular view of Router internals than the legacy Apollo tracing protocol.
 
-Benefits include:
+Benefits of OTLP traces include:
 
-- A comprehensive way to visualize the Router execution path in Studio.
-- Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
-- Additional attributes including HTTP request details, REST connector details, and more.
+- Comprehensive visualization of the router execution path in Studio
+- New spans in Studio traces, including query parsing, planning, execution, and more
+- New attributes, including HTTP request details, REST connector details, and more
 
-It is expected that this will become the default in a future version of Router.
 
 #### Configuration
 
-This change adds a new configuration option `telemetry.apollo.experimental_otlp_tracing_sampler`. Use this option to send
+You can configure OTel traces with the  `telemetry.apollo.experimental_otlp_tracing_sampler` option. Use this option to send
 a percentage of traces to Studio via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
 
-- `always_off` (default): send all traces via the legacy Apollo Usage Reporting protocol.
-- `always_on`: send all traces via OTLP.
-- `0.0 - 1.0` (used for testing): the ratio of traces to send via OTLP (0.5 = 50 / 50).
+- `always_off` (default): send all traces via the legacy Apollo Usage Reporting protocol
+- `always_on`: send all traces via OTLP
+- `0.0 - 1.0` (used for testing): the ratio of traces to send via OTLP (0.4 = 40% OTLP / 60% legacy)
 
-Note that this sampler is only applied _after_ the common tracing sampler, for example:
+This sampler is applied after the common tracing sampler.
 
-#### Sample 1% of traces, send all traces via OTLP:
+#### Example configuration 
+
+An example configuration that samples 1% of traces and sends all traces via OTLP:
+
 
 ```yaml
 telemetry:
@@ -118,21 +122,18 @@ telemetry:
         sampler: 0.01
 ```
 
-OTel traces sent to Studio will not necessarily be identical to the ones sent to 3rd Party APM tools via OTLP:
+OTLP traces sent to Studio aren't necessarily identical to ones sent to third-party APM tools via OTLP:
 
-- Only specific OTLP attributes will be included for parity with what is provided in legacy traces today. This ensures that data privacy
-  is maintained in an equivalent manner. The existing Router configuration options for Apollo telemetry will continue to function
-  with OTLP traces, such as forwarding of GraphQL errors, headers, and variables.
-- Some features of OTLP traces may only be available in Studio and not in 3rd Party APM tools (e.g. resolver-level timing information from
-  [Federated Tracing](../../federation/metrics/#enabling-federated-tracing)).
+- Only specific OTLP attributes are included for parity with legacy traces today. This ensures that data privacy is maintained in an equivalent manner. Existing router configuration options for Apollo telemetry will continue to function with OTLP traces, including forwarding of GraphQL errors, headers, and variables.
+- Some features of OTLP traces are available only in Studio and not in third-party APM tools, such as resolver-level timing information from [Federated Tracing](../../federation/metrics/#enabling-federated-tracing)
 
 <Note>
 
-This change results in using a new wire protocol for traces, and some users may experience an increase in tracing traffic
-to GraphOS Studio due to the additional detail being captured. In exceptional situations it may be necessary to send fewer traces.
-This can be achieved via sending fewer traces (`telemetry.exporters.tracing.common.sampler`) or as a last resort, falling back
-to the old protocol via `telemetry.apollo.otlp_tracing_sampler` to send fewer OTLP traces or fully disable them.  
-Any performance regressions due to the new tracing protocol should also be reported to the Apollo support team.
+You may experience an increase in tracing traffic sent to GraphOS Studio due to the additional detail captured by the new wire protocol. In exceptional situations, you may need to send fewer traces.
+
+To send fewer traces, configure `telemetry.exporters.tracing.common.sampler` or revert to the old protocol via `telemetry.apollo.otlp_tracing_sampler` to send fewer OTLP traces or to disable them.
+  
+For performance regressions due to the new tracing protocol, you should report them to the [Apollo support team](https://www.apollographql.com/support).
 
 </Note>
 
