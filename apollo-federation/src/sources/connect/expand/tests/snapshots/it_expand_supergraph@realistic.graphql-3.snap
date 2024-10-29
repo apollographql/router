@@ -70,8 +70,8 @@ input AddressInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
 input CreateUserInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
   name: String!
   username: String!
-  email: EmailAddress
-  status: Status
+  email: EmailAddress!
+  status: Status!
   address: AddressInput
 }
 

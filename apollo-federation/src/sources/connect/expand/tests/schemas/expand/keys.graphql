@@ -70,6 +70,7 @@ type R
 
 type T
   @join__type(graph: ONE, key: "id")
+  @join__type(graph: ONE, key: "id id2")
 {
   id: ID!
   id2: ID!
