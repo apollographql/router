@@ -51,7 +51,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     }
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
-    let known_cache_key = "plan:cache:1:federation:v2.9.2:schema:087288dbcef764e15c3088f332a47568275df3573719b7bbd358ede489a492e4:query:a64923334e18d0422a5b4485e3d4a4911839f72b3cc1e8582771c0b670a7ca64:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fffd4213337929d098b1d9f7c7337d0fd167ebc4c3c4c98ffc5bb5e1d164d996";
+    let known_cache_key = "plan:cache:1:federation:v2.9.3:schema:087288dbcef764e15c3088f332a47568275df3573719b7bbd358ede489a492e4:query:a64923334e18d0422a5b4485e3d4a4911839f72b3cc1e8582771c0b670a7ca64:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:847dd433267f02ffb5c21451f893b7c8cefead56fbd67b1ff188a9033f19970b";
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -1004,7 +1004,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:cbfa8570d4e57116629a00bedd4391cb311a075269d19f311a760f0993bb0d0c"
+        "plan:cache:1:federation:v2.9.3:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:705198456b77953ec7d3eb4e09a6f10d96fcf02f5d5b4d6eac1bf24edc702338"
     )
     .await;
 }
@@ -1034,7 +1034,7 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:4148d368d81bada698527f710e6f71b78e632d827184a463f937b1b87af1f3c4"
+        "plan:cache:1:federation:v2.9.3:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:aecf7a3e824ed276b03ccea7149dea044d4c8cdb2bf6f01450d6b44619df26d6"
     )
     .await;
 }
@@ -1056,7 +1056,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0fde8b7bd9fc39dc9c7d077aae4fe1756bfdb9df7d07de5b01712582b553c8e2"
+        "plan:cache:1:federation:v2.9.3:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fdee5baffce546145614696374b1e41913b2b8db17de50ec1c8ba58f3eb1d856"
     )
     .await;
 }
@@ -1078,7 +1078,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:027e66f8bc66b24abf2d64cddcdf9dab8aec4e84538c16db4d78d16e146cba3c"
+        "plan:cache:1:federation:v2.9.3:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:a20af48aa2814481e8426052fadd98e82e52b492d08d015600769cc1d5782297"
     )
     .await;
 }
@@ -1103,7 +1103,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.clear_redis_cache().await;
 
     // If the tests above are failing, this is the key that needs to be changed first.
-    let starting_key = "plan:cache:1:federation:v2.9.2:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fffd4213337929d098b1d9f7c7337d0fd167ebc4c3c4c98ffc5bb5e1d164d996";
+    let starting_key = "plan:cache:1:federation:v2.9.3:schema:dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9:query:b35a54b1486c29af240eaee4af97bb0e63c2298bafc898f29ebdfda369697ef7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:847dd433267f02ffb5c21451f893b7c8cefead56fbd67b1ff188a9033f19970b";
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
     router.execute_default_query().await;

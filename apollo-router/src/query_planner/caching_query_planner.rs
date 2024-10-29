@@ -746,8 +746,11 @@ impl std::fmt::Display for CachingQueryKey {
         let operation = hex::encode(hasher.finalize());
 
         let mut hasher = StructHasher::new();
+        "^metadata".hash(&mut hasher);
         self.metadata.hash(&mut hasher);
+        "^plan_options".hash(&mut hasher);
         self.plan_options.hash(&mut hasher);
+        "^config_mode".hash(&mut hasher);
         self.config_mode.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
