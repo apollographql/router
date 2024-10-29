@@ -146,6 +146,9 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
 
+    /// value type
+    fn json_type_name(&self) -> &'static str;
+
     /// Convert this value to an instance of `apollo_compiler::ast::Value`
     fn to_ast(&self) -> apollo_compiler::ast::Value;
 
@@ -473,6 +476,17 @@ impl ValueExt for Value {
                 .map_or(true, |typename| {
                     typename == maybe_type || schema.is_subtype(maybe_type, typename)
                 })
+    }
+
+    fn json_type_name(&self) -> &'static str {
+        match self {
+            Value::Array(_) => "array",
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Object(_) => "object",
+        }
     }
 
     fn to_ast(&self) -> apollo_compiler::ast::Value {
