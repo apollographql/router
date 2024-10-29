@@ -773,23 +773,29 @@ fn extract_object_type_content(
                     let mut arr = context_name.name.split("__");
                     if let Some(subgraph_name) = arr.next() {
                         let subgraph_name = Name::new(subgraph_name)?;
-                        let subgraph = get_subgraph(
-                            subgraphs,
-                            graph_enum_value_name_to_subgraph_name,
-                            &subgraph_name,
-                        )?;
-                        let federation_spec_definition = federation_spec_definitions
-                            .get(&subgraph_name)
-                            .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
-                                message: "Subgraph unexpectedly does not use federation spec"
-                                    .to_owned(),
-                            })?;
-                        if let Some(context_in_subgraph) = arr.last() {
-                            let context_directive = federation_spec_definition.context_directive(
-                                &subgraph.schema,
-                                context_in_subgraph.to_string(),
+                        let subgraph_index = get_index_from_subgraph_name(graph_enum_value_name_to_subgraph_name, &subgraph_name);
+                        if let Some(subgraph_index) = subgraph_index {
+                            let subgraph = get_subgraph(
+                                subgraphs,
+                                graph_enum_value_name_to_subgraph_name,
+                                subgraph_index,
                             )?;
-                            pos.insert_directive(&mut subgraph.schema, context_directive.into())?;
+            
+                            let federation_spec_definition = federation_spec_definitions
+                                .get(subgraph_index)
+                                .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                                    message: "Subgraph unexpectedly does not use federation spec"
+                                        .to_owned(),
+                                })?;
+                            if let Some(context_in_subgraph) = arr.last() {
+                                let context_directive = federation_spec_definition.context_directive(
+                                    &subgraph.schema,
+                                    context_in_subgraph.to_string(),
+                                )?;
+                                pos.insert_directive(&mut subgraph.schema, context_directive.into())?;
+                            } else {
+                                todo!();
+                            }
                         } else {
                             todo!();
                         }
@@ -1534,18 +1540,19 @@ fn add_subgraph_field(
                 name,
                 type_,
                 context,
-                selection: _,
+                selection,
             } = args;
             let mut split = context.split("__");
             split.next();
             let Some(context_name_in_subgraph) = split.last() else {
                 todo!();
             };
+            
+            let arg = format!("${} {}", context_name_in_subgraph, selection);
             let from_context_directive = federation_spec_definition
-                .from_context_directive(&subgraph.schema, context_name_in_subgraph.to_string())?;
+                .from_context_directive(&subgraph.schema, arg)?;
             let directives = std::iter::once(from_context_directive).collect();
             let ty = decode_type(type_)?;
-            let _subgraph_type = subgraph.schema.get_type(ty.inner_named_type().clone())?;
             let node = Node::new(InputValueDefinition {
                 name: Name::new(name)?,
                 ty: ty.into(),
@@ -1645,17 +1652,13 @@ fn get_subgraph<'subgraph>(
     })
 }
 
-fn get_subgraph_by_name<'subgraph>(
-    subgraphs: &'subgraph mut FederationSubgraphs,
-    subgraph_name: &str,
-) -> Result<&'subgraph mut FederationSubgraph, FederationError> {
-    subgraphs.get_mut(subgraph_name).ok_or_else(|| {
-        SingleFederationError::Internal {
-            message: "All subgraphs should have been created by \"collect_empty_subgraphs()\""
-                .to_owned(),
-        }
-        .into()
-    })
+fn get_index_from_subgraph_name<'a>(
+    graph_enum_value_name_to_subgraph_name: &'a IndexMap<Name, Arc<str>>,
+    subgraph_name: &'a Name,
+) -> Option<&'a Name> {
+    graph_enum_value_name_to_subgraph_name.iter()
+        .find(|(_, v)| v.as_ref() == subgraph_name.as_str())
+        .map(|(k, _)| k)
 }
 
 lazy_static! {

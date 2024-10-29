@@ -50,7 +50,7 @@ pub(crate) const JOIN_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("overrideLabel"
 pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
-pub(crate) const JOIN_MEMBER_CONTEXT_ARGUMENT: Name = name!("contextArgument");
+pub(crate) const JOIN_MEMBER_CONTEXT_ARGUMENTS: Name = name!("contextArguments");
 
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -311,7 +311,7 @@ impl JoinSpecDefinition {
             )?,
             context_arguments: directive_optional_list_argument(
                 application,
-                &JOIN_MEMBER_CONTEXT_ARGUMENT,
+                &JOIN_MEMBER_CONTEXT_ARGUMENTS,
             )?
             .map(|values| {
                 values

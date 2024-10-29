@@ -99,6 +99,10 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
     directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
+    directive @federation__fromContext(field: String) on ARGUMENT_DEFINITION
+
+    directive @federation__context(name: String) repeatable on INTERFACE | OBJECT
+    
     scalar federation__FieldSet
 
     scalar federation__Scope
