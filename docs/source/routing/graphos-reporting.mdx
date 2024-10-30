@@ -37,8 +37,6 @@ You can enable usage reporting via OTLP by an option that can also configure the
 
 - In router v1.x, this is controlled using the `experimental_otlp_tracing_sampler` option and is disabled by default.
 
-- In router v2.x and later, this option is renamed to `otlp_tracing_sampler` and is enabled by default.
-
 The supported values of the OTLP sampler option are the following:
 
 - `always_off`: send all traces via Apollo Usage Reporting protocol. Default for v1.x.
@@ -51,7 +49,7 @@ The OTLP sampler is applied _after_ the common tracing sampler. In the following
 telemetry:
   apollo:
     # Send 0.7 OTLP / 0.3 Apollo
-    otlp_tracing_sampler: 0.7
+    experimental_otlp_tracing_sampler: 0.7
 
   exporters:
     tracing:
