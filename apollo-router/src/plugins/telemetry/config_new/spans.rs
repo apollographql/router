@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::conditional::Conditional;
+use super::connector::spans::ConnectorSpans;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -35,6 +36,10 @@ pub(crate) struct Spans {
     /// Attributes to include on the subgraph span.
     /// Subgraph spans contain information about the subgraph request and response and therefore contain subgraph specific attributes.
     pub(crate) subgraph: SubgraphSpans,
+
+    /// Attributes to include on the connector span.
+    /// Connector spans contain information about the connector request and response and therefore contain connector specific attributes.
+    pub(crate) connector: ConnectorSpans,
 }
 
 impl Spans {

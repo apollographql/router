@@ -32,8 +32,8 @@ use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
-use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
@@ -145,7 +145,6 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             let Some(http_client_factory) = http_client_factory else {
                 return Err("no http client found".into());
             };
-
             let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
             let span = tracing::info_span!(
                 CONNECT_SPAN_NAME,
@@ -159,6 +158,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 "apollo_private.sent_time_offset" = fetch_time_offset,
                 "otel.status_code" = tracing::field::Empty,
             );
+            // TODO: I think we should get rid of these attributes by default and only add it from custom telemetry. We just need to double check it's not required for Studio.
+
+            // These additionnal attributes will be added to custom telemetry feature
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set

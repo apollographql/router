@@ -1,6 +1,7 @@
 extern crate core;
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -38,6 +39,7 @@ async fn test_reload() -> Result<(), BoxError> {
             Some("ExampleQuery"),
             &["client", "router", "subgraph"],
             false,
+            false,
         )
         .await?;
         router.touch_config().await;
@@ -71,6 +73,7 @@ async fn test_remote_root() -> Result<(), BoxError> {
         Some("ExampleQuery"),
         &["client", "router", "subgraph"],
         false,
+        false,
     )
     .await?;
 
@@ -101,6 +104,7 @@ async fn test_local_root() -> Result<(), BoxError> {
         &query,
         Some("ExampleQuery"),
         &["router", "subgraph"],
+        false,
         false,
     )
     .await?;
@@ -149,6 +153,7 @@ async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
                 &query,
                 Some("ExampleQuery"),
                 &["router", "subgraph"],
+                false,
                 false,
             )
             .await
@@ -208,9 +213,45 @@ async fn test_default_operation() -> Result<(), BoxError> {
         Some("ExampleQuery1"),
         &["client", "router", "subgraph"],
         false,
+        false,
     )
     .await?;
     router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_rest_connectors() -> Result<(), BoxError> {
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        let mut router = IntegrationTest::builder()
+            .telemetry(Telemetry::Jaeger)
+            .supergraph(PathBuf::from("tests/fixtures/supergraph_connect.graphql"))
+            .config(include_str!("fixtures/jaeger.connectors.router.yaml"))
+            .build()
+            .await;
+
+        router.start().await;
+        router.assert_started().await;
+        let query = json!({"query":"query ExampleQuery { posts { id } }","variables":{}, "operationName": "ExampleQuery"});
+
+        let (id, result) = router.execute_query(&query).await;
+        assert!(!result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .is_empty());
+
+        validate_trace(
+            id,
+            &query,
+            Some("ExampleQuery"),
+            &["client", "router"],
+            false,
+            true,
+        )
+        .await?;
+        router.graceful_shutdown().await;
+    }
     Ok(())
 }
 
@@ -233,7 +274,15 @@ async fn test_anonymous_operation() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
-    validate_trace(id, &query, None, &["client", "router", "subgraph"], false).await?;
+    validate_trace(
+        id,
+        &query,
+        None,
+        &["client", "router", "subgraph"],
+        false,
+        false,
+    )
+    .await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -262,6 +311,7 @@ async fn test_selected_operation() -> Result<(), BoxError> {
         Some("ExampleQuery2"),
         &["client", "router", "subgraph"],
         false,
+        false,
     )
     .await?;
     router.graceful_shutdown().await;
@@ -288,6 +338,7 @@ async fn test_span_customization() -> Result<(), BoxError> {
             Some("ExampleQuery"),
             &["client", "router", "subgraph"],
             true,
+            false,
         )
         .await?;
         router.graceful_shutdown().await;
@@ -324,6 +375,7 @@ async fn test_decimal_trace_id() -> Result<(), BoxError> {
         Some("ExampleQuery1"),
         &["client", "router", "subgraph"],
         false,
+        false,
     )
     .await?;
     router.graceful_shutdown().await;
@@ -336,6 +388,7 @@ async fn validate_trace(
     operation_name: Option<&str>,
     services: &[&'static str],
     custom_span_instrumentation: bool,
+    check_connect_span: bool,
 ) -> Result<(), BoxError> {
     let params = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("service", services.first().expect("expected root service"))
@@ -350,6 +403,7 @@ async fn validate_trace(
             operation_name,
             services,
             custom_span_instrumentation,
+            check_connect_span,
         )
         .await
         .is_ok()
@@ -364,6 +418,7 @@ async fn validate_trace(
         operation_name,
         services,
         custom_span_instrumentation,
+        check_connect_span,
     )
     .await?;
     Ok(())
@@ -375,6 +430,7 @@ async fn find_valid_trace(
     operation_name: Option<&str>,
     services: &[&'static str],
     custom_span_instrumentation: bool,
+    check_connect_span: bool,
 ) -> Result<(), BoxError> {
     // A valid trace has:
     // * All three services
@@ -392,7 +448,7 @@ async fn find_valid_trace(
     verify_trace_participants(&trace, services)?;
 
     // Verify that we got the expected span operation names
-    verify_spans_present(&trace, operation_name, services)?;
+    verify_spans_present(&trace, operation_name, services, check_connect_span)?;
 
     // Verify that all spans have a path to the root 'client_request' span
     verify_span_parenting(&trace, services)?;
@@ -405,6 +461,10 @@ async fn find_valid_trace(
 
     // Verify that router span fields are present
     verify_router_span_fields(&trace, custom_span_instrumentation)?;
+
+    if check_connect_span {
+        verify_connect_span_fields(&trace)?;
+    }
 
     Ok(())
 }
@@ -550,6 +610,37 @@ fn verify_supergraph_span_fields(
     Ok(())
 }
 
+fn verify_connect_span_fields(trace: &Value) -> Result<(), BoxError> {
+    // We can't actually assert the values on a span. Only that a field has been set.
+    let connect_span = trace.select_path("$..spans[?(@.operationName == 'connect')]")?[0];
+    assert_eq!(
+        connect_span
+            .select_path("$.tags[?(@.key == 'connector.http.method')].value")?
+            .first(),
+        Some(&&Value::String("GET".to_string()))
+    );
+    assert_eq!(
+        connect_span
+            .select_path("$.tags[?(@.key == 'connector.source.name')].value")?
+            .first(),
+        Some(&&Value::String("jsonPlaceholder".to_string()))
+    );
+    assert_eq!(
+        connect_span
+            .select_path("$.tags[?(@.key == 'connector.url.template')].value")?
+            .first(),
+        Some(&&Value::String("/posts".to_string()))
+    );
+    assert_eq!(
+        connect_span
+            .select_path("$.tags[?(@.key == 'subgraph.name')].value")?
+            .first(),
+        None
+    );
+
+    Ok(())
+}
+
 fn verify_trace_participants(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
     let actual_services: HashSet<String> = trace
         .select_path("$..serviceName")?
@@ -574,6 +665,7 @@ fn verify_spans_present(
     trace: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],
+    check_connect_span: bool,
 ) -> Result<(), BoxError> {
     let operation_names: HashSet<String> = trace
         .select_path("$..operationName")?
@@ -583,7 +675,6 @@ fn verify_spans_present(
     let mut expected_operation_names: HashSet<String> = HashSet::from(
         [
             "execution",
-            "subgraph server",
             operation_name
                 .map(|name| format!("query {name}"))
                 .unwrap_or("query".to_string())
@@ -592,10 +683,13 @@ fn verify_spans_present(
             "fetch",
             //"parse_query", Parse query will only happen once
             //"query_planning", query planning will only happen once
-            "subgraph",
         ]
         .map(|s| s.into()),
     );
+    if !check_connect_span {
+        expected_operation_names.insert("subgraph server".into());
+        expected_operation_names.insert("subgraph".into());
+    }
     if services.contains(&"client") {
         expected_operation_names.insert("client_request".into());
     }

@@ -2140,6 +2140,16 @@ expression: "&schema"
         }
       ]
     },
+    "ConnectorSpans": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorValue": {
       "anyOf": [
         {
@@ -5956,6 +5966,10 @@ expression: "&schema"
     "Spans": {
       "additionalProperties": false,
       "properties": {
+        "connector": {
+          "$ref": "#/definitions/ConnectorSpans",
+          "description": "#/definitions/ConnectorSpans"
+        },
         "default_attribute_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
           "description": "#/definitions/DefaultAttributeRequirementLevel"
@@ -7959,6 +7973,22 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
+            }
+          }
+        }
+      ]
+    },
     "conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector": {
       "anyOf": [
         {
@@ -8427,6 +8457,35 @@ expression: "&schema"
       },
       "properties": {
         "graphql.type.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+      },
+      "properties": {
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
           "nullable": true
