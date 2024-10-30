@@ -716,13 +716,10 @@ fn extract_object_type_content(
         .and_then(|metadata| metadata.for_identity(&Identity::context_identity()))
         .and_then(|context_link| CONTEXT_VERSIONS.find(&context_link.url.version))
         .and_then(|context_spec_def| {
-            if let Some(name_in_schema) = context_spec_def
+            context_spec_def
                 .context_directive_name_in_schema(supergraph_schema)
                 .ok()
-            {
-                return Some((context_spec_def, name_in_schema));
-            }
-            None
+                .map(|name_in_schema| (context_spec_def, name_in_schema))
         });
     // let context_name_in_schema = context_spec_def
     //     .and_then(|def| def.context_directive_name_in_schema(supergraph_schema).ok());
