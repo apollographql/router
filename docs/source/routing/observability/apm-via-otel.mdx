@@ -112,21 +112,22 @@ cors:
 supergraph:
   listen: 0.0.0.0:4000
 telemetry:
-  metrics:
-    otlp:
-      endpoint: https://otlp.nr-data.net
-      grpc:
-        metadata:
-          'api-key': ['${env.NEW_RELIC_LICENSE_KEY}']
-  tracing:
-    trace_config:
-      service_name: 'router'
-      service_namespace: 'apollo'
-    otlp:
-      endpoint: https://otlp.nr-data.net
-      grpc:
-        metadata:
-          'api-key': ['${env.NEW_RELIC_LICENSE_KEY}']
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        protocol: grpc
+
+        # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+        temporality: delta
+
+        # Ensure the endpoint provided ends with "/v1/metrics"
+        # Be sure to use the correct URL for your region.
+        endpoint: https://otlp.nr-data.net:4317/v1/metrics
+        grpc:
+          metadata:
+            api-key:
+              - "<new-relic-api-key>"
 ```
 
-This uses the `NEW_RELIC_LICENSE_KEY` environment variable for passing the key using the router's [variable expansion feature](/router/configuration/overview#variable-expansion) to avoid including sensitive tokens in the configuration.
+Go to [Metrics exporters](/graphos/reference/router/telemetry/metrics-exporters/overview) to learn about exporting router metrics to different APMs.
