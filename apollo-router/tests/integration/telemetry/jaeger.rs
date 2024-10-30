@@ -241,7 +241,15 @@ async fn test_rest_connectors() -> Result<(), BoxError> {
             .unwrap()
             .is_empty());
 
-        validate_trace(id, &query, Some("ExampleQuery"), &["router"], false, true).await?;
+        validate_trace(
+            id,
+            &query,
+            Some("ExampleQuery"),
+            &["client", "router"],
+            false,
+            true,
+        )
+        .await?;
         router.graceful_shutdown().await;
     }
     Ok(())
