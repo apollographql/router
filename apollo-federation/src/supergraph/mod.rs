@@ -1539,9 +1539,7 @@ fn add_subgraph_field(
                 context,
                 selection,
             } = args;
-            let mut split = context.split("__");
-            split.next();
-            let Some(context_name_in_subgraph) = split.last() else {
+            let Some((_, context_name_in_subgraph)) = context.rsplit_once() else {
                 todo!();
             };
             
