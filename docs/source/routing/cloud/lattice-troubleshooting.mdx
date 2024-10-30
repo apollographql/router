@@ -44,8 +44,8 @@ headers:
   all: # Header rules for all subgraphs
     request:
       - propagate:
-        named: 'host'
-        rename: 'x-host'
+          named: 'host'
+          rename: 'x-host'
 ```
 
 The previous example renames a `host` header to `x-host`.
@@ -66,8 +66,8 @@ headers:
   all: # Header rules for all subgraphs
     request:
       - propagate:
-        named: 'Authorization'
-        rename: 'X-Authorization'
+          named: 'Authorization'
+          rename: 'X-Authorization'
 ```
 
 Then, update your subgraphs to check for `Authorization` or your new header name.
