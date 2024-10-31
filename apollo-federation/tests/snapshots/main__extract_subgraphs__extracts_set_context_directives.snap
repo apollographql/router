@@ -2,7 +2,7 @@
 source: apollo-federation/tests/extract_subgraphs.rs
 expression: snapshot
 ---
-Subgraph1: https://Subgraph1
+Subgraph1
 ---
 schema {
   query: Query
@@ -64,20 +64,23 @@ scalar federation__FieldSet
 scalar federation__Scope
 
 type Query {
-  t: T
+  t: T!
   _entities(representations: [_Any!]!): [_Entity]!
   _service: _Service!
 }
 
-type S {
-  x: Int
+type T @federation__key(fields: "id", resolvable: true) @federation__context(name: "context") {
+  id: ID!
+  u: U!
+  prop: String!
 }
 
-type T @federation__key(fields: "k", resolvable: true) {
-  k: ID @federation__shareable
+type U @federation__key(fields: "id", resolvable: true) {
+  id: ID! @federation__shareable
+  field(
+    a: String @federation__fromContext(field: "$context { prop }"),
+  ): Int!
 }
-
-union U = S | T
 
 scalar _Any
 
@@ -85,9 +88,9 @@ type _Service {
   sdl: String
 }
 
-union _Entity = T
+union _Entity = T | U
 
-Subgraph2: https://Subgraph2
+Subgraph2
 ---
 schema {
   query: Query
@@ -148,15 +151,14 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
-enum E {
-  V1
-  V2
+type Query {
+  a: Int!
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
 }
 
-type T @federation__key(fields: "k", resolvable: true) {
-  k: ID @federation__shareable
-  a: Int
-  b: String
+type U @federation__key(fields: "id", resolvable: true) {
+  id: ID! @federation__shareable
 }
 
 scalar _Any
@@ -165,9 +167,4 @@ type _Service {
   sdl: String
 }
 
-union _Entity = T
-
-type Query {
-  _entities(representations: [_Any!]!): [_Entity]!
-  _service: _Service!
-}
+union _Entity = U
