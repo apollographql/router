@@ -44,7 +44,7 @@ pub(crate) type OffsetRange = Option<std::ops::Range<usize>>;
 // (because that information is not derivable from its children) and (b) cannot
 // easily store that information by adding another struct field (most often
 // because T is an enum or primitive/String type, not a struct).
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct WithRange<T> {
     node: Box<T>,
     range: OffsetRange,
@@ -83,6 +83,13 @@ where
 {
     fn eq(&self, other: &T) -> bool {
         self.node.as_ref() == other
+    }
+}
+
+// Implement Hash if the inner type T implements Hash.
+impl<T: std::hash::Hash> std::hash::Hash for WithRange<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.node.as_ref().hash(state)
     }
 }
 
