@@ -454,7 +454,6 @@ impl PlanNode {
         Ok(())
     }
 
-    #[cfg(test)]
     /// Retrieves all the services used across all plan nodes.
     ///
     /// Note that duplicates are not filtered.

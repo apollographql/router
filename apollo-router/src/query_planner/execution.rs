@@ -101,6 +101,10 @@ impl QueryPlan {
     pub fn subgraph_fetches(&self) -> usize {
         self.root.subgraph_fetches()
     }
+
+    pub fn service_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+        self.root.service_usage()
+    }
 }
 
 // holds the query plan executon arguments that do not change between calls
