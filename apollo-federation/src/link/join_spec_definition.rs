@@ -9,6 +9,7 @@ use apollo_compiler::Node;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 
+use super::argument::directive_optional_list_argument;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -23,8 +24,6 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
-
-use super::argument::directive_optional_list_argument;
 
 pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: Name = name!("Graph");
 pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: Name = name!("graph");

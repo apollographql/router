@@ -9,6 +9,8 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use lazy_static::lazy_static;
 
+use super::context_spec_definition::ContextSpecDefinition;
+use super::context_spec_definition::CONTEXT_VERSIONS;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
@@ -22,9 +24,6 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
-
-use super::context_spec_definition::ContextSpecDefinition;
-use super::context_spec_definition::CONTEXT_VERSIONS;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
