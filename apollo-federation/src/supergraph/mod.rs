@@ -763,43 +763,43 @@ fn extract_object_type_content(
 
         if let Some((_context_spec_def, name_in_supergraph)) = &context {
             for directive in type_.directives.get_all(name_in_supergraph.as_str()) {
-                if let Some(context_name) =
-                    FederationSpecDefinition::context_directive_arguments(directive).ok()
-                {
-                    // todo should I return an error if there isn't a value?
-                    let mut arr = context_name.name.split("__");
-                    if let Some(subgraph_name) = arr.next() {
+                FederationSpecDefinition::context_directive_arguments(directive)
+                    .and_then(|context_name| {
+                        let mut arr = context_name.name.split("__");
+                        let subgraph_name = arr.next().ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                                message: format!("Could not parse context name from supergraph '{}'", name_in_supergraph)
+                                    .to_owned(),
+                        })?;
                         let subgraph_name = Name::new(subgraph_name)?;
-                        let subgraph_index = get_index_from_subgraph_name(graph_enum_value_name_to_subgraph_name, &subgraph_name);
-                        if let Some(subgraph_index) = subgraph_index {
-                            let subgraph = get_subgraph(
-                                subgraphs,
-                                graph_enum_value_name_to_subgraph_name,
-                                subgraph_index,
-                            )?;
-            
-                            let federation_spec_definition = federation_spec_definitions
-                                .get(subgraph_index)
-                                .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
-                                    message: "Subgraph unexpectedly does not use federation spec"
-                                        .to_owned(),
-                                })?;
-                            if let Some(context_in_subgraph) = arr.last() {
-                                let context_directive = federation_spec_definition.context_directive(
-                                    &subgraph.schema,
-                                    context_in_subgraph.to_string(),
-                                )?;
-                                pos.insert_directive(&mut subgraph.schema, context_directive.into())?;
-                            } else {
-                                todo!();
+                        let subgraph_index = get_index_from_subgraph_name(graph_enum_value_name_to_subgraph_name, &subgraph_name).ok_or_else(|| {
+                            SingleFederationError::InvalidSubgraph {
+                                message: format!("Could not look up subgraph by name '{}'", subgraph_name)
+                                    .to_owned(),
                             }
-                        } else {
-                            todo!();
-                        }
-                    } else {
-                        todo!();
-                    }
-                }
+                        })?;
+                        let subgraph = get_subgraph(
+                            subgraphs,
+                            graph_enum_value_name_to_subgraph_name,
+                            subgraph_index,
+                        )?;
+        
+                        let federation_spec_definition = federation_spec_definitions
+                            .get(subgraph_index)
+                            .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                                message: "Subgraph unexpectedly does not use federation spec"
+                                    .to_owned(),
+                            })?;
+                        let context_in_subgraph = arr.last().ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                                message: format!("Could not parse context name from supergraph '{}'", name_in_supergraph)
+                                    .to_owned(),
+                        })?;
+                        let context_directive = federation_spec_definition.context_directive(
+                            &subgraph.schema,
+                            context_in_subgraph.to_string(),
+                        )?;
+                        pos.insert_directive(&mut subgraph.schema, context_directive.into())?;
+                        Ok(())
+                    })?;
             }
         }
 
@@ -1539,9 +1539,10 @@ fn add_subgraph_field(
                 context,
                 selection,
             } = args;
-            let Some((_, context_name_in_subgraph)) = context.rsplit_once("__") else {
-                todo!();
-            };
+            let (_, context_name_in_subgraph) = context.rsplit_once("__").ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                    message: format!("Could not parse context field from supergraph '{}'", context)
+                        .to_owned(),
+            })?;
             
             let arg = format!("${} {}", context_name_in_subgraph, selection);
             let from_context_directive = federation_spec_definition
