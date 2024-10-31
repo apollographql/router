@@ -26,20 +26,19 @@ The `experimental_query_planner_mode` option has the following supported modes:
 - `legacy` - enables only the legacy JavaScript query planner 
 - `both_best_effort` (default) - enables both new and legacy query planners for comparison. The legacy query planner is used for execution. 
 
-<MinVersion version="1.56.0">
+<MinVersion version="1.57.0">
 
 ## Optimize native query planner
 
 </MinVersion>
 
-To run the native query planner with the best performance and resource utilization, configure your router with the following options:
+To run the native query planner with the best performance and resource utilization, configure your router with the following option:
 
 ```yaml title="router.yaml"
 experimental_query_planner_mode: new
-experimental_introspection_mode: new
 ```
 
-Setting `experimental_query_planner_mode: new` and `experimental_introspection_mode: new` not only enables native query planning and schema introspection, it also disables the V8 JavaScript runtime used by the legacy query planner. Disabling V8 frees up CPU and memory and improves native query planning performance.
+Setting `experimental_query_planner_mode: new` not only enables native query planning, it also disables the V8 JavaScript runtime used by the legacy query planner. Disabling V8 frees up CPU and memory and improves native query planning performance.
 
 Additionally, to enable more optimal native query planning and faster throughput by reducing the size of queries sent to subgraphs, you can enable query fragment generation with the following option:
 

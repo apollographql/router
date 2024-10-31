@@ -49,6 +49,7 @@ impl Clone for CloneSubgraphResponse {
             response: http_ext::Response::from(&self.0.response).inner,
             context: self.0.context.clone(),
             subgraph_name: self.0.subgraph_name.clone(),
+            id: self.0.id.clone(),
         })
     }
 }
@@ -105,6 +106,7 @@ where
                                         response.0.response,
                                         request.context,
                                         request.subgraph_name.unwrap_or_default(),
+                                        request.id,
                                     )
                                 })
                                 .map_err(|e| e.into())
@@ -121,6 +123,7 @@ where
 
                     let context = request.context.clone();
                     let authorization_cache_key = request.authorization.clone();
+                    let id = request.id.clone();
                     let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
@@ -162,6 +165,7 @@ where
                             response.0.response,
                             context,
                             response.0.subgraph_name.unwrap_or_default(),
+                            id,
                         )
                     });
                 }

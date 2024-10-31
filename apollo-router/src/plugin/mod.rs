@@ -69,6 +69,8 @@ pub struct PluginInit<T> {
     pub config: T,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
+    /// Router Supergraph Schema ID (SHA256 of the SDL))
+    pub(crate) supergraph_schema_id: Arc<String>,
     /// The supergraph schema (parsed)
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
@@ -91,6 +93,7 @@ where
                 Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
                     .expect("failed to parse supergraph schema"),
             ))
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -114,6 +117,7 @@ where
                         BoxError::from(e.errors.to_string())
                     })?,
             ))
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -130,6 +134,7 @@ where
 
         PluginInit::fake_builder()
             .config(config)
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
             .notify(Notify::for_tests())
@@ -165,6 +170,7 @@ where
     pub(crate) fn new_builder(
         config: T,
         supergraph_sdl: Arc<String>,
+        supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         notify: Notify<String, graphql::Response>,
@@ -172,6 +178,7 @@ where
         PluginInit {
             config,
             supergraph_sdl,
+            supergraph_schema_id,
             supergraph_schema,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify,
@@ -186,6 +193,7 @@ where
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
+        supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         notify: Notify<String, graphql::Response>,
@@ -195,6 +203,7 @@ where
             config,
             supergraph_sdl,
             supergraph_schema,
+            supergraph_schema_id,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             notify,
         })
@@ -205,6 +214,7 @@ where
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,
+        supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         notify: Option<Notify<String, graphql::Response>>,
@@ -212,6 +222,7 @@ where
         PluginInit {
             config,
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
+            supergraph_schema_id: supergraph_schema_id.unwrap_or_default(),
             supergraph_schema: supergraph_schema
                 .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
@@ -229,6 +240,7 @@ impl PluginInit<serde_json::Value> {
         PluginInit::try_builder()
             .config(self.config)
             .supergraph_schema(self.supergraph_schema)
+            .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
