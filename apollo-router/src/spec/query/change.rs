@@ -38,8 +38,7 @@
 //! ```
 //!
 //! This prevents possible collision while hashing multiple things in a sequence. The
-//! `^` character cannot be present in a GraphQL query or schema outside of comments
-//! or strings, so this is a good separator.
+//! `^` character cannot be present in GraphQL names, so this is a good separator.
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::Hash;
