@@ -80,6 +80,7 @@ pub(crate) struct QueryHashVisitor<'a> {
     hasher: Sha256,
     fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
+    hashed_field_definitions: HashSet<(String, String)>,
     seen_introspection: bool,
     join_field_directive_name: Option<String>,
     join_type_directive_name: Option<String>,
@@ -97,6 +98,7 @@ impl<'a> QueryHashVisitor<'a> {
             hasher: Sha256::new(),
             fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
+            hashed_field_definitions: HashSet::new(),
             seen_introspection: false,
             // should we just return an error if we do not find those directives?
             join_field_directive_name: Schema::directive_name(
@@ -398,28 +400,12 @@ impl<'a> QueryHashVisitor<'a> {
 
     fn hash_field(
         &mut self,
-        parent_type: String,
+        parent_type: &str,
         field_def: &FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
         "^FIELD".hash(self);
-
-        self.hash_type_by_name(&parent_type)?;
-
-        field_def.name.hash(self);
-        self.hash_type(&field_def.ty)?;
-
-        // for every field, we also need to look at fields defined in `@requires` because
-        // they will affect the query plan
-        self.hash_join_field(&parent_type, &field_def.directives)?;
-
-        self.hash_directive_list_ast(&field_def.directives);
-
-        "^ARGUMENT_DEF_LIST".hash(self);
-        for argument in &field_def.arguments {
-            self.hash_input_value_definition(argument)?;
-        }
-        "^ARGUMENT_DEF_LIST_END".hash(self);
+        self.hash_field_definition(parent_type, field_def)?;
 
         "^ARGUMENT_LIST".hash(self);
         for argument in &node.arguments {
@@ -431,6 +417,42 @@ impl<'a> QueryHashVisitor<'a> {
 
         node.alias.hash(self);
         "^FIELD-END".hash(self);
+
+        Ok(())
+    }
+
+    fn hash_field_definition(
+        &mut self,
+        parent_type: &str,
+        field_def: &FieldDefinition,
+    ) -> Result<(), BoxError> {
+        "^FIELD_DEFINITION".hash(self);
+
+        let field_index = (parent_type.to_string(), field_def.name.as_str().to_string());
+        if self.hashed_field_definitions.contains(&field_index) {
+            return Ok(());
+        }
+
+        self.hashed_field_definitions.insert(field_index);
+
+        self.hash_type_by_name(parent_type)?;
+
+        field_def.name.hash(self);
+        self.hash_type(&field_def.ty)?;
+
+        // for every field, we also need to look at fields defined in `@requires` because
+        // they will affect the query plan
+        self.hash_join_field(parent_type, &field_def.directives)?;
+
+        self.hash_directive_list_ast(&field_def.directives);
+
+        "^ARGUMENT_DEF_LIST".hash(self);
+        for argument in &field_def.arguments {
+            self.hash_input_value_definition(argument)?;
+        }
+        "^ARGUMENT_DEF_LIST_END".hash(self);
+
+        "^FIELD_DEFINITION_END".hash(self);
 
         Ok(())
     }
@@ -598,7 +620,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.schema_str.hash(self);
         }
 
-        self.hash_field(parent_type.to_string(), field_def, node)?;
+        self.hash_field(parent_type, field_def, node)?;
 
         if let Some(ExtendedType::Interface(intf)) =
             self.schema.types.get(field_def.ty.inner_named_type())
