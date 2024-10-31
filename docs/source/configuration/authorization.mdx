@@ -690,10 +690,11 @@ When using subscriptions along with `@policy` authorization, subscription events
 
 GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes`, `@authenticated`, or `@policy` directives, they are set on the supergraph too.
 
-#### Composition with `AND`/`OR` logic
+#### Multiple authorization directives on a shared field use `AND` logic
 
-If shared subgraph fields include multiple directives, composition merges them. For example, suppose the `me` query requires `@authentication` in one subgraph:
+If shared subgraph fields include multiple directives, composition merges them. For example, suppose the `me` query requires `@authentication` in on subgraph and the `read:user` scope in another subgraph:
 
+<CodeColumns>
 
 ```graphql title="Subgraph A"
 type Query {
@@ -707,8 +708,6 @@ type User {
 }
 ```
 
-and the `read:user` scope in another subgraph:
-
 ```graphql title="Subgraph B"
 type Query {
   me: User @requiresScopes(scopes: [["read:user"]])
@@ -721,9 +720,21 @@ type User {
 }
 ```
 
+</CodeColumns>
+
 A request would need to both be authenticated **AND** have the required scope. Recall that the `@authenticated` directive only checks for the existence of the `apollo_authentication::JWT::claims` key in a request's context, so authentication is guaranteed if the request includes scopes.
 
-If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges them with the same logic used to [combine scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic). For example, if one subgraph requires the `read:others` scope on the `users` query:
+#### Multiple `@requiresScopes` on a shared field using `AND` logic
+
+<Tip>
+
+Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean logic in one subgraph.
+
+</Tip>
+
+If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges them with the same logic used to [combine scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic). For example, if one subgraph requires the `read:others` scope on the `users` query and another subgraph requires the `read:profiles` scope on `users` query:
+
+<CodeColumns>
 
 ```graphql title="Subgraph A"
 type Query {
@@ -731,13 +742,12 @@ type Query {
 }
 ```
 
-and another subgraph requires the `read:profiles` scope on `users` query:
-
 ```graphql title="Subgraph B"
 type Query {
   users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
 }
 ```
+</CodeColumns>
 
 Then the supergraph schema would require _both_ scopes for it.
 
@@ -747,7 +757,46 @@ type Query {
 }
 ```
 
+#### Multiple `@requiresScopes` on a shared field using `OR` logic
+
+<Tip>
+
+Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean logic in one subgraph.
+
+</Tip>
+
+If multiple shared subgraph fields include `@requiresScopes` with **OR** logic, the supergraph schema merges them so that satisfying any one of the required scopes grants access. This is similar to the approach for [combining required scopes with OR logic](#combining-required-scopes-with-andor-logic) within a single subgraph.
+
+For example, if one subgraph requires the `read:others` scope on the `users` query and another subgraph requires the `read:profiles` scope on the same `users` query:
+
+<CodeColumns>
+
+```graphql title="Subgraph A"
+type Query {
+  users: [User!]! @requiresScopes(scopes: [["read:others"]])
+}
+```
+
+```graphql title="Subgraph B"
+type Query {
+  users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
+}
+```
+</CodeColumns>
+
+Then the supergraph schema would require **either** scope for access:
+
+```graphql title="Supergraph"
+type Query {
+  users: [User!]! @requiresScopes(scopes: [["read:others"], ["read:profiles"]])
+}
+```
+
+#### Multiple `@requiresScopes` on a shared field using `AND` and `OR` logic
+
 As with [combining scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **OR** logic:
+
+<CodeColumns>
 
 ```graphql title="Subgraph A"
 type Query {
@@ -760,6 +809,8 @@ type Query {
   users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
 }
 ```
+
+</CodeColumns>
 
 Since both `scopes` arrays are nested arrays, they would be composed using **OR** logic into the supergraph schema:
 
