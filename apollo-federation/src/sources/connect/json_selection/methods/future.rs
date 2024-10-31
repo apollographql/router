@@ -5,6 +5,7 @@
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 
+use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::helpers::vec_push;
@@ -13,13 +14,15 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::methods::ArrowMethodImpl;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
-pub(super) fn typeof_method(
+impl_arrow_method!(TypeOfMethod, ArrowMethodImpl, typeof_method);
+fn typeof_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -45,7 +48,8 @@ pub(super) fn typeof_method(
     }
 }
 
-pub(super) fn eq_method(
+impl_arrow_method!(EqMethod, ArrowMethodImpl, eq_method);
+fn eq_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -79,12 +83,12 @@ pub(super) fn eq_method(
     )
 }
 
-// Like ->match, but expects the first element of each pair
-// to evaluate to a boolean, returning the second element of
-// the first pair whose first element is true. This makes
-// providing a final catch-all case easy, since the last
+// Like ->match, but expects the first element of each pair to evaluate to a
+// boolean, returning the second element of the first pair whose first element
+// is true. This makes providing a final catch-all case easy, since the last
 // pair can be [true, <default>].
-pub(super) fn match_if_method(
+impl_arrow_method!(MatchIfMethod, ArrowMethodImpl, match_if_method);
+fn match_if_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -234,8 +238,9 @@ infix_math_op!(div_op, /);
 infix_math_op!(rem_op, %);
 
 macro_rules! infix_math_method {
-    ($name:ident, $op:ident) => {
-        pub(super) fn $name(
+    ($struct_name:ident, $fn_name:ident, $op:ident) => {
+        impl_arrow_method!($struct_name, ArrowMethodImpl, $fn_name);
+        fn $fn_name(
             method_name: &WithRange<String>,
             method_args: Option<&MethodArgs>,
             data: &JSON,
@@ -248,13 +253,14 @@ macro_rules! infix_math_method {
         }
     };
 }
-infix_math_method!(add_method, add_op);
-infix_math_method!(sub_method, sub_op);
-infix_math_method!(mul_method, mul_op);
-infix_math_method!(div_method, div_op);
-infix_math_method!(mod_method, rem_op);
+infix_math_method!(AddMethod, add_method, add_op);
+infix_math_method!(SubMethod, sub_method, sub_op);
+infix_math_method!(MulMethod, mul_method, mul_op);
+infix_math_method!(DivMethod, div_method, div_op);
+infix_math_method!(ModMethod, mod_method, rem_op);
 
-pub(super) fn has_method(
+impl_arrow_method!(HasMethod, ArrowMethodImpl, has_method);
+fn has_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -348,9 +354,8 @@ pub(super) fn has_method(
     }
 }
 
-// Returns the array or string element at the given index, as Option<JSON>. If
-// the index is out of bounds, returns None and reports an error.
-pub(super) fn get_method(
+impl_arrow_method!(GetMethod, ArrowMethodImpl, get_method);
+fn get_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -547,7 +552,8 @@ pub(super) fn get_method(
     }
 }
 
-pub(super) fn keys_method(
+impl_arrow_method!(KeysMethod, ArrowMethodImpl, keys_method);
+fn keys_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -589,7 +595,8 @@ pub(super) fn keys_method(
     }
 }
 
-pub(super) fn values_method(
+impl_arrow_method!(ValuesMethod, ArrowMethodImpl, values_method);
+fn values_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -631,7 +638,8 @@ pub(super) fn values_method(
     }
 }
 
-pub(super) fn not_method(
+impl_arrow_method!(NotMethod, ArrowMethodImpl, not_method);
+fn not_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -666,7 +674,8 @@ fn is_truthy(data: &JSON) -> bool {
     }
 }
 
-pub(super) fn or_method(
+impl_arrow_method!(OrMethod, ArrowMethodImpl, or_method);
+fn or_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -701,7 +710,8 @@ pub(super) fn or_method(
     }
 }
 
-pub(super) fn and_method(
+impl_arrow_method!(AndMethod, ArrowMethodImpl, and_method);
+fn and_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,

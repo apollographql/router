@@ -2,6 +2,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
+use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::helpers::vec_push;
@@ -10,13 +11,15 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::methods::ArrowMethodImpl;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
-pub(super) fn echo_method(
+impl_arrow_method!(EchoMethod, ArrowMethodImpl, echo_method);
+fn echo_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -41,7 +44,8 @@ pub(super) fn echo_method(
     )
 }
 
-pub(super) fn map_method(
+impl_arrow_method!(MapMethod, ArrowMethodImpl, map_method);
+fn map_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -72,33 +76,33 @@ pub(super) fn map_method(
                     output.push(JSON::Null);
                 }
 
-                (Some(JSON::Array(output)), errors)
+                return (Some(JSON::Array(output)), errors);
             } else {
-                first_arg.apply_to_path(data, vars, input_path)
+                return first_arg.apply_to_path(data, vars, input_path);
             }
         } else {
-            (
+            return (
                 None,
                 vec![ApplyToError::new(
                     format!("Method ->{} requires one argument", method_name.as_ref()),
                     input_path.to_vec(),
                     method_name.range(),
                 )],
-            )
+            );
         }
-    } else {
-        (
-            None,
-            vec![ApplyToError::new(
-                format!("Method ->{} requires one argument", method_name.as_ref()),
-                input_path.to_vec(),
-                method_name.range(),
-            )],
-        )
     }
+    (
+        None,
+        vec![ApplyToError::new(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            input_path.to_vec(),
+            method_name.range(),
+        )],
+    )
 }
 
-pub(super) fn match_method(
+impl_arrow_method!(MatchMethod, ArrowMethodImpl, match_method);
+fn match_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -154,7 +158,8 @@ pub(super) fn match_method(
     )
 }
 
-pub(super) fn first_method(
+impl_arrow_method!(FirstMethod, ArrowMethodImpl, first_method);
+fn first_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -197,7 +202,8 @@ pub(super) fn first_method(
     }
 }
 
-pub(super) fn last_method(
+impl_arrow_method!(LastMethod, ArrowMethodImpl, last_method);
+fn last_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -240,7 +246,8 @@ pub(super) fn last_method(
     }
 }
 
-pub(super) fn slice_method(
+impl_arrow_method!(SliceMethod, ArrowMethodImpl, slice_method);
+fn slice_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -330,7 +337,8 @@ pub(super) fn slice_method(
     }
 }
 
-pub(super) fn size_method(
+impl_arrow_method!(SizeMethod, ArrowMethodImpl, size_method);
+fn size_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -382,11 +390,8 @@ pub(super) fn size_method(
     }
 }
 
-// Returns a list of [{ key, value }, ...] objects for each key-value pair in
-// the object. Returning a list of [[ key, value ], ...] pairs might also seem
-// like an option, but GraphQL doesn't handle heterogeneous lists (or tuples) as
-// well as it handles objects with named properties like { key, value }.
-pub(super) fn entries_method(
+impl_arrow_method!(EntriesMethod, ArrowMethodImpl, entries_method);
+fn entries_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,

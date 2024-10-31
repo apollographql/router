@@ -1,6 +1,3 @@
-use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
-use lazy_static::lazy_static;
 use serde_json_bytes::Value as JSON;
 
 use super::immutable::InputPath;
@@ -24,131 +21,161 @@ mod public;
 #[cfg(test)]
 mod tests;
 
-type ArrowMethod = fn(
-    // Method name
-    method_name: &WithRange<String>,
-    // Arguments passed to this method
-    method_args: Option<&MethodArgs>,
-    // The JSON input value (data)
-    data: &JSON,
-    // The variables
-    vars: &VarsWithPathsMap,
-    // The input_path (may contain integers)
-    input_path: &InputPath<JSON>,
-    // The rest of the PathList
-    tail: &WithRange<PathList>,
-) -> (Option<JSON>, Vec<ApplyToError>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ArrowMethod {
+    // Public methods:
+    Echo,
+    Map,
+    Match,
+    First,
+    Last,
+    Slice,
+    Size,
+    Entries,
 
-lazy_static! {
-    // This set controls which ->methods are exposed for use in connector
-    // schemas. Non-public methods are still implemented and tested, but will
-    // not be returned from lookup_arrow_method outside of tests.
-    static ref PUBLIC_ARROW_METHODS: IndexSet<&'static str> = {
-        let mut public_methods = IndexSet::default();
+    // Future methods:
+    TypeOf,
+    Eq,
+    MatchIf,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Has,
+    Get,
+    Keys,
+    Values,
+    Not,
+    Or,
+    And,
+}
 
-        // Before enabling a method here, move it from the future:: namespace to
-        // the top level of the methods.rs file.
-        public_methods.insert("echo");
-        // public_methods.insert("typeof");
-        public_methods.insert("map");
-        // public_methods.insert("eq");
-        public_methods.insert("match");
-        // public_methods.insert("matchIf");
-        // public_methods.insert("match_if");
-        // public_methods.insert("add");
-        // public_methods.insert("sub");
-        // public_methods.insert("mul");
-        // public_methods.insert("div");
-        // public_methods.insert("mod");
-        public_methods.insert("first");
-        public_methods.insert("last");
-        public_methods.insert("slice");
-        public_methods.insert("size");
-        // public_methods.insert("has");
-        // public_methods.insert("get");
-        // public_methods.insert("keys");
-        // public_methods.insert("values");
-        public_methods.insert("entries");
-        // public_methods.insert("not");
-        // public_methods.insert("or");
-        // public_methods.insert("and");
-
-        public_methods
-    };
-
-    // This map registers all the built-in ->methods that are currently
-    // implemented, even the non-public ones that are not included in the
-    // PUBLIC_ARROW_METHODS set.
-    static ref ARROW_METHODS: IndexMap<String, ArrowMethod> = {
-        let mut methods = IndexMap::<String, ArrowMethod>::default();
-
-        // This built-in method returns its first input argument as-is, ignoring
-        // the input data. Useful for embedding literal values, as in
-        // $->echo("give me this string").
-        methods.insert("echo".to_string(), public::echo_method);
-
-        // Returns the type of the data as a string, e.g. "object", "array",
-        // "string", "number", "boolean", or "null". Note that `typeof null` is
-        // "object" in JavaScript but "null" for our purposes.
-        methods.insert("typeof".to_string(), future::typeof_method);
-
-        // When invoked against an array, ->map evaluates its first argument
-        // against each element of the array and returns an array of the
-        // results. When invoked against a non-array, ->map evaluates its first
-        // argument against the data and returns the result.
-        methods.insert("map".to_string(), public::map_method);
-
-        // Returns true if the data is deeply equal to the first argument, false
-        // otherwise. Equality is solely value-based (all JSON), no references.
-        methods.insert("eq".to_string(), future::eq_method);
-
-        // Takes any number of pairs [candidate, value], and returns value for
-        // the first candidate that equals the input data $. If none of the
-        // pairs match, a runtime error is reported, but a single-element
-        // [<default>] array as the final argument guarantees a default value.
-        methods.insert("match".to_string(), public::match_method);
-
-        // Like ->match, but expects the first element of each pair to evaluate
-        // to a boolean, returning the second element of the first pair whose
-        // first element is true. This makes providing a final catch-all case
-        // easy, since the last pair can be [true, <default>].
-        methods.insert("matchIf".to_string(), future::match_if_method);
-        methods.insert("match_if".to_string(), future::match_if_method);
-
-        // Arithmetic methods
-        methods.insert("add".to_string(), future::add_method);
-        methods.insert("sub".to_string(), future::sub_method);
-        methods.insert("mul".to_string(), future::mul_method);
-        methods.insert("div".to_string(), future::div_method);
-        methods.insert("mod".to_string(), future::mod_method);
-
-        // Array/string methods (note that ->has and ->get also work for array
-        // and string indexes)
-        methods.insert("first".to_string(), public::first_method);
-        methods.insert("last".to_string(), public::last_method);
-        methods.insert("slice".to_string(), public::slice_method);
-        methods.insert("size".to_string(), public::size_method);
-
-        // Object methods (note that ->size also works for objects)
-        methods.insert("has".to_string(), future::has_method);
-        methods.insert("get".to_string(), future::get_method);
-        methods.insert("keys".to_string(), future::keys_method);
-        methods.insert("values".to_string(), future::values_method);
-        methods.insert("entries".to_string(), public::entries_method);
-
-        // Logical methods
-        methods.insert("not".to_string(), future::not_method);
-        methods.insert("or".to_string(), future::or_method);
-        methods.insert("and".to_string(), future::and_method);
-
-        methods
+#[macro_export]
+macro_rules! impl_arrow_method {
+    ($struct_name:ident, $trait_name:ident, $impl_fn_name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub(super) struct $struct_name;
+        impl $trait_name for $struct_name {
+            fn apply(
+                &self,
+                method_name: &WithRange<String>,
+                method_args: Option<&MethodArgs>,
+                data: &JSON,
+                vars: &VarsWithPathsMap,
+                input_path: &InputPath<JSON>,
+                tail: &WithRange<PathList>,
+            ) -> (Option<JSON>, Vec<ApplyToError>) {
+                $impl_fn_name(method_name, method_args, data, vars, input_path, tail)
+            }
+        }
     };
 }
 
-pub(super) fn lookup_arrow_method(method_name: &str) -> Option<&ArrowMethod> {
-    if cfg!(test) || PUBLIC_ARROW_METHODS.contains(method_name) {
-        ARROW_METHODS.get(method_name)
-    } else {
-        None
+pub(super) trait ArrowMethodImpl {
+    fn apply(
+        &self,
+        method_name: &WithRange<String>,
+        method_args: Option<&MethodArgs>,
+        data: &JSON,
+        vars: &VarsWithPathsMap,
+        input_path: &InputPath<JSON>,
+        tail: &WithRange<PathList>,
+    ) -> (Option<JSON>, Vec<ApplyToError>);
+}
+
+// This Deref implementation allows us to call .apply(...) directly on the
+// ArrowMethod enum.
+impl std::ops::Deref for ArrowMethod {
+    type Target = dyn ArrowMethodImpl;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            // Public methods:
+            Self::Echo => &public::EchoMethod,
+            Self::Map => &public::MapMethod,
+            Self::Match => &public::MatchMethod,
+            Self::First => &public::FirstMethod,
+            Self::Last => &public::LastMethod,
+            Self::Slice => &public::SliceMethod,
+            Self::Size => &public::SizeMethod,
+            Self::Entries => &public::EntriesMethod,
+
+            // Future methods:
+            Self::TypeOf => &future::TypeOfMethod,
+            Self::Eq => &future::EqMethod,
+            Self::MatchIf => &future::MatchIfMethod,
+            Self::Add => &future::AddMethod,
+            Self::Sub => &future::SubMethod,
+            Self::Mul => &future::MulMethod,
+            Self::Div => &future::DivMethod,
+            Self::Mod => &future::ModMethod,
+            Self::Has => &future::HasMethod,
+            Self::Get => &future::GetMethod,
+            Self::Keys => &future::KeysMethod,
+            Self::Values => &future::ValuesMethod,
+            Self::Not => &future::NotMethod,
+            Self::Or => &future::OrMethod,
+            Self::And => &future::AndMethod,
+        }
+    }
+}
+
+impl ArrowMethod {
+    // This method is currently used at runtime to look up methods by &str name,
+    // but it could be hoisted parsing time, and then we'd store an ArrowMethod
+    // instead of a String for the method name in the AST.
+    pub(super) fn lookup(name: &str) -> Option<Self> {
+        let method_opt = match name {
+            "echo" => Some(Self::Echo),
+            "map" => Some(Self::Map),
+            "eq" => Some(Self::Eq),
+            "match" => Some(Self::Match),
+            // As this case suggests, we can't necessarily provide a name()
+            // method for ArrowMethod (the opposite of lookup), because method
+            // implementations can be used under multiple names.
+            "matchIf" | "match_if" => Some(Self::MatchIf),
+            "typeof" => Some(Self::TypeOf),
+            "add" => Some(Self::Add),
+            "sub" => Some(Self::Sub),
+            "mul" => Some(Self::Mul),
+            "div" => Some(Self::Div),
+            "mod" => Some(Self::Mod),
+            "first" => Some(Self::First),
+            "last" => Some(Self::Last),
+            "slice" => Some(Self::Slice),
+            "size" => Some(Self::Size),
+            "has" => Some(Self::Has),
+            "get" => Some(Self::Get),
+            "keys" => Some(Self::Keys),
+            "values" => Some(Self::Values),
+            "entries" => Some(Self::Entries),
+            "not" => Some(Self::Not),
+            "or" => Some(Self::Or),
+            "and" => Some(Self::And),
+            _ => None,
+        };
+
+        match method_opt {
+            Some(method) if cfg!(test) || method.is_public() => Some(method),
+            _ => None,
+        }
+    }
+
+    pub(super) fn is_public(&self) -> bool {
+        // This set controls which ->methods are exposed for use in connector
+        // schemas. Non-public methods are still implemented and tested, but
+        // will not be returned from lookup_arrow_method outside of tests.
+        matches!(
+            self,
+            Self::Echo
+                | Self::Map
+                | Self::Match
+                | Self::First
+                | Self::Last
+                | Self::Slice
+                | Self::Size
+                | Self::Entries
+        )
     }
 }
