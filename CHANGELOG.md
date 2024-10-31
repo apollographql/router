@@ -4,6 +4,18 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.57.1] - 2024-10-31
+
+## 🐛 Fixes
+
+### Progressive override: fix query planner cache warmup ([PR #6108](https://github.com/apollographql/router/pull/6108))
+
+This fixes an issue in progressive override where the override labels would not be transmitted to the query planner during cache warmup, resulting in queries correctly using the overridden fields at first, but after an update, would revert to non overridden fields, and could not recover.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/6108
+
+
+
 # [1.57.0] - 2024-10-22
 
 > [!IMPORTANT]
