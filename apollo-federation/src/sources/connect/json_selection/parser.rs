@@ -139,19 +139,24 @@ impl JSONSelection {
     // if we drastically change implementation details. That's why we use &str
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
-    pub fn parse(input: &str) -> IResult<&str, Self, JSONSelectionParseError> {
+    pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
         match JSONSelection::parse_span(new_span(input)) {
             Ok((remainder, selection)) => {
-                // To avoid exposing the implementation details of nom_locate's
-                // LocatedSpan, we report the remainder as a &str instead.
-                Ok((remainder.fragment(), selection))
+                let fragment = remainder.fragment();
+                if fragment.is_empty() {
+                    Ok(selection)
+                } else {
+                    Err(JSONSelectionParseError {
+                        message: "Unexpected trailing characters".to_string(),
+                        fragment: fragment.to_string(),
+                        offset: remainder.location_offset(),
+                    })
+                }
             }
 
             Err(e) => match e {
                 nom::Err::Error(e) | nom::Err::Failure(e) => {
-                    // If a non-fatal nom::Err::Error bubbles all the way up
-                    // here, then it becomes a fatal nom::Err::Failure.
-                    Err(nom::Err::Failure(JSONSelectionParseError {
+                    Err(JSONSelectionParseError {
                         message: if let Some(message_str) = e.input.extra {
                             message_str.to_string()
                         } else {
@@ -162,7 +167,7 @@ impl JSONSelection {
                         },
                         fragment: e.input.fragment().to_string(),
                         offset: e.input.location_offset(),
-                    }))
+                    })
                 }
 
                 nom::Err::Incomplete(_) => unreachable!("nom::Err::Incomplete not expected here"),
@@ -2808,12 +2813,7 @@ mod tests {
     #[test]
     fn test_ranged_locations() {
         fn check(input: &str, expected: JSONSelection) {
-            let (remainder, parsed) = JSONSelection::parse(input).unwrap();
-            // We can't (and don't want to) use span_is_all_spaces_or_comments
-            // here because remainder is a &str not a Span, and
-            // JSONSelection::parse is responsible for consuming the entire
-            // string when possible (see all_consuming).
-            assert_eq!(remainder, "");
+            let parsed = JSONSelection::parse(input).unwrap();
             assert_eq!(parsed, expected);
         }
 

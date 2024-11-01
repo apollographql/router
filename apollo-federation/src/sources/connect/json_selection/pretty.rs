@@ -448,9 +448,7 @@ mod tests {
 
     #[test]
     fn it_prints_root_selection() {
-        let (unmatched, root_selection) = JSONSelection::parse("id name").unwrap();
-        assert!(unmatched.is_empty());
-
+        let root_selection = JSONSelection::parse("id name").unwrap();
         test_permutations(root_selection, "id\nname");
     }
 }

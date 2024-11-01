@@ -13,10 +13,7 @@ use super::ParseResult;
 #[macro_export]
 macro_rules! selection {
     ($input:expr) => {
-        if let Ok((remainder, parsed)) =
-            $crate::sources::connect::json_selection::JSONSelection::parse($input)
-        {
-            assert_eq!(remainder, "");
+        if let Ok(parsed) = $crate::sources::connect::json_selection::JSONSelection::parse($input) {
             parsed
         } else {
             panic!("invalid selection: {:?}", $input);

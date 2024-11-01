@@ -315,15 +315,13 @@ mod tests {
 
     #[test]
     fn test_arrow_path_ranges() {
-        let (remainder, parsed) =
-            JSONSelection::parse("  __typename: @ -> echo ( \"Frog\" , )  ").unwrap();
-        assert_eq!(remainder, "");
+        let parsed = JSONSelection::parse("  __typename: @ -> echo ( \"Frog\" , )  ").unwrap();
         assert_debug_snapshot!(parsed);
     }
 
     #[test]
     fn test_parse_with_range_snapshots() {
-        let (remainder, parsed) = JSONSelection::parse(
+        let parsed = JSONSelection::parse(
             r#"
         path: some.nested.path { isbn author { name }}
         alias: "not an identifier" {
@@ -337,7 +335,6 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(remainder, "");
         assert_snapshot!(format!("{:#?}", parsed));
     }
 }
