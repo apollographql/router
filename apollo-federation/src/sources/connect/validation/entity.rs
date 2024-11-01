@@ -29,99 +29,115 @@ pub(super) fn validate_entity_arg(
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     category: ObjectCategory,
-) -> Vec<Message> {
-    let mut messages = vec![];
+) -> Result<(), Message> {
     let connect_directive_name = &connect_directive.name;
 
-    if let Some(entity_arg) = connect_directive
+    let Some(entity_arg) = connect_directive
         .arguments
         .iter()
         .find(|arg| arg.name == CONNECT_ENTITY_ARGUMENT_NAME)
+    else {
+        return Ok(());
+    };
+    let entity_arg_value = &entity_arg.value;
+    if !entity_arg_value
+        .to_bool()
+        .is_some_and(|entity_arg_value| entity_arg_value)
     {
-        let entity_arg_value = &entity_arg.value;
-        if entity_arg_value
-            .to_bool()
-            .is_some_and(|entity_arg_value| entity_arg_value)
-        {
-            if category != ObjectCategory::Query {
-                messages.push(Message {
-                    code: Code::EntityNotOnRootQuery,
-                    message: format!(
-                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
-                        coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
-                    ),
-                    locations: entity_arg.line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                })
-                // TODO: Allow interfaces
-            } else if field.ty.is_list()
-                || schema.get_object(field.ty.inner_named_type()).is_none()
-                || field.ty.is_non_null()
-            {
-                messages.push(Message {
-                    code: Code::EntityTypeInvalid,
-                    message: format!(
-                        "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types.",
-                        coordinate = connect_directive_entity_argument_coordinate(
-                            connect_directive_name,
-                            entity_arg_value.as_ref(),
-                            object,
-                            &field.name
-                        )
-                    ),
-                    locations: entity_arg
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                })
-            }
-
-            // Validate the arguments to the entity resolver (but if the field was determined to be
-            // invalid for an entity resolver above, don't bother validating the field arguments).
-            if messages.is_empty() {
-                if field.arguments.is_empty() {
-                    messages.push(Message {
-                        code: Code::EntityResolverArgumentMismatch,
-                        message: format!(
-                            "{coordinate} must have arguments. See https://preview-docs.apollographql.com/graphos/connectors/directives/#rules-for-entity-true",
-                            coordinate = field_with_connect_directive_entity_true_coordinate(
-                                connect_directive_name,
-                                entity_arg_value.as_ref(),
-                                object,
-                                &field.name,
-                            ),
-                        ),
-                        locations: entity_arg
-                            .line_column_range(&schema.sources)
-                            .into_iter()
-                            .collect(),
-                    });
-                } else if let Some(object_type) = schema.get_object(field.ty.inner_named_type()) {
-                    let key_fields = resolvable_key_fields(object_type, schema).collect();
-
-                    if let Some(message) = (ArgumentVisitor {
-                        schema,
-                        entity_arg,
-                        entity_arg_value,
-                        object,
-                        field: &field.name,
-                        key_fields,
-                    })
-                    .walk(Group::Root {
-                        field,
-                        entity_type: object_type,
-                    })
-                    .err()
-                    {
-                        messages.push(message);
-                    }
-                };
-            }
-        }
+        // This is not an entity resolver
+        return Ok(());
     }
 
-    messages
+    if category != ObjectCategory::Query {
+        return Err(
+            Message {
+                code: Code::EntityNotOnRootQuery,
+                message: format!(
+                    "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
+                    coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
+                ),
+                locations: entity_arg.line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }
+        );
+        // TODO: Allow interfaces
+    }
+
+    let Some(object_type) = schema.get_object(field.ty.inner_named_type()) else {
+        return Err(Message {
+            code: Code::EntityTypeInvalid,
+            message: format!(
+                "{coordinate} is invalid. Entity connectors must return object types.",
+                coordinate = connect_directive_entity_argument_coordinate(
+                    connect_directive_name,
+                    entity_arg_value.as_ref(),
+                    object,
+                    &field.name
+                )
+            ),
+            locations: entity_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    };
+
+    if field.ty.is_list() || field.ty.is_non_null() {
+        return Err(
+            Message {
+                code: Code::EntityTypeInvalid,
+                message: format!(
+                    "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types.",
+                    coordinate = connect_directive_entity_argument_coordinate(
+                        connect_directive_name,
+                        entity_arg_value.as_ref(),
+                        object,
+                        &field.name
+                    )
+                ),
+                locations: entity_arg
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }
+        );
+    }
+
+    if field.arguments.is_empty() {
+        return Err(Message {
+            code: Code::EntityResolverArgumentMismatch,
+            message: format!(
+                "{coordinate} must have arguments. See https://apollographql.com/docs/graphos/connectors/directives/#rules-for-entity-true",
+                coordinate = field_with_connect_directive_entity_true_coordinate(
+                    connect_directive_name,
+                    entity_arg_value.as_ref(),
+                    object,
+                    &field.name,
+                ),
+            ),
+            locations: entity_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
+
+    // Validate the arguments to the entity resolver.
+    let key_fields = resolvable_key_fields(object_type, schema).collect();
+
+    ArgumentVisitor {
+        schema,
+        entity_arg,
+        entity_arg_value,
+        object,
+        field: &field.name,
+        key_fields,
+    }
+    .walk(Group::Root {
+        field,
+        entity_type: object_type,
+    })
 }
 
 #[derive(Clone, Debug)]
