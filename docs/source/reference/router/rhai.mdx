@@ -1,0 +1,695 @@
+---
+title: Rhai Script API Reference
+subtitle: APIs for router customizations
+description: This reference documents the symbols and behaviors that are specific to Rhai customizations for the Apollo GraphOS Router and Apollo Router Core. Includes entry point hooks, logging, and more.
+---
+
+This reference documents the symbols and behaviors that are specific to [Rhai customizations](/graphos/routing/customization/rhai/) for the GraphOS Router and Apollo Router Core.
+
+## Entry point hooks
+
+Your Rhai script's [main file](/graphos/routing/customization/rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
+
+```rhai
+fn router_service(service) {}
+fn supergraph_service(service) {}
+fn execution_service(service) {}
+fn subgraph_service(service, subgraph) {}
+```
+
+Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](/graphos/routing/customization/rhai/#service-callbacks), like so:
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+      print("Supergraph service: Client request received");
+  };
+  
+  let response_callback = |response| {
+      print("Supergraph service: Client response ready to send");
+  };
+
+  service.map_request(request_callback);
+  service.map_response(response_callback);
+}
+```
+
+## Logging
+
+If your script logs a message with Rhai's built-in `print()` function, it's logged to the router's logs at the "info" level:
+
+```rhai
+print("logged at the info level");
+```
+
+For more control over a message's log level, you can use the following functions:
+
+```rhai
+log_error("error-level log message");
+log_warn("warn-level log message");
+log_info("info-level log message");
+log_debug("debug-level log message");
+log_trace("trace-level log message");
+```
+
+## Terminating client requests
+
+Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from the supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
+
+For example:
+```rhai
+// Must throw exception from supergraph service
+fn supergraph_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Something goes wrong during response processing...
+        throw "An error occurred setting up the supergraph_service...";
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
+```
+
+If you wish to have more control over the HTTP status code returned to the client, then you can throw an error which is an objectmap with keys: status and message.
+
+The key must be a number and the message must be something which can be converted to a string.
+
+For example:
+```rhai
+// Must throw exception from supergraph service
+fn supergraph_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Something goes wrong during response processing...
+        throw #{
+            status: 400,
+            message: "An error occurred processing the response..."
+        };
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
+```
+
+You can also `throw` a valid GraphQL response, which will be deserialized and dealt with by the router.
+
+For example:
+```rhai
+// Must throw exception from supergraph service
+fn supergraph_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something goes wrong during request processing...
+        throw #{
+            status: 403,
+            body: #{
+                errors: [#{
+                    message: `I have raised a 403`,
+                    extensions: #{
+                        code: "ACCESS_DENIED"
+                    }
+                }]
+            }
+        };
+    };
+    // Map our request using our closure
+    service.map_request(f);
+}
+```
+
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](/router/customizations/coprocessor/#terminating-a-client-request).
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+
+## Timing execution
+
+Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
+
+```rhai
+// Define a closure to process our response
+// Note: We can't use a closure in this example because we are referencing our global Router during function execution
+fn process_response(response) {
+    // highlight-start
+    let start = Router.APOLLO_START.elapsed;
+    // Do some processing here...
+    let duration = Router.APOLLO_START.elapsed - start;
+    print(`response processing took: ${duration}`);
+    // highlight-end
+
+    // Log out any errors we may have
+    print(response.body.errors);
+}
+
+fn supergraph_service(service) {
+    const response_callback = Fn("process_response");
+    service.map_response(response_callback);
+}
+```
+
+## Accessing the SDL
+
+Your Rhai customization can use the global `Router.APOLLO_SDL` constant to examine the supergraph.
+
+```rhai
+fn supergraph_service(service) {
+    print(`${Router.APOLLO_SDL}`);
+}
+```
+
+## Accessing a TraceId
+
+Your Rhai customization can use the function `traceid()` to retrieve an opentelemetry span id. This will throw an exception if a span is not available, so always handle exceptions when using this function.
+
+```rhai
+fn supergraph_service(service) {
+    try {
+        let id = traceid();
+        print(`id: ${id}`);
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`span id error: ${err}`);
+    }
+}
+```
+
+## url encode/decode strings
+
+Your Rhai customization can use the functions `urlencode()` and `urldecode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = urlencode(original);
+    // encoded will be "alice%20and%20bob"
+    try {
+        let and_back = urldecode(encoded);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`urldecode error: ${err}`);
+    }
+}
+```
+
+## json encode/decode strings
+
+Your Rhai customization can use the functions `json::encode()` and `json::decode()` to convert Rhai objects to/from valid JSON encoded strings. Both functions can fail, so always handle exceptions when using them.
+
+```rhai
+fn router_service(service) {
+    let original = `{"valid":"object"}`;
+    try {
+        let encoded = json::decode(original);
+        // encoded is a Rhai object, with a property (or key) named valid with a String value of "object"
+        print(`encoded.valid: ${encoded.valid}`);
+        let and_back = json::encode(encoded);
+        // and_back will be a string == original.
+        if and_back != original {
+            throw "something has gone wrong";
+        }
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`json coding error: ${err}`);
+    }
+}
+```
+
+## base64 encode/decode strings
+
+Your Rhai customization can use the functions `base64::encode()` and `base64::decode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = base64::encode(original);
+    // encoded will be "YWxpY2UgYW5kIGJvYgo="
+    try {
+        let and_back = base64::decode(encoded);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`base64::decode error: ${err}`);
+    }
+}
+```
+<Note>
+
+You don't need to import the "base64" module. It is imported in the router.
+
+</Note>
+
+### Different alphabets
+
+Base64 supports multiple alphabets to encode data, depending on the supported characters where it is used. The router supports the following alphabets:
+* `STANDARD`: the "base64" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-4). This is the default when not specified
+* `STANDARD_NO_PAD`: the "base64" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-4) without the padding (`=` or `==` characters at the end)
+* `URL_SAFE`: the "base64url" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-5)
+* `URL_SAFE_NO_PAD`: the "base64url" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-5) without the padding (`=` or `==` characters at the end)
+
+To use them, we can add an argument to the `encode` and `decode` methods:
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = base64::encode(original, base64::URL_SAFE);
+    // encoded will be "YWxpY2UgYW5kIGJvYgo="
+    try {
+        let and_back = base64::decode(encoded, base64::URL_SAFE);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`base64::decode error: ${err}`);
+    }
+}
+```
+
+## sha256 hash strings
+
+Your Rhai customization can use the function `sha256::digest()` to hash strings using the SHA256 hashing algorithm.
+
+```rhai
+fn supergraph_service(service){
+    service.map_request(|request|{
+        let sha = sha256::digest("hello world");
+        log_info(sha);
+    });
+}
+```
+<Note>
+
+You don't need to import the "sha256" module. It is imported in the router.
+
+</Note>
+
+## Headers with multiple values
+
+The simple get/set api for dealing with single value headers is sufficient for most use cases. If you wish to set multiple values on a key then you should do this by supplying an array of values.
+
+If you wish to get multiple values for a header key, then you must use the `values()` fn, NOT the indexed accessor. If you do use the indexed accessor, it will only return the first value (as a string) associated with the key.
+
+Look at the examples to see how this works in practice.
+
+## Unix timestamp
+
+Your Rhai customization can use the function `unix_now()` to obtain the current Unix timestamp in seconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_now();
+}
+```
+
+## Unix timestamp (in milliseconds)
+
+Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_ms_now();
+}
+```
+
+## Unique IDs (UUID)
+
+Your Rhai customization can use the function `uuid_v4()` to obtain a UUIDv4 ID.
+ 
+```rhai
+fn supergraph_service(service) {
+    let id = uuid_v4();
+}
+```
+
+## Environment Variables
+
+Your Rhai customization can access environment variables using the `env` module. Use the `env::get()` function.
+
+```rhai
+fn router_service(service) {
+    try {
+        print(`HOME: ${env::get("HOME")}`);
+        print(`LANG: ${env::get("LANG")}`);
+    } catch(err) {
+        print(`exception: ${err}`);
+    }
+}
+```
+
+<Note>
+
+* You don't need to import the "env" module. It is imported in the router.
+* `get()` may fail, so it's best to handle exceptions when using it.
+
+</Note>
+
+## Available constants
+
+The router provides constants for your Rhai scripts that mostly help you fetch data from the context.
+
+```
+Router.APOLLO_SDL // Context key to access the SDL
+Router.APOLLO_START // Constant to calculate durations
+Router.APOLLO_AUTHENTICATION_JWT_CLAIMS // Context key to access authentication jwt claims
+Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS // Context key to modify or access the custom connection params when using subscriptions in WebSocket to subgraphs (cf subscription docs)
+Router.APOLLO_ENTITY_CACHE_KEY // Context key to access the entity cache key
+Router.APOLLO_OPERATION_ID // Context key to get the value of apollo operation id (studio trace id) from the context
+Router.APOLLO_COST_ESTIMATED_KEY // Context key to get the estimated cost of an operation
+Router.APOLLO_COST_ACTUAL_KEY // Context key to get the actual cost of an operation
+Router.APOLLO_COST_STRATEGY_KEY // Context key to get the strategy used to calculate cost
+Router.APOLLO_COST_RESULT_KEY // Context key to get the cost result of an operation
+```
+
+## `Request` interface
+
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields:
+
+```
+request.context
+request.id
+request.headers
+request.method
+request.body.query
+request.body.operation_name
+request.body.variables
+request.body.extensions
+request.uri.host
+request.uri.path
+request.uri.port
+```
+
+<Note>
+
+These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`, the only modifiable field is `request.context`.
+
+</Note>
+
+**For `subgraph_service` callbacks only,** the `request` object provides _additional_ modifiable fields for interacting with the request that will be sent to the corresponding subgraph:
+
+```
+request.subgraph.headers
+request.subgraph.body.query
+request.subgraph.body.operation_name
+request.subgraph.body.variables
+request.subgraph.body.extensions
+request.subgraph.uri.host
+request.subgraph.uri.path
+request.subgraph.uri.port
+```
+
+### `request.context`
+
+The context is a generic key/value store that exists for the entire lifespan of a particular client request. You can use this to share information between multiple callbacks throughout the request's lifespan.
+
+Keys must be strings, but values can be any Rhai object.
+
+```rhai
+// You can interact with request.context as an indexed variable
+request.context["contextual"] = 42; // Adds value 42 to the context with key "contextual"
+print(`${request.context["contextual"]}`); // Writes 42 to the router log at info level
+// Rhai also supports extended dot notation for indexed variables, so this is equivalent
+request.context.contextual = 42;
+```
+
+#### `upsert()`
+
+The context provides an `upsert()` function for resolving situations where one of an update _or_ an insert is required when setting the value for a particular key.
+
+To use `upsert()`, you define a callback function that receives a key's existing value (if any) and makes changes as required before returning the final value to set.
+
+```rhai
+// Get a reference to a cache-key
+let my_cache_key = response.headers["cache-key"];
+
+// Define an upsert resolver callback
+// The `current` parameter is the current value for the specified key.
+// This particular callback checks whether `current` is an ObjectMap 
+// (default is the unit value of ()). If not, assign an empty ObjectMap.
+// Finally, update the stored ObjectMap with our subgraph name as key
+// and the returned cache-key as a value.
+let resolver = |current| {
+  if current == () {
+      // No map found. Create an empty object map
+      current = #{};
+  }
+  // Update our object map with a key and value
+  current[subgraph] = my_cache_key;
+  return current;
+};
+
+// Upsert our context with our resolver
+response.context.upsert("surrogate-cache-key", resolver);
+```
+
+### `request.id`
+
+The id is a string which uniquely identifies a request/response context for its entire lifespan. If you have a request (or a response) you can access the ID as follows.
+
+```rhai
+print(`request id is: ${request.id}`);
+```
+
+### `request.headers`
+
+The headers of a request are accessible as a read/write indexed variable. The keys and values must be valid header name and value strings.
+
+```rhai
+// You can interact with request.headers as an indexed variable
+request.headers["x-my-new-header"] = 42.to_string(); // Inserts a new header "x-my-new-header" with value "42"
+print(`${request.headers["x-my-new-header"]}`); // Writes "42" into the router log at info level
+// Rhai also supports extended dot notation for indexed variables, so this is equivalent
+request.headers.x-my-new-header = 42.to_string();
+// You can also set an header value from an array. Useful with the "set-cookie" header,
+// Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
+request.headers["set-cookie"] = [
+  "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+];
+// You can also get multiple header values for a header using the values() fn
+// Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
+print(`${request.headers.values("set-cookie")}`);
+```
+
+### `request.method`
+
+This is the HTTP method of the client request.
+
+```rhai
+print(`${request.method}`); // Log the HTTP method
+```
+
+### `request.body.query`
+
+This is the client-provided GraphQL operation string to execute.
+
+To modify this value _before_ query planning occurs, you must do so within a `supergraph_service()` request callback. If you modify it later, the query plan is generated using the original provided operation string.
+
+The following example modifies an incoming query and transforms it into a completely invalid query:
+
+```rhai
+print(`${request.body.query}`); // Log the query string before modification
+request.body.query="query invalid { _typnam }}"; // Update the query string (in this case to an invalid query)
+print(`${request.body.query}`); // Log the query string after modification
+```
+
+### `request.body.operation_name`
+
+This is the name of the GraphQL operation to execute, if a name is provided in the request. This value _must_ be present if `request.body.query` contains more than one operation definition.
+
+For an example of interacting with `operation_name`, see the [examples/op-name-to-header directory](https://github.com/apollographql/router/tree/main/examples/op-name-to-header).
+
+```rhai
+print(`${request.body.operation_name}`); // Log the operation_name before modification
+request.body.operation_name +="-my-suffix"; // Append "-my-suffix" to the operation_name
+print(`${request.body.operation_name}`); // Log the operation_name after modification
+```
+
+### `request.body.variables`
+
+These are the values of any GraphQL variables provided for the operation. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
+
+```rhai
+print(`${request.body.variables}`); // Log all GraphQL variables
+```
+
+### `request.body.extensions`
+
+Request extensions may be read or modified. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
+
+```rhai
+print(`${request.body.extensions}`); // Log all extensions
+```
+
+### `request.uri.host`
+
+This is the host component of the request's URI, as a string.
+
+Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.host` in a `subgraph_service` callback _does_ modify the URI that the router uses to communicate with the corresponding subgraph.
+
+```rhai
+print(`${request.uri.host}`); // Log the request host
+```
+
+### `request.uri.path`
+
+This is the path component of the request's URI, as a string.
+
+Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.path` in a `subgraph_service` callback _does_ modify the URI that the router uses to communicate with the corresponding subgraph.
+
+```rhai
+print(`${request.uri.path}`); // log the request path
+request.uri.path += "/added-context"; // Add an extra element to the query path
+```
+
+### `request.uri.port`
+
+This is the port component of the request's URI, as an integer. If no port is explicitly defined in the URI, this value defaults to an empty value.
+
+Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.port` in a `subgraph_service` callback _does_ modify the URI that the router uses to communicate with the corresponding subgraph.
+
+```rhai
+print(`${request.uri.port}`); // log the request port
+request.uri.port = 4040; // Changes the port to be 4040
+```
+
+### `request.subgraph.*`
+
+The `request.subgraph` object is available _only_ for `map_request` callbacks registered in `subgraph_service`. This object has the exact same fields as `request` itself, but these fields apply to the HTTP request that the router will send to the corresponding subgraph.
+
+```rhai
+// You can interact with request.subgraph.headers as an indexed variable
+request.subgraph.headers["x-my-new-header"] = 42.to_string(); // Inserts a new header "x-my-new-header" with value "42"
+print(`${request.subgraph.headers["x-my-new-header"]}`); // Writes "42" into the router log at info level
+// Rhai also supports extended dot notation for indexed variables, so this is equivalent
+request.subgraph.headers.x-my-new-header = 42.to_string();
+```
+
+## `Response` interface
+
+All callback functions registered via `map_response` are passed a `response` object that represents an HTTP response.
+
+* For callbacks in `subgraph_service`, this object represents the response sent to the router by the corresponding subgraph.
+* In all other services, this object represents the response that the router will send to the requesting client.
+
+The `response` object includes the following fields:
+
+```
+response.context
+response.id
+response.status_code
+response.headers
+response.body.label
+response.body.data
+response.body.errors
+response.body.extensions
+```
+
+All of the above fields are read/write.
+
+The following fields are identical in behavior to their `request` counterparts:
+
+* [`context`](#requestcontext)
+* [`id`](#requestid)
+* [`headers`](#requestheaders)
+* [`body`](#requestbody)
+* [`body.extensions`](#requestbodyextensions)
+
+### `response.is_primary()`
+
+Be particularly careful when interacting with `headers` or `status_code` in a response context. For `router_service()`, `supergraph_service()` and `execution_service()`, response `headers` and `status_code` only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the `headers` or `status_code` in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+
+```rhai
+    if response.is_primary() {
+        print(`all response headers: ${response.headers}`);
+    } else {
+        print(`don't try to access headers`);
+    }
+```
+
+Other fields are described below.
+
+### `response.body.label`
+
+A response may contain a label and this may be read/written as a string.
+
+```rhai
+print(`${response.body.label}`); // logs the response label
+```
+
+### `response.body.data`
+
+A response may contain data (some responses with errors do not contain data). Be careful when manipulating data (and errors) to make sure that response remain valid. `data` is exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
+
+There is a complete example of interacting with the response data in the [examples/data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/data-response-mutate).
+
+```rhai
+print(`${response.body.data}`); // logs the response data
+```
+
+### `response.body.errors`
+
+A response may contain errors. Errors are represented in rhai as an array of Object Maps.
+
+Each Error must contain at least:
+ - a message (String)
+ - a location (Array)
+
+(The location can be an empty array.)
+
+Optionally, an error may also contain extensions, which are represented as an Object Map.
+
+There is a complete example of interacting with the response errors in the [examples/error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/error-response-mutate).
+
+```rhai
+// Create an error with our message
+let error_to_add = #{
+    message: "this is an added error",
+    locations: [],
+    // Extensions are optional, adding some arbitrary extensions to illustrate syntax
+    extensions: #{
+        field_1: "field 1",
+        field_2: "field_2"
+    }
+};
+// Add this error to any existing errors
+response.body.errors += error_to_add;
+print(`${response.body.errors}`); // logs the response errors
+```
+
+### `response.status_code.to_string()`
+
+Convert response status code to a string.
+
+```rhai
+if response.status_code.to_string() == "200" {
+    print(`ok`);
+}
+```
+
+Also useful if you want to convert response status code to a number
+
+```rhai
+if parse_int(response.status_code.to_string()) == 200 {
+    print(`ok`);
+}
+```
+
+You can also create your own status code from an integer:
+
+```rhai
+if response.status_code == status_code_from_int(200) {
+    print(`ok`);
+}
+```
+
+<Note>
+The `response.status_code` object is available _only_ for `map_response` callbacks registered in `router_service` or `subgraph_service`.
+</Note>

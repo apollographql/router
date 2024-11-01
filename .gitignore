@@ -29,3 +29,6 @@
 # Previous git submodules
 dockerfiles/federation-demo
 dockerfiles/federation2-demo
+
+# macOS
+.DS_Store
