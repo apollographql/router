@@ -404,6 +404,9 @@ fn require_value_is_str<'a, Coordinate: Display>(
     })
 }
 
+/// For an object type, get all the keys that are resolvable.
+///
+/// The FieldSet returned here is what goes in the `fields` argument, so `id` in `@key(fields: "id")`
 fn resolvable_key_fields<'a>(
     object: &'a Node<ObjectType>,
     schema: &'a Schema,
