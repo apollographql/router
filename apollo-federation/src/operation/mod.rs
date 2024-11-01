@@ -1266,6 +1266,25 @@ mod field_selection {
                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
             ))
         }
+
+        pub(crate) fn add_arguments(
+            &mut self,
+            mut args: Vec<apollo_compiler::Node<apollo_compiler::executable::Argument>>,
+        ) {
+            let mut field_names: apollo_compiler::collections::IndexSet<Name> = Default::default();
+            for arg in &args {
+                field_names.insert(arg.name.clone());
+            }
+            if let Some(inner) = &self.arguments.inner {
+                for arg in inner.iter() {
+                    if !field_names.contains(&arg.name) {
+                        args.push(arg.clone());
+                    }
+                }
+            }
+
+            self.arguments = ArgumentList::from(args);
+        }
     }
 
     impl HasSelectionKey for FieldData {
