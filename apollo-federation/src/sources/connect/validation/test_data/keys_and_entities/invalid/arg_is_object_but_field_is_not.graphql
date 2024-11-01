@@ -10,7 +10,7 @@ extend schema
 
 type Query {
     product(
-        id: String!
+        id: ProductInput!
     ): Product
     @connect(
         http: { GET: "http://myapi/products/{$args.id}" }
@@ -19,7 +19,11 @@ type Query {
     )
 }
 
-type Product @key(fields: "id") {
+type Product {
     id: ID!
     name: String
+}
+
+input ProductInput {
+    id: ID!
 }

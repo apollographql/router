@@ -9,6 +9,7 @@ extend schema
 )
 
 type Query {
+    "The auto-key `store` field doesn't match the explicit composite key, so that key is unresolved"
     product(
         id: ID!
         store: StoreInput!

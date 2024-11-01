@@ -9,6 +9,7 @@ extend schema
 )
 
 type Query {
+    "The auto-key here matches the first `@key`, but the second `@key` is still unresolved"
     product(
         id: ID!
         store: StoreInput!
@@ -20,7 +21,7 @@ type Query {
     )
 }
 
-type Product @key(fields: "id store { id country { key_id region } }") @key(fields: "id store { id country { key_id2 region } }") {
+type Product @key(fields: "id store { id country { id region } }") @key(fields: "id store { id country { key_id region } }") {
     id: ID!
     store: Store!
     name: String

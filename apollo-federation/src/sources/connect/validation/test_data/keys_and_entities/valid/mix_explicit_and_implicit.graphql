@@ -9,21 +9,26 @@ extend schema
 )
 
 type Query {
-    product(
-        id: ProductInput!
+    implicit(
+        id: ID!
     ): Product
     @connect(
         http: { GET: "http://myapi/products/{$args.id}" }
-        selection: "id name"
+        selection: "id key_id name"
+        entity: true
+    )
+    explicit(
+        key_id: ID!
+    ): Product
+    @connect(
+        http: { GET: "http://myapi/products/{$args.key_id}" }
+        selection: "id key_id name"
         entity: true
     )
 }
 
-type Product @key(fields: "id") {
+type Product @key(fields: "key_id") {
     id: ID!
+    key_id: ID!
     name: String
-}
-
-input ProductInput {
-    id: ID!
 }

@@ -9,15 +9,17 @@ extend schema
 )
 
 type Query {
-    product: Product
+    product(
+        id: String!
+    ): Product
     @connect(
-        http: { GET: "http://myapi/products" }
+        http: { GET: "http://myapi/products/{$args.id}" }
         selection: "id name"
         entity: true
     )
 }
 
-type Product @key(fields: "id") {
+type Product {
     id: ID!
     name: String
 }
