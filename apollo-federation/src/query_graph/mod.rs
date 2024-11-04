@@ -26,11 +26,12 @@ use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
 pub mod build_query_graph;
@@ -136,15 +137,12 @@ impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
 
 // TODO: Add docs.
 #[derive(Debug, PartialEq, Clone)]
-pub struct ContextCondition  {
-  context: String,
-  subgraph_name: String,
-  named_parameter: String,
-  selection: String,
-  types_with_context_set: HashSet<String>,
-  // TODO: Do we want this or maybe we want composition type position...
-  arg_type: TypeDefinitionPosition,
-  coordinate: String,
+pub struct ContextCondition {
+    context: String,
+    subgraph_name: Arc<str>,
+    selection: String,
+    types_with_context_set: HashSet<ObjectTypeDefinitionPosition>,
+    coordinate: ObjectFieldDefinitionPosition,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -173,11 +171,14 @@ pub(crate) struct QueryGraphEdge {
     pub(crate) override_condition: Option<OverrideCondition>,
     // TODO: Add docs
     // TODO: Should this be a set?
-    pub(crate) required_contexts: Vec<ContextCondition>
+    pub(crate) required_contexts: Vec<ContextCondition>,
 }
 
 impl QueryGraphEdge {
-    pub(crate) fn new(transition: QueryGraphEdgeTransition, conditions: Option<Arc<SelectionSet>>) -> Self {
+    pub(crate) fn new(
+        transition: QueryGraphEdgeTransition,
+        conditions: Option<Arc<SelectionSet>>,
+    ) -> Self {
         Self {
             transition,
             conditions,
@@ -191,7 +192,10 @@ impl QueryGraphEdge {
         self
     }
 
-    pub(crate) fn with_required_contexts(mut self, contexts: impl IntoIterator<Item = ContextCondition>) -> Self {
+    pub(crate) fn with_required_contexts(
+        mut self,
+        contexts: impl IntoIterator<Item = ContextCondition>,
+    ) -> Self {
         self.required_contexts.extend(contexts);
         self
     }
@@ -397,8 +401,9 @@ pub struct QueryGraph {
     non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
     // TODO: Are these duplicate fields??
     // TODO: If not, write docs
-    subgraph_to_args: MultiMap<String, String>,
-    subgraph_to_arg_indices: HashMap<String, HashMap<String, String>>,
+    subgraph_to_args: MultiMap<Arc<str>, ObjectFieldArgumentDefinitionPosition>,
+    subgraph_to_arg_indices:
+        HashMap<Arc<str>, HashMap<ObjectFieldArgumentDefinitionPosition, String>>,
 }
 
 impl QueryGraph {

@@ -405,6 +405,28 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     {
         self.process_results(|mut results| results.find(predicate))
     }
+
+    fn fallible_fold<F, O, T, E>(&mut self, mut init: O, mut mapper: F) -> Result<O, E>
+        where
+        Self: Iterator<Item = T>,
+        F: FnMut(O, T) -> Result<O, E>,
+    {
+        for item in self {
+            init = mapper(init, item)?;
+        }
+        Ok(init)
+    }
+
+    fn and_then_fold<F, O, T, E>(&mut self, mut init: O, mut mapper: F) -> Result<O, E>
+    where
+        Self: Iterator<Item = Result<T, E>>,
+        F: FnMut(O, T) -> Result<O, E>,
+    {
+        for item in self {
+            init = mapper(init, item?)?
+        }
+        Ok(init)
+    }
 }
 
 impl<I: Itertools> FallibleIterator for I {}

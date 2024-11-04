@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
@@ -8,20 +9,24 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use multimap::MultiMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use regex::Regex;
 use strum::IntoEnumIterator;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::operation::merge_selection_sets;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::ContextCondition;
 use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
@@ -33,6 +38,7 @@ use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -42,9 +48,10 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
+use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::supergraph::extract_subgraphs_from_supergraph;
-
-use super::ContextCondition;
+use crate::utils::FallibleIterator;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -61,7 +68,7 @@ pub fn build_federated_query_graph(
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
     let for_query_planning = for_query_planning.unwrap_or(true);
-    let mut query_graph = QueryGraph {
+    let query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
         current_source: "".into(),
         graph: Default::default(),
@@ -73,21 +80,20 @@ pub fn build_federated_query_graph(
         subgraph_to_args: Default::default(),
         subgraph_to_arg_indices: Default::default(),
     };
-    let subgraphs =
-        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
-    for (subgraph_name, subgraph) in subgraphs {
-        let builder = SchemaQueryGraphBuilder::new(
-            query_graph,
-            subgraph_name,
-            subgraph.schema,
-            Some(api_schema.clone()),
-            for_query_planning,
-        )?;
-        query_graph = builder.build()?;
-    }
-    let federated_builder = FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?;
-    query_graph = federated_builder.build()?;
-    Ok(query_graph)
+    let query_graph =
+        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
+            .into_iter()
+            .fallible_fold(query_graph, |query_graph, (subgraph_name, subgraph)| {
+                SchemaQueryGraphBuilder::new(
+                    query_graph,
+                    subgraph_name,
+                    subgraph.schema,
+                    Some(api_schema.clone()),
+                    for_query_planning,
+                )?
+                .build()
+            })?;
+    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?.build()
 }
 
 /// Builds a query graph based on the provided schema (usually an API schema outside of testing).
@@ -986,6 +992,7 @@ impl FederatedQueryGraphBuilder {
         self.handle_key()?;
         self.handle_requires()?;
         self.handle_progressive_overrides()?;
+        self.handle_context()?;
         // Note that @provides must be handled last when building since it requires copying nodes
         // and their edges, and it's easier to reason about this if we know previous
         self.handle_provides()?;
@@ -1011,15 +1018,14 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {
-        let mut root_kinds = IndexSet::default();
-        for (source, root_kinds_to_nodes) in &self.base.query_graph.root_kinds_to_nodes_by_source {
-            if *source == self.base.query_graph.current_source {
-                continue;
-            }
-            for root_kind in root_kinds_to_nodes.keys() {
-                root_kinds.insert(*root_kind);
-            }
-        }
+        let root_kinds = self
+            .base
+            .query_graph
+            .root_kinds_to_nodes_by_source
+            .iter()
+            .filter(|(source, _)| **source != self.base.query_graph.current_source)
+            .flat_map(|(_, root_kind_to_notes)| root_kind_to_notes.keys().copied())
+            .collect::<IndexSet<_>>();
         for root_kind in root_kinds {
             self.base.create_root_node(root_kind.into(), root_kind)?;
         }
@@ -1471,6 +1477,154 @@ impl FederatedQueryGraphBuilder {
             let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
             mutable_edge.override_condition = Some(condition);
         }
+        Ok(())
+    }
+
+    fn handle_context(&mut self) -> Result<(), FederationError> {
+        fn parse_context(field: &str) -> Result<(String, String), FederationError> {
+            let pattern = Regex::new(
+                r#"/^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/"#,
+            ).unwrap();
+
+            let mut iter = pattern.find_iter(field);
+
+            let Some(conext) = iter.next() else {
+                internal_error!("Expected 'context' in @fromContext(field) not found");
+            };
+
+            let Some(selection) = iter.next() else {
+                internal_error!("Expected 'selection' in @fromContext(field) not found");
+            };
+
+            if iter.next().is_some() {
+                internal_error!("More than 'context' and 'selection' found in @fromContext(field)");
+            }
+
+            Ok((conext.as_str().to_owned(), selection.as_str().to_owned()))
+        }
+
+        let mut subgraph_to_args: MultiMap<Arc<str>, ObjectFieldArgumentDefinitionPosition> =
+            MultiMap::new();
+        for (source, subgraph) in self.base.query_graph.subgraphs() {
+            let Some((_, context_refs)) = &subgraph
+                .referencers()
+                .directives
+                .iter()
+                // TODO: I think I need to get the subgraph data which contains the name of the
+                // context in that subgraph, ya?
+                .find(|(dir, _)| **dir == CONTEXT_DIRECTIVE_NAME)
+            else {
+                continue;
+            };
+
+            let Some((_, from_context_refs)) = &subgraph
+                .referencers()
+                .directives
+                .iter()
+                // TODO: I think I need to get the subgraph data which contains the name of
+                // fromContext in that subgraph, ya?
+                .find(|(dir, _)| **dir == FROM_CONTEXT_DIRECTIVE_NAME)
+            else {
+                continue;
+            };
+
+            // For @context
+            // subgraph -> referencers -> iter through object_types and interface_types
+            let subgraph_data = self.subgraphs.get(source)?;
+            let mut context_name_to_types: HashMap<&str, HashSet<&ObjectTypeDefinitionPosition>> =
+                HashMap::default();
+            for object_def_pos in &context_refs.object_types {
+                let object = object_def_pos.get(subgraph.schema())?;
+                for dir in object.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(object_def_pos);
+                }
+            }
+
+            // For @fromContext
+            // subgraph -> referencers -> iter through object_field_arguments and interface_field_arguments
+            let mut coordinate_map: HashMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>> =
+                HashMap::default();
+            for object_field_arg in &from_context_refs.object_field_arguments {
+                let input_value = object_field_arg.get(subgraph.schema())?;
+                let coordinate = object_field_arg.parent();
+                subgraph_to_args
+                    .entry(source.clone())
+                    .or_insert_vec(vec![object_field_arg.clone()]);
+                for dir in input_value.directives.get_all(&FROM_CONTEXT_DIRECTIVE_NAME) {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .from_context_directive_arguments(dir)?;
+                    let (context, selection) = parse_context(application.field)?;
+
+                    let types_with_context_set = context_name_to_types
+                        .get(context.as_str())
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                        .cloned()
+                        .collect();
+                    let conditions = ContextCondition {
+                        context,
+                        selection,
+                        subgraph_name: source.clone(),
+                        coordinate: coordinate.clone(),
+                        types_with_context_set,
+                    };
+                    coordinate_map
+                        .entry(coordinate.clone())
+                        .or_default()
+                        .push(conditions);
+                }
+            }
+            // TODO:
+            // Do the simpleTraversal
+
+            for edge in self.base.query_graph.graph.edge_indices() {
+                let edge_weight = self.base.query_graph.edge_weight(edge)?;
+                let QueryGraphEdgeTransition::FieldCollection {
+                    source,
+                    field_definition_position,
+                    ..
+                } = &edge_weight.transition
+                else {
+                    continue;
+                };
+                // TODO: Port the check of `e.head.type.kind === 'ObjectType'`
+                // I think that's found via the collection's field def pos
+                if *source == self.base.query_graph.current_source {
+                    continue;
+                }
+            }
+        }
+
+        // Add the context argument mapping
+        let mut subgraph_to_arg_indices: HashMap<
+            Arc<str>,
+            HashMap<ObjectFieldArgumentDefinitionPosition, String>,
+        > = HashMap::default();
+        for (source, _) in self.base.query_graph.subgraphs() {
+            if let Some(args) = subgraph_to_args.get_vec(source.as_ref()) {
+                // The JS code sorted the list, but the ObjectFieldDefinitionPosition does
+                // implement Ord. Can we ignore sorting?
+                // args.sort();
+                let args = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, arg)| (arg.clone(), format!("contextualArgument__{source}_{i}")))
+                    .collect();
+                subgraph_to_arg_indices.insert(source.clone(), args);
+            }
+        }
+
+        self.base.query_graph.subgraph_to_args = subgraph_to_args;
+        self.base.query_graph.subgraph_to_arg_indices = subgraph_to_arg_indices;
+
         Ok(())
     }
 
@@ -2083,6 +2237,14 @@ impl FederatedQueryGraphBuilderSubgraphs {
                 .override_directive_definition(schema)?
                 .name
                 .clone();
+            let context_directive_definition_name = federation_spec_definition
+                .context_directive_definition(schema)?
+                .name
+                .clone();
+            let from_context_directive_definition_name = federation_spec_definition
+                .from_context_directive_definition(schema)?
+                .name
+                .clone();
             subgraphs.map.insert(
                 source.clone(),
                 FederatedQueryGraphBuilderSubgraphData {
@@ -2092,6 +2254,8 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     provides_directive_definition_name,
                     interface_object_directive_definition_name,
                     overrides_directive_definition_name,
+                    context_directive_definition_name,
+                    from_context_directive_definition_name,
                 },
             );
         }
@@ -2118,6 +2282,8 @@ struct FederatedQueryGraphBuilderSubgraphData {
     provides_directive_definition_name: Name,
     interface_object_directive_definition_name: Name,
     overrides_directive_definition_name: Name,
+    context_directive_definition_name: Name,
+    from_context_directive_definition_name: Name,
 }
 
 #[derive(Debug)]
