@@ -11,6 +11,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
+use tracing::trace;
 
 use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
@@ -551,7 +552,15 @@ impl QueryPlanner {
             statistics,
         };
 
-        snapshot!(plan, "query plan");
+        snapshot!(
+            "QueryPlan",
+            plan.to_string(),
+            "QueryPlan from build_query_plan"
+        );
+        snapshot!(
+            plan.statistics,
+            "QueryPlanningStatistics from build_query_plan"
+        );
 
         Ok(plan)
     }
@@ -716,7 +725,11 @@ pub(crate) fn compute_root_fetch_groups(
             root_kind,
             root_type.clone(),
         )?;
-        snapshot!(dependency_graph, "tree_with_root_node");
+        snapshot!(
+            "FetchDependencyGraph",
+            dependency_graph.to_dot(),
+            "tree_with_root_node"
+        );
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -737,16 +750,13 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
-    snapshot!(
-        "FetchDependencyGraph",
-        "Empty",
-        "Starting process to construct a parallel fetch dependency graph"
-    );
+    trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
     snapshot!(
-        best_plan.fetch_dependency_graph,
-        "Plan returned from compute_root_parallel_best_plan"
+        "FetchDependencyGraph",
+        best_plan.fetch_dependency_graph.to_dot(),
+        "Fetch dependency graph returned from compute_root_parallel_best_plan"
     );
     Ok(best_plan.fetch_dependency_graph)
 }
@@ -807,7 +817,8 @@ fn compute_plan_internal(
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
-            dependency_graph,
+            "FetchDependencyGraph",
+            dependency_graph.to_dot(),
             "Plan after calling FetchDependencyGraph::process"
         );
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?

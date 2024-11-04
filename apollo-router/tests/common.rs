@@ -4,7 +4,6 @@ use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -19,7 +18,6 @@ use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::HeaderName;
 use http::HeaderValue;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
@@ -225,11 +223,23 @@ impl Telemetry {
                 )
             }
             Telemetry::Datadog => {
+                // Get the existing PSR header if it exists. This is because the existing telemetry propagator doesn't support PSR properly yet.
+                // In testing we are manually setting the PSR header, and we don't want to override it.
+                let psr = request
+                    .headers()
+                    .get("x-datadog-sampling-priority")
+                    .cloned();
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                );
+
+                if let Some(psr) = psr {
+                    request
+                        .headers_mut()
+                        .insert("x-datadog-sampling-priority", psr);
+                }
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
@@ -595,7 +605,7 @@ impl IntegrationTest {
             async move {
                 let client = reqwest::Client::new();
 
-                let builder = client
+                let mut builder = client
                     .post(url)
                     .header(
                         CONTENT_TYPE,
@@ -606,20 +616,14 @@ impl IntegrationTest {
                     .header("x-my-header", "test")
                     .header("head", "test");
 
-                let mut request = builder.json(&query).build().unwrap();
-                telemetry.inject_context(&mut request);
-
                 if let Some(headers) = headers {
                     for (name, value) in headers {
-                        request.headers_mut().remove(&name);
-                        request.headers_mut().append(
-                            HeaderName::from_str(&name).expect("header was invalid"),
-                            value.try_into().expect("header was invalid"),
-                        );
+                        builder = builder.header(name, value);
                     }
                 }
 
-                request.headers_mut().remove(ACCEPT);
+                let mut request = builder.json(&query).build().unwrap();
+                telemetry.inject_context(&mut request);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {
@@ -649,27 +653,20 @@ impl IntegrationTest {
         async move {
             let client = reqwest::Client::new();
 
-            let mut request = client
+            let mut builder = client
                 .post(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
-                .json(&query)
-                .build()
-                .unwrap();
+                .json(&query);
 
-            request.headers_mut().remove(ACCEPT);
             if let Some(headers) = headers {
                 for (name, value) in headers {
-                    request.headers_mut().remove(&name);
-                    request.headers_mut().append(
-                        HeaderName::from_str(&name).expect("header was invalid"),
-                        value.try_into().expect("header was invalid"),
-                    );
+                    builder = builder.header(name, value);
                 }
             }
 
-            match client.execute(request).await {
+            match client.execute(builder.build().unwrap()).await {
                 Ok(response) => (
                     TraceId::from_hex(
                         response

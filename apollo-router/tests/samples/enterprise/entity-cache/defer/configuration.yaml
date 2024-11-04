@@ -5,14 +5,14 @@ include_subgraph_errors:
 
 preview_entity_cache:
   enabled: true
+  redis:
+    urls:
+      ["redis://localhost:6379",]
   subgraph:
     all:
       enabled: true
-      redis:
-        urls:
-          ["redis://localhost:6379",]
     subgraphs:
-      invalidation-entity-key-reviews:
+      reviews:
         ttl: 120s
         enabled: true
 
