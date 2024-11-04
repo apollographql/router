@@ -236,6 +236,22 @@ impl TestExecution {
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
+        if let Some(requests) = self
+            .subgraphs_server
+            .as_ref()
+            .unwrap()
+            .received_requests()
+            .await
+        {
+            writeln!(out, "Will reload config, subgraphs received requests:").unwrap();
+            for request in requests {
+                writeln!(out, "\tmethod: {}", request.method).unwrap();
+                writeln!(out, "\tpath: {}", request.url).unwrap();
+                writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
+            }
+        } else {
+            writeln!(out, "subgraphs received no requests").unwrap();
+        }
         let mut subgraphs_server = match self.subgraphs_server.take() {
             Some(subgraphs_server) => subgraphs_server,
             None => self.start_subgraphs(out).await.0,
