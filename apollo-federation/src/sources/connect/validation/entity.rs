@@ -41,10 +41,7 @@ pub(super) fn validate_entity_arg(
         return Ok(());
     };
     let entity_arg_value = &entity_arg.value;
-    if !entity_arg_value
-        .to_bool()
-        .unwrap_or_default()
-    {
+    if !entity_arg_value.to_bool().unwrap_or_default() {
         // This is not an entity resolver
         return Ok(());
     }
