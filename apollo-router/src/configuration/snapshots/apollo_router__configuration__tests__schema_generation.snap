@@ -2175,6 +2175,11 @@ expression: "&schema"
           "description": "Enables connector debugging information on response extensions if the feature is enabled",
           "type": "boolean"
         },
+        "expose_sources_in_context": {
+          "default": false,
+          "description": "When enabled, adds an entry to the context for use in coprocessors ```json { \"context\": { \"entries\": { \"apollo_connectors::sources_in_query_plan\": [ { \"subgraph_name\": \"subgraph\", \"source_name\": \"source\" } ] } } } ```",
+          "type": "boolean"
+        },
         "max_requests_per_operation_per_source": {
           "default": null,
           "description": "The maximum number of requests for a connector source",
