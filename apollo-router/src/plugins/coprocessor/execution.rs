@@ -3,11 +3,9 @@ use std::sync::Arc;
 
 use futures::future;
 use futures::stream;
-use itertools::Itertools;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use services::execution::QueryPlan;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
@@ -17,10 +15,8 @@ use super::*;
 use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
-use crate::plugins::connectors::query_plans::get_connectors;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
-use crate::Context;
 
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -38,8 +34,6 @@ pub(super) struct ExecutionRequestConf {
     pub(super) method: bool,
     /// Send the query plan
     pub(super) query_plan: bool,
-    /// Send the sources in the query plan (subgraphs and connectors)
-    pub(super) sources: bool,
 }
 
 /// What information is passed to a router request/response stage
@@ -224,9 +218,6 @@ where
     let query_plan = request_config
         .query_plan
         .then(|| request.query_plan.clone());
-    let sources = request_config
-        .sources
-        .then(|| make_list_of_services(&request.query_plan, &request.context));
 
     let payload = Externalizable::execution_builder()
         .stage(PipelineStep::ExecutionRequest)
@@ -238,7 +229,6 @@ where
         .and_method(method)
         .and_sdl(sdl_to_send)
         .and_query_plan(query_plan)
-        .and_sources(sources)
         .build();
 
     tracing::debug!(?payload, "externalized output");
@@ -513,27 +503,6 @@ where
     })
 }
 
-fn make_list_of_services(query_plan: &QueryPlan, context: &Context) -> Vec<String> {
-    let connectors = get_connectors(context);
-
-    query_plan
-        .root
-        .service_usage()
-        .flat_map(|service_name| {
-            if let Some(connector) = connectors.as_ref().and_then(|c| c.get(service_name)) {
-                connector
-                    .id
-                    .source_name
-                    .as_ref()
-                    .map(|source_name| format!("{}.{}", connector.id.subgraph_name, source_name))
-            } else {
-                Some(service_name.to_string())
-            }
-        })
-        .unique()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -607,7 +576,6 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
-                sources: false,
             },
             response: Default::default(),
         };
@@ -742,7 +710,6 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
-                sources: false,
             },
             response: Default::default(),
         };

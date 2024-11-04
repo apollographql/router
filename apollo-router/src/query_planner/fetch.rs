@@ -556,6 +556,7 @@ impl FetchNode {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn service_name(&self) -> &str {
         &self.service_name
     }

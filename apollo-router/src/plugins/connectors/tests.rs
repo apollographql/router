@@ -1397,11 +1397,14 @@ async fn test_sources_in_context() {
         "query Posts { posts { id body title author { name username } } }",
         Default::default(),
         Some(json!({
+          "preview_connectors": {
+            "expose_sources_in_context": true
+          },
           "coprocessor": {
             "url": format!("{}/coprocessor", mock_server.uri()),
             "execution": {
               "request": {
-                "sources": true
+                "context": true
               }
             }
           }
@@ -1416,8 +1419,19 @@ async fn test_sources_in_context() {
         .body_json::<serde_json_bytes::Value>()
         .unwrap();
     pretty_assertions::assert_eq!(
-        body.get("sources").unwrap(),
-        &serde_json_bytes::json!(["connectors.jsonPlaceholder"])
+        body.get("context")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("entries")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("apollo_connectors::sources_in_query_plan")
+            .unwrap(),
+        &serde_json_bytes::json!([
+          { "subgraph_name": "connectors", "source_name": "jsonPlaceholder" }
+        ])
     );
 }
 
