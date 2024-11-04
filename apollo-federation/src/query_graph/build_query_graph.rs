@@ -1536,9 +1536,7 @@ impl FederatedQueryGraphBuilder {
             for object_def_pos in &context_refs.object_types {
                 let object = object_def_pos.get(subgraph.schema())?;
                 for dir in object.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
-                    let application = subgraph_data
-                        .federation_spec_definition
-                        .context_directive_arguments(dir)?;
+                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
                     context_name_to_types
                         .entry(application.name)
                         .or_default()

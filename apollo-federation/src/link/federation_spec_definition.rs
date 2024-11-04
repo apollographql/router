@@ -71,14 +71,6 @@ pub(crate) struct OverrideDirectiveArguments<'doc> {
     pub(crate) label: Option<&'doc str>,
 }
 
-pub(crate) struct ContextDirectiveArguments<'doc> {
-    pub(crate) name: &'doc str,
-}
-
-pub(crate) struct FromContextDirectiveArguments<'doc> {
-    pub(crate) field: &'doc str,
-}
-
 #[derive(Debug)]
 pub(crate) struct FederationSpecDefinition {
     url: Url,
@@ -349,27 +341,6 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn context_directive_arguments<'doc>(
-        &self,
-        application: &'doc Node<Directive>,
-    ) -> Result<ContextDirectiveArguments<'doc>, FederationError> {
-        Ok(ContextDirectiveArguments {
-            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
-        })
-    }
-
-    pub(crate) fn from_context_directive_arguments<'doc>(
-        &self,
-        application: &'doc Node<Directive>,
-    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
-        Ok(FromContextDirectiveArguments {
-            field: directive_required_string_argument(
-                application,
-                &FEDERATION_FIELD_ARGUMENT_NAME,
-            )?,
-        })
-    }
-
     pub(crate) fn provides_directive_arguments<'doc>(
         &self,
         application: &'doc Node<Directive>,
@@ -521,6 +492,18 @@ impl FederationSpecDefinition {
             })
     }
 
+    pub(crate) fn from_context_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
+        Ok(FromContextDirectiveArguments {
+            field: directive_required_string_argument(
+                application,
+                &FEDERATION_FIELD_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
     pub(crate) fn from_context_directive(
         &self,
         schema: &FederationSchema,
@@ -540,18 +523,6 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments,
-        })
-    }
-
-    pub(crate) fn from_context_directive_arguments<'doc>(
-        &self,
-        application: &'doc Node<Directive>,
-    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
-        Ok(FromContextDirectiveArguments {
-            field: directive_required_string_argument(
-                application,
-                &FEDERATION_FIELD_ARGUMENT_NAME,
-            )?,
         })
     }
 
