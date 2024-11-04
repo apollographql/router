@@ -1,19 +1,37 @@
 use std::sync::Arc;
 
+use apollo_federation::sources::connect::Connector;
 use indexmap::IndexMap;
 
 use crate::query_planner::PlanNode;
 use crate::Context;
 
-type ConnectorsContext = Arc<IndexMap<Arc<str>, String>>;
+type ConnectorsByServiceName = Arc<IndexMap<Arc<str>, Connector>>;
 
-pub(crate) fn store_connectors_context(
+pub(crate) fn store_connectors(
+    context: &Context,
+    connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+) {
+    context
+        .extensions()
+        .with_lock(|mut lock| lock.insert::<ConnectorsByServiceName>(connectors_by_service_name));
+}
+
+pub(crate) fn get_connectors(context: &Context) -> Option<ConnectorsByServiceName> {
+    context
+        .extensions()
+        .with_lock(|lock| lock.get::<ConnectorsByServiceName>().cloned())
+}
+
+type ConnectorLabels = Arc<IndexMap<Arc<str>, String>>;
+
+pub(crate) fn store_connectors_labels(
     context: &Context,
     labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
 ) {
     context
         .extensions()
-        .with_lock(|mut lock| lock.insert::<ConnectorsContext>(labels_by_service_name));
+        .with_lock(|mut lock| lock.insert::<ConnectorLabels>(labels_by_service_name));
 }
 
 pub(crate) fn replace_connector_service_names_text(
@@ -22,7 +40,7 @@ pub(crate) fn replace_connector_service_names_text(
 ) -> Option<Arc<String>> {
     let replacements = context
         .extensions()
-        .with_lock(|lock| lock.get::<ConnectorsContext>().cloned());
+        .with_lock(|lock| lock.get::<ConnectorLabels>().cloned());
     if let Some(replacements) = replacements {
         text.as_ref().map(|text| {
             let mut text = text.to_string();
@@ -42,7 +60,7 @@ pub(crate) fn replace_connector_service_names(
 ) -> Arc<PlanNode> {
     let replacements = context
         .extensions()
-        .with_lock(|lock| lock.get::<ConnectorsContext>().cloned());
+        .with_lock(|lock| lock.get::<ConnectorLabels>().cloned());
 
     return if let Some(replacements) = replacements {
         let mut plan = plan.clone();

@@ -35,7 +35,8 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::plugin::DynPlugin;
-use crate::plugins::connectors::query_plans::store_connectors_context;
+use crate::plugins::connectors::query_plans::store_connectors;
+use crate::plugins::connectors::query_plans::store_connectors_labels;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -130,7 +131,8 @@ impl Service<SupergraphRequest> for SupergraphService {
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
         if let Some(connectors) = &self.schema.connectors {
-            store_connectors_context(&req.context, connectors.labels_by_service_name.clone());
+            store_connectors_labels(&req.context, connectors.labels_by_service_name.clone());
+            store_connectors(&req.context, connectors.by_service_name.clone());
         }
 
         // Consume our cloned services and allow ownership to be transferred to the async block.
