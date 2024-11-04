@@ -205,7 +205,7 @@ impl QueryAnalysisLayer {
                         doc.executable.clone(),
                         op_name,
                         self.schema.api_schema(),
-                        &request.supergraph_request.body().variables.clone(),
+                        &request.supergraph_request.body().variables,
                     ))
                 } else {
                     None
