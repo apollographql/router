@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_federation::sources::connect::HTTPMethod;
 use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::connect::URLTemplate;
@@ -124,8 +125,11 @@ pub(crate) fn make_request(
             (None, None, hyper::Body::empty(), 0, vec![])
         };
 
-    if content_length > 0 {
-        request = request.header(CONTENT_LENGTH, content_length);
+    match transport.method {
+        HTTPMethod::Post | HTTPMethod::Patch | HTTPMethod::Put => {
+            request = request.header(CONTENT_LENGTH, content_length);
+        }
+        _ => {}
     }
 
     let request = request
