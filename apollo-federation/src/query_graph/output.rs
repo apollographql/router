@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use petgraph::dot::Config;
 use petgraph::dot::Dot;
-use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::stable_graph::StableGraph;
 
@@ -14,7 +13,6 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphNode;
 
-type InnerGraph = DiGraph<QueryGraphNode, QueryGraphEdge>;
 type StableInnerGraph = StableGraph<QueryGraphNode, QueryGraphEdge>;
 
 //////////////////////////////////////////////////////////////////////////////

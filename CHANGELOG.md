@@ -4,6 +4,153 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.57.1] - 2024-10-31
+
+## 🐛 Fixes
+
+### Progressive override: fix query planner cache warmup ([PR #6108](https://github.com/apollographql/router/pull/6108))
+
+This fixes an issue in progressive override where the override labels were not transmitted to the query planner during cache warmup. Queries were correctly using the overridden fields at first, but after an update, reverted to non overridden fields, and could not recover.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/6108
+
+
+
+# [1.57.0] - 2024-10-22
+
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), updates to the query planner in this release will result in query plan caches being re-generated rather than re-used.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new query plans come into service.
+
+## 🚀 Features
+
+### Remove legacy schema introspection ([PR #6139](https://github.com/apollographql/router/pull/6139))
+
+Schema introspection in the router now runs natively without JavaScript. We have high confidence that the new native implementation returns responses that match the previous Javascript implementation, based on differential testing: fuzzing arbitrary queries against a large schema, and testing a corpus of customer schemas against a comprehensive query.
+
+Changes to the router's YAML configuration:
+
+* The `experimental_introspection_mode` key has been removed, with the `new` mode as the only behavior in this release.
+* The `supergraph.query_planning.legacy_introspection_caching` key is removed, with the behavior in this release now similar to what was `false`: introspection responses are not part of the query plan cache but instead in a separate, small in-memory—only cache.
+
+When using the above deprecated configuration options, the router's automatic configuration migration will ensure that existing configuration continue to work until the next major version of the router.  To simplify major upgrades, we recommend reviewing incremental updates to your YAML configuration by comparing the output of `./router config upgrade --config path/to/config.yaml` with your existing configuration.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6139
+
+### Support new `request_context` selector for telemetry ([PR #6160](https://github.com/apollographql/router/pull/6160))
+
+The router supports a new `request_context` selector for telemetry that enables access to the supergraph schema ID.
+
+You can configure the context to access the supergraph schema ID at the router service level:
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      router:
+        my.request_event:
+          message: "my request event message"
+          level: info
+          on: request
+          attributes:
+            schema.id:
+              request_context: "apollo::supergraph_schema_id" # The key containing the supergraph schema id
+```
+
+You can use the selector in any service at any stage. While this example applies to `events` attributes, the selector can also be used on spans and instruments.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6160
+
+### Support reading and setting `port` on request URIs using Rhai ([Issue #5437](https://github.com/apollographql/router/issues/5437))
+
+Custom Rhai scripts in the router now support the `request.uri.port` and `request.subgraph.uri.port` functions for reading and setting URI ports. These functions enable you to update the full URI for subgraph fetches. For example: 
+
+```rust
+fn subgraph_service(service, subgraph){
+    service.map_request(|request|{
+        log_info(``);
+        if request.subgraph.uri.port == {} {
+            log_info("Port is not explicitly set");
+        }
+        request.subgraph.uri.host = "api.apollographql.com";
+        request.subgraph.uri.path = "/api/graphql";
+        request.subgraph.uri.port = 1234;
+        log_info(``);
+    });
+}
+```
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5439
+
+## 🐛 Fixes
+
+### Fix various edge cases for `__typename` field ([PR #6009](https://github.com/apollographql/router/pull/6009))
+
+The router now correctly handles the `__typename` field used on operation root types, even when the subgraph's root type has a name that differs from the supergraph's root type.
+
+For example, given a query like this:
+
+```graphql
+{
+  ...RootFragment
+}
+
+fragment RootFragment on Query {
+  __typename
+  me {
+    name
+  }
+}
+```
+
+Even if the subgraph's root type returns a `__typename` that differs from `Query`, the router will still use `Query` as the value of the `__typename` field.
+
+This change also includes fixes for other edge cases related to the handling of `__typename` fields. For a detailed technical description of the edge cases that were fixed, please see [this description](https://github.com/apollographql/router/pull/6009#issue-2529717207).
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6009
+
+### Support `uri` and `method` properties on router "request" objects in Rhai ([PR #6147](https://github.com/apollographql/router/pull/6147))
+
+The router now supports accessing `request.uri` and `request.method` properties from custom Rhai scripts.  Previously, when trying to access `request.uri` and `request.method` on a router request in Rhai, the router would return error messages stating the properties were undefined.
+
+An example Rhai script using these properties:
+
+```rhai
+fn router_service(service) {
+  let router_request_callback = Fn("router_request_callback");
+  service.map_request(router_request_callback);
+}
+
+fn router_request_callback (request) {
+  log_info(`Router Request... Host: , Path: `);
+}
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6114
+
+### Cost calculation for subgraph requests with named fragments ([PR #6162](https://github.com/apollographql/router/issues/6162))
+
+In some cases where subgraph GraphQL operations contain named fragments and abstract types, demand control used the wrong type for cost calculation, and could reject valid operations.  Now, the correct type is used.
+
+This fixes errors of the form:
+
+```
+Attempted to look up a field on type MyInterface, but the field does not exist
+```
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6162
+
+### Federation v2.9.3 ([PR #6161](https://github.com/apollographql/router/pull/6161))
+
+This release updates to Federation v2.9.3, with query planner fixes:
+
+- Fixes a query planning bug where operation variables for a subgraph query wouldn't match what's used in that query.
+- Fixes a query planning bug where directives applied to `__typename` may be omitted in the subgraph query.
+- Fixes a query planning inefficiency where some redundant subgraph queries were not removed.
+- Fixes a query planning inefficiency where some redundant inline fragments in `@key`/`@requires` selection sets were not optimized away.
+- Fixes a query planning inefficiency where unnecessary subgraph jumps were being added when using `@context`/`@fromContext`.
+
+By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/6161
+
 # [1.56.0] - 2024-10-01
 
 > [!IMPORTANT]
@@ -89,6 +236,41 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 ## 🚀 Features
+
+### Entity cache invalidation preview ([PR #5889](https://github.com/apollographql/router/pull/5889))
+
+> ⚠️ This is a preview for an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).  If your organization doesn't currently have an Enterprise plan, you can test out this functionality with a [free Enterprise trial](https://studio.apollographql.com/signup?type=enterprise-trial).
+>
+> As a preview feature, it's subject to our [Preview launch stage](https://www.apollographql.com/docs/resources/product-launch-stages/#preview) expectations and configuration and performance may change in future releases.
+
+As a follow up to the Entity cache preview that was published in the router 1.46.0 release, we're introducing a new feature that allows you to invalidate cached entries.
+
+This introduces two ways to invalidate cached entries:
+- through an HTTP endpoint exposed by the router
+- via GraphQL response `extensions` returned from subgraph requests
+
+The invalidation endpoint can be defined in the router's configuration, as follows:
+
+```yaml
+preview_entity_cache:
+  enabled: true
+
+  # global invalidation configuration
+  invalidation:
+    # address of the invalidation endpoint
+    # this should only be exposed to internal networks
+    listen: "127.0.0.1:3000"
+    path: "/invalidation"
+```
+
+Invalidation requests can target cached entries by:
+- subgraph name
+- subgraph name and type name
+- subgraph name, type name and entity key
+
+You can learn more about invalidation in the [documentation](https://www.apollographql.com/docs/router/configuration/entity-caching#entity-cache-invalidation).
+
+By [@bnjjj](https://github.com/bnjjj),[@bryncooke](https://github.com/bryncooke), [@garypen](https://github.com/garypen), [@Geal](https://github.com/Geal), [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5889
 
 ### Support aliasing standard attributes for telemetry ([Issue #5930](https://github.com/apollographql/router/issues/5930))
 

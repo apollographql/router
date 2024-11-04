@@ -76,7 +76,7 @@ fn retain_semantic_directives_ast(directives: &mut apollo_compiler::ast::Directi
 
 /// Remove non-semantic directive applications from the schema representation.
 /// This only keeps directive applications that are observable in introspection.
-pub fn remove_non_semantic_directives(schema: &mut Schema) {
+pub(crate) fn remove_non_semantic_directives(schema: &mut Schema) {
     let root_definitions = schema.schema_definition.make_mut();
     retain_semantic_directives(&mut root_definitions.directives);
 
@@ -241,7 +241,7 @@ fn coerce_arguments_default_values(
 /// This is not what we would want to do for coercion in a real execution scenario, but it matches
 /// a behaviour in graphql-js so we can compare API schema results between federation-next and JS
 /// federation. We can consider removing this when we no longer rely on JS federation.
-pub fn coerce_schema_default_values(schema: &mut Schema) {
+pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
     // Keep a copy of the types in the schema so we can mutate the schema while walking it.
     let types = schema.types.clone();
 
@@ -357,7 +357,7 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
     coerce_selection_set_values(schema, &mut operation.selection_set);
 }
 
-pub fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
+pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
     if let Some(operation) = &mut document.operations.anonymous {
         coerce_operation_values(schema, operation);
     }
@@ -369,7 +369,7 @@ pub fn coerce_executable_values(schema: &Valid<Schema>, document: &mut Executabl
 /// Applies default value coercion and removes non-semantic directives so that
 /// the apollo-rs serialized output of the schema matches the result of
 /// `printSchema(buildSchema()` in graphql-js.
-pub fn make_print_schema_compatible(schema: &mut Schema) {
+pub(crate) fn make_print_schema_compatible(schema: &mut Schema) {
     remove_non_semantic_directives(schema);
     coerce_schema_default_values(schema);
 }
