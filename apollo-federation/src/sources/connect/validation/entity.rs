@@ -43,7 +43,7 @@ pub(super) fn validate_entity_arg(
     let entity_arg_value = &entity_arg.value;
     if !entity_arg_value
         .to_bool()
-        .is_some_and(|entity_arg_value| entity_arg_value)
+        .unwrap_or_default()
     {
         // This is not an entity resolver
         return Ok(());
@@ -62,7 +62,6 @@ pub(super) fn validate_entity_arg(
                     .collect(),
             }
         );
-        // TODO: Allow interfaces
     }
 
     let Some(object_type) = schema.get_object(field.ty.inner_named_type()) else {
@@ -89,7 +88,7 @@ pub(super) fn validate_entity_arg(
             Message {
                 code: Code::EntityTypeInvalid,
                 message: format!(
-                    "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types.",
+                    "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
                     coordinate = connect_directive_entity_argument_coordinate(
                         connect_directive_name,
                         entity_arg_value.as_ref(),
@@ -109,7 +108,7 @@ pub(super) fn validate_entity_arg(
         return Err(Message {
             code: Code::EntityResolverArgumentMismatch,
             message: format!(
-                "{coordinate} must have arguments. See https://apollographql.com/docs/graphos/connectors/directives/#rules-for-entity-true",
+                "{coordinate} must have arguments. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
                 coordinate = field_with_connect_directive_entity_true_coordinate(
                     connect_directive_name,
                     entity_arg_value.as_ref(),
