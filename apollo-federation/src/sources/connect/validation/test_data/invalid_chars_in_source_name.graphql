@@ -4,8 +4,24 @@ extend schema
     import: ["@connect", "@source"]
   )
   @source(name: "u$ers", http: { baseURL: "http://127.0.0.1" })
+  @source(name: "1", http: { baseURL: "http://127.0.0.1" })
+  @source(name: "no.dots", http: { baseURL: "http://127.0.0.1" })
+  @source(
+    name: "areallylongnamethatisoversixtythreecharacterstakesalongwhiletotypebutthisshoulddoit"
+    http: { baseURL: "http://127.0.0.1" }
+  )
 
 type Query {
-  resources: [String!]!
+  resources1: [String!]!
     @connect(source: "u$ers", http: { GET: "/resources" }, selection: "$")
+  resources2: [String!]!
+    @connect(source: "1", http: { GET: "/resources" }, selection: "$")
+  resources3: [String!]!
+    @connect(source: "no.dots", http: { GET: "/resources" }, selection: "$")
+  resources4: [String!]!
+    @connect(
+      source: "areallylongnamethatisoversixtythreecharacterstakesalongwhiletotypebutthisshoulddoit"
+      http: { GET: "/resources" }
+      selection: "$"
+    )
 }
