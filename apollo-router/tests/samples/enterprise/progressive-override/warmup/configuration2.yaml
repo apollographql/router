@@ -1,0 +1,21 @@
+include_subgraph_errors:
+  all: true
+
+supergraph:
+  query_planning:
+    warmed_up_queries: 6
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text
+
+experimental_query_planner_mode: legacy
+
+# rhai:
+#   scripts: "tests/samples/enterprise/progressive-override/rhai"
+#   main: "main.rhai"
+
+plugins:
+  experimental.expose_query_plan: true
