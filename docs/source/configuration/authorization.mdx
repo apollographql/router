@@ -690,7 +690,7 @@ When using subscriptions along with `@policy` authorization, subscription events
 
 GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes`, `@authenticated`, or `@policy` directives, they are set on the supergraph too. Whether composition uses `AND` or `OR` logic depends on how the authorization directives are used.
 
-#### A shared field with different authorization directives uses `AND` logic
+### Composed fields with different authorization directives use `AND` logic
 
 If a shared field uses different authorization directives across subgraphs, composition merges them using `AND` logic.
 For example, suppose the `me` query requires `@authentication` in one subgraph and the `read:user` scope in another subgraph:
@@ -731,7 +731,7 @@ Recall that the `@authenticated` directive only checks for the existence of the 
 
 </Note>
 
-#### A shared field with the same authorization directives use `OR` logic
+### Composed fields with the same authorization directives use `OR` logic
 
 If a shared field uses the same authorization directives across subgraphs, composition merges them using `OR` logic.
 For example, suppose two subgraphs uses the `@requiresScopes` directive on the `users` query.
