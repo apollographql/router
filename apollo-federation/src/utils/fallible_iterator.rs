@@ -407,7 +407,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     }
 
     fn fallible_fold<F, O, T, E>(&mut self, mut init: O, mut mapper: F) -> Result<O, E>
-        where
+    where
         Self: Iterator<Item = T>,
         F: FnMut(O, T) -> Result<O, E>,
     {
