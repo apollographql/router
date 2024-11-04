@@ -688,11 +688,12 @@ When using subscriptions along with `@policy` authorization, subscription events
 
 ## Composition and federation
 
-GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes`, `@authenticated`, or `@policy` directives, they are set on the supergraph too.
+GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes`, `@authenticated`, or `@policy` directives, they are set on the supergraph too. Whether composition uses `AND` or `OR` logic depends on how the authorization directives are used.
 
-#### Multiple authorization directives on a shared field use `AND` logic
+#### A shared field with different authorization directives uses `AND` logic
 
-If shared subgraph fields include multiple directives, composition merges them. For example, suppose the `me` query requires `@authentication` in on subgraph and the `read:user` scope in another subgraph:
+If a shared field uses different authorization directives across subgraphs, composition merges them using `AND` logic.
+For example, suppose the `me` query requires `@authentication` in one subgraph and the `read:user` scope in another subgraph:
 
 <CodeColumns>
 
@@ -722,52 +723,19 @@ type User {
 
 </CodeColumns>
 
-A request would need to both be authenticated **AND** have the required scope. Recall that the `@authenticated` directive only checks for the existence of the `apollo_authentication::JWT::claims` key in a request's context, so authentication is guaranteed if the request includes scopes.
+A request would need to both be authenticated **AND** have the required `read:user` scope.
 
-#### Multiple `@requiresScopes` on a shared field using `AND` logic
+<Note>
 
-<Tip>
+Recall that the `@authenticated` directive only checks for the existence of the `apollo_authentication::JWT::claims` key in a request's context, so authentication is guaranteed if the request includes scopes.
 
-Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean logic in one subgraph.
+</Note>
 
-</Tip>
+#### A shared field with the same authorization directives use `OR` logic
 
-If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges them with the same logic used to [combine scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic). For example, if one subgraph requires the `read:others` scope on the `users` query and another subgraph requires the `read:profiles` scope on `users` query:
-
-<CodeColumns>
-
-```graphql title="Subgraph A"
-type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:others"]])
-}
-```
-
-```graphql title="Subgraph B"
-type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
-}
-```
-</CodeColumns>
-
-Then the supergraph schema would require _both_ scopes for it.
-
-```graphql title="Supergraph"
-type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:others", "read:profiles"]])
-}
-```
-
-#### Multiple `@requiresScopes` on a shared field using `OR` logic
-
-<Tip>
-
-Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean logic in one subgraph.
-
-</Tip>
-
-If multiple shared subgraph fields include `@requiresScopes` with **OR** logic, the supergraph schema merges them so that satisfying any one of the required scopes grants access. This is similar to the approach for [combining required scopes with OR logic](#combining-required-scopes-with-andor-logic) within a single subgraph.
-
-For example, if one subgraph requires the `read:others` scope on the `users` query and another subgraph requires the `read:profiles` scope on the same `users` query:
+If a shared field uses the same authorization directives across subgraphs, composition merges them using `OR` logic.
+For example, suppose two subgraphs uses the `@requiresScopes` directive on the `users` query.
+One subgraph requires the `read:others` scope and another subgraph requires the `read:profiles` scope:
 
 <CodeColumns>
 
@@ -784,7 +752,7 @@ type Query {
 ```
 </CodeColumns>
 
-Then the supergraph schema would require **either** scope for access:
+Then a request would need either the `read:others` **OR** the `read:profiles` scope to be authorized.
 
 ```graphql title="Supergraph"
 type Query {
@@ -792,9 +760,18 @@ type Query {
 }
 ```
 
-#### Multiple `@requiresScopes` on a shared field using `AND` and `OR` logic
+<Tip>
 
-As with [combining scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **OR** logic:
+Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
+
+</Tip>
+
+Using **OR** logic for shared directives simplifies schema updates.
+If requirements change suddenly, you don't need to update the directive in all the subgraphs at once.
+
+#### Combining `AND`/`OR` logic
+
+As with [combining scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
 
 <CodeColumns>
 
@@ -812,7 +789,7 @@ type Query {
 
 </CodeColumns>
 
-Since both `scopes` arrays are nested arrays, they would be composed using **OR** logic into the supergraph schema:
+Since both subgraphs use the same authorization directive, composition [merges them using **OR** logic](#a-shared-field-with-the-same-authorization-directives-use-or-logic):
 
 ```graphql title="Supergraph"
 type Query {
