@@ -752,7 +752,7 @@ type Query {
 ```
 </CodeColumns>
 
-Then a request would need either the `read:others` **OR** the `read:profiles` scope to be authorized.
+A request would need either the `read:others` **OR** the `read:profiles` scope to be authorized.
 
 ```graphql title="Supergraph"
 type Query {
@@ -769,9 +769,9 @@ Refer to the section on [Combining policies with AND/OR logic](#combining-polici
 Using **OR** logic for shared directives simplifies schema updates.
 If requirements change suddenly, you don't need to update the directive in all the subgraphs at once.
 
-#### Combining `AND`/`OR` logic
+#### Combining `AND`/`OR` logic with `@requiresScopes`
 
-As with [combining scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
+As with [combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
 
 <CodeColumns>
 
@@ -801,8 +801,8 @@ This syntax means a request needs either (`read:others` **AND** `read:users`) sc
 
 ### Authorization and `@key` fields
 
-The [`@key` directive](https://www.apollographql.com/docs/federation/entities/) lets you create an entity whose fields resolve across multiple subgraphs.
-If you use authorization directives on fields defined in [`@key` directives](https://www.apollographql.com/docs/federation/entities/), Apollo still uses those fields to compose entities between the subgraphs, but the client cannot query them directly.
+The [`@key` directive](/docs/graphos/reference/federation/directives#key) lets you create an entity whose fields resolve across multiple subgraphs.
+If you use authorization directives on fields defined in `@key` directives, Apollo still uses those fields to compose entities between the subgraphs, but the client cannot query them directly.
 
 Consider these example subgraph schemas:
 
@@ -853,11 +853,11 @@ query {
 }
 ```
 
-This behavior resembles what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
+This behavior resembles what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](/graphos/reference/federation/directives#inaccessible).
 
 ### Authorization and interfaces
 
-If a type [implementing an interface](https://www.apollographql.com/docs/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
+If a type [implementing an interface](/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
 
 For example, consider this schema where the `Post` interface doesn't require authentication, but the `PrivateBlog` type, which implements `Post`, does:
 
