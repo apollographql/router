@@ -33,6 +33,7 @@ impl RequestInputs {
         &self,
         config: Option<&CustomConfiguration>,
         context: Option<Map<ByteString, Value>>,
+        status: Option<u16>,
     ) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(3, Default::default());
         map.insert("$args".to_string(), Value::Object(self.args.clone()));
@@ -42,6 +43,9 @@ impl RequestInputs {
         }
         if let Some(config) = config {
             map.insert("$config".to_string(), json!(config));
+        }
+        if let Some(status) = status {
+            map.insert("$status".to_string(), Value::Number(status.into()));
         }
         map
     }
@@ -127,7 +131,7 @@ fn request_params_to_requests(
             &connector.transport,
             response_key
                 .inputs()
-                .merge(connector.config.as_ref(), Some(context.clone())),
+                .merge(connector.config.as_ref(), Some(context.clone()), None),
             original_request,
             debug,
         )?;
