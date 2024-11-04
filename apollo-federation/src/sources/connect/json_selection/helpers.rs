@@ -1,10 +1,10 @@
 use nom::character::complete::multispace0;
-use nom::IResult;
 use nom::Slice;
 use serde_json_bytes::Value as JSON;
 
 use super::location::Span;
 use super::location::WithRange;
+use super::ParseResult;
 
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to
@@ -13,10 +13,7 @@ use super::location::WithRange;
 #[macro_export]
 macro_rules! selection {
     ($input:expr) => {
-        if let Ok((remainder, parsed)) =
-            $crate::sources::connect::json_selection::JSONSelection::parse($input)
-        {
-            assert_eq!(remainder, "");
+        if let Ok(parsed) = $crate::sources::connect::json_selection::JSONSelection::parse($input) {
             parsed
         } else {
             panic!("invalid selection: {:?}", $input);
@@ -26,7 +23,7 @@ macro_rules! selection {
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
-pub(crate) fn spaces_or_comments(input: Span) -> IResult<Span, WithRange<&str>> {
+pub(crate) fn spaces_or_comments(input: Span) -> ParseResult<WithRange<&str>> {
     let mut suffix = input;
     loop {
         let mut made_progress = false;
@@ -87,11 +84,12 @@ pub(crate) fn vec_push<T>(mut vec: Vec<T>, item: T) -> Vec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sources::connect::json_selection::location::new_span;
 
     #[test]
     fn test_spaces_or_comments() {
         fn check(input: &str, (exp_remainder, exp_spaces): (&str, &str)) {
-            match spaces_or_comments(Span::new(input)) {
+            match spaces_or_comments(new_span(input)) {
                 Ok((remainder, parsed)) => {
                     assert_eq!(*remainder.fragment(), exp_remainder);
                     assert_eq!(*parsed.as_ref(), exp_spaces);

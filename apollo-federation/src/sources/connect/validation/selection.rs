@@ -76,7 +76,7 @@ pub(super) fn validate_body_selection(
 
     let selection_str = require_value_is_str(selection_node, &coordinate, &schema.sources)?;
 
-    let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
+    let selection = JSONSelection::parse(selection_str).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
         message: format!("{coordinate} is not a valid JSONSelection: {err}"),
         locations: selection_node
@@ -129,16 +129,15 @@ fn get_json_selection<'a>(
                 .collect(),
         })?;
 
-    let (_rest, selection) =
-        JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
-            code: Code::InvalidJsonSelection,
-            message: format!("{coordinate} is not a valid JSONSelection: {err}",),
-            locations: selection_arg
-                .value
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
-        })?;
+    let selection = JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
+        code: Code::InvalidJsonSelection,
+        message: format!("{coordinate} is not a valid JSONSelection: {err}",),
+        locations: selection_arg
+            .value
+            .line_column_range(source_map)
+            .into_iter()
+            .collect(),
+    })?;
 
     if selection.is_empty() {
         return Err(Message {
