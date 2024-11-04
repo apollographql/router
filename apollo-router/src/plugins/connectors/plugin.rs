@@ -25,6 +25,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::register_plugin;
+use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::execution;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
@@ -164,23 +165,11 @@ impl Plugin for Connectors {
                     .service_usage()
                     .unique()
                     .flat_map(|service_name| {
-                        let Some(connector) = connectors.get(service_name) else {
-                            return None;
-                        };
-
-                        let Some(ref source_name) = connector.id.source_name else {
-                            return None;
-                        };
-
-                        Some((connector.id.subgraph_name.clone(), source_name.clone()))
+                        connectors
+                            .get(service_name)
+                            .map(|connector| ConnectorSourceRef::try_from(connector).ok())
                     })
                     .unique()
-                    .map(|(subgraph_name, source_name)| {
-                        json!({
-                            "subgraph_name": subgraph_name,
-                            "source_name": source_name,
-                        })
-                    })
                     .collect_vec();
 
                 req.context
