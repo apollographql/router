@@ -22,11 +22,13 @@ telemetry:
               - "log"
               - request_header: "x-log-request"
         my.request_event:
-          message: "my event message"
+          message: "my request event message"
           level: info
           on: request
           attributes:
             http.request.body.size: true
+            schema.id:
+              request_context: "apollo::supergraph_schema_id"
         my.response_event:
           message: "my response event message"
           level: info
@@ -68,6 +70,12 @@ telemetry:
             eq:
               - "log"
               - response_header: "x-log-request"
+        my.response_event.on_event:
+          message: "my response event message"
+          level: warn
+          on: event_response
+          attributes:
+            on_supergraph_response_event: on_supergraph_event
       subgraph:
         # Standard events
         request: info

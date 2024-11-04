@@ -133,7 +133,6 @@ fn enums_from_response(
     let mut result = ReferencedEnums::new();
     extract_enums_from_response(
         Arc::new(query),
-        operation_name,
         schema.supergraph_schema(),
         &response_body,
         &mut result,

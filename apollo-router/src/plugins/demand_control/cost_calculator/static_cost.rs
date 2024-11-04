@@ -255,7 +255,6 @@ impl StaticCostCalculator {
         &self,
         ctx: &ScoringContext,
         fragment_spread: &FragmentSpread,
-        parent_type: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
@@ -267,7 +266,7 @@ impl StaticCostCalculator {
         self.score_selection_set(
             ctx,
             &fragment.selection_set,
-            parent_type,
+            fragment.type_condition(),
             list_size_directive,
         )
     }
@@ -282,7 +281,10 @@ impl StaticCostCalculator {
         self.score_selection_set(
             ctx,
             &inline_fragment.selection_set,
-            parent_type,
+            inline_fragment
+                .type_condition
+                .as_ref()
+                .unwrap_or(parent_type),
             list_size_directive,
         )
     }
@@ -320,15 +322,10 @@ impl StaticCostCalculator {
                 parent_type,
                 list_size_directive.and_then(|dir| dir.size_of(f)),
             ),
-            Selection::FragmentSpread(s) => {
-                self.score_fragment_spread(ctx, s, parent_type, list_size_directive)
+            Selection::FragmentSpread(s) => self.score_fragment_spread(ctx, s, list_size_directive),
+            Selection::InlineFragment(i) => {
+                self.score_inline_fragment(ctx, i, parent_type, list_size_directive)
             }
-            Selection::InlineFragment(i) => self.score_inline_fragment(
-                ctx,
-                i,
-                i.type_condition.as_ref().unwrap_or(parent_type),
-                list_size_directive,
-            ),
         }
     }
 
@@ -585,6 +582,7 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::introspection::IntrospectionCache;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::QueryPlannerContent;
@@ -671,9 +669,15 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None, None)
-            .await
-            .unwrap();
+        let mut planner = BridgeQueryPlanner::new(
+            schema.into(),
+            config.clone(),
+            None,
+            None,
+            Arc::new(IntrospectionCache::new(&config)),
+        )
+        .await
+        .unwrap();
 
         let ctx = Context::new();
         ctx.extensions()
@@ -718,7 +722,9 @@ mod tests {
         let planner =
             QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
 
-        let query_plan = planner.build_query_plan(&query.executable, None).unwrap();
+        let query_plan = planner
+            .build_query_plan(&query.executable, None, Default::default())
+            .unwrap();
 
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
@@ -897,6 +903,17 @@ mod tests {
         let variables = "{}";
 
         assert_eq!(basic_estimated_cost(schema, query, variables), 0.0)
+    }
+
+    #[test(tokio::test)]
+    async fn fragments_cost() {
+        let schema = include_str!("./fixtures/basic_supergraph_schema.graphql");
+        let query = include_str!("./fixtures/basic_fragments_query.graphql");
+        let variables = "{}";
+
+        assert_eq!(basic_estimated_cost(schema, query, variables), 102.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 102.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 102.0);
     }
 
     #[test(tokio::test)]

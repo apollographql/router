@@ -489,6 +489,11 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub fn update_subgraph_overrides(&mut self, overrides: HashMap<String, String>) {
+        self._subgraph_overrides = overrides;
+    }
+
+    #[allow(dead_code)]
     pub async fn update_schema(&self, supergraph_path: &PathBuf) {
         fs::copy(supergraph_path, &self.test_schema_location).expect("could not write schema");
     }
@@ -523,7 +528,7 @@ impl IntegrationTest {
     pub fn execute_huge_query(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
     }
 
     #[allow(dead_code)]
@@ -582,7 +587,6 @@ impl IntegrationTest {
 
                 let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
-                request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {
