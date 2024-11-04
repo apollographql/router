@@ -2638,7 +2638,9 @@ mod tests {
                     method: GET,
                     uri: http://localhost/api/path,
                     version: HTTP/1.1,
-                    headers: {},
+                    headers: {
+                        "content-length": "0",
+                    },
                     body: Body(
                         Empty,
                     ),

@@ -94,32 +94,39 @@ pub(crate) fn make_request(
 
     let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
 
-    let (json_body, form_body, body, apply_to_errors) = if let Some(ref selection) = transport.body
-    {
-        // The URL and headers use the $context above, but JSON Selection errors if it is present
-        let inputs = inputs
-            .into_iter()
-            .filter(|(k, _)| *k != "$context")
-            .collect();
-        let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
-        let mut form_body = None;
-        let body = if let Some(json_body) = json_body.as_ref() {
-            if is_form_urlencoded {
-                let encoded = encode_json_as_form(json_body)
-                    .map_err(HttpJsonTransportError::FormBodySerialization)?;
-                form_body = Some(encoded.clone());
-                hyper::Body::from(encoded)
+    let (json_body, form_body, body, content_length, apply_to_errors) =
+        if let Some(ref selection) = transport.body {
+            // The URL and headers use the $context above, but JSON Selection errors if it is present
+            let inputs = inputs
+                .into_iter()
+                .filter(|(k, _)| *k != "$context")
+                .collect();
+            let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
+            let mut form_body = None;
+            let (body, content_length) = if let Some(json_body) = json_body.as_ref() {
+                if is_form_urlencoded {
+                    let encoded = encode_json_as_form(json_body)
+                        .map_err(HttpJsonTransportError::FormBodySerialization)?;
+                    form_body = Some(encoded.clone());
+                    let len = encoded.bytes().len();
+                    (hyper::Body::from(encoded), len)
+                } else {
+                    request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
+                    let bytes = serde_json::to_vec(json_body)?;
+                    let len = bytes.len();
+                    (hyper::Body::from(bytes), len)
+                }
             } else {
-                request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
-                hyper::Body::from(serde_json::to_vec(json_body)?)
-            }
+                (hyper::Body::empty(), 0)
+            };
+            (json_body, form_body, body, content_length, apply_to_errors)
         } else {
-            hyper::Body::empty()
+            (None, None, hyper::Body::empty(), 0, vec![])
         };
-        (json_body, form_body, body, apply_to_errors)
-    } else {
-        (None, None, hyper::Body::empty(), vec![])
-    };
+
+    if content_length > 0 {
+        request = request.header(CONTENT_LENGTH, content_length);
+    }
 
     let request = request
         .body(body.into())
@@ -668,12 +675,20 @@ mod test_make_uri {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
+    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HeaderSource;
+    use apollo_federation::sources::connect::JSONSelection;
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
+    use insta::assert_debug_snapshot;
 
     use super::*;
+    use crate::Context;
 
     #[test]
     fn test_headers_to_add_no_directives() {
@@ -758,5 +773,106 @@ mod tests {
             .unwrap()
             .clone()
         );
+    }
+
+    #[test]
+    fn make_request() {
+        let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
+        let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$args".to_string(), json!({ "a": 42 }));
+
+        let req = super::make_request(
+            &HttpJsonTransport {
+                source_url: None,
+                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                method: HTTPMethod::Post,
+                headers: Default::default(),
+                body: Some(JSONSelection::parse("$args { a }").unwrap().1),
+            },
+            vars,
+            &connect::Request {
+                service_name: Arc::from("service"),
+                context: Context::default(),
+                operation: Arc::from(doc),
+                supergraph_request: Arc::from(http::Request::default()),
+                variables: Default::default(),
+            },
+            &None,
+        )
+        .unwrap();
+
+        assert_debug_snapshot!(req, @r###"
+        (
+            Request {
+                method: POST,
+                uri: http://localhost:8080/,
+                version: HTTP/1.1,
+                headers: {
+                    "content-type": "application/json",
+                    "content-length": "8",
+                },
+                body: Body(
+                    Full(
+                        b"{\"a\":42}",
+                    ),
+                ),
+            },
+            None,
+        )
+        "###);
+    }
+
+    #[test]
+    fn make_request_form_encoded() {
+        let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
+        let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$args".to_string(), json!({ "a": 42 }));
+        let mut headers = IndexMap::default();
+        headers.insert(
+            "content-type".parse().unwrap(),
+            HeaderSource::Value("application/x-www-form-urlencoded".parse().unwrap()),
+        );
+
+        let req = super::make_request(
+            &HttpJsonTransport {
+                source_url: None,
+                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                method: HTTPMethod::Post,
+                headers,
+                body: Some(JSONSelection::parse("$args { a }").unwrap().1),
+            },
+            vars,
+            &connect::Request {
+                service_name: Arc::from("service"),
+                context: Context::default(),
+                operation: Arc::from(doc),
+                supergraph_request: Arc::from(http::Request::default()),
+                variables: Default::default(),
+            },
+            &None,
+        )
+        .unwrap();
+
+        assert_debug_snapshot!(req, @r###"
+        (
+            Request {
+                method: POST,
+                uri: http://localhost:8080/,
+                version: HTTP/1.1,
+                headers: {
+                    "content-type": "application/x-www-form-urlencoded",
+                    "content-length": "4",
+                },
+                body: Body(
+                    Full(
+                        b"a=42",
+                    ),
+                ),
+            },
+            None,
+        )
+        "###);
     }
 }
