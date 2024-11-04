@@ -15,18 +15,14 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt as TowerServiceExt;
 
-use super::query_plans::get_connectors;
 use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::register_plugin;
-use crate::services::connector_service::ConnectorSourceRef;
-use crate::services::execution;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
 
@@ -34,7 +30,6 @@ const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
 const CONNECTORS_DEBUG_KEY: &str = "apolloConnectorsDebugging";
 const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OPERATION";
-const CONNECTOR_SOURCES_IN_QUERY_PLAN: &str = "apollo_connectors::sources_in_query_plan";
 
 static LAST_DEBUG_ENABLED_VALUE: AtomicBool = AtomicBool::new(false);
 
@@ -147,37 +142,6 @@ impl Plugin for Connectors {
                     res
                 },
             )
-            .boxed()
-    }
-
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
-        ServiceBuilder::new()
-            .map_request(|req: execution::Request| {
-                let Some(connectors) = get_connectors(&req.context) else {
-                    return req;
-                };
-
-                // add [{"subgraph_name": "", "source_name": ""}] to the context
-                // for connectors with sources in the query plan.
-                let list = req
-                    .query_plan
-                    .root
-                    .service_usage()
-                    .unique()
-                    .flat_map(|service_name| {
-                        connectors
-                            .get(service_name)
-                            .map(|connector| ConnectorSourceRef::try_from(connector).ok())
-                    })
-                    .unique()
-                    .collect_vec();
-
-                req.context
-                    .insert(CONNECTOR_SOURCES_IN_QUERY_PLAN, list)
-                    .unwrap();
-                req
-            })
-            .service(service)
             .boxed()
     }
 }

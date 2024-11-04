@@ -469,7 +469,10 @@ Properties of the JSON body are divided into two high-level categories:
       "formatted_query_plan":"QueryPlan {\n  Fetch(service: \"accounts\") {\n    {\n      me {\n        name\n        username\n      }\n    }\n  },\n}",
       "query":{
         "string":"query Me {\n  me {\n    name\n    username\n  }\n}\n","fragments":{"map":{}},"operations":[{"name":"Me","kind":"query","type_name":"Query","selection_set":[{"Field":{"name":"me","alias":null,"selection_set":[{"Field":{"name":"name","alias":null,"selection_set":null,"field_type":{"Named":"String"},"include_skip":{"include":"Yes","skip":"No"}}},{"Field":{"name":"username","alias":null,"selection_set":null,"field_type":{"Named":"String"},"include_skip":{"include":"Yes","skip":"No"}}}],"field_type":{"Named":"User"},"include_skip":{"include":"Yes","skip":"No"}}}],"variables":{}}],"subselections":{},"unauthorized":{"paths":[],"errors":{"log":true,"response":"errors"}},"filtered_query":null,"defer_stats":{"has_defer":false,"has_unconditional_defer":false,"conditional_defer_variable_names":[]},"is_original":true}
-      }
+      },
+  "sources": [
+    "accounts"
+  ]
 }
 
 ```
@@ -1040,6 +1043,21 @@ When `stage` is `SubgraphRequest`, this is the full URI of the subgraph the rout
 <td>
 
 When `stage` is `ExecutionRequest`, this contains the query plan for the client query. It cannot be modified by the coprocessor.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `sources`
+
+`string`
+
+</td>
+<td>
+
+When `stage` is `ExecutionRequest`, this contains the subgraph names and connector source names in the query plan for the client query. It cannot be modified by the coprocessor.
 
 </td>
 </tr>
