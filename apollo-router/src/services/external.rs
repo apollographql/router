@@ -105,8 +105,6 @@ pub(crate) struct Externalizable<T> {
     query_plan: Option<Arc<QueryPlan>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) subgraph_request_id: Option<SubgraphRequestId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sources: Option<Vec<String>>,
 }
 
 #[buildstructor::buildstructor]
@@ -151,7 +149,6 @@ where
             has_next: None,
             query_plan: None,
             subgraph_request_id: None,
-            sources: None,
         }
     }
 
@@ -192,7 +189,6 @@ where
             has_next,
             query_plan: None,
             subgraph_request_id: None,
-            sources: None,
         }
     }
 
@@ -212,7 +208,6 @@ where
         sdl: Option<String>,
         has_next: Option<bool>,
         query_plan: Option<Arc<QueryPlan>>,
-        sources: Option<Vec<String>>,
     ) -> Self {
         assert!(matches!(
             stage,
@@ -235,7 +230,6 @@ where
             has_next,
             query_plan,
             subgraph_request_id: None,
-            sources,
         }
     }
 
@@ -277,7 +271,6 @@ where
             has_next: None,
             query_plan: None,
             subgraph_request_id,
-            sources: None,
         }
     }
 
