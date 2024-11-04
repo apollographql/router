@@ -6,9 +6,30 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_c
 [
     Message {
         code: InvalidSourceName,
-        message: "There are invalid characters in `@source(name: \"u$ers\")`. Only alphanumeric and underscores are allowed.",
+        message: "`@source(name: \"u$ers\")` is invalid; all source names must follow pattern '^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
         locations: [
             6:17..6:24,
+        ],
+    },
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"1\")` is invalid; all source names must follow pattern '^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+        locations: [
+            7:17..7:20,
+        ],
+    },
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"no.dots\")` is invalid; all source names must follow pattern '^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+        locations: [
+            8:17..8:26,
+        ],
+    },
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"areallylongnamethatisoversixtythreecharacterstakesalongwhiletotypebutthisshoulddoit\")` is invalid; all source names must follow pattern '^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+        locations: [
+            10:11..10:96,
         ],
     },
 ]

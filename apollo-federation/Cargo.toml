@@ -29,7 +29,9 @@ lazy_static = "1.4.0"
 line-col = "0.2.1"
 multimap = "0.10.0"
 nom = "7.1.3"
+once_cell = "1.19.0"
 petgraph = { version = "0.6.4", features = ["serde-1"] }
+regex = "1.10.5"
 serde.workspace = true
 serde_json.workspace = true
 serde_json_bytes.workspace = true

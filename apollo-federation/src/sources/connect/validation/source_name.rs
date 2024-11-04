@@ -17,6 +17,19 @@ use super::Message;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
+// Adding a module to allow changing clippy lints for the regex
+#[allow(clippy::expect_used)]
+mod patterns {
+    use once_cell::sync::Lazy;
+    use regex::Regex;
+
+    /// This is the same regular expression used for subgraph names
+    pub(super) static SOURCE_NAME_REGEX: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
+            .expect("this regex to check source names is valid")
+    });
+}
+
 pub(super) fn validate_source_name_arg(
     field_name: &Name,
     object_name: &Name,
@@ -112,7 +125,7 @@ impl SourceName {
                 directive_name,
                 value: arg.value.clone(),
             }
-        } else if str_value.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        } else if patterns::SOURCE_NAME_REGEX.is_match(str_value) {
             Self::Valid {
                 value: arg.value.clone(),
                 directive_name,
@@ -132,7 +145,8 @@ impl SourceName {
                 value,
                 directive_name,
             } => Err(Message {
-                message: format!("There are invalid characters in {coordinate}. Only alphanumeric and underscores are allowed.", coordinate = source_name_value_coordinate(&directive_name, &value)),
+                // This message is the same as Studio when trying to publish a subgraph with an invalid name
+                message: format!("{coordinate} is invalid; all source names must follow pattern '^[a-zA-Z][a-zA-Z0-9_-]{{0,63}}$", coordinate = source_name_value_coordinate(&directive_name, &value)),
                 code: Code::InvalidSourceName,
                 locations: value.line_column_range(sources).into_iter().collect(),
             }),
