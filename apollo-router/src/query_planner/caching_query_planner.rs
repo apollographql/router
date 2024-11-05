@@ -160,7 +160,7 @@ where
             subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
-            config_mode_hash: config_mode,
+            config_mode_hash,
         })
     }
 
