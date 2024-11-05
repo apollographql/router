@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use apollo_compiler::executable::Directive;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
@@ -10,6 +12,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
@@ -24,7 +27,6 @@ use crate::schema::ValidFederationSchema;
 // Things to consider:
 // - Fields executed through @requires and @key etc, should be recorded but not end up in the
 //   response shape
-// - Subgraph jumps: I think it's enough to execute a field in only one subgraph.
 // - Tolerance for extra fields being executed
 // - Execution order (only in mutations)
 // - Differences due to abstract types: executing a field on an interface is the same as executing
@@ -34,24 +36,57 @@ use crate::schema::ValidFederationSchema;
 //   Could also expand each interface selection to all its concrete types. Note some subgraphs may
 //   not have all concrete types.
 
+/// An element of a path in the supergraph operation.
 #[derive(Debug, Clone)]
 pub struct SupergraphQueryElement {
+    /// Path of the field.
     path: FetchDataPathElement,
-    parent_type: Name,
+    /// Subgraphs where this field *could* be fetched.
     in_subgraphs: Vec<Name>,
 }
 
+/// An element of a path in a subgraph operation.
 #[derive(Debug, Clone)]
 pub struct SubgraphQueryElement {
+    /// Path of the field.
     path: FetchDataPathElement,
-    parent_type: Name,
+    /// Subgraph where this field is actually fetched.
     in_subgraph: Name,
 }
+
+type SupergraphQueryPath = Vec<SupergraphQueryElement>;
+
+type SubgraphQueryPath = Vec<SubgraphQueryElement>;
 
 struct SupergraphQueryVisitor<'a> {
     supergraph: &'a ValidFederationSchema,
     document: &'a Valid<ExecutableDocument>,
-    paths: Vec<Vec<SupergraphQueryElement>>,
+    paths: Vec<SupergraphQueryPath>,
+}
+
+impl Display for SupergraphQueryVisitor<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for path in &self.paths {
+            for (index, element) in path.iter().enumerate() {
+                if index > 0 {
+                    write!(f, " -> ")?;
+                }
+                write!(
+                    f,
+                    "{} ({})",
+                    element.path,
+                    element
+                        .in_subgraphs
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
 }
 
 // directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
@@ -99,6 +134,8 @@ impl SupergraphQueryVisitor<'_> {
         };
 
         // If we have different requires conditions in different graphs, does this need branching?
+        // As long as this is commented out, we do not verify that the generated plan fetches the
+        // fields from a `@requires`, only the fields explicitly in the supergraph operation.
         /*
         let requires = definition.directives
             .get_all("join__field")
@@ -115,7 +152,6 @@ impl SupergraphQueryVisitor<'_> {
         let mut path = path.to_vec();
         path.push(SupergraphQueryElement {
             path: FetchDataPathElement::Key(field.response_key().clone(), vec![]),
-            parent_type: parent_type.name().clone(),
             in_subgraphs,
         });
 
@@ -177,15 +213,15 @@ pub fn supergraph_query_paths(
     operation_name: Option<&str>,
 ) -> Result<Vec<Vec<SupergraphQueryElement>>, FederationError> {
     let Ok(operation) = operation_document.operations.get(operation_name) else {
-        return Err(FederationError::internal("operation name not found"));
+        internal_error!("operation name not found");
     };
 
     let schema = supergraph.schema();
     let Some(root_type) = schema.root_operation(operation.operation_type) else {
-        return Err(FederationError::internal("root operation type not found"));
+        internal_error!("root operation type not found");
     };
     let Some(root_type) = schema.types.get(root_type) else {
-        return Err(FederationError::internal("root operation type not found"));
+        internal_error!("root operation type not found");
     };
 
     let mut visitor = SupergraphQueryVisitor {
@@ -196,31 +232,27 @@ pub fn supergraph_query_paths(
 
     visitor.visit_selection_set(&[], root_type, &operation.selection_set)?;
 
-    for path in &visitor.paths {
-        for (index, element) in path.iter().enumerate() {
-            if index > 0 {
-                print!(" -> ");
-            }
-            print!(
-                "{} ({})",
-                element.path,
-                element
-                    .in_subgraphs
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-        }
-        println!();
-    }
-
     Ok(visitor.paths)
 }
 
 struct QueryPlanVisitor<'a> {
     supergraph: &'a ValidFederationSchema,
-    paths: Vec<Vec<SubgraphQueryElement>>,
+    paths: Vec<SubgraphQueryPath>,
+}
+
+impl Display for QueryPlanVisitor<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for path in &self.paths {
+            for (index, element) in path.iter().enumerate() {
+                if index > 0 {
+                    write!(f, " -> ")?;
+                }
+                write!(f, "{} ({})", element.path, element.in_subgraph)?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
 }
 
 impl QueryPlanVisitor<'_> {
@@ -312,7 +344,6 @@ impl QueryPlanVisitor<'_> {
                     let mut path = path.to_vec();
                     path.push(SubgraphQueryElement {
                         path: FetchDataPathElement::Key(field.response_key().clone(), vec![]),
-                        parent_type: parent_type.name().clone(),
                         in_subgraph: in_subgraph.clone(),
                     });
 
@@ -383,7 +414,7 @@ impl QueryPlanVisitor<'_> {
         node: &FetchNode,
     ) -> Result<(), FederationError> {
         // TODO(@goto-bus-stop): use real translation
-        let in_subgraph = Name::new_unchecked(&node.subgraph_name.to_uppercase().replace("-", "_"));
+        let in_subgraph = Name::new_unchecked(&node.subgraph_name.to_uppercase().replace('-', "_"));
         let Ok(operation) = node
             .operation_document
             .operations
@@ -460,21 +491,16 @@ pub fn query_plan_paths(
         visitor.visit_top_level_node(node)?;
     }
 
-    for path in &visitor.paths {
-        for (index, element) in path.iter().enumerate() {
-            if index > 0 {
-                print!(" -> ");
-            }
-            print!("{} ({})", element.path, element.in_subgraph);
-        }
-        println!();
-    }
-
     Ok(visitor.paths)
 }
 
 /// Compare that the supergraph execution paths are correctly fulfilled by the query plan execution
 /// paths.
+///
+/// This has many limitations at the moment:
+/// - It only verifies that the query plan fetches all the fields that the supergraph operation
+/// fetches.
+/// - It does not account for dependencies introduced by `@key` and `@requires`
 pub fn compare_paths(
     supergraph_paths: &[Vec<SupergraphQueryElement>],
     plan_paths: &[Vec<SubgraphQueryElement>],
