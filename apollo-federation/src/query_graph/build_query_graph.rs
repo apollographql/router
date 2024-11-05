@@ -1481,28 +1481,6 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn handle_context(&mut self) -> Result<(), FederationError> {
-        fn parse_context(field: &str) -> Result<(String, String), FederationError> {
-            let pattern = Regex::new(
-                r#"/^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/"#,
-            ).unwrap();
-
-            let mut iter = pattern.find_iter(field);
-
-            let Some(conext) = iter.next() else {
-                internal_error!("Expected 'context' in @fromContext(field) not found");
-            };
-
-            let Some(selection) = iter.next() else {
-                internal_error!("Expected 'selection' in @fromContext(field) not found");
-            };
-
-            if iter.next().is_some() {
-                internal_error!("More than 'context' and 'selection' found in @fromContext(field)");
-            }
-
-            Ok((conext.as_str().to_owned(), selection.as_str().to_owned()))
-        }
-
         let mut subgraph_to_args: MultiMap<Arc<str>, ObjectFieldArgumentDefinitionPosition> =
             MultiMap::new();
         let mut coordinate_map: HashMap<
@@ -2327,6 +2305,45 @@ fn resolvable_key_applications<'doc>(
     Ok(applications)
 }
 
+fn parse_context(field: &str) -> Result<(String, String), FederationError> {
+    let pattern = Regex::new(
+        r#"^(?:[\n\r\t ,]|#[^\n\r]*)*\$(?:[\n\r\t ,]|#[^\n\r]*)*([A-Za-z_]\w*)([\s\S]*)$"#,
+    )
+    .unwrap();
+
+    let mut iter = pattern.captures_iter(field);
+
+    let Some(captures) = iter.next() else {
+        internal_error!("Expected to find the name of a context and a selection inside the field argument to `@fromContext`: {field:?}");
+    };
+
+    if iter.next().is_some() {
+        internal_error!("Expected only one context and selection pair inside the field argument to `@fromContext`: {field:?}");
+    }
+
+    let (context, selection) = captures
+        .iter()
+        // Ignore the first match because it is always the whole matching substring
+        .skip(1)
+        .filter_map(|group| group)
+        .fold(("", ""), |(a, b), group| (b, group.as_str()));
+
+    if context.is_empty() {
+        internal_error!("Expected to find the name of a context inside the field argument to `@fromContext`: {field:?}");
+    }
+
+    if selection.is_empty() {
+        internal_error!(
+            "Expected to find and a selection inside the field argument to `@fromContext`: {field:?}"
+        );
+    }
+
+    Ok((
+        context.trim_end().to_owned(),
+        selection.trim_start().to_owned(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::collections::IndexMap;
@@ -2427,6 +2444,43 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(tails.len(), 1);
         Ok(tails.pop().unwrap())
+    }
+
+    #[test]
+    fn test_parse_context() {
+        let fields = [
+            ("$context { prop }", ("context", "{ prop }")),
+            (
+                "$context ... on A { prop } ... on B { prop }",
+                ("context", "... on A { prop } ... on B { prop }"),
+            ),
+            (
+                "$topLevelQuery { me { locale } }",
+                ("topLevelQuery", "{ me { locale } }"),
+            ),
+            (
+                "$context { a { b { c { prop }}} }",
+                ("context", "{ a { b { c { prop }}} }"),
+            ),
+            (
+                "$ctx { identifiers { legacyUserId } }",
+                ("ctx", "{ identifiers { legacyUserId } }"),
+            ),
+            (
+                "$retailCtx { identifiers { id5 } }",
+                ("retailCtx", "{ identifiers { id5 } }"),
+            ),
+            ("$retailCtx { mid }", ("retailCtx", "{ mid }")),
+            (
+                "$widCtx { identifiers { wid } }",
+                ("widCtx", "{ identifiers { wid } }"),
+            ),
+        ];
+        for (field, (known_context, known_selection)) in fields {
+            let (context, selection) = super::parse_context(field).unwrap();
+            assert_eq!(context, known_context);
+            assert_eq!(selection, known_selection);
+        }
     }
 
     #[test]
