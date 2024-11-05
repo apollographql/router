@@ -1505,7 +1505,14 @@ impl FederatedQueryGraphBuilder {
 
         let mut subgraph_to_args: MultiMap<Arc<str>, ObjectFieldArgumentDefinitionPosition> =
             MultiMap::new();
-        for (source, subgraph) in self.base.query_graph.subgraphs() {
+        let mut coordinate_map: HashMap<
+            Arc<str>,
+            HashMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>>,
+        > = HashMap::default();
+        for (subgraph_name, subgraph) in self.base.query_graph.subgraphs() {
+            // TODO: Most other `handle_*` methods filter out
+            // `self.base.query_graph.source == subgraph_name`. Should we do something similar?
+            // Perhaps only process the subgraph with the name `self.base.query_graph.source`?
             let Some((_, context_refs)) = &subgraph
                 .referencers()
                 .directives
@@ -1530,7 +1537,7 @@ impl FederatedQueryGraphBuilder {
 
             // For @context
             // subgraph -> referencers -> iter through object_types and interface_types
-            let subgraph_data = self.subgraphs.get(source)?;
+            let subgraph_data = self.subgraphs.get(subgraph_name)?;
             let mut context_name_to_types: HashMap<&str, HashSet<&ObjectTypeDefinitionPosition>> =
                 HashMap::default();
             for object_def_pos in &context_refs.object_types {
@@ -1546,13 +1553,12 @@ impl FederatedQueryGraphBuilder {
 
             // For @fromContext
             // subgraph -> referencers -> iter through object_field_arguments and interface_field_arguments
-            let mut coordinate_map: HashMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>> =
-                HashMap::default();
+            let coordinate_map = coordinate_map.entry(subgraph_name.clone()).or_default();
             for object_field_arg in &from_context_refs.object_field_arguments {
                 let input_value = object_field_arg.get(subgraph.schema())?;
                 let coordinate = object_field_arg.parent();
                 subgraph_to_args
-                    .entry(source.clone())
+                    .entry(subgraph_name.clone())
                     .or_insert_vec(vec![object_field_arg.clone()]);
                 for dir in input_value.directives.get_all(&FROM_CONTEXT_DIRECTIVE_NAME) {
                     let application = subgraph_data
@@ -1570,7 +1576,7 @@ impl FederatedQueryGraphBuilder {
                     let conditions = ContextCondition {
                         context,
                         selection,
-                        subgraph_name: source.clone(),
+                        subgraph_name: subgraph_name.clone(),
                         coordinate: coordinate.clone(),
                         types_with_context_set,
                     };
@@ -1580,25 +1586,31 @@ impl FederatedQueryGraphBuilder {
                         .push(conditions);
                 }
             }
-            // TODO:
-            // Do the simpleTraversal
-
-            for edge in self.base.query_graph.graph.edge_indices() {
-                let edge_weight = self.base.query_graph.edge_weight(edge)?;
-                let QueryGraphEdgeTransition::FieldCollection {
-                    source,
-                    field_definition_position,
-                    ..
-                } = &edge_weight.transition
-                else {
-                    continue;
-                };
-                // TODO: Port the check of `e.head.type.kind === 'ObjectType'`
-                // I think that's found via the collection's field def pos
-                if *source == self.base.query_graph.current_source {
-                    continue;
-                }
-            }
+        }
+        for edge in self.base.query_graph.graph.edge_indices() {
+            let edge_weight = self.base.query_graph.edge_weight(edge)?;
+            let QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } = &edge_weight.transition
+            else {
+                continue;
+            };
+            let FieldDefinitionPosition::Object(obj_field) = field_definition_position else {
+                continue;
+            };
+            let Some(contexts) = coordinate_map.get_mut(source) else {
+                continue;
+            };
+            let Some(required_contexts) = contexts.get(obj_field) else {
+                continue;
+            };
+            self.base
+                .query_graph
+                .edge_weight_mut(edge)?
+                .required_contexts
+                .extend_from_slice(&required_contexts);
         }
 
         // Add the context argument mapping
