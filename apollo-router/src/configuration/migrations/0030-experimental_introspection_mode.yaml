@@ -1,0 +1,4 @@
+description: experimental_introspection_mode was removed
+actions:
+  - type: delete
+    path: experimental_introspection_mode

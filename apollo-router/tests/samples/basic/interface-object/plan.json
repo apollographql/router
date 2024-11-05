@@ -1,0 +1,254 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf__accounts__0{i{__typename id x ...on A{a}...on B{b}}}",
+                                    "operationName": "TestItf__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "i": [
+                                            {
+                                                "__typename": "A",
+                                                "id": "1",
+                                                "x": 1,
+                                                "a": "a"
+                                            },
+                                            null,
+                                            {
+                                                "__typename": "B",
+                                                "id": "2",
+                                                "x": 2,
+                                                "b": "b"
+                                            },
+                                            {
+                                                "__typename": "A",
+                                                "id": "1",
+                                                "x": 1,
+                                                "a": "a"
+                                            },
+                                            {
+                                                "__typename": "B",
+                                                "id": "3",
+                                                "x": 3,
+                                                "b": "c"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                    "operationName": "TestItf__products__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "I",
+                                                "id": "1"
+                                            },
+                                            {
+                                                "__typename": "I",
+                                                "id": "2"
+                                            },
+                                            {
+                                                "__typename": "I",
+                                                "id": "3"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "y": 1
+                                            },
+                                            {
+                                                "y": 2
+                                            },
+                                            null
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": []
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestItf { i { __typename x y ... on A { a } ... on B { b } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "i": [
+                        {
+                            "__typename": "A",
+                            "x": 1,
+                            "y": 1,
+                            "a": "a"
+                        },
+                        null,
+                        {
+                            "__typename": "B",
+                            "x": 2,
+                            "y": 2,
+                            "b": "b"
+                        },
+                        {
+                            "__typename": "A",
+                            "x": 1,
+                            "y": 1,
+                            "a": "a"
+                        },
+                        {
+                            "__typename": "B",
+                            "x": 3,
+                            "y": null,
+                            "b": "c"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf2__accounts__0{req{__typename id i{__typename id x}}}",
+                                    "operationName": "TestItf2__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "req": {
+                                            "__typename": "C",
+                                            "id": "1",
+                                            "i": {
+                                                "__typename": "A",
+                                                "id": "1",
+                                                "x": 1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf2__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                    "operationName": "TestItf2__products__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "I",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "y": 1
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf2__reviews__2($representations:[_Any!]!){_entities(representations:$representations){...on C{c}}}",
+                                    "operationName": "TestItf2__reviews__2",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "C",
+                                                "i": {
+                                                    "x": 1,
+                                                    "y": 1
+                                                },
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "c": "c"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestItf2 { req { id c } }"
+            },
+            "expected_response": {
+                "data": {
+                    "req": {
+                        "id": "1",
+                        "c": "c"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

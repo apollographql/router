@@ -3352,11 +3352,7 @@ pub(crate) fn compute_nodes_for_tree(
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
-    snapshot!(
-        "OpPathTree",
-        serde_json_bytes::json!(initial_tree.to_string()).to_string(),
-        "path_tree"
-    );
+    snapshot!("OpPathTree", initial_tree.to_string(), "path_tree");
     let mut stack = vec![ComputeNodesStackItem {
         tree: initial_tree,
         node_id: initial_node_id,
@@ -3443,7 +3439,11 @@ pub(crate) fn compute_nodes_for_tree(
             }
         }
     }
-    snapshot!(dependency_graph, "updated_dependency_graph");
+    snapshot!(
+        "FetchDependencyGraph",
+        dependency_graph.to_dot(),
+        "Fetch dependency graph updated by compute_nodes_for_tree"
+    );
     Ok(created_nodes)
 }
 

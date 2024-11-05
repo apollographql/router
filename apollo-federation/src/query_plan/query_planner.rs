@@ -11,6 +11,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
+use tracing::trace;
 
 use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
@@ -55,31 +56,26 @@ pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
-    /// Whether the query planner should try to reused the named fragments of the planned query in
+    /// Whether the query planner should try to reuse the named fragments of the planned query in
     /// subgraph fetches.
     ///
-    /// This is often a good idea as it can prevent very large subgraph queries in some cases (named
-    /// fragments can make some relatively small queries (using said fragments) expand to a very large
-    /// query if all the spreads are inline). However, due to architecture of the query planner, this
-    /// optimization is done as an additional pass on the subgraph queries of the generated plan and
-    /// can thus increase the latency of building a plan. As long as query plans are sufficiently
-    /// cached, this should not be a problem, which is why this option is enabled by default, but if
-    /// the distribution of inbound queries prevents efficient caching of query plans, this may become
-    /// an undesirable trade-off and can be disabled in that case.
+    /// Reusing fragments requires complicated validations, so it can take a long time on large
+    /// queries with many fragments. This option may be removed in the future in favour of
+    /// [`generate_query_fragments`][QueryPlannerConfig::generate_query_fragments].
     ///
     /// Defaults to true.
     pub reuse_query_fragments: bool,
 
-    /// NOTE: **not implemented yet**
-    ///
     /// If enabled, the query planner will extract inline fragments into fragment
     /// definitions before sending queries to subgraphs. This can significantly
-    /// reduce the size of the query sent to subgraphs, but may increase the time
-    /// it takes to plan the query.
+    /// reduce the size of the query sent to subgraphs.
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
 
+    /// **TODO:** This option is not implemented, and the behaviour is *always enabled*.
+    /// <https://github.com/apollographql/router/pull/5871>
+    ///
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
     ///
@@ -111,8 +107,8 @@ impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
             reuse_query_fragments: true,
-            subgraph_graphql_validation: false,
             generate_query_fragments: false,
+            subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
             type_conditioned_fetching: Default::default(),
@@ -122,12 +118,15 @@ impl Default for QueryPlannerConfig {
 
 #[derive(Debug, Clone, Default, Hash)]
 pub struct QueryPlanIncrementalDeliveryConfig {
-    /// Enables @defer support by the query planner.
+    /// Enables `@defer` support in the query planner, breaking up the query plan with [DeferNode]s
+    /// as appropriate.
     ///
-    /// If set, then the query plan for queries having some @defer will contains some `DeferNode`
-    /// (see `query_plan/mod.rs`).
+    /// If false, operations with `@defer` are still accepted, but are planned as if they did not
+    /// contain `@defer` directives.
     ///
-    /// Defaults to false (meaning that the @defer are ignored).
+    /// Defaults to false.
+    ///
+    /// [DeferNode]: crate::query_plan::DeferNode
     pub enable_defer: bool,
 }
 
@@ -558,7 +557,15 @@ impl QueryPlanner {
             statistics,
         };
 
-        snapshot!(plan, "query plan");
+        snapshot!(
+            "QueryPlan",
+            plan.to_string(),
+            "QueryPlan from build_query_plan"
+        );
+        snapshot!(
+            plan.statistics,
+            "QueryPlanningStatistics from build_query_plan"
+        );
 
         #[cfg(test)]
         {
@@ -729,7 +736,11 @@ pub(crate) fn compute_root_fetch_groups(
             root_kind,
             root_type.clone(),
         )?;
-        snapshot!(dependency_graph, "tree_with_root_node");
+        snapshot!(
+            "FetchDependencyGraph",
+            dependency_graph.to_dot(),
+            "tree_with_root_node"
+        );
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -750,16 +761,13 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
-    snapshot!(
-        "FetchDependencyGraph",
-        "Empty",
-        "Starting process to construct a parallel fetch dependency graph"
-    );
+    trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
     snapshot!(
-        best_plan.fetch_dependency_graph,
-        "Plan returned from compute_root_parallel_best_plan"
+        "FetchDependencyGraph",
+        best_plan.fetch_dependency_graph.to_dot(),
+        "Fetch dependency graph returned from compute_root_parallel_best_plan"
     );
     Ok(best_plan.fetch_dependency_graph)
 }
@@ -820,7 +828,8 @@ fn compute_plan_internal(
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
-            dependency_graph,
+            "FetchDependencyGraph",
+            dependency_graph.to_dot(),
             "Plan after calling FetchDependencyGraph::process"
         );
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?

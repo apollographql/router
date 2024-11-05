@@ -21,6 +21,7 @@ use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
+use super::Fragment;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -29,6 +30,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::QueryHash;
@@ -50,6 +52,7 @@ pub(crate) mod transform;
 pub(crate) mod traverse;
 
 pub(crate) const TYPENAME: &str = "__typename";
+pub(crate) const RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAILED";
 
 /// A GraphQL query.
 #[derive(Derivative, Serialize, Deserialize)]
@@ -142,20 +145,10 @@ impl Query {
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
-                                errors: Vec::new(),
+                                nullification_errors: Vec::new(),
                                 nullified: Vec::new(),
+                                validation_errors: Vec::new(),
                             };
-                            // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-                            // cf https://github.com/apollographql/router/issues/1677
-                            let operation_kind_if_root_typename = self
-                                .operation
-                                .selection_set
-                                .iter()
-                                .any(|f| f.is_typename_field())
-                                .then(|| *self.operation.kind());
-                            if let Some(operation_kind) = operation_kind_if_root_typename {
-                                output.insert(TYPENAME, operation_kind.default_type_name().into());
-                            }
 
                             response.data = Some(
                                 match self.apply_root_selection_set(
@@ -171,10 +164,16 @@ impl Query {
                                 },
                             );
 
-                            if !parameters.errors.is_empty() {
-                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                            if !parameters.nullification_errors.is_empty() {
+                                if let Ok(value) =
+                                    serde_json_bytes::to_value(&parameters.nullification_errors)
+                                {
                                     response.extensions.insert("valueCompletion", value);
                                 }
+                            }
+
+                            if !parameters.validation_errors.is_empty() {
+                                response.errors.append(&mut parameters.validation_errors);
                             }
 
                             return parameters.nullified;
@@ -208,8 +207,9 @@ impl Query {
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
-                        errors: Vec::new(),
+                        nullification_errors: Vec::new(),
                         nullified: Vec::new(),
+                        validation_errors: Vec::new(),
                     };
 
                     response.data = Some(
@@ -225,33 +225,23 @@ impl Query {
                             Err(InvalidValue) => Value::Null,
                         },
                     );
-                    if !parameters.errors.is_empty() {
-                        if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                    if !parameters.nullification_errors.is_empty() {
+                        if let Ok(value) =
+                            serde_json_bytes::to_value(&parameters.nullification_errors)
+                        {
                             response.extensions.insert("valueCompletion", value);
                         }
+                    }
+
+                    if !parameters.validation_errors.is_empty() {
+                        response.errors.append(&mut parameters.validation_errors);
                     }
 
                     return parameters.nullified;
                 }
             }
             Some(Value::Null) => {
-                // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-                // cf https://github.com/apollographql/router/issues/1677
-                let operation_kind_if_root_typename = self
-                    .operation
-                    .selection_set
-                    .iter()
-                    .any(|f| f.is_typename_field())
-                    .then(|| *self.operation.kind());
-                response.data = match operation_kind_if_root_typename {
-                    Some(operation_kind) => {
-                        let mut output = Object::default();
-                        output.insert(TYPENAME, operation_kind.default_type_name().into());
-                        Some(output.into())
-                    }
-                    None => Some(Value::default()),
-                };
-
+                response.data = Some(Value::Null);
                 return vec![];
             }
             _ => {
@@ -259,7 +249,7 @@ impl Query {
             }
         }
 
-        response.data = Some(Value::default());
+        response.data = Some(Value::Null);
 
         vec![]
     }
@@ -368,6 +358,7 @@ impl Query {
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         parent_type: &executable::Type,
+        field_or_index: FieldOrIndex<'a>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
@@ -388,7 +379,8 @@ impl Query {
                     input,
                     output,
                     path,
-                    field_type,
+                    parent_type,
+                    field_or_index,
                     selection_set,
                 ) {
                     Err(_) => Err(InvalidValue),
@@ -403,7 +395,7 @@ impl Query {
                                 ),
                                 _ => todo!(),
                             };
-                            parameters.errors.push(Error {
+                            parameters.nullification_errors.push(Error {
                                 message,
                                 path: Some(Path::from_response_slice(path)),
                                 ..Error::default()
@@ -443,6 +435,7 @@ impl Query {
                                 &mut output_array[i],
                                 path,
                                 field_type,
+                                FieldOrIndex::Index(i),
                                 selection_set,
                             );
                             path.pop();
@@ -456,7 +449,22 @@ impl Query {
                         Ok(()) => Ok(()),
                     }
                 }
-                _ => Ok(()),
+                Value::Null => Ok(()),
+                v => {
+                    parameters.validation_errors.push(
+                        Error::builder()
+                            .message(format!(
+                                "Invalid non-list value of type {} for list type {field_type}",
+                                v.json_type_name()
+                            ))
+                            .path(Path::from_response_slice(path))
+                            .extension_code(RESPONSE_VALIDATION)
+                            .build(),
+                    );
+
+                    *output = Value::Null;
+                    Ok(())
+                }
             },
             executable::Type::Named(name) if name == "Int" => {
                 let opt = if input.is_i64() {
@@ -472,6 +480,19 @@ impl Query {
                 if opt.is_some() {
                     *output = input.clone();
                 } else {
+                    if !input.is_null() {
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -480,6 +501,19 @@ impl Query {
                 if input.as_f64().is_some() {
                     *output = input.clone();
                 } else {
+                    if !input.is_null() {
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -488,6 +522,19 @@ impl Query {
                 if input.as_bool().is_some() {
                     *output = input.clone();
                 } else {
+                    if !input.is_null() {
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -496,6 +543,19 @@ impl Query {
                 if input.as_str().is_some() {
                     *output = input.clone();
                 } else {
+                    if !input.is_null() {
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -504,6 +564,19 @@ impl Query {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
                     *output = input.clone();
                 } else {
+                    if !input.is_null() {
+                        parameters.validation_errors.push(
+                            Error::builder()
+                                .message(invalid_value_message(
+                                    parent_type,
+                                    field_type,
+                                    field_or_index,
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .extension_code(RESPONSE_VALIDATION)
+                                .build(),
+                        );
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -523,11 +596,31 @@ impl Query {
                                     *output = input.clone();
                                     Ok(())
                                 } else {
+                                    parameters.validation_errors.push(
+                                        Error::builder()
+                                            .message(format!(
+                                                "Expected a valid enum value for type {}",
+                                                enum_type.name
+                                            ))
+                                            .path(Path::from_response_slice(path))
+                                            .extension_code(RESPONSE_VALIDATION)
+                                            .build(),
+                                    );
                                     *output = Value::Null;
                                     Ok(())
                                 }
                             }
                             None => {
+                                parameters.validation_errors.push(
+                                    Error::builder()
+                                        .message(format!(
+                                            "Expected a valid enum value for type {}",
+                                            enum_type.name
+                                        ))
+                                        .path(Path::from_response_slice(path))
+                                        .extension_code(RESPONSE_VALIDATION)
+                                        .build(),
+                                );
                                 *output = Value::Null;
                                 Ok(())
                             }
@@ -538,6 +631,9 @@ impl Query {
 
                 match input {
                     Value::Object(ref mut input_object) => {
+                        // FIXME: we should return an error if __typename is not a string
+                        // but this might cause issues for some production deployments where
+                        // __typename might be missing or invalid (cf https://github.com/apollographql/router/commit/4a592f4933b7b9e46f14c7a98404b9e067687f09 )
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
@@ -565,19 +661,13 @@ impl Query {
                             .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
                             .map(apollo_compiler::ast::Type::Named);
 
-                        let current_type = if parameters
-                            .schema
-                            .get_interface(field_type.inner_named_type())
-                            .is_some()
-                            || parameters
-                                .schema
-                                .get_union(field_type.inner_named_type())
-                                .is_some()
-                        {
-                            typename.as_ref().unwrap_or(field_type)
-                        } else {
-                            field_type
-                        };
+                        let current_type =
+                            match parameters.schema.types.get(field_type.inner_named_type()) {
+                                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
+                                    typename.as_ref().unwrap_or(field_type)
+                                }
+                                _ => field_type,
+                            };
 
                         if self
                             .apply_selection_set(
@@ -596,8 +686,20 @@ impl Query {
 
                         Ok(())
                     }
-                    _ => {
-                        parameters.nullified.push(Path::from_response_slice(path));
+                    Value::Null => {
+                        *output = Value::Null;
+                        Ok(())
+                    }
+                    v => {
+                        parameters.validation_errors.push(
+                        Error::builder()
+                        .message(format!(
+                            "Invalid non-object value of type {} for composite type {type_name}", v.json_type_name()
+                        ))
+                        .path(Path::from_response_slice(path))
+                        .extension_code(RESPONSE_VALIDATION)
+                        .build(),
+                    );
                         *output = Value::Null;
                         Ok(())
                     }
@@ -634,21 +736,18 @@ impl Query {
                     }
 
                     if name.as_str() == TYPENAME {
-                        let input_value = input
-                            .get(field_name.as_str())
-                            .cloned()
-                            .filter(|v| v.is_string())
-                            .unwrap_or_else(|| {
-                                Value::String(ByteString::from(
-                                    current_type.inner_named_type().as_str().to_owned(),
-                                ))
+                        let object_type = parameters
+                            .schema
+                            .get_object(current_type.inner_named_type())
+                            .or_else(|| {
+                                let input_value = input.get(field_name.as_str())?.as_str()?;
+                                parameters.schema.get_object(input_value)
                             });
-                        if let Some(input_str) = input_value.as_str() {
-                            if parameters.schema.get_object(input_str).is_some() {
-                                output.insert((*field_name).clone(), input_value);
-                            } else {
-                                return Err(InvalidValue);
-                            }
+
+                        if let Some(object_type) = object_type {
+                            output.insert((*field_name).clone(), object_type.name.as_str().into());
+                        } else {
+                            return Err(InvalidValue);
                         }
                         continue;
                     }
@@ -676,6 +775,7 @@ impl Query {
                             output_value,
                             path,
                             current_type,
+                            FieldOrIndex::Field(field_name.as_str()),
                             selection_set,
                         );
                         path.pop();
@@ -685,7 +785,7 @@ impl Query {
                             output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
-                            parameters.errors.push(Error {
+                            parameters.nullification_errors.push(Error {
                                 message: format!(
                                     "Cannot return null for non-nullable field {current_type}.{}",
                                     field_name.as_str()
@@ -745,11 +845,15 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(fragment) = self.fragments.get(name) {
+                    if let Some(Fragment {
+                        type_condition,
+                        selection_set,
+                    }) = self.fragments.get(name)
+                    {
                         let is_apply = current_type.inner_named_type().as_str()
-                            == fragment.type_condition.as_str()
+                            == type_condition.as_str()
                             || parameters.schema.is_subtype(
-                                &fragment.type_condition,
+                                type_condition,
                                 current_type.inner_named_type().as_str(),
                             );
 
@@ -762,7 +866,7 @@ impl Query {
                             }
 
                             self.apply_selection_set(
-                                &fragment.selection_set,
+                                selection_set,
                                 parameters,
                                 input,
                                 output,
@@ -803,9 +907,19 @@ impl Query {
                         continue;
                     }
 
+                    let root_type = apollo_compiler::ast::Type::Named(
+                        // Unchecked name instantiation is always safe, and we know the name is
+                        // valid here
+                        apollo_compiler::Name::new_unchecked(root_type_name),
+                    );
                     let field_name = alias.as_ref().unwrap_or(name);
                     let field_name_str = field_name.as_str();
-                    if let Some(input_value) = input.get_mut(field_name_str) {
+
+                    if name.as_str() == TYPENAME {
+                        if !output.contains_key(field_name_str) {
+                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
+                        }
+                    } else if let Some(input_value) = input.get_mut(field_name_str) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
                         // the input value with Null
@@ -826,17 +940,14 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            &field_type.0,
+                            &root_type,
+                            FieldOrIndex::Field(field_name_str),
                             selection_set,
                         );
                         path.pop();
                         res?
-                    } else if name.as_str() == TYPENAME {
-                        if !output.contains_key(field_name_str) {
-                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
-                        }
                     } else if field_type.is_non_null() {
-                        parameters.errors.push(Error {
+                        parameters.nullification_errors.push(Error {
                             message: format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
                                 root_type_name
@@ -855,25 +966,25 @@ impl Query {
                     include_skip,
                     ..
                 } => {
-                    // top level objects will not provide a __typename field
-                    if type_condition.as_str() != root_type_name {
-                        return Err(InvalidValue);
-                    }
-
                     if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
-                    self.apply_selection_set(
-                        selection_set,
-                        parameters,
-                        input,
-                        output,
-                        path,
-                        // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
-                        #[allow(clippy::unwrap_used)]
-                        &FieldType::new_named(type_condition.try_into().unwrap()).0,
-                    )?;
+                    // check if the fragment matches the input type directly, and if not, check if the
+                    // input type is a subtype of the fragment's type condition (interface, union)
+                    let is_apply = (root_type_name == type_condition.as_str())
+                        || parameters.schema.is_subtype(type_condition, root_type_name);
+
+                    if is_apply {
+                        self.apply_root_selection_set(
+                            root_type_name,
+                            selection_set,
+                            parameters,
+                            input,
+                            output,
+                            path,
+                        )?;
+                    }
                 }
                 Selection::FragmentSpread {
                     name,
@@ -886,30 +997,26 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(fragment) = self.fragments.get(name) {
-                        let is_apply = {
-                            // check if the fragment matches the input type directly, and if not, check if the
-                            // input type is a subtype of the fragment's type condition (interface, union)
-                            root_type_name == fragment.type_condition.as_str()
-                                || parameters
-                                    .schema
-                                    .is_subtype(&fragment.type_condition, root_type_name)
-                        };
+                    if let Some(Fragment {
+                        type_condition,
+                        selection_set,
+                    }) = self.fragments.get(name)
+                    {
+                        // check if the fragment matches the input type directly, and if not, check if the
+                        // input type is a subtype of the fragment's type condition (interface, union)
+                        let is_apply = (root_type_name == type_condition.as_str())
+                            || parameters.schema.is_subtype(type_condition, root_type_name);
 
-                        if !is_apply {
-                            return Err(InvalidValue);
+                        if is_apply {
+                            self.apply_root_selection_set(
+                                root_type_name,
+                                selection_set,
+                                parameters,
+                                input,
+                                output,
+                                path,
+                            )?;
                         }
-
-                        self.apply_selection_set(
-                            &fragment.selection_set,
-                            parameters,
-                            input,
-                            output,
-                            path,
-                            // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
-                            #[allow(clippy::unwrap_used)]
-                            &FieldType::new_named(root_type_name.try_into().unwrap()).0,
-                        )?;
                     } else {
                         // the fragment should have been already checked with the schema
                         failfast_debug!("missing fragment named: {}", name);
@@ -1048,7 +1155,8 @@ impl Query {
 /// Intermediate structure for arguments passed through the entire formatting
 struct FormatParameters<'a> {
     variables: &'a Object,
-    errors: Vec<Error>,
+    nullification_errors: Vec<Error>,
+    validation_errors: Vec<Error>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
 }
@@ -1066,6 +1174,26 @@ pub(crate) struct Operation {
 pub(crate) struct Variable {
     field_type: FieldType,
     default_value: Option<Value>,
+}
+
+enum FieldOrIndex<'a> {
+    Field(&'a str),
+    Index(usize),
+}
+
+fn invalid_value_message(
+    parent_type: &executable::Type,
+    field_type: &executable::Type,
+    field_or_index: FieldOrIndex,
+) -> String {
+    match field_or_index {
+        FieldOrIndex::Field(field_name) => {
+            format!("Invalid value found for field {parent_type}.{field_name}")
+        }
+        FieldOrIndex::Index(i) => {
+            format!("Invalid value found for array element of type {field_type} at index {i}")
+        }
+    }
 }
 
 impl Operation {
