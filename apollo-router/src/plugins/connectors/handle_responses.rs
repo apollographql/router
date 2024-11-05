@@ -771,7 +771,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$status").unwrap().1,
+            selection: JSONSelection::parse("$status").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
@@ -785,7 +785,7 @@ mod tests {
             name: "hello".to_string(),
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("Int".to_string()),
-            selection: Arc::new(JSONSelection::parse("$status").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
 
         let res = super::handle_responses(
