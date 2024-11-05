@@ -792,7 +792,7 @@ mod tests {
                 connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers: Default::default(),
-                body: Some(JSONSelection::parse("$args { a }").unwrap().1),
+                body: Some(JSONSelection::parse("$args { a }").unwrap()),
             },
             vars,
             &connect::Request {
@@ -845,7 +845,7 @@ mod tests {
                 connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers,
-                body: Some(JSONSelection::parse("$args { a }").unwrap().1),
+                body: Some(JSONSelection::parse("$args { a }").unwrap()),
             },
             vars,
             &connect::Request {
