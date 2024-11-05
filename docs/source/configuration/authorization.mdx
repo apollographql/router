@@ -693,7 +693,7 @@ GraphOS's composition strategy for authorization directives is intentionally acc
 ### Composed fields with different authorization directives
 
 If a shared field uses different authorization directives across subgraphs, composition merges them using `AND` logic.
-For example, suppose the `me` query requires `@authentication` in one subgraph and the `read:user` scope in another subgraph:
+For example, suppose the `me` query requires `@authenticated` in one subgraph and the `read:user` scope in another subgraph:
 
 ```graphql title="Subgraph A"
 type Query {
