@@ -64,6 +64,7 @@ pub(crate) enum ConfigMode {
     //FIXME: add the Rust planner structure once it is hashable and serializable,
     // for now use the JS config as it expected to be identical to the Rust one
     Rust(Arc<apollo_federation::query_plan::query_planner::QueryPlannerConfig>),
+    Both(Arc<QueryPlannerConfig>),
     BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
 }
@@ -82,7 +83,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     experimental_reuse_query_plans: QueryPlanReuseMode,
-    config_mode: Arc<QueryHash>,
+    config_mode_hash: Arc<QueryHash>,
 }
 
 fn init_query_plan_from_redis(
@@ -140,16 +141,20 @@ where
             }
             crate::configuration::QueryPlannerMode::Both => {
                 "PLANNER-BOTH".hash(&mut hasher);
-                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
+                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+                    .hash(&mut hasher);
                 ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
                     .hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::BothBestEffort => {
+                "PLANNER-BOTH-BEST-EFFORT".hash(&mut hasher);
                 ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
+                    .hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
                     .hash(&mut hasher);
             }
         };
-        let config_mode = Arc::new(QueryHash(hasher.finalize()));
+        let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
 
         Ok(Self {
             cache,
@@ -162,7 +167,7 @@ where
                 .supergraph
                 .query_planning
                 .experimental_reuse_query_plans,
-            config_mode,
+            config_mode_hash,
         })
     }
 
@@ -219,7 +224,7 @@ where
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
-                            config_mode: self.config_mode.clone(),
+                            config_mode: self.config_mode_hash.clone(),
                         },
                     )
                     .take(count)
@@ -264,7 +269,7 @@ where
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
-                        config_mode: self.config_mode.clone(),
+                        config_mode: self.config_mode_hash.clone(),
                     });
                 }
             }
@@ -306,7 +311,7 @@ where
                 },
                 metadata: metadata.clone(),
                 plan_options: plan_options.clone(),
-                config_mode: self.config_mode.clone(),
+                config_mode: self.config_mode_hash.clone(),
             };
 
             let mut should_measure = None;
@@ -333,7 +338,7 @@ where
                         hash: warmup_hash.clone(),
                         metadata: metadata.clone(),
                         plan_options: plan_options.clone(),
-                        config_mode: self.config_mode.clone(),
+                        config_mode: self.config_mode_hash.clone(),
                     });
                 }
             };
@@ -368,6 +373,11 @@ where
                     lock.insert::<ParsedDocument>(doc);
                     lock.insert(caching_key.metadata)
                 });
+
+                let _ = context.insert(
+                    LABELS_TO_OVERRIDE_KEY,
+                    caching_key.plan_options.override_conditions.clone(),
+                );
 
                 let request = QueryPlannerRequest {
                     query: query.clone(),
@@ -582,7 +592,7 @@ where
             },
             metadata,
             plan_options,
-            config_mode: self.config_mode.clone(),
+            config_mode: self.config_mode_hash.clone(),
         };
 
         let context = request.context.clone();
