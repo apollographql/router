@@ -591,6 +591,12 @@ pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
     pub(crate) lazily_computed_indirect_paths: Vec<Option<OpIndirectPaths>>,
 }
 
+impl Display for SimultaneousPathsWithLazyIndirectPaths {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.paths)
+    }
+}
+
 /// A "set" of excluded destinations (i.e. subgraph names). Note that we use a `Vec` instead of set
 /// because this is used in pretty hot paths (the whole path computation is CPU intensive) and will
 /// basically always be tiny (it's bounded by the number of distinct key on a given type, so usually
