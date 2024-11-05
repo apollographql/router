@@ -151,7 +151,7 @@ where
                     .hash(&mut hasher);
             }
         };
-        let config_mode = Arc::new(QueryHash(hasher.finalize()));
+        let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
 
         Ok(Self {
             cache,
