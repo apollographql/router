@@ -630,7 +630,7 @@ impl<'a> QueryHashVisitor<'a> {
             }
             Ok(())
         } else {
-            return Err("context argument value is not an object".into());
+            Err("context argument value is not an object".into())
         }
     }
 
