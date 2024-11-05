@@ -6,6 +6,7 @@ pub(crate) enum KnownVariable {
     This,
     Args,
     Config,
+    Status,
     Dollar,
     AtSign,
 }
@@ -16,6 +17,7 @@ impl KnownVariable {
             "$this" => Some(Self::This),
             "$args" => Some(Self::Args),
             "$config" => Some(Self::Config),
+            "$status" => Some(Self::Status),
             "$" => Some(Self::Dollar),
             "@" => Some(Self::AtSign),
             _ => None,
@@ -27,6 +29,7 @@ impl KnownVariable {
             Self::This => "$this",
             Self::Args => "$args",
             Self::Config => "$config",
+            Self::Status => "$status",
             Self::Dollar => "$",
             Self::AtSign => "@",
         }

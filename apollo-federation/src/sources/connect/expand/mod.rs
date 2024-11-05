@@ -771,7 +771,7 @@ mod helpers {
                     // (externally-provided) variables like $this, $args, and
                     // $config. The $ and @ variables, by contrast, are always bound
                     // to something within the input data.
-                    KnownVariable::Dollar | KnownVariable::AtSign => {
+                    KnownVariable::Dollar | KnownVariable::AtSign | KnownVariable::Status => {
                         return None;
                     }
                 };
