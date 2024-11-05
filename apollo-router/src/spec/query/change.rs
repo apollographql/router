@@ -66,6 +66,8 @@ use crate::plugins::progressive_override::JOIN_SPEC_BASE_URL;
 use crate::spec::Schema;
 
 pub(crate) const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
+pub(crate) const CONTEXT_SPEC_BASE_URL: &str = "https://specs.apollo.dev/context";
+pub(crate) const CONTEXT_DIRECTIVE_NAME: &str = "context";
 
 /// Calculates a hash of the query and the schema, but only looking at the parts of the
 /// schema which affect the query.
@@ -84,6 +86,9 @@ pub(crate) struct QueryHashVisitor<'a> {
     seen_introspection: bool,
     join_field_directive_name: Option<String>,
     join_type_directive_name: Option<String>,
+    context_directive_name: Option<String>,
+    // map from context string to list of type names
+    contexts: HashMap<String, Vec<String>>,
 }
 
 impl<'a> QueryHashVisitor<'a> {
@@ -113,6 +118,13 @@ impl<'a> QueryHashVisitor<'a> {
                 ">=0.1.0",
                 JOIN_TYPE_DIRECTIVE_NAME,
             ),
+            context_directive_name: Schema::directive_name(
+                schema,
+                CONTEXT_SPEC_BASE_URL,
+                ">=0.1.0",
+                CONTEXT_DIRECTIVE_NAME,
+            ),
+            contexts: HashMap::new(),
         };
 
         visitor.hash_schema()?;
@@ -290,6 +302,8 @@ impl<'a> QueryHashVisitor<'a> {
 
                 self.hash_join_type(&o.name, &o.directives)?;
 
+                self.record_context(&o.name, &o.directives)?;
+
                 "^IMPLEMENTED_INTERFACES_LIST".hash(self);
                 for interface in &o.implements_interfaces {
                     self.hash_type_by_name(&interface.name)?;
@@ -303,6 +317,8 @@ impl<'a> QueryHashVisitor<'a> {
                 self.hash_directive_list_schema(&i.directives);
 
                 self.hash_join_type(&i.name, &i.directives)?;
+
+                self.record_context(&i.name, &i.directives)?;
 
                 "^IMPLEMENTED_INTERFACES_LIST".hash(self);
                 for implementor in &i.implements_interfaces {
@@ -331,6 +347,8 @@ impl<'a> QueryHashVisitor<'a> {
                 "^UNION".hash(self);
 
                 self.hash_directive_list_schema(&u.directives);
+
+                self.record_context(&u.name, &u.directives)?;
 
                 "^MEMBER_LIST".hash(self);
                 for member in &u.members {
@@ -535,11 +553,85 @@ impl<'a> QueryHashVisitor<'a> {
                         }
                     }
                 }
+
+                if let Some(context_arguments) = dir
+                    .specified_argument_by_name("contextArguments")
+                    .and_then(|value| value.as_list())
+                {
+                    for argument in context_arguments {
+                        self.hash_context_argument(argument)?;
+                    }
+                }
             }
         }
         "^JOIN_FIELD-END".hash(self);
 
         Ok(())
+    }
+
+    fn record_context(
+        &mut self,
+        parent_type: &str,
+        directives: &DirectiveList,
+    ) -> Result<(), BoxError> {
+        if let Some(dir_name) = self.context_directive_name.as_deref() {
+            if let Some(dir) = directives.get(dir_name) {
+                if let Some(name) = dir
+                    .specified_argument_by_name("name")
+                    .and_then(|arg| arg.as_str())
+                {
+                    self.contexts
+                        .entry(name.to_string())
+                        .or_default()
+                        .push(parent_type.to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Hashes the context argument of a field
+    ///
+    /// contextArgument contains a selection that must be applied to a parent type in the
+    /// query that matches the context name. We store in advance which type names map to
+    /// which contexts, to reuse them here when we encounter the selection.
+    fn hash_context_argument(&mut self, argument: &ast::Value) -> Result<(), BoxError> {
+        if let Some(obj) = argument.as_object() {
+            let context_name = Name::new("context")?;
+            let selection_name = Name::new("selection")?;
+            if let (Some(context), Some(selection)) = (
+                obj.iter()
+                    .find(|(k, _)| k == &context_name)
+                    .and_then(|(_, v)| v.as_str()),
+                obj.iter()
+                    .find(|(k, _)| k == &selection_name)
+                    .and_then(|(_, v)| v.as_str()),
+            ) {
+                if let Some(types) = self.contexts.get(context).cloned() {
+                    for ty in types {
+                        if let Ok(parent_type) = Name::new(ty.as_str()) {
+                            let mut parser = Parser::new();
+
+                            if let Ok(field_set) = parser.parse_field_set(
+                                Valid::assume_valid_ref(self.schema),
+                                parent_type.clone(),
+                                selection,
+                                std::path::Path::new("schema.graphql"),
+                            ) {
+                                traverse::selection_set(
+                                    self,
+                                    parent_type.as_str(),
+                                    &field_set.selection_set.selections[..],
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        } else {
+            return Err("context argument value is not an object".into());
+        }
     }
 
     fn hash_interface_implementers(
