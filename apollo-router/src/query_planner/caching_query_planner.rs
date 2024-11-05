@@ -350,6 +350,11 @@ where
                     lock.insert(caching_key.metadata)
                 });
 
+                let _ = context.insert(
+                    LABELS_TO_OVERRIDE_KEY,
+                    caching_key.plan_options.override_conditions.clone(),
+                );
+
                 let request = QueryPlannerRequest {
                     query,
                     operation_name,
