@@ -1,0 +1,113 @@
+{
+    "enterprise": true,
+    "redis": true,
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "cache-defer-accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query CacheDefer__cache_defer_accounts__0{me{__typename name id}}",
+                                    "operationName": "CacheDefer__cache_defer_accounts__0"
+                                }
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {
+                                    "data": {
+                                        "me": {
+                                            "__typename": "User",
+                                            "name": "test-user",
+                                            "id": "1"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "cache-defer-reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query CacheDefer__cache_defer_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+                                    "operationName": "CacheDefer__cache_defer_reviews__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "id": "1",
+                                                "__typename": "User"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=100",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {
+                                    "data": {
+                                        "reviews": [
+                                            {
+                                                "body": "test-review"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query CacheDefer { me { name ... @defer { reviews { body } } } }"
+            },
+            "headers": {
+                "Accept": "multipart/mixed;deferSpec=20220824"
+            },
+            "expected_response": [
+                {
+                    "data": {
+                        "me": {
+                            "name": "test-user"
+                        }
+                    },
+                    "hasNext": true
+                },
+                {
+                    "hasNext": false,
+                    "incremental": [
+                        {
+                            "data": {
+                                "reviews": null
+                            },
+                            "path": [
+                                "me"
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "expected_headers": {
+                "Cache-Control": "max-age=10,public"
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

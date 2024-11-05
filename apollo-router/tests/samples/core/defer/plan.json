@@ -1,0 +1,106 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "{me{__typename name id}}"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "me": {
+                                            "__typename": "User",
+                                            "name": "test",
+                                            "id": "1"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "User",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "reviews": [
+                                                    {
+                                                        "body": "Test"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "headers": {
+                "Accept": "multipart/mixed;deferSpec=20220824"
+            },
+            "request": {
+                "query": "{ me { name ... @defer { reviews { body } } } }"
+            },
+            "expected_response": [
+                {
+                    "data": {
+                        "me": {
+                            "name": "test"
+                        }
+                    },
+                    "hasNext": true
+                },
+                {
+                    "hasNext": false,
+                    "incremental": [
+                        {
+                            "data": {
+                                "reviews": [
+                                    {
+                                        "body": "Test"
+                                    }
+                                ]
+                            },
+                            "path": [
+                                "me"
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

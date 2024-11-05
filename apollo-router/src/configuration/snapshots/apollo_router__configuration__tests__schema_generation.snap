@@ -549,6 +549,11 @@ expression: "&schema"
     "Client": {
       "additionalProperties": false,
       "properties": {
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
@@ -2160,6 +2165,45 @@ expression: "&schema"
         },
         {
           "type": "boolean"
+        }
+      ]
+    },
+    "DnsResolutionStrategy": {
+      "oneOf": [
+        {
+          "description": "Only query for `A` (IPv4) records",
+          "enum": [
+            "ipv4_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Only query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv6_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel",
+          "enum": [
+            "ipv4_and_ipv6"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records",
+          "enum": [
+            "ipv6_then_ipv4"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv4_then_ipv6"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -4997,6 +5041,25 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "A value from context.",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "request_context": {
+              "description": "The request context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A header from the response",
           "properties": {
             "default": {
@@ -5911,6 +5974,11 @@ expression: "&schema"
           "description": "Send the service name",
           "type": "boolean"
         },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
+          "type": "boolean"
+        },
         "uri": {
           "default": false,
           "description": "Send the subgraph URI",
@@ -5951,6 +6019,11 @@ expression: "&schema"
         "status_code": {
           "default": false,
           "description": "Send the http status",
+          "type": "boolean"
+        },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
           "type": "boolean"
         }
       },
@@ -6375,6 +6448,11 @@ expression: "&schema"
           "description": "Enable query deduplication",
           "nullable": true,
           "type": "boolean"
+        },
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
         },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
