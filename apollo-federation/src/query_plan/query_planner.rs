@@ -74,7 +74,7 @@ pub struct QueryPlannerConfig {
     pub generate_query_fragments: bool,
 
     /// **TODO:** This option is not implemented, and the behaviour is *always enabled*.
-    /// https://github.com/apollographql/router/pull/5871
+    /// <https://github.com/apollographql/router/pull/5871>
     ///
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
