@@ -583,19 +583,6 @@ impl QueryPlanner {
             .types
             .values()
             .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
-        if has_set_context {
-            let message = "\
-                `experimental_query_planner_mode: new` or `both` cannot yet \
-                be used with `@context`. \
-                Remove uses of `@context` to try the experimental query planner, \
-                otherwise switch back to `legacy` or `both_best_effort`.\
-            ";
-            return Err(SingleFederationError::UnsupportedFeature {
-                message: message.to_owned(),
-                kind: crate::error::UnsupportedFeatureKind::Context,
-            }
-            .into());
-        }
         Ok(())
     }
 }
