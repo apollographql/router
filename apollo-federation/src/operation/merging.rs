@@ -15,9 +15,9 @@ use super::NamedFragments;
 use super::Selection;
 use super::SelectionSet;
 use super::SelectionValue;
+use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
-use crate::bail;
 
 impl<'a> FieldSelectionValue<'a> {
     /// Merges the given field selections into this one.

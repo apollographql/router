@@ -369,27 +369,27 @@ impl QueryGraph {
     }
 
     pub(crate) fn node_weight(&self, node: NodeIndex) -> Result<&QueryGraphNode, FederationError> {
-        self.graph.node_weight(node).ok_or_else(|| {
-            internal_error!("Node unexpectedly missing")
-        })
+        self.graph
+            .node_weight(node)
+            .ok_or_else(|| internal_error!("Node unexpectedly missing"))
     }
 
     fn node_weight_mut(&mut self, node: NodeIndex) -> Result<&mut QueryGraphNode, FederationError> {
-        self.graph.node_weight_mut(node).ok_or_else(|| {
-            internal_error!("Node unexpectedly missing")
-        })
+        self.graph
+            .node_weight_mut(node)
+            .ok_or_else(|| internal_error!("Node unexpectedly missing"))
     }
 
     pub(crate) fn edge_weight(&self, edge: EdgeIndex) -> Result<&QueryGraphEdge, FederationError> {
-        self.graph.edge_weight(edge).ok_or_else(|| {
-            internal_error!("Edge unexpectedly missing")
-        })
+        self.graph
+            .edge_weight(edge)
+            .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
     }
 
     fn edge_weight_mut(&mut self, edge: EdgeIndex) -> Result<&mut QueryGraphEdge, FederationError> {
-        self.graph.edge_weight_mut(edge).ok_or_else(|| {
-            internal_error!("Edge unexpectedly missing")
-        })
+        self.graph
+            .edge_weight_mut(edge)
+            .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
     }
 
     pub(crate) fn edge_head_weight(
@@ -404,9 +404,9 @@ impl QueryGraph {
         &self,
         edge: EdgeIndex,
     ) -> Result<(NodeIndex, NodeIndex), FederationError> {
-        self.graph.edge_endpoints(edge).ok_or_else(|| {
-            internal_error!("Edge unexpectedly missing")
-        })
+        self.graph
+            .edge_endpoints(edge)
+            .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
     }
 
     fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
@@ -417,9 +417,9 @@ impl QueryGraph {
         &self,
         source: &str,
     ) -> Result<&ValidFederationSchema, FederationError> {
-        self.sources.get(source).ok_or_else(|| {
-            internal_error!(r#"Schema for "{source}" unexpectedly missing"#)
-        })
+        self.sources
+            .get(source)
+            .ok_or_else(|| internal_error!(r#"Schema for "{source}" unexpectedly missing"#))
     }
 
     pub(crate) fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {

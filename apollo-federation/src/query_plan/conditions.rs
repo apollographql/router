@@ -8,8 +8,8 @@ use apollo_compiler::Node;
 use indexmap::map::Entry;
 use serde::Serialize;
 
-use crate::error::FederationError;
 use crate::bail;
+use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::NamedFragments;
 use crate::operation::Selection;
