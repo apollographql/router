@@ -405,6 +405,23 @@ impl InstrumentData {
             "$.metrics_reference_mode"
         );
 
+        populate_config_instrument!(
+            apollo.router.config.connectors,
+            "$.preview_connectors",
+            opt.debug_extensions,
+            "$[?(@.debug_extensions == true)]",
+            opt.expose_sources_in_context,
+            "$[?(@.expose_sources_in_context == true)]",
+            opt.max_requests_per_operation_per_source,
+            "$[?(@.max_requests_per_operation_per_source)]",
+            opt.subgraph.config,
+            "$[?(@.subgraphs..['$config'])]",
+            opt.source.override_url,
+            "$[?(@.subgraphs..sources..override_url)]",
+            opt.source.max_requests_per_operation,
+            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
+        );
+
         // We need to update the entry we just made because the selected strategy is a named object in the config.
         // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
         if let Some((_, demand_control_attributes)) =
