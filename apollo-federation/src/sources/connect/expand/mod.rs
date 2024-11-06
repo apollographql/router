@@ -522,7 +522,7 @@ mod helpers {
                             to_schema,
                             &self.directive_deny_list,
                         );
-                        let (_, parsed) = JSONSelection::parse(&field_and_selection.sub_selection)
+                        let parsed = JSONSelection::parse(&field_and_selection.sub_selection)
                             .map_err(|e| {
                                 FederationError::internal(format!(
                                     "error creating key from `$this` variable: {e}"
@@ -772,7 +772,7 @@ mod helpers {
                     // (externally-provided) variables like $this, $args, and
                     // $config. The $ and @ variables, by contrast, are always bound
                     // to something within the input data.
-                    KnownVariable::Dollar | KnownVariable::AtSign => {
+                    KnownVariable::Dollar | KnownVariable::AtSign | KnownVariable::Status => {
                         return None;
                     }
                 };

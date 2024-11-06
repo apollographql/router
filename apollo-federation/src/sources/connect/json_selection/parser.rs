@@ -8,6 +8,7 @@ use nom::combinator::all_consuming;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::combinator::recognize;
+use nom::error::ParseError;
 use nom::multi::many0;
 use nom::sequence::pair;
 use nom::sequence::preceded;
@@ -21,11 +22,52 @@ use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::merge_ranges;
+use super::location::new_span;
 use super::location::ranged_span;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
+
+// ParseResult is the internal type returned by most ::parse methods, as it is
+// convenient to use with nom's combinators. The top-level JSONSelection::parse
+// method returns a slightly different IResult type that hides implementation
+// details of the nom-specific types.
+//
+// TODO Consider switching the third IResult type parameter to VerboseError
+// here, if error messages can be improved with additional context.
+pub(super) type ParseResult<'a, T> = IResult<Span<'a>, T>;
+
+// Generates a non-fatal error with the given suffix and message, allowing the
+// parser to recover and continue.
+pub(super) fn nom_error_message<'a>(
+    suffix: Span<'a>,
+    // This message type forbids computing error messages with format!, which
+    // might be worthwhile in the future. For now, it's convenient to avoid
+    // String messages so the Span type can remain Copy, so we don't have to
+    // clone spans frequently in the parsing code. In most cases, the suffix
+    // provides the dynamic context needed to interpret the static message.
+    message: &'static str,
+) -> nom::Err<nom::error::Error<Span<'a>>> {
+    nom::Err::Error(nom::error::Error::from_error_kind(
+        suffix.map_extra(|_| Some(message)),
+        nom::error::ErrorKind::IsNot,
+    ))
+}
+
+// Generates a fatal error with the given suffix Span and message, causing the
+// parser to abort with the given error message, which is useful after
+// recognizing syntax that completely constrains what follows (like the -> token
+// before a method name), and what follows does not parse as required.
+pub(super) fn nom_fail_message<'a>(
+    suffix: Span<'a>,
+    message: &'static str,
+) -> nom::Err<nom::error::Error<Span<'a>>> {
+    nom::Err::Failure(nom::error::Error::from_error_kind(
+        suffix.map_extra(|_| Some(message)),
+        nom::error::ErrorKind::IsNot,
+    ))
+}
 
 pub(crate) trait ExternalVarPaths {
     fn external_var_paths(&self) -> Vec<&PathSelection>;
@@ -43,6 +85,40 @@ pub enum JSONSelection {
     Path(PathSelection),
 }
 
+// To keep JSONSelection::parse consumers from depending on details of the nom
+// error types, JSONSelection::parse reports this custom error type. Other
+// ::parse methods still internally report nom::error::Error for the most part.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct JSONSelectionParseError {
+    // The message will be a meaningful error message in many cases, but may
+    // fall back to a formatted nom::error::ErrorKind in some cases, e.g. when
+    // an alt(...) runs out of options and we can't determine which underlying
+    // error was "most" responsible.
+    pub message: String,
+
+    // Since we are not exposing the nom_locate-specific Span type, we report
+    // span.fragment() and span.location_offset() here.
+    pub fragment: String,
+
+    // While it might be nice to report a range rather than just an offset, not
+    // all parsing errors have an unambiguous end offset, so the best we can do
+    // is point to the suffix of the input that failed to parse (which
+    // corresponds to where the fragment starts).
+    pub offset: usize,
+}
+
+impl std::error::Error for JSONSelectionParseError {}
+
+impl Display for JSONSelectionParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} at offset {}: {}",
+            self.message, self.offset, self.fragment
+        )
+    }
+}
+
 impl JSONSelection {
     pub fn empty() -> Self {
         JSONSelection::Named(SubSelection {
@@ -58,9 +134,48 @@ impl JSONSelection {
         }
     }
 
-    pub fn parse(input: &str) -> IResult<&str, Self> {
-        let input_span = Span::new(input);
+    // JSONSelection::parse is possibly the "most public" method in the entire
+    // file, so it's important that the method signature can remain stable even
+    // if we drastically change implementation details. That's why we use &str
+    // as the input type and a custom JSONSelectionParseError type as the error
+    // type, rather than using Span or nom::error::Error directly.
+    pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
+        match JSONSelection::parse_span(new_span(input)) {
+            Ok((remainder, selection)) => {
+                let fragment = remainder.fragment();
+                if fragment.is_empty() {
+                    Ok(selection)
+                } else {
+                    Err(JSONSelectionParseError {
+                        message: "Unexpected trailing characters".to_string(),
+                        fragment: fragment.to_string(),
+                        offset: remainder.location_offset(),
+                    })
+                }
+            }
 
+            Err(e) => match e {
+                nom::Err::Error(e) | nom::Err::Failure(e) => {
+                    Err(JSONSelectionParseError {
+                        message: if let Some(message_str) = e.input.extra {
+                            message_str.to_string()
+                        } else {
+                            // These errors aren't the most user-friendly, but
+                            // with any luck we can gradually replace them with
+                            // custom error messages over time.
+                            format!("nom::error::ErrorKind::{:?}", e.code)
+                        },
+                        fragment: e.input.fragment().to_string(),
+                        offset: e.input.location_offset(),
+                    })
+                }
+
+                nom::Err::Incomplete(_) => unreachable!("nom::Err::Incomplete not expected here"),
+            },
+        }
+    }
+
+    fn parse_span(input: Span) -> ParseResult<Self> {
         match alt((
             all_consuming(terminated(
                 map(PathSelection::parse, Self::Path),
@@ -80,22 +195,24 @@ impl JSONSelection {
                 // input, which is caught by the first all_consuming above.
                 spaces_or_comments,
             )),
-        ))(input_span)
+        ))(input)
         {
             Ok((remainder, selection)) => {
                 if remainder.fragment().is_empty() {
-                    Ok(("", selection))
+                    Ok((remainder, selection))
                 } else {
-                    Err(nom::Err::Error(nom::error::Error::new(
-                        *input_span.fragment(),
-                        nom::error::ErrorKind::IsNot,
-                    )))
+                    Err(nom_fail_message(
+                        // Usually our nom errors report the original input that
+                        // failed to parse, but that's not helpful here, since
+                        // input corresponds to the entire string, whereas this
+                        // error message is reporting junk at the end of the
+                        // string that should not be there.
+                        remainder,
+                        "Unexpected trailing characters",
+                    ))
                 }
             }
-            Err(_) => Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::IsNot,
-            ))),
+            Err(e) => Err(e),
         }
     }
 
@@ -169,7 +286,7 @@ impl Ranged<NamedSelection> for NamedSelection {
 }
 
 impl NamedSelection {
-    pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
+    pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         alt((
             // We must try parsing NamedPathSelection before NamedFieldSelection
             // and NamedQuotedSelection because a NamedPathSelection without a
@@ -185,7 +302,7 @@ impl NamedSelection {
         ))(input)
     }
 
-    fn parse_field(input: Span) -> IResult<Span, Self> {
+    fn parse_field(input: Span) -> ParseResult<Self> {
         tuple((
             opt(Alias::parse),
             Key::parse,
@@ -198,21 +315,21 @@ impl NamedSelection {
     }
 
     // Parses either NamedPathSelection or PathWithSubSelection.
-    fn parse_path(input: Span) -> IResult<Span, Self> {
+    fn parse_path(input: Span) -> ParseResult<Self> {
         let (remainder, (alias_opt, path)) =
             tuple((opt(Alias::parse), PathSelection::parse))(input)?;
 
         if alias_opt.is_none() && !path.has_subselection() {
-            Err(nom::Err::Error(nom::error::Error::new(
+            Err(nom_fail_message(
                 input,
-                nom::error::ErrorKind::IsNot,
-            )))
+                "Named path selection must either begin with alias or end with subselection",
+            ))
         } else {
             Ok((remainder, Self::Path(alias_opt, path)))
         }
     }
 
-    fn parse_group(input: Span) -> IResult<Span, Self> {
+    fn parse_group(input: Span) -> ParseResult<Self> {
         tuple((Alias::parse, SubSelection::parse))(input)
             .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
@@ -309,7 +426,7 @@ impl Ranged<PathSelection> for PathSelection {
 }
 
 impl PathSelection {
-    pub fn parse(input: Span) -> IResult<Span, Self> {
+    pub fn parse(input: Span) -> ParseResult<Self> {
         PathList::parse(input).map(|(input, path)| (input, Self { path }))
     }
 
@@ -409,10 +526,19 @@ pub(super) enum PathList {
 }
 
 impl PathList {
-    pub(crate) fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
+    pub(super) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         match Self::parse_with_depth(input, 0) {
-            Ok((remainder, parsed)) if matches!(*parsed, Self::Empty) => Err(nom::Err::Error(
-                nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
+            Ok((_, parsed)) if matches!(*parsed, Self::Empty) => Err(nom_error_message(
+                input,
+                // As a small technical note, you could consider
+                // NamedGroupSelection (an Alias followed by a SubSelection) as
+                // a kind of NamedPathSelection where the path is empty, but
+                // it's still useful to distinguish groups in the grammar so we
+                // can forbid empty paths in general. In fact, when parsing a
+                // NamedGroupSelection, this error message is likely to be the
+                // reason we abandon parsing NamedPathSelection and correctly
+                // fall back to NamedGroupSelection.
+                "Path selection cannot be empty",
             )),
             otherwise => otherwise,
         }
@@ -423,7 +549,7 @@ impl PathList {
         WithRange::new(self, None)
     }
 
-    fn parse_with_depth(input: Span, depth: usize) -> IResult<Span, WithRange<Self>> {
+    fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
         // If the input is empty (i.e. this method will end up returning
         // PathList::Empty), we want the OffsetRange to be an empty range at the
         // end of the previously parsed PathList elements, not separated from
@@ -477,12 +603,20 @@ impl PathList {
                             WithRange::new(Self::Var(ranged_known_var, rest), full_range),
                         ))
                     } else {
-                        // Reject unknown variables at parse time.
-                        // TODO Improve these parse error messages.
-                        Err(nom::Err::Error(nom::error::Error::new(
+                        Err(nom_fail_message(
                             input,
-                            nom::error::ErrorKind::IsNot,
-                        )))
+                            // Here's an error where we might like to use
+                            // format! to include the full_name of the unknown
+                            // variable in the error message, but that means
+                            // we'd have to store the message as an owned
+                            // String, which would make Span no longer Copy,
+                            // which leads to more cloning of Spans in the
+                            // parser code. For now, the input Span reported
+                            // with the error will begin with the unknown
+                            // variable name, which should be enough to
+                            // interpret this static message.
+                            "Unknown variable",
+                        ))
                     }
                 } else {
                     let ranged_dollar_var =
@@ -509,8 +643,16 @@ impl PathList {
             if let Ok((suffix, key)) = Key::parse(input) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 return match rest.as_ref() {
-                    Self::Empty | Self::Selection(_) => Err(nom::Err::Error(
-                        nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
+                    // We use nom_error_message rather than nom_fail_message
+                    // here because the key might actually be a field selection,
+                    // which means we want to unwind parsing the path and fall
+                    // back to parsing other kinds of NamedSelection.
+                    Self::Empty | Self::Selection(_) => Err(nom_error_message(
+                        input,
+                        // Another place where format! might be useful to
+                        // suggest .{key}, which would require storing error
+                        // messages as owned Strings.
+                        "Single-key path must be prefixed with $. to avoid ambiguity with field name",
                     )),
                     _ => {
                         let full_range = merge_ranges(key.range(), rest.range());
@@ -523,19 +665,26 @@ impl PathList {
         if depth == 0 {
             // If the PathSelection does not start with a $var (or $ or @), a
             // key., or $(expr), it is not a valid PathSelection.
-            //
-            // TODO When we improve these parse error messages, we may want to
-            // detect the .key case and suggest using $.key instead.
-            return Err(nom::Err::Error(nom::error::Error::new(
+            if tuple((ranged_span("."), Key::parse))(input).is_ok() {
+                // Since we previously allowed starting key paths with .key but
+                // now forbid that syntax (because it can be ambiguous), suggest
+                // the unambiguous $.key syntax instead.
+                return Err(nom_fail_message(
+                    input,
+                    "Key paths cannot start with just .key (use $.key instead)",
+                ));
+            }
+            // This error technically covers the case above, but doesn't suggest
+            // a helpful solution.
+            return Err(nom_error_message(
                 input,
-                nom::error::ErrorKind::IsNot,
-            )));
+                "Path selection must start with key., $variable, $, @, or $(expression)",
+            ));
         }
 
         // In previous versions of this code, a .key could appear at depth 0 (at
         // the beginning of a path), which was useful to disambiguate a KeyPath
-        // consisting of a single key from a field selection (though this case
-        // was never explicitly allowed by the formal grammar in the README.md).
+        // consisting of a single key from a field selection.
         //
         // Now that key paths can appear alongside/after named selections within
         // a SubSelection, the .key syntax is potentially unsafe because it may
@@ -544,32 +693,45 @@ impl PathList {
         //
         // In order to prevent this ambiguity, we now require that a single .key
         // be written as a subproperty of the $ variable, e.g. $.key, which is
-        // equivalent to the old behavior without any parsing ambiguities. In
-        // terms of this code, that means we allow a .key only at depths > 0.
-        if let Ok((suffix, (dot, _, key))) =
-            tuple((ranged_span("."), spaces_or_comments, Key::parse))(input)
-        {
-            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            let dot_key_range = merge_ranges(dot.range(), key.range());
-            let full_range = merge_ranges(dot_key_range, rest.range());
-            return Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)));
+        // equivalent to the old behavior, but parses unambiguously. In terms of
+        // this code, that means we allow a .key only at depths > 0.
+        if let Ok((suffix, dot)) = ranged_span(".")(input) {
+            // As soon as we see a leading ., we know what follows must be a
+            // Key, so we can unconditionally return based on what Key::parse
+            // tells us. Note: Key::parse consumes any spaces/comments between
+            // the . and the key.
+            return match Key::parse(suffix) {
+                Ok((remainder, key)) => {
+                    let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
+                    let dot_key_range = merge_ranges(dot.range(), key.range());
+                    let full_range = merge_ranges(dot_key_range, rest.range());
+                    Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
+                }
+                Err(_) => Err(nom_fail_message(
+                    input,
+                    "Path selection . must be followed by key (identifier or quoted string literal)",
+                )),
+            };
         }
 
         // PathSelection can never start with a naked ->method (instead, use
         // $->method or @->method if you want to operate on the current value).
-        if let Ok((suffix, (arrow, _, method, args))) = tuple((
-            ranged_span("->"),
-            spaces_or_comments,
-            parse_identifier,
-            opt(MethodArgs::parse),
-        ))(input)
-        {
-            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            let full_range = merge_ranges(arrow.range(), rest.range());
-            return Ok((
-                remainder,
-                WithRange::new(Self::Method(method, args, rest), full_range),
-            ));
+        if let Ok((suffix, arrow)) = ranged_span("->")(input) {
+            // As soon as we see a -> token, we know what follows must be a
+            // method name, so we can unconditionally return based on what
+            // parse_identifier tells us. since MethodArgs::parse is optional,
+            // the absence of args will never trigger the error case.
+            return match tuple((parse_identifier, opt(MethodArgs::parse)))(suffix) {
+                Ok((suffix, (method, args))) => {
+                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                    let full_range = merge_ranges(arrow.range(), rest.range());
+                    Ok((
+                        remainder,
+                        WithRange::new(Self::Method(method, args, rest), full_range),
+                    ))
+                }
+                Err(_) => Err(nom_fail_message(input, "Method name must follow ->")),
+            };
         }
 
         // Likewise, if the PathSelection has a SubSelection, it must appear at
@@ -699,7 +861,7 @@ impl Ranged<SubSelection> for SubSelection {
 }
 
 impl SubSelection {
-    pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
+    pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         tuple((
             spaces_or_comments,
             ranged_span("{"),
@@ -719,7 +881,7 @@ impl SubSelection {
         })
     }
 
-    fn parse_naked(input: Span) -> IResult<Span, Self> {
+    fn parse_naked(input: Span) -> ParseResult<Self> {
         preceded(spaces_or_comments, many0(NamedSelection::parse))(input).map(
             |(remainder, selections)| {
                 let range = merge_ranges(
@@ -816,7 +978,7 @@ impl Alias {
         }
     }
 
-    fn parse(input: Span) -> IResult<Span, Self> {
+    fn parse(input: Span) -> ParseResult<Self> {
         tuple((Key::parse, spaces_or_comments, ranged_span(":")))(input).map(
             |(input, (name, _, colon))| {
                 let range = merge_ranges(name.range(), colon.range());
@@ -839,7 +1001,7 @@ pub enum Key {
 }
 
 impl Key {
-    pub fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
+    pub fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         alt((
             map(parse_identifier, |id| id.take_as(Key::Field)),
             map(parse_string_literal, |s| s.take_as(Key::Quoted)),
@@ -914,11 +1076,11 @@ impl Display for Key {
 
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
-fn parse_identifier(input: Span) -> IResult<Span, WithRange<String>> {
+fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
     preceded(spaces_or_comments, parse_identifier_no_space)(input)
 }
 
-fn parse_identifier_no_space(input: Span) -> IResult<Span, WithRange<String>> {
+fn parse_identifier_no_space(input: Span) -> ParseResult<WithRange<String>> {
     recognize(pair(
         one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
         many0(one_of(
@@ -935,7 +1097,7 @@ fn parse_identifier_no_space(input: Span) -> IResult<Span, WithRange<String>> {
 //   | "'" ("\\'" | [^'])* "'"
 //   | '"' ('\\"' | [^"])* '"'
 
-pub(crate) fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
+pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>> {
     let input = spaces_or_comments(input)?.0;
     let start = input.location_offset();
     let mut input_char_indices = input.char_indices();
@@ -944,7 +1106,7 @@ pub(crate) fn parse_string_literal(input: Span) -> IResult<Span, WithRange<Strin
         Some((0, quote @ '\'')) | Some((0, quote @ '"')) => {
             let mut escape_next = false;
             let mut chars: Vec<char> = vec![];
-            let mut remainder: Option<Span> = None;
+            let mut remainder_opt: Option<Span> = None;
 
             for (i, c) in input_char_indices {
                 if escape_next {
@@ -960,13 +1122,13 @@ pub(crate) fn parse_string_literal(input: Span) -> IResult<Span, WithRange<Strin
                     continue;
                 }
                 if c == quote {
-                    remainder = Some(input.slice(i + 1..));
+                    remainder_opt = Some(input.slice(i + 1..));
                     break;
                 }
                 chars.push(c);
             }
 
-            if let Some(remainder) = remainder {
+            if let Some(remainder) = remainder_opt {
                 Ok((
                     remainder,
                     WithRange::new(
@@ -975,17 +1137,11 @@ pub(crate) fn parse_string_literal(input: Span) -> IResult<Span, WithRange<Strin
                     ),
                 ))
             } else {
-                Err(nom::Err::Error(nom::error::Error::new(
-                    input,
-                    nom::error::ErrorKind::Eof,
-                )))
+                Err(nom_fail_message(input, "Unterminated string literal"))
             }
         }
 
-        _ => Err(nom::Err::Error(nom::error::Error::new(
-            input,
-            nom::error::ErrorKind::IsNot,
-        ))),
+        _ => Err(nom_error_message(input, "Not a string literal")),
     }
 }
 
@@ -1006,7 +1162,7 @@ impl Ranged<MethodArgs> for MethodArgs {
 // the PathSelection::Method will be None, so we can safely define MethodArgs
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
-    fn parse(input: Span) -> IResult<Span, Self> {
+    fn parse(input: Span) -> ParseResult<Self> {
         tuple((
             spaces_or_comments,
             ranged_span("("),
@@ -1051,11 +1207,12 @@ mod tests {
     use super::*;
     use crate::selection;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
+    use crate::sources::connect::json_selection::location::new_span;
 
     #[test]
     fn test_identifier() {
         fn check(input: &str, expected_name: &str) {
-            let (remainder, name) = parse_identifier(Span::new(input)).unwrap();
+            let (remainder, name) = parse_identifier(new_span(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(name.as_ref(), expected_name);
         }
@@ -1067,26 +1224,32 @@ mod tests {
         check(" hello ", "hello");
 
         fn check_no_space(input: &str, expected_name: &str) {
-            let name = parse_identifier_no_space(Span::new(input)).unwrap().1;
+            let name = parse_identifier_no_space(new_span(input)).unwrap().1;
             assert_eq!(name.as_ref(), expected_name);
         }
 
         check_no_space("oyez", "oyez");
         check_no_space("oyez   ", "oyez");
 
-        assert_eq!(
-            parse_identifier_no_space(Span::new("  oyez   ")),
-            Err(nom::Err::Error(nom::error::Error::new(
-                Span::new("  oyez   "),
-                nom::error::ErrorKind::OneOf
-            ))),
-        );
+        {
+            let identifier_with_leading_space = new_span("  oyez   ");
+            assert_eq!(
+                parse_identifier_no_space(identifier_with_leading_space),
+                Err(nom::Err::Error(nom::error::Error::from_error_kind(
+                    // The parse_identifier_no_space function does not provide a
+                    // custom error message, since it's only used internally.
+                    // Testing it directly here is somewhat contrived.
+                    identifier_with_leading_space,
+                    nom::error::ErrorKind::OneOf,
+                ))),
+            );
+        }
     }
 
     #[test]
     fn test_string_literal() {
         fn check(input: &str, expected: &str) {
-            let (remainder, lit) = parse_string_literal(Span::new(input)).unwrap();
+            let (remainder, lit) = parse_string_literal(new_span(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(lit.as_ref(), expected);
         }
@@ -1100,7 +1263,7 @@ mod tests {
     #[test]
     fn test_key() {
         fn check(input: &str, expected: &Key) {
-            let (remainder, key) = Key::parse(Span::new(input)).unwrap();
+            let (remainder, key) = Key::parse(new_span(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(key.as_ref(), expected);
         }
@@ -1115,7 +1278,7 @@ mod tests {
     #[test]
     fn test_alias() {
         fn check(input: &str, alias: &str) {
-            let (remainder, parsed) = Alias::parse(Span::new(input)).unwrap();
+            let (remainder, parsed) = Alias::parse(new_span(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(parsed.name(), alias);
         }
@@ -1130,7 +1293,7 @@ mod tests {
     #[test]
     fn test_named_selection() {
         fn assert_result_and_names(input: &str, expected: NamedSelection, names: &[&str]) {
-            let (remainder, selection) = NamedSelection::parse(Span::new(input)).unwrap();
+            let (remainder, selection) = NamedSelection::parse(new_span(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             let selection = selection.strip_ranges();
             assert_eq!(selection, expected);
@@ -1453,7 +1616,7 @@ mod tests {
 
     #[track_caller]
     fn check_path_selection(input: &str, expected: PathSelection) {
-        let (remainder, path_selection) = PathSelection::parse(Span::new(input)).unwrap();
+        let (remainder, path_selection) = PathSelection::parse(new_span(input)).unwrap();
         assert!(span_is_all_spaces_or_comments(remainder));
         assert_eq!(&path_selection.strip_ranges(), &expected);
         assert_eq!(
@@ -1908,38 +2071,66 @@ mod tests {
             },
         );
 
-        {
-            let input = Span::new("naked");
-            assert_eq!(
-                PathSelection::parse(input),
-                Err(nom::Err::Error(nom::error::Error::new(
-                    input.slice(5..),
-                    nom::error::ErrorKind::IsNot,
-                ))),
-            );
+        #[track_caller]
+        fn check_path_parse_error(input: &str, expected_offset: usize, expected_message: &str) {
+            match PathSelection::parse(new_span(input)) {
+                Ok((remainder, path)) => {
+                    panic!(
+                        "Expected error at offset {} with message '{}', but got path {:?} and remainder {:?}",
+                        expected_offset,
+                        expected_message,
+                        path,
+                        remainder,
+                    );
+                }
+                Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
+                    assert_eq!(&input[expected_offset..], *e.input.fragment());
+                    // The PartialEq implementation for LocatedSpan
+                    // unfortunately ignores span.extra, so we have to check
+                    // e.input.extra manually.
+                    assert_eq!(e.input.extra, Some(expected_message));
+                }
+                Err(e) => {
+                    panic!("Unexpected error {:?}", e);
+                }
+            }
         }
 
-        {
-            let input = Span::new("naked { hi }");
-            assert_eq!(
-                PathSelection::parse(input),
-                Err(nom::Err::Error(nom::error::Error::new(
-                    input.slice(12..),
-                    nom::error::ErrorKind::IsNot,
-                ))),
-            );
-        }
+        let single_key_path_error_message =
+            "Single-key path must be prefixed with $. to avoid ambiguity with field name";
+        check_path_parse_error(
+            new_span("naked").fragment(),
+            0,
+            single_key_path_error_message,
+        );
+        check_path_parse_error(
+            new_span("naked { hi }").fragment(),
+            0,
+            single_key_path_error_message,
+        );
+        check_path_parse_error(
+            new_span("  naked { hi }").fragment(),
+            2,
+            single_key_path_error_message,
+        );
 
-        {
-            let input = Span::new("valid.$invalid");
-            assert_eq!(
-                PathSelection::parse(input),
-                Err(nom::Err::Error(nom::error::Error::new(
-                    input.slice(5..),
-                    nom::error::ErrorKind::IsNot,
-                ))),
-            );
-        }
+        let path_key_ambiguity_error_message =
+            "Path selection . must be followed by key (identifier or quoted string literal)";
+        check_path_parse_error(
+            new_span("valid.$invalid").fragment(),
+            5,
+            path_key_ambiguity_error_message,
+        );
+        check_path_parse_error(
+            new_span("  valid.$invalid").fragment(),
+            7,
+            path_key_ambiguity_error_message,
+        );
+        check_path_parse_error(
+            new_span("  valid . $invalid").fragment(),
+            8,
+            path_key_ambiguity_error_message,
+        );
 
         assert_eq!(
             selection!("$").strip_ranges(),
@@ -2031,6 +2222,23 @@ mod tests {
                 ..Default::default()
             }),
         );
+    }
+
+    #[test]
+    fn test_error_snapshots() {
+        // The .data shorthand is no longer allowed, since it can be mistakenly
+        // parsed as a continuation of a previous selection. Instead, use $.data
+        // to achieve the same effect without ambiguity.
+        assert_debug_snapshot!(JSONSelection::parse(".data"));
+
+        // We statically verify that all variables are KnownVariables, and
+        // $bogus is not one of them.
+        assert_debug_snapshot!(JSONSelection::parse("$bogus"));
+
+        // If you want to mix a path selection with other named selections, the
+        // path selection must have a trailing subselection, to enforce that it
+        // returns an object with statically known keys.
+        assert_debug_snapshot!(JSONSelection::parse("id $.object"));
     }
 
     #[test]
@@ -2455,7 +2663,7 @@ mod tests {
     #[test]
     fn test_subselection() {
         fn check_parsed(input: &str, expected: SubSelection) {
-            let (remainder, parsed) = SubSelection::parse(Span::new(input)).unwrap();
+            let (remainder, parsed) = SubSelection::parse(new_span(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(parsed.strip_ranges(), expected);
         }
@@ -2538,7 +2746,7 @@ mod tests {
     #[test]
     fn test_external_var_paths() {
         fn parse(input: &str) -> PathSelection {
-            PathSelection::parse(Span::new(input))
+            PathSelection::parse(new_span(input))
                 .unwrap()
                 .1
                 .strip_ranges()
@@ -2605,12 +2813,7 @@ mod tests {
     #[test]
     fn test_ranged_locations() {
         fn check(input: &str, expected: JSONSelection) {
-            let (remainder, parsed) = JSONSelection::parse(input).unwrap();
-            // We can't (and don't want to) use span_is_all_spaces_or_comments
-            // here because remainder is a &str not a Span, and
-            // JSONSelection::parse is responsible for consuming the entire
-            // string when possible (see all_consuming).
-            assert_eq!(remainder, "");
+            let parsed = JSONSelection::parse(input).unwrap();
             assert_eq!(parsed, expected);
         }
 

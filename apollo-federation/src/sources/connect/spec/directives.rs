@@ -287,15 +287,8 @@ impl ConnectDirectiveArguments {
                 let selection_value = arg.value.as_str().ok_or(internal!(
                     "`selection` field in `@connect` directive is not a string"
                 ))?;
-                let (remainder, selection_value) = JSONSelection::parse(selection_value)
-                    .map_err(|_| internal!("invalid JSON selection"))?;
-                if !remainder.is_empty() {
-                    return Err(internal!(format!(
-                        "`selection` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}"
-                    )));
-                }
-
-                selection = Some(selection_value);
+                selection =
+                    Some(JSONSelection::parse(selection_value).map_err(|e| internal!(e.message))?);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
                 let entity_value = arg.value.to_bool().ok_or(internal!(
                     "`entity` field in `@connect` directive is not a boolean"
@@ -337,15 +330,7 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                 let body_value = value.as_str().ok_or(internal!(
                     "`body` field in `@connect` directive's `http` field is not a string"
                 ))?;
-                let (remainder, body_value) = JSONSelection::parse(body_value)
-                    .map_err(|_| internal!("invalid JSON selection"))?;
-                if !remainder.is_empty() {
-                    return Err(internal!(format!(
-                        "`body` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}"
-                    )));
-                }
-
-                body = Some(body_value);
+                body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 // TODO: handle a single object since the language spec allows it
                 headers = value.as_list().map(nodes_to_headers).transpose()?;

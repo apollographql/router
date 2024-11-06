@@ -275,8 +275,7 @@ mod tests {
     fn it_iterates_over_empty_path() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) = JSONSelection::parse("").unwrap();
-        assert!(unmatched.is_empty());
+        let selection = JSONSelection::parse("").unwrap();
 
         visitor
             .walk(selection.next_subselection().cloned().unwrap())
@@ -288,8 +287,7 @@ mod tests {
     fn it_iterates_over_simple_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) = JSONSelection::parse("a b c d").unwrap();
-        assert!(unmatched.is_empty());
+        let selection = JSONSelection::parse("a b c d").unwrap();
 
         visitor
             .walk(selection.next_subselection().cloned().unwrap())
@@ -306,9 +304,7 @@ mod tests {
     fn it_iterates_over_aliased_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) =
-            JSONSelection::parse("a: one b: two c: three d: four").unwrap();
-        assert!(unmatched.is_empty());
+        let selection = JSONSelection::parse("a: one b: two c: three d: four").unwrap();
 
         visitor
             .walk(selection.next_subselection().cloned().unwrap())
@@ -325,8 +321,7 @@ mod tests {
     fn it_iterates_over_nested_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) = JSONSelection::parse("a { b { c { d { e } } } } f").unwrap();
-        assert!(unmatched.is_empty());
+        let selection = JSONSelection::parse("a { b { c { d { e } } } } f").unwrap();
 
         visitor
             .walk(selection.next_subselection().cloned().unwrap())
@@ -345,7 +340,7 @@ mod tests {
     fn it_iterates_over_paths() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) = JSONSelection::parse(
+        let selection = JSONSelection::parse(
             "a
             $.b {
                 c
@@ -357,7 +352,6 @@ mod tests {
             j",
         )
         .unwrap();
-        assert!(unmatched.is_empty());
 
         visitor
             .walk(selection.next_subselection().cloned().unwrap())
@@ -376,7 +370,7 @@ mod tests {
     fn it_iterates_over_complex_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) = JSONSelection::parse(
+        let selection = JSONSelection::parse(
             "id
             name
             username
@@ -400,7 +394,6 @@ mod tests {
             }",
         )
         .unwrap();
-        assert!(unmatched.is_empty());
 
         visitor
             .walk(selection.next_subselection().cloned().unwrap())

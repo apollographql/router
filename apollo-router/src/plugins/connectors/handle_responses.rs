@@ -82,7 +82,11 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                     let mut res_data = {
                         let (res, apply_to_errors) = response_key.selection().apply_with_vars(
                             &json_data,
-                            &response_key.inputs().merge(connector.config.as_ref(), None),
+                            &response_key.inputs().merge(
+                                connector.config.as_ref(),
+                                None,
+                                Some(parts.status.as_u16()),
+                            ),
                         );
 
                         if let Some(ref debug) = debug {
@@ -297,7 +301,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
@@ -310,7 +314,7 @@ mod tests {
             name: "hello".to_string(),
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("String".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let response2 = http::Response::builder()
@@ -320,7 +324,7 @@ mod tests {
             name: "hello2".to_string(),
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("String".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let res = super::handle_responses(
@@ -391,7 +395,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data { id }").unwrap().1,
+            selection: JSONSelection::parse("$.data { id }").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
@@ -404,7 +408,7 @@ mod tests {
             index: 0,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let response2 = http::Response::builder()
@@ -414,7 +418,7 @@ mod tests {
             index: 1,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let res = super::handle_responses(
@@ -497,7 +501,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
             max_requests: None,
@@ -511,7 +515,7 @@ mod tests {
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let response2 = http::Response::builder()
@@ -522,7 +526,7 @@ mod tests {
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let res = super::handle_responses(
@@ -605,7 +609,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
@@ -619,7 +623,7 @@ mod tests {
             index: 0,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let response2 = http::Response::builder()
@@ -629,7 +633,7 @@ mod tests {
             index: 1,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let response3 = http::Response::builder()
@@ -640,7 +644,7 @@ mod tests {
             index: 2,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
         let res = super::handle_responses(
@@ -738,6 +742,79 @@ mod tests {
                             },
                         },
                     ],
+                    extensions: {},
+                    has_next: None,
+                    subscribed: None,
+                    created_at: None,
+                    incremental: [],
+                },
+            },
+        }
+        "###);
+    }
+
+    #[tokio::test]
+    async fn test_handle_responses_status() {
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("$status").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        let response1: http::Response<RouterBody> = http::Response::builder()
+            .status(201)
+            .body(hyper::Body::from(r#"{}"#).into())
+            .expect("response builder");
+        let response_key1 = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            typename: ResponseTypeName::Concrete("Int".to_string()),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
+        };
+
+        let res = super::handle_responses(
+            vec![ConnectorResponse {
+                result: response1.into(),
+                key: response_key1,
+                debug_request: None,
+            }],
+            &connector,
+            &None,
+        )
+        .await
+        .unwrap();
+
+        assert_debug_snapshot!(res, @r###"
+        Response {
+            response: Response {
+                status: 200,
+                version: HTTP/1.1,
+                headers: {},
+                body: Response {
+                    label: None,
+                    data: Some(
+                        Object({
+                            "hello": Number(201),
+                        }),
+                    ),
+                    path: None,
+                    errors: [],
                     extensions: {},
                     has_next: None,
                     subscribed: None,

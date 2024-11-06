@@ -3,10 +3,9 @@ source: apollo-federation/src/sources/connect/json_selection/parser.rs
 expression: "JSONSelection::parse(r#\"\n            id\n            created\n            choices->first.message\n            model\n        \"#)"
 ---
 Err(
-    Error(
-        Error {
-            input: "\n            id\n            created\n            choices->first.message\n            model\n        ",
-            code: IsNot,
-        },
-    ),
+    JSONSelectionParseError {
+        message: "Named path selection must either begin with alias or end with subselection",
+        fragment: "choices->first.message\n            model\n        ",
+        offset: 48,
+    },
 )

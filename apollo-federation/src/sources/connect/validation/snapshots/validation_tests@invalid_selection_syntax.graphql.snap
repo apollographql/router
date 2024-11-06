@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
 [
     Message {
         code: InvalidJsonSelection,
-        message: "`@connect(selection:)` on `Query.something` is not a valid JSONSelection: Parsing Error: Error { input: \"&how\", code: IsNot }",
+        message: "`@connect(selection:)` on `Query.something` is not a valid JSONSelection: nom::error::ErrorKind::Eof at offset 0: &how",
         locations: [
             8:86..8:92,
         ],
