@@ -1686,6 +1686,11 @@ expression: "&schema"
           "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
         "invalidation": {
           "$ref": "#/definitions/InvalidationEndpointConfig",
           "description": "#/definitions/InvalidationEndpointConfig",

@@ -63,7 +63,8 @@ pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
-pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::keys";
+/// Context key to enable support of surrogate cache key
+pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::cached_keys_status";
 
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
@@ -676,6 +677,7 @@ impl InnerCacheService {
                 Ok(response)
             }
         } else {
+            let request_id = request.id.clone();
             match cache_lookup_entities(
                 self.name.clone(),
                 self.storage.clone(),
@@ -715,6 +717,20 @@ impl InnerCacheService {
                                 &[graphql_error],
                                 &mut cache_result.0,
                             );
+                            if self.expose_keys_in_context {
+                                // Update cache keys needed for surrogate cache key because new data has not been fetched
+                                context.upsert::<_, CacheKeysContext>(
+                                    CONTEXT_CACHE_KEYS,
+                                    |mut value| {
+                                        if let Some(cache_keys) = value.get_mut(&request_id) {
+                                            cache_keys.retain(|cache_key| {
+                                                matches!(cache_key.status, CacheKeyStatus::Cached)
+                                            });
+                                        }
+                                        value
+                                    },
+                                )?;
+                            }
 
                             let mut data = Object::default();
                             data.insert(ENTITIES, new_entities.into());
@@ -958,7 +974,6 @@ async fn cache_lookup_entities(
     let (new_representations, cache_result, cache_control) =
         filter_representations(&name, representations, keys, cache_result, &request.context)?;
 
-    // TODO add if config
     if expose_keys_in_context {
         let mut cache_entries = Vec::with_capacity(cache_result.len());
         for intermediate_result in &cache_result {
