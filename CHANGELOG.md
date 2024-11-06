@@ -44,6 +44,15 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 
 * `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
 * `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
+# [1.57.1] - 2024-10-31
+
+## 🐛 Fixes
+
+### Progressive override: fix query planner cache warmup ([PR #6108](https://github.com/apollographql/router/pull/6108))
+
+This fixes an issue in progressive override where the override labels were not transmitted to the query planner during cache warmup. Queries were correctly using the overridden fields at first, but after an update, reverted to non overridden fields, and could not recover.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/6108
 
 # [1.57.0] - 2024-10-22
 
