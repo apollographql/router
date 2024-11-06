@@ -1266,6 +1266,9 @@ expression: "&schema"
       "type": "object"
     },
     "Conf5": {
+      "type": "object"
+    },
+    "Conf6": {
       "anyOf": [
         {
           "additionalProperties": {
@@ -1277,7 +1280,7 @@ expression: "&schema"
       ],
       "description": "Subgraph URL mappings"
     },
-    "Conf6": {
+    "Conf7": {
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
@@ -1294,7 +1297,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Conf7": {
+    "Conf8": {
       "additionalProperties": false,
       "description": "Telemetry configuration",
       "properties": {
@@ -8323,6 +8326,10 @@ expression: "&schema"
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
     },
+    "fleet_detector": {
+      "$ref": "#/definitions/Conf5",
+      "description": "#/definitions/Conf5"
+    },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig",
       "description": "#/definitions/ForbidMutationsConfig"
@@ -8348,8 +8355,8 @@ expression: "&schema"
       "description": "#/definitions/Config"
     },
     "override_subgraph_url": {
-      "$ref": "#/definitions/Conf5",
-      "description": "#/definitions/Conf5"
+      "$ref": "#/definitions/Conf6",
+      "description": "#/definitions/Conf6"
     },
     "persisted_queries": {
       "$ref": "#/definitions/PersistedQueries",
@@ -8372,8 +8379,8 @@ expression: "&schema"
       "description": "#/definitions/Config8"
     },
     "rhai": {
-      "$ref": "#/definitions/Conf6",
-      "description": "#/definitions/Conf6"
+      "$ref": "#/definitions/Conf7",
+      "description": "#/definitions/Conf7"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
@@ -8388,8 +8395,8 @@ expression: "&schema"
       "description": "#/definitions/Supergraph"
     },
     "telemetry": {
-      "$ref": "#/definitions/Conf7",
-      "description": "#/definitions/Conf7"
+      "$ref": "#/definitions/Conf8",
+      "description": "#/definitions/Conf8"
     },
     "tls": {
       "$ref": "#/definitions/Tls",
