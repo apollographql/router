@@ -688,12 +688,12 @@ When using subscriptions along with `@policy` authorization, subscription events
 
 ## Composition and federation
 
-GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes`, `@authenticated`, or `@policy` directives, they are set on the supergraph too.
+GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes`, `@authenticated`, or `@policy` directives, they are set on the supergraph too. Whether composition uses `AND` or `OR` logic depends on how the authorization directives are used.
 
-#### Composition with `AND`/`OR` logic
+### Composed fields with different authorization directives
 
-If shared subgraph fields include multiple directives, composition merges them. For example, suppose the `me` query requires `@authentication` in one subgraph:
-
+If a shared field uses different authorization directives across subgraphs, composition merges them using `AND` logic.
+For example, suppose the `me` query requires `@authenticated` in one subgraph and the `read:user` scope in another subgraph:
 
 ```graphql title="Subgraph A"
 type Query {
@@ -707,8 +707,6 @@ type User {
 }
 ```
 
-and the `read:user` scope in another subgraph:
-
 ```graphql title="Subgraph B"
 type Query {
   me: User @requiresScopes(scopes: [["read:user"]])
@@ -721,9 +719,19 @@ type User {
 }
 ```
 
-A request would need to both be authenticated **AND** have the required scope. Recall that the `@authenticated` directive only checks for the existence of the `apollo_authentication::JWT::claims` key in a request's context, so authentication is guaranteed if the request includes scopes.
+A request must both be authenticated **AND** have the required `read:user` scope to succeed.
 
-If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges them with the same logic used to [combine scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic). For example, if one subgraph requires the `read:others` scope on the `users` query:
+<Note>
+
+Recall that the `@authenticated` directive only checks for the existence of the `apollo_authentication::JWT::claims` key in a request's context, so authentication is guaranteed if the request includes scopes.
+
+</Note>
+
+### Composed fields with the same authorization directives
+
+If a shared field uses the same authorization directives across subgraphs, composition merges them using `OR` logic.
+For example, suppose two subgraphs use the `@requiresScopes` directive on the `users` query.
+One subgraph requires the `read:others` scope, and another subgraph requires the `read:profiles` scope:
 
 ```graphql title="Subgraph A"
 type Query {
@@ -731,23 +739,32 @@ type Query {
 }
 ```
 
-and another subgraph requires the `read:profiles` scope on `users` query:
-
 ```graphql title="Subgraph B"
 type Query {
   users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
 }
 ```
 
-Then the supergraph schema would require _both_ scopes for it.
+A request would need either the `read:others` **OR** the `read:profiles` scope to be authorized.
 
 ```graphql title="Supergraph"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:others", "read:profiles"]])
+  users: [User!]! @requiresScopes(scopes: [["read:others"], ["read:profiles"]])
 }
 ```
 
-As with [combining scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **OR** logic:
+<Tip>
+
+Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
+
+</Tip>
+
+Using **OR** logic for shared directives simplifies schema updates.
+If requirements change suddenly, you don't need to update the directive in all subgraphs simultaneously.
+
+#### Combining `AND`/`OR` logic with `@requiresScopes`
+
+As with [combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
 
 ```graphql title="Subgraph A"
 type Query {
@@ -761,7 +778,7 @@ type Query {
 }
 ```
 
-Since both `scopes` arrays are nested arrays, they would be composed using **OR** logic into the supergraph schema:
+Since both subgraphs use the same authorization directive, composition [merges them using **OR** logic](#a-shared-field-with-the-same-authorization-directives-use-or-logic):
 
 ```graphql title="Supergraph"
 type Query {
@@ -773,8 +790,8 @@ This syntax means a request needs either (`read:others` **AND** `read:users`) sc
 
 ### Authorization and `@key` fields
 
-The [`@key` directive](https://www.apollographql.com/docs/federation/entities/) lets you create an entity whose fields resolve across multiple subgraphs.
-If you use authorization directives on fields defined in [`@key` directives](https://www.apollographql.com/docs/federation/entities/), Apollo still uses those fields to compose entities between the subgraphs, but the client cannot query them directly.
+The [`@key` directive](/graphos/reference/federation/directives#key) lets you create an entity whose fields resolve across multiple subgraphs.
+If you use authorization directives on fields defined in `@key` directives, Apollo still uses those fields to compose entities between the subgraphs, but the client cannot query them directly.
 
 Consider these example subgraph schemas:
 
@@ -825,11 +842,11 @@ query {
 }
 ```
 
-This behavior resembles what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
+This behavior resembles what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](/graphos/reference/federation/directives#inaccessible).
 
 ### Authorization and interfaces
 
-If a type [implementing an interface](https://www.apollographql.com/docs/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
+If a type [implementing an interface](/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
 
 For example, consider this schema where the `Post` interface doesn't require authentication, but the `PrivateBlog` type, which implements `Post`, does:
 

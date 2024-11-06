@@ -12,9 +12,9 @@ use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::schema::ValidFederationSchema;
 use sha1::Digest;
 
-const ROVER_FEDERATION_VERSION: &str = "2.7.4";
+const ROVER_FEDERATION_VERSION: &str = "2.9.0";
 
-const DEFAULT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+const DEFAULT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@context", "@fromContext", "@cost", "@listSize"])"#;
 
 /// Runs composition on the given subgraph schemas and return `(api_schema, query_planner)`
 ///
