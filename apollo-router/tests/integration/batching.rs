@@ -147,6 +147,8 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
         - errors:
             - message: expected error in A
               path: []
+              extensions:
+                service: a
         - data:
             entryA:
               index: 2
@@ -200,9 +202,13 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
         - errors:
             - message: expected error in A
               path: []
+              extensions:
+                service: a
         - errors:
             - message: expected error in B
               path: []
+              extensions:
+                service: b
         - data:
             entryA:
               index: 2
@@ -256,6 +262,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         - data:
             entryA:
               index: 1
@@ -264,6 +271,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         "###);
     }
 
@@ -331,16 +339,19 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         - errors:
             - message: Request timed out
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         - errors:
             - message: Request timed out
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         "###);
     }
 
@@ -568,6 +579,7 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: ERR_NOT_ALLOWED
+                service: a
         - data:
             entryB:
               index: 0
@@ -576,6 +588,7 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: ERR_NOT_ALLOWED
+                service: a
         - data:
             entryB:
               index: 1
@@ -725,6 +738,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
               path: []
               extensions:
                 code: ERR_NOT_ALLOWED
+                service: a
         - data:
             entryB:
               index: 2
