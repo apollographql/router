@@ -16,6 +16,7 @@ use petgraph::Direction;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::operation::Field;
 use crate::operation::InlineFragment;
 use crate::operation::SelectionSet;
@@ -369,37 +370,25 @@ impl QueryGraph {
 
     pub(crate) fn node_weight(&self, node: NodeIndex) -> Result<&QueryGraphNode, FederationError> {
         self.graph.node_weight(node).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Node unexpectedly missing".to_owned(),
-            }
-            .into()
+            internal_error!("Node unexpectedly missing")
         })
     }
 
     fn node_weight_mut(&mut self, node: NodeIndex) -> Result<&mut QueryGraphNode, FederationError> {
         self.graph.node_weight_mut(node).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Node unexpectedly missing".to_owned(),
-            }
-            .into()
+            internal_error!("Node unexpectedly missing")
         })
     }
 
     pub(crate) fn edge_weight(&self, edge: EdgeIndex) -> Result<&QueryGraphEdge, FederationError> {
         self.graph.edge_weight(edge).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Edge unexpectedly missing".to_owned(),
-            }
-            .into()
+            internal_error!("Edge unexpectedly missing")
         })
     }
 
     fn edge_weight_mut(&mut self, edge: EdgeIndex) -> Result<&mut QueryGraphEdge, FederationError> {
         self.graph.edge_weight_mut(edge).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Edge unexpectedly missing".to_owned(),
-            }
-            .into()
+            internal_error!("Edge unexpectedly missing")
         })
     }
 
@@ -416,10 +405,7 @@ impl QueryGraph {
         edge: EdgeIndex,
     ) -> Result<(NodeIndex, NodeIndex), FederationError> {
         self.graph.edge_endpoints(edge).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Edge unexpectedly missing".to_owned(),
-            }
-            .into()
+            internal_error!("Edge unexpectedly missing")
         })
     }
 
@@ -432,10 +418,7 @@ impl QueryGraph {
         source: &str,
     ) -> Result<&ValidFederationSchema, FederationError> {
         self.sources.get(source).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Schema unexpectedly missing".to_owned(),
-            }
-            .into()
+            internal_error!(r#"Schema for "{source}" unexpectedly missing"#)
         })
     }
 
@@ -454,7 +437,7 @@ impl QueryGraph {
     ) -> Result<&IndexSet<NodeIndex>, FederationError> {
         self.types_to_nodes()?
             .get(name)
-            .ok_or_else(|| FederationError::internal("No nodes unexpectedly found for type"))
+            .ok_or_else(|| internal_error!("No nodes unexpectedly found for type"))
     }
 
     pub(crate) fn types_to_nodes(
