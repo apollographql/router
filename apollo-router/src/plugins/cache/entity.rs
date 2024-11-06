@@ -1586,7 +1586,7 @@ pub(crate) struct CacheKeyContext {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Eq, Hash, Ord))]
+#[cfg_attr(test, derive(PartialEq, Eq, Hash))]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CacheKeyStatus {
     /// New cache key inserted in the cache
@@ -1598,12 +1598,18 @@ pub(crate) enum CacheKeyStatus {
 #[cfg(test)]
 impl PartialOrd for CacheKeyStatus {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[cfg(test)]
+impl Ord for CacheKeyStatus {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
             (CacheKeyStatus::New, CacheKeyStatus::New) => std::cmp::Ordering::Equal,
             (CacheKeyStatus::New, CacheKeyStatus::Cached) => std::cmp::Ordering::Greater,
             (CacheKeyStatus::Cached, CacheKeyStatus::New) => std::cmp::Ordering::Less,
             (CacheKeyStatus::Cached, CacheKeyStatus::Cached) => std::cmp::Ordering::Equal,
         }
-        .into()
     }
 }
