@@ -26,8 +26,6 @@
     unconditional_panic,
     // clippy::all
 )]
-// TODO: After we are done prototyping the context feature, we need to remove this.
-#![allow(dead_code)]
 
 mod api_schema;
 mod compat;
