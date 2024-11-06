@@ -1509,8 +1509,7 @@ impl FederatedQueryGraphBuilder {
                 continue;
             };
 
-            // For @context
-            // subgraph -> referencers -> iter through object_types and interface_types
+            // Collect data for @context
             let mut context_name_to_types: HashMap<&str, HashSet<&ObjectTypeDefinitionPosition>> =
                 HashMap::default();
             for object_def_pos in &context_refs.object_types {
@@ -1524,8 +1523,7 @@ impl FederatedQueryGraphBuilder {
                 }
             }
 
-            // For @fromContext
-            // subgraph -> referencers -> iter through object_field_arguments and interface_field_arguments
+            // Collect data for @fromContext
             let coordinate_map = coordinate_map.entry(subgraph_name.clone()).or_default();
             for object_field_arg in &from_context_refs.object_field_arguments {
                 let input_value = object_field_arg.get(subgraph.schema())?;
@@ -1560,6 +1558,7 @@ impl FederatedQueryGraphBuilder {
                 }
             }
         }
+
         for edge in self.base.query_graph.graph.edge_indices() {
             let edge_weight = self.base.query_graph.edge_weight(edge)?;
             let QueryGraphEdgeTransition::FieldCollection {

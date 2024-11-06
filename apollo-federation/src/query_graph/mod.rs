@@ -9,7 +9,6 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::Name;
-use multimap::MultiMap;
 use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
@@ -135,7 +134,8 @@ impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
     }
 }
 
-// TODO: Add docs.
+/// Contains all of the data necessary to connect the object field (`coordinate`) with the
+/// `@fromContext` to its (grand)parent types contain a matching selection.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ContextCondition {
     context: String,
@@ -169,8 +169,8 @@ pub(crate) struct QueryGraphEdge {
     /// one of them has an @override with a label. If the override condition
     /// matches the query plan parameters, this edge can be taken.
     pub(crate) override_condition: Option<OverrideCondition>,
-    // TODO: Add docs
-    // TODO: Should this be a set?
+    /// All fields with `@fromContext` that need access to parental type with corresponding
+    /// `@context`.
     pub(crate) required_contexts: Vec<ContextCondition>,
 }
 
@@ -399,9 +399,9 @@ pub struct QueryGraph {
     /// lowered composition validation on a big composition (100+ subgraphs) from ~4 minutes to
     /// ~10 seconds.
     non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
-    // TODO: Are these duplicate fields??
-    // TODO: If not, write docs
+    /// Maps each subgraph name to each field argument of `@fromContext`.
     subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>>,
+    /// Like `self.subgraph_to_args` but pairs each field argument with a unique identifier string.
     subgraph_to_arg_indices:
         IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, String>>,
 }
