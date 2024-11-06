@@ -525,7 +525,7 @@ mod helpers {
                         let (_, parsed) = JSONSelection::parse(&field_and_selection.sub_selection)
                             .map_err(|e| {
                                 FederationError::internal(format!(
-                                    "could not parse fake selection for sibling field: {e}"
+                                    "error creating key from `$this` variable: {e}"
                                 ))
                             })?;
 
