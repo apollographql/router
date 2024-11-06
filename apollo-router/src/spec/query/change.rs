@@ -599,6 +599,15 @@ impl<'a> QueryHashVisitor<'a> {
         if let Some(obj) = argument.as_object() {
             let context_name = Name::new("context")?;
             let selection_name = Name::new("selection")?;
+            // the contextArgument input type is defined as follows:
+            // input join__ContextArgument {
+            //     name: String!
+            //     type: String!
+            //     context: String!
+            //     selection: join__FieldValue!
+            //  }
+            // and that is checked by schema validation, so the `context` and `selection` fields
+            // are guaranteed to be present and to be strings.
             if let (Some(context), Some(selection)) = (
                 obj.iter()
                     .find(|(k, _)| k == &context_name)
@@ -612,6 +621,7 @@ impl<'a> QueryHashVisitor<'a> {
                         if let Ok(parent_type) = Name::new(ty.as_str()) {
                             let mut parser = Parser::new();
 
+                            // we assume that the selection was already checked by schema validation
                             if let Ok(field_set) = parser.parse_field_set(
                                 Valid::assume_valid_ref(self.schema),
                                 parent_type.clone(),
