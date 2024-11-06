@@ -211,7 +211,7 @@ pub fn supergraph_query_paths(
     supergraph: &ValidFederationSchema,
     operation_document: &Valid<ExecutableDocument>,
     operation_name: Option<&str>,
-) -> Result<Vec<Vec<SupergraphQueryElement>>, FederationError> {
+) -> Result<Vec<SupergraphQueryPath>, FederationError> {
     let Ok(operation) = operation_document.operations.get(operation_name) else {
         internal_error!("operation name not found");
     };
@@ -304,7 +304,7 @@ impl QueryPlanVisitor<'_> {
         Ok(())
     }
 
-    fn map_response_path(&self, path: &[FetchDataPathElement]) -> Vec<SubgraphQueryElement> {
+    fn map_response_path(&self, path: &[FetchDataPathElement]) -> SubgraphQueryPath {
         self.paths
             .iter()
             .filter(|existing_path| existing_path.len() >= path.len())
@@ -481,7 +481,7 @@ impl QueryPlanVisitor<'_> {
 pub fn query_plan_paths(
     supergraph: &ValidFederationSchema,
     plan: &QueryPlan,
-) -> Result<Vec<Vec<SubgraphQueryElement>>, FederationError> {
+) -> Result<Vec<SubgraphQueryPath>, FederationError> {
     let mut visitor = QueryPlanVisitor {
         supergraph,
         paths: Default::default(),
@@ -502,8 +502,8 @@ pub fn query_plan_paths(
 /// fetches.
 /// - It does not account for dependencies introduced by `@key` and `@requires`
 pub fn compare_paths(
-    supergraph_paths: &[Vec<SupergraphQueryElement>],
-    plan_paths: &[Vec<SubgraphQueryElement>],
+    supergraph_paths: &[SupergraphQueryPath],
+    plan_paths: &[SubgraphQueryPath],
 ) -> Result<(), FederationError> {
     for supergraph_path in supergraph_paths {
         // If the path is just resolving __typename at the root of the operation, it's not
