@@ -13,11 +13,19 @@ use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
 
-/// Break out of the current function, returning an internal error.
+/// Create an internal error.
 #[macro_export]
 macro_rules! internal_error {
     ( $( $arg:tt )+ ) => {
-        return Err($crate::error::FederationError::internal(format!( $( $arg )+ )).into());
+        $crate::error::FederationError::internal(format!( $( $arg )+ ))
+    }
+}
+
+/// Break out of the current function, returning an internal error.
+#[macro_export]
+macro_rules! bail {
+    ( $( $arg:tt )+ ) => {
+        return Err($crate::internal_error!( $( $arg )+ ).into());
     }
 }
 
