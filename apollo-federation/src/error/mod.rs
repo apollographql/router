@@ -14,6 +14,17 @@ use lazy_static::lazy_static;
 use crate::subgraph::spec::FederationSpecError;
 
 /// Create an internal error.
+///
+/// # Example
+/// ```rust
+/// use apollo_federation::internal_error;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// const NAME: &str = "the thing";
+/// let result: Result<(), FederationError> = may_be_none()
+///     .ok_or_else(|| internal_error!("Expected {NAME} to be Some"));
+/// ```
 #[macro_export]
 macro_rules! internal_error {
     ( $( $arg:tt )+ ) => {
@@ -22,6 +33,20 @@ macro_rules! internal_error {
 }
 
 /// Break out of the current function, returning an internal error.
+///
+/// # Example
+/// ```rust
+/// use apollo_federation::bail;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// fn example() -> Result<(), FederationError> {
+///     bail!("Something went horribly wrong");
+///     unreachable!()
+/// }
+/// #
+/// # _ = example();
+/// ```
 #[macro_export]
 macro_rules! bail {
     ( $( $arg:tt )+ ) => {
@@ -34,6 +59,18 @@ macro_rules! bail {
 ///
 /// Treat this as an assertion. It must only be used for conditions that *should never happen*
 /// in normal operation.
+///
+/// # Example
+/// ```rust,no_run
+/// use apollo_federation::ensure;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// fn example() -> Result<(), FederationError> {
+///     ensure!(1 == 0, "Something went horribly wrong");
+///     unreachable!()
+/// }
+/// ```
 #[macro_export]
 macro_rules! ensure {
     ( $expr:expr, $( $arg:tt )+ ) => {
