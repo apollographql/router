@@ -9,6 +9,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -17,6 +18,7 @@ use petgraph::Direction;
 use regex::Regex;
 use strum::IntoEnumIterator;
 
+use crate::display_helpers::DisplaySlice;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -1481,23 +1483,19 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn handle_context(&mut self) -> Result<(), FederationError> {
-        let mut subgraph_to_args: MultiMap<Arc<str>, ObjectFieldArgumentDefinitionPosition> =
-            MultiMap::new();
-        let mut coordinate_map: HashMap<
+        let mut subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>> =
+            IndexMap::default();
+        let mut coordinate_map: IndexMap<
             Arc<str>,
-            HashMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>>,
-        > = HashMap::default();
+            IndexMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>>,
+        > = IndexMap::default();
         for (subgraph_name, subgraph) in self.base.query_graph.subgraphs() {
-            // TODO: Most other `handle_*` methods filter out
-            // `self.base.query_graph.source == subgraph_name`. Should we do something similar?
-            // Perhaps only process the subgraph with the name `self.base.query_graph.source`?
+            let subgraph_data = self.subgraphs.get(subgraph_name)?;
             let Some((_, context_refs)) = &subgraph
                 .referencers()
                 .directives
                 .iter()
-                // TODO: I think I need to get the subgraph data which contains the name of the
-                // context in that subgraph, ya?
-                .find(|(dir, _)| **dir == CONTEXT_DIRECTIVE_NAME)
+                .find(|(dir, _)| **dir == subgraph_data.context_directive_definition_name)
             else {
                 continue;
             };
@@ -1506,16 +1504,13 @@ impl FederatedQueryGraphBuilder {
                 .referencers()
                 .directives
                 .iter()
-                // TODO: I think I need to get the subgraph data which contains the name of
-                // fromContext in that subgraph, ya?
-                .find(|(dir, _)| **dir == FROM_CONTEXT_DIRECTIVE_NAME)
+                .find(|(dir, _)| **dir == subgraph_data.from_context_directive_definition_name)
             else {
                 continue;
             };
 
             // For @context
             // subgraph -> referencers -> iter through object_types and interface_types
-            let subgraph_data = self.subgraphs.get(subgraph_name)?;
             let mut context_name_to_types: HashMap<&str, HashSet<&ObjectTypeDefinitionPosition>> =
                 HashMap::default();
             for object_def_pos in &context_refs.object_types {
@@ -1537,7 +1532,8 @@ impl FederatedQueryGraphBuilder {
                 let coordinate = object_field_arg.parent();
                 subgraph_to_args
                     .entry(subgraph_name.clone())
-                    .or_insert_vec(vec![object_field_arg.clone()]);
+                    .or_default()
+                    .push(object_field_arg.clone());
                 for dir in input_value.directives.get_all(&FROM_CONTEXT_DIRECTIVE_NAME) {
                     let application = subgraph_data
                         .federation_spec_definition
@@ -1548,8 +1544,7 @@ impl FederatedQueryGraphBuilder {
                         .get(context.as_str())
                         .into_iter()
                         .flatten()
-                        .cloned()
-                        .cloned()
+                        .map(|obj| ObjectTypeDefinitionPosition::clone(*obj))
                         .collect();
                     let conditions = ContextCondition {
                         context,
@@ -1592,26 +1587,23 @@ impl FederatedQueryGraphBuilder {
         }
 
         // Add the context argument mapping
-        let mut subgraph_to_arg_indices: HashMap<
-            Arc<str>,
-            HashMap<ObjectFieldArgumentDefinitionPosition, String>,
-        > = HashMap::default();
-        for (source, _) in self.base.query_graph.subgraphs() {
-            if let Some(args) = subgraph_to_args.get_vec(source.as_ref()) {
-                // The JS code sorted the list, but the ObjectFieldDefinitionPosition does
-                // implement Ord. Can we ignore sorting?
-                // args.sort();
-                let args = args
-                    .iter()
-                    .enumerate()
-                    .map(|(i, arg)| (arg.clone(), format!("contextualArgument__{source}_{i}")))
-                    .collect();
-                subgraph_to_arg_indices.insert(source.clone(), args);
-            }
-        }
-
+        self.base.query_graph.subgraph_to_arg_indices = self
+            .base
+            .query_graph
+            .subgraphs()
+            .filter_map(|(source, _)| subgraph_to_args.get_key_value(source))
+            .map(|(source, args)| {
+                (
+                    source.clone(),
+                    args.iter()
+                        .sorted()
+                        .enumerate()
+                        .map(|(i, arg)| (arg.clone(), format!("contextualArgument__{source}_{i}")))
+                        .collect(),
+                )
+            })
+            .collect();
         self.base.query_graph.subgraph_to_args = subgraph_to_args;
-        self.base.query_graph.subgraph_to_arg_indices = subgraph_to_arg_indices;
 
         Ok(())
     }

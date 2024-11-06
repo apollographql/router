@@ -401,9 +401,9 @@ pub struct QueryGraph {
     non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
     // TODO: Are these duplicate fields??
     // TODO: If not, write docs
-    subgraph_to_args: MultiMap<Arc<str>, ObjectFieldArgumentDefinitionPosition>,
+    subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>>,
     subgraph_to_arg_indices:
-        HashMap<Arc<str>, HashMap<ObjectFieldArgumentDefinitionPosition, String>>,
+        IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, String>>,
 }
 
 impl QueryGraph {
