@@ -5,12 +5,12 @@ expression: cache_keys
 [
   {
     "key": "version:1.0:subgraph:orga:type:Organization:entity:5221ff42b311b757445c096c023cee4fefab5de49735e421c494f1119326317b:hash:cffb47a84aff0aea6a447e33caf3b275bdc7f71689d75f56647242b3b9f5e13b:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
-    "status": "new",
+    "status": "cached",
     "cache_control": "max-age=3600,public"
   },
   {
     "key": "version:1.0:subgraph:orga:type:Organization:entity:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:hash:cffb47a84aff0aea6a447e33caf3b275bdc7f71689d75f56647242b3b9f5e13b:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
-    "status": "new",
+    "status": "cached",
     "cache_control": "max-age=3600,public"
   }
 ]

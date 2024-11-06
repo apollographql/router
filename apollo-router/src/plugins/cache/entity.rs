@@ -1578,6 +1578,7 @@ fn assemble_response_from_errors(
 pub(crate) type CacheKeysContext = HashMap<SubgraphRequestId, Vec<CacheKeyContext>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(test, derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub(crate) struct CacheKeyContext {
     key: String,
     status: CacheKeyStatus,
@@ -1585,10 +1586,24 @@ pub(crate) struct CacheKeyContext {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(test, derive(PartialEq, Eq, Hash, Ord))]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CacheKeyStatus {
     /// New cache key inserted in the cache
     New,
     /// Key that was already in the cache
     Cached,
+}
+
+#[cfg(test)]
+impl PartialOrd for CacheKeyStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (CacheKeyStatus::New, CacheKeyStatus::New) => std::cmp::Ordering::Equal,
+            (CacheKeyStatus::New, CacheKeyStatus::Cached) => std::cmp::Ordering::Greater,
+            (CacheKeyStatus::Cached, CacheKeyStatus::New) => std::cmp::Ordering::Less,
+            (CacheKeyStatus::Cached, CacheKeyStatus::Cached) => std::cmp::Ordering::Equal,
+        }
+        .into()
+    }
 }
