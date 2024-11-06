@@ -192,11 +192,11 @@ mod helpers {
     use itertools::Itertools;
 
     use super::filter_directives;
-    use super::path_to_selection;
     use super::visitors::try_insert;
     use super::visitors::try_pre_insert;
     use super::visitors::GroupVisitor;
     use super::visitors::SchemaVisitor;
+    use super::FieldAndSelection;
     use crate::error::FederationError;
     use crate::link::spec::Identity;
     use crate::link::Link;
@@ -489,8 +489,8 @@ mod helpers {
                 //
                 // All sibling fields marked by $this in a transport must be carried over to the output type
                 // regardless of its use in the output selection.
-                let (field_name_str, selection) = path_to_selection(&path);
-                let field_name = Name::new(&field_name_str)?;
+                let field_and_selection = FieldAndSelection::from_path(&path);
+                let field_name = Name::new(field_and_selection.field_name)?;
                 let field: Box<dyn Field> = match &key_for_type {
                     TypeDefinitionPosition::Object(o)  => Box::new(o.field(field_name)),
                     TypeDefinitionPosition::Interface(i) => Box::new(i.field(field_name)),
@@ -510,7 +510,7 @@ mod helpers {
                 let field_def = field.get(self.original_schema.schema())?;
 
                 // Mark it as a required key for the output type
-                if !selection.is_empty() {
+                if !field_and_selection.sub_selection.is_empty() {
                     // We'll also need to carry over the output type of this sibling if there is a sub
                     // selection.
                     let field_output = field_def.ty.inner_named_type();
@@ -522,11 +522,12 @@ mod helpers {
                             to_schema,
                             &self.directive_deny_list,
                         );
-                        let parsed = JSONSelection::parse(&selection).map_err(|e| {
-                            FederationError::internal(format!(
-                                "could not parse fake selection for sibling field: {e}"
-                            ))
-                        })?;
+                        let parsed = JSONSelection::parse(&field_and_selection.sub_selection)
+                            .map_err(|e| {
+                                FederationError::internal(format!(
+                                    "error creating key from `$this` variable: {e}"
+                                ))
+                            })?;
 
                         let output_type = match self
                             .original_schema
@@ -548,7 +549,7 @@ mod helpers {
                     }
                 }
 
-                keys.push(format!("{field_name_str}{selection}"));
+                keys.push(field_and_selection.to_key());
 
                 // Add the field if not already present in the output schema
                 if field.get(to_schema.schema()).is_err() {
@@ -833,22 +834,75 @@ mod helpers {
     }
 }
 
-/// Turn a path like a.b.c into a selection like (a,  { b { c } }). Join together to get a key.
-fn path_to_selection(path: &str) -> (String, String) {
-    let mut parts = path.split('.').peekable();
-    let field = parts.next().unwrap_or_default().to_string();
-    let mut selection = String::new();
-    let mut closing_braces = 0;
-    for sub_path in parts {
-        // Generate nested { a { b { c } } }
-        selection.push_str(" { ");
-        selection.push_str(sub_path);
-        closing_braces += 1;
+/// Represents a field and the subselection of that field, which can then be joined together into
+/// a full named selection (which is the same as a key, in simple cases).
+struct FieldAndSelection<'a> {
+    field_name: &'a str,
+    sub_selection: String,
+}
+
+impl<'a> FieldAndSelection<'a> {
+    /// Extract from a path like `a.b.c` into `a` and `b { c }`
+    fn from_path(path: &'a str) -> Self {
+        let mut parts = path.split('.').peekable();
+        let field_name = parts.next().unwrap_or_default();
+        let mut sub_selection = String::new();
+        let mut closing_braces = 0;
+        while let Some(sub_path) = parts.next() {
+            sub_selection.push_str(sub_path);
+            if parts.peek().is_some() {
+                sub_selection.push_str(" { ");
+                closing_braces += 1;
+            }
+        }
+        for _ in 0..closing_braces {
+            sub_selection.push_str(" }");
+        }
+        FieldAndSelection {
+            field_name,
+            sub_selection,
+        }
     }
-    for _ in 0..closing_braces {
-        selection.push_str(" }");
+
+    fn to_key(&self) -> String {
+        if self.sub_selection.is_empty() {
+            self.field_name.to_string()
+        } else {
+            format!("{} {{ {} }}", self.field_name, self.sub_selection)
+        }
     }
-    (field, selection)
+}
+
+#[cfg(test)]
+mod test_field_and_selection {
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::simple("a", "a", "")]
+    #[case::one("a.b", "a", "b")]
+    #[case::two("a.b.c", "a", "b { c }")]
+    #[case::three("a.b.c.d", "a", "b { c { d } }")]
+    fn from_path(
+        #[case] path: &str,
+        #[case] expected_field: &str,
+        #[case] expected_selection: &str,
+    ) {
+        let result = super::FieldAndSelection::from_path(path);
+        assert_eq!(result.field_name, expected_field);
+        assert_eq!(result.sub_selection, expected_selection);
+    }
+
+    #[rstest]
+    #[case::simple("a", "", "a")]
+    #[case::one("a", "b", "a { b }")]
+    #[case::two("a", "b { c }", "a { b { c } }")]
+    fn to_key(#[case] field_name: &str, #[case] sub_selection: &str, #[case] expected_key: &str) {
+        let result = super::FieldAndSelection {
+            field_name,
+            sub_selection: sub_selection.to_string(),
+        };
+        assert_eq!(result.to_key(), expected_key);
+    }
 }
 
 #[cfg(test)]

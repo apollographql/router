@@ -1,0 +1,35 @@
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+        @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+        @link(
+          url: "https://specs.apollo.dev/connect/v0.1"
+          import: ["@connect", "@source"]
+        )
+        @source(
+          name: "v1"
+          http: { baseURL: "https://rt-airlock-services-listing.herokuapp.com" }
+        )
+        
+        type T {
+          k: K
+          b: String
+            @connect(http: { GET: "https://my.api/t/{$$this.k.id}" }, selection: "b")
+        }
+        
+        type K {
+          id: ID!
+        }
+        
+        type Query {
+          f: T
+            @connect(
+              http: { GET: "https://my.api/t" }
+              selection: """
+              k { id }
+              """
+            )
+        }
