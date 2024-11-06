@@ -51,6 +51,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
+use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
@@ -62,6 +63,7 @@ pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
+pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::keys";
 
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
@@ -73,6 +75,7 @@ pub(crate) struct EntityCache {
     entity_type: Option<String>,
     enabled: bool,
     metrics: Metrics,
+    expose_keys_in_context: bool,
     private_queries: Arc<RwLock<HashSet<String>>>,
     pub(crate) invalidation: Invalidation,
 }
@@ -95,6 +98,10 @@ pub(crate) struct Config {
     /// Enable or disable the entity caching feature
     #[serde(default)]
     enabled: bool,
+
+    #[serde(default)]
+    /// Expose cache keys in context
+    expose_keys_in_context: bool,
 
     /// Configure invalidation per subgraph
     subgraph: SubgraphConfiguration<Subgraph>,
@@ -297,6 +304,7 @@ impl Plugin for EntityCache {
             storage,
             entity_type,
             enabled: init.config.enabled,
+            expose_keys_in_context: init.config.expose_keys_in_context,
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
@@ -390,6 +398,7 @@ impl Plugin for EntityCache {
                     private_queries,
                     private_id,
                     invalidation: self.invalidation.clone(),
+                    expose_keys_in_context: self.expose_keys_in_context,
                 })));
             tower::util::BoxService::new(inner)
         } else {
@@ -467,6 +476,7 @@ impl EntityCache {
             storage,
             entity_type: None,
             enabled: true,
+            expose_keys_in_context: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph::default(),
                 subgraphs,
@@ -496,6 +506,7 @@ struct InnerCacheService {
     subgraph_ttl: Option<Duration>,
     private_queries: Arc<RwLock<HashSet<String>>>,
     private_id: Option<String>,
+    expose_keys_in_context: bool,
     invalidation: Invalidation,
 }
 
@@ -567,6 +578,7 @@ impl InnerCacheService {
                     self.storage.clone(),
                     is_known_private,
                     private_id.as_deref(),
+                    self.expose_keys_in_context,
                     request,
                 )
                 .instrument(tracing::info_span!("cache.entity.lookup"))
@@ -638,6 +650,7 @@ impl InnerCacheService {
                                 &response,
                                 cache_control,
                                 root_cache_key,
+                                self.expose_keys_in_context,
                             )
                             .await?;
                         }
@@ -669,6 +682,7 @@ impl InnerCacheService {
                 is_known_private,
                 private_id.as_deref(),
                 request,
+                self.expose_keys_in_context,
             )
             .instrument(tracing::info_span!("cache.entity.lookup"))
             .await?
@@ -726,6 +740,25 @@ impl InnerCacheService {
 
                     if let Some(control_from_cached) = cache_result.1 {
                         cache_control = cache_control.merge(&control_from_cached);
+                    }
+                    if self.expose_keys_in_context {
+                        // Update cache keys needed for surrogate cache key when it's new data and not data from the cache
+                        let response_id = response.id.clone();
+                        let cache_control_str = cache_control.to_cache_control_header()?;
+                        response.context.upsert::<_, CacheKeysContext>(
+                            CONTEXT_CACHE_KEYS,
+                            |mut value| {
+                                if let Some(cache_keys) = value.get_mut(&response_id) {
+                                    for cache_key in cache_keys
+                                        .iter_mut()
+                                        .filter(|c| matches!(c.status, CacheKeyStatus::New))
+                                    {
+                                        cache_key.cache_control = cache_control_str.clone();
+                                    }
+                                }
+                                value
+                            },
+                        )?;
                     }
 
                     if !is_known_private && cache_control.private() {
@@ -797,6 +830,7 @@ async fn cache_lookup_root(
     cache: RedisCacheStorage,
     is_known_private: bool,
     private_id: Option<&str>,
+    expose_keys_in_context: bool,
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
     let body = request.subgraph_request.body_mut();
@@ -822,6 +856,36 @@ async fn cache_lookup_root(
                     .context
                     .extensions()
                     .with_lock(|mut lock| lock.insert(control));
+                if expose_keys_in_context {
+                    let request_id = request.id.clone();
+                    let cache_control_header = value.0.control.to_cache_control_header()?;
+                    request
+                        .context
+                        .upsert::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS, |mut val| {
+                            match val.get_mut(&request_id) {
+                                Some(v) => {
+                                    v.push(CacheKeyContext {
+                                        key: key.clone(),
+                                        status: CacheKeyStatus::Cached,
+                                        cache_control: cache_control_header,
+                                    });
+                                }
+                                None => {
+                                    val.insert(
+                                        request_id,
+                                        vec![CacheKeyContext {
+                                            key: key.clone(),
+                                            status: CacheKeyStatus::Cached,
+                                            cache_control: cache_control_header,
+                                        }],
+                                    );
+                                }
+                            }
+
+                            val
+                        })
+                        .expect("update context cache keys for subgraph should not panic");
+                }
 
                 let mut response = subgraph::Response::builder()
                     .data(value.0.data)
@@ -851,6 +915,7 @@ async fn cache_lookup_entities(
     is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
+    expose_keys_in_context: bool,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
@@ -892,6 +957,48 @@ async fn cache_lookup_entities(
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) =
         filter_representations(&name, representations, keys, cache_result, &request.context)?;
+
+    // TODO add if config
+    if expose_keys_in_context {
+        let mut cache_entries = Vec::with_capacity(cache_result.len());
+        for intermediate_result in &cache_result {
+            match &intermediate_result.cache_entry {
+                Some(cache_entry) => {
+                    cache_entries.push(CacheKeyContext {
+                        key: intermediate_result.key.clone(),
+                        status: CacheKeyStatus::Cached,
+                        cache_control: cache_entry.control.to_cache_control_header()?,
+                    });
+                }
+                None => {
+                    // TODO: check if it's a private element it should still be with that status ?
+                    cache_entries.push(CacheKeyContext {
+                        key: intermediate_result.key.clone(),
+                        status: CacheKeyStatus::New,
+                        cache_control: match &cache_control {
+                            Some(cc) => cc.to_cache_control_header()?,
+                            None => CacheControl::default().to_cache_control_header()?,
+                        },
+                    });
+                }
+            }
+        }
+        let request_id = request.id.clone();
+        request
+            .context
+            .upsert::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS, |mut v| {
+                match v.get_mut(&request_id) {
+                    Some(cache_keys) => {
+                        cache_keys.append(&mut cache_entries);
+                    }
+                    None => {
+                        v.insert(request_id, cache_entries);
+                    }
+                }
+
+                v
+            })?;
+    }
 
     if !new_representations.is_empty() {
         body.variables
@@ -954,6 +1061,7 @@ async fn cache_store_root_from_response(
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
+    expose_keys_in_context: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl: Option<Duration> = cache_control
@@ -964,6 +1072,38 @@ async fn cache_store_root_from_response(
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
+            if expose_keys_in_context {
+                let response_id = response.id.clone();
+                let cache_control_header = cache_control.to_cache_control_header()?;
+
+                response
+                    .context
+                    .upsert::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS, |mut val| {
+                        match val.get_mut(&response_id) {
+                            Some(v) => {
+                                v.push(CacheKeyContext {
+                                    key: cache_key.clone(),
+                                    status: CacheKeyStatus::New,
+                                    cache_control: cache_control_header,
+                                });
+                            }
+                            None => {
+                                val.insert(
+                                    response_id,
+                                    vec![CacheKeyContext {
+                                        key: cache_key.clone(),
+                                        status: CacheKeyStatus::New,
+                                        cache_control: cache_control_header,
+                                    }],
+                                );
+                            }
+                        }
+
+                        val
+                    })
+                    .expect("update context cache keys for subgraph should not panic");
+            }
+
             tokio::spawn(async move {
                 cache
                     .insert(
@@ -1418,4 +1558,22 @@ fn assemble_response_from_errors(
         }
     }
     (new_entities, new_errors)
+}
+
+pub(crate) type CacheKeysContext = HashMap<SubgraphRequestId, Vec<CacheKeyContext>>;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct CacheKeyContext {
+    key: String,
+    status: CacheKeyStatus,
+    cache_control: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CacheKeyStatus {
+    /// New cache key inserted in the cache
+    New,
+    /// Key that was already in the cache
+    Cached,
 }
