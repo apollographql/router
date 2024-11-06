@@ -31,3 +31,21 @@ To report the subgraph errors to GraphOS that is a separate configuration that i
 ## Logging GraphQL request errors
 To log the GraphQL error responses (i.e. messages returned in the GraphQL `errors` array) from the router, see the [logging configuration documentation](./telemetry/exporters/logging/overview).
 
+## Exposing subgraph name through error extensions
+If `include_subgraph_errors` is `true` for a particular subgraph, all errors originating in this subgraph will have the subgraph's name exposed as a `service` extension.
+
+For example, if subgraph errors are enabled for the `products` subgraph and this subgraph returns an error, it will have a `service` extension:
+```json
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Invalid product ID",
+      "path": [],
+      "extensions": {
+        "service": "products",
+      }
+    }
+  ]
+}
+```
