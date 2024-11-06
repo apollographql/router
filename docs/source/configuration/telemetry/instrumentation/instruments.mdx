@@ -27,6 +27,9 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
   * `http.client.request.duration` - A histogram of request durations for requests handled by subgraphs.
   * `http.client.response.body.size` - A histogram of response body sizes for requests handled by subgraphs.
 
+<Note>
+Whether or not these instruments are enabled or disabled by default depends on [the `default_requirement_level`](#default_requirement_level) setting.  If you desire configuration which deviates from the behavior achieved by setting `default_requirement_level` to either `reecommended` or `required`, configure these instruments explicitly.
+</Note>
 
 These instruments are configurable in `router.yaml`:
 
