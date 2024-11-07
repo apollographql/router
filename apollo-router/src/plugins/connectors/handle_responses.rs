@@ -49,7 +49,7 @@ enum RawResponse {
         parts: http::response::Parts,
         data: Value,
         key: ResponseKey,
-        debug: Option<ConnectorDebugHttpRequest>,
+        debug_request: Option<ConnectorDebugHttpRequest>,
     },
 }
 
@@ -61,7 +61,7 @@ impl RawResponse {
     fn map_response(
         self,
         connector: &Connector,
-        debug: &Option<Arc<Mutex<ConnectorContext>>>,
+        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     ) -> MappedResponse {
         match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
@@ -69,7 +69,7 @@ impl RawResponse {
                 data,
                 key,
                 parts,
-                debug: debug_request,
+                debug_request,
             } => {
                 let (res, apply_to_errors) = key.selection().apply_with_vars(
                     &data,
@@ -80,7 +80,7 @@ impl RawResponse {
                     ),
                 );
 
-                if let Some(ref debug) = debug {
+                if let Some(ref debug) = debug_context {
                     debug.lock().push_response(
                         debug_request.clone(),
                         &parts,
@@ -111,14 +111,14 @@ impl RawResponse {
     fn map_error(
         self,
         connector: &Connector,
-        debug: &Option<Arc<Mutex<ConnectorContext>>>,
+        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     ) -> MappedResponse {
         match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
             RawResponse::Data {
                 key,
                 parts,
-                debug: debug_request,
+                debug_request,
                 data,
             } => {
                 let error = FetchError::SubrequestHttpError {
@@ -133,7 +133,7 @@ impl RawResponse {
                 .to_graphql_error(None)
                 .add_subgraph_name(&connector.id.subgraph_name);
 
-                if let Some(ref debug) = debug {
+                if let Some(ref debug) = debug_context {
                     debug
                         .lock()
                         .push_response(debug_request.clone(), &parts, &data, None);
@@ -262,7 +262,7 @@ impl MappedResponse {
 pub(crate) async fn handle_responses<T: HttpBody>(
     responses: Vec<ConnectorResponse<T>>,
     connector: &Connector,
-    debug: &Option<Arc<Mutex<ConnectorContext>>>,
+    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Response, HandleResponseError> {
     let futures_vec = responses
         .into_iter()
@@ -282,12 +282,20 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                     // If this errors, it will write to the debug context because it
                     // has access to the raw bytes, so we can't write to it again
                     // in any RawResponse::Error branches.
-                    match deserialize_response(body, &parts, connector, debug).await {
+                    match deserialize_response(
+                        body,
+                        &parts,
+                        connector,
+                        debug_context,
+                        &debug_request,
+                    )
+                    .await
+                    {
                         Ok(data) => RawResponse::Data {
                             parts,
                             data,
                             key: response_key,
-                            debug: debug_request,
+                            debug_request,
                         },
                         Err(error) => RawResponse::Error {
                             error,
@@ -312,9 +320,9 @@ pub(crate) async fn handle_responses<T: HttpBody>(
         };
 
         let mapped = if is_success {
-            raw.map_response(connector, debug)
+            raw.map_response(connector, debug_context)
         } else {
-            raw.map_error(connector, debug)
+            raw.map_error(connector, debug_context)
         };
 
         mapped.add_to_data(&mut data, &mut errors, count)?;
@@ -354,7 +362,8 @@ async fn deserialize_response<T: HttpBody>(
     body: T,
     parts: &http::response::Parts,
     connector: &Connector,
-    debug: &Option<Arc<Mutex<ConnectorContext>>>,
+    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    debug_request: &Option<ConnectorDebugHttpRequest>,
 ) -> Result<Value, graphql::Error> {
     let make_err = || {
         FetchError::SubrequestHttpError {
@@ -374,8 +383,10 @@ async fn deserialize_response<T: HttpBody>(
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {
-            if let Some(ref debug) = debug {
-                debug.lock().push_invalid_response(None, parts, body);
+            if let Some(ref debug_context) = debug_context {
+                debug_context
+                    .lock()
+                    .push_invalid_response(debug_request.clone(), parts, body);
             }
 
             Err(make_err())
