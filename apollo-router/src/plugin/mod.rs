@@ -630,6 +630,9 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
+
+    /// This is invoked once after the OTEL meter has been refreshed.
+    async fn activate(&self) {}
 }
 
 #[async_trait]
@@ -733,6 +736,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// Support downcasting
     #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// This is invoked once after the OTEL meter has been refreshed.
+    async fn activate(&self) {}
 }
 
 #[async_trait]
@@ -782,6 +788,10 @@ where
     #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    async fn activate(&self) {
+        self.activate().await
     }
 }
 

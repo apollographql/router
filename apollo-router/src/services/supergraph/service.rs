@@ -812,6 +812,8 @@ impl PluggableSupergraphServiceBuilder {
         for (_, plugin) in self.plugins.iter() {
             if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
                 telemetry.activate();
+            } else {
+                plugin.activate().await;
             }
         }
 
