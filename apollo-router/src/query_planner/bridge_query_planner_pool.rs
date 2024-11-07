@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::task::Poll;
 use std::time::Instant;
 
 use apollo_compiler::validation::Valid;
@@ -42,6 +43,7 @@ pub(crate) struct BridgeQueryPlannerPool {
     )>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     pool_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_used: Arc<AtomicU64>,
     v8_heap_used_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
@@ -151,6 +153,7 @@ impl BridgeQueryPlannerPool {
             sender,
             schema,
             subgraph_schemas,
+            compute_jobs_queue_size_gauge: Default::default(),
             pool_size_gauge: Default::default(),
             v8_heap_used,
             v8_heap_used_gauge: Default::default(),
@@ -228,6 +231,10 @@ impl BridgeQueryPlannerPool {
     pub(super) fn activate(&self) {
         // Gauges MUST be initialized after a meter provider is created.
         // When a hot reload happens this means that the gauges must be re-initialized.
+        *self
+            .compute_jobs_queue_size_gauge
+            .lock()
+            .expect("lock poisoned") = Some(crate::compute_job::create_queue_size_gauge());
         *self.pool_size_gauge.lock().expect("lock poisoned") = Some(self.create_pool_size_gauge());
         *self.v8_heap_used_gauge.lock().expect("lock poisoned") =
             Some(self.create_heap_used_gauge());
@@ -244,16 +251,16 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if crate::compute_job::is_full() {
+            return Poll::Pending;
+        }
         if self.sender.is_full() {
-            std::task::Poll::Ready(Err(QueryPlannerError::PoolProcessing(
+            Poll::Ready(Err(QueryPlannerError::PoolProcessing(
                 "query plan queue is full".into(),
             )))
         } else {
-            std::task::Poll::Ready(Ok(()))
+            Poll::Ready(Ok(()))
         }
     }
 
