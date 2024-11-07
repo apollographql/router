@@ -306,6 +306,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
             if let Some(max_headers) = configuration.supergraph.experimental_http1_max_headers {
                 http_config.http1_max_headers(max_headers);
             }
+            if let Some(max_buf_size) = configuration.supergraph.experimental_http1_max_buf_size {
+                http_config.max_buf_size(max_buf_size);
+            }
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 main_listener,

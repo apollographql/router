@@ -707,6 +707,11 @@ pub(crate) struct Supergraph {
     ///
     /// Default is 100.
     pub(crate) experimental_http1_max_headers: Option<usize>,
+
+    /// Set the maximum buffer size for the HTTP1 connection.
+    ///
+    /// Default is ~400kb.
+    pub(crate) experimental_http1_max_buf_size: Option<usize>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -746,6 +751,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         experimental_http1_max_headers: Option<usize>,
+        experimental_http1_max_buf_size: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -766,6 +772,7 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             experimental_http1_max_headers,
+            experimental_http1_max_buf_size,
         }
     }
 }
@@ -785,6 +792,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         experimental_http1_max_headers: Option<usize>,
+        experimental_http1_max_buf_size: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -805,6 +813,7 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             experimental_http1_max_headers,
+            experimental_http1_max_buf_size,
         }
     }
 }
