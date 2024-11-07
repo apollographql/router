@@ -15,9 +15,9 @@ use super::NamedFragments;
 use super::Selection;
 use super::SelectionSet;
 use super::SelectionValue;
+use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
-use crate::internal_error;
 
 impl<'a> FieldSelectionValue<'a> {
     /// Merges the given field selections into this one.
@@ -50,14 +50,14 @@ impl<'a> FieldSelectionValue<'a> {
             );
             if self.get().selection_set.is_some() {
                 let Some(other_selection_set) = &other.selection_set else {
-                    internal_error!(
+                    bail!(
                         "Field \"{}\" has composite type but not a selection set",
                         other_field.field_position,
                     );
                 };
                 selection_sets.push(other_selection_set);
             } else if other.selection_set.is_some() {
-                internal_error!(
+                bail!(
                     "Field \"{}\" has non-composite type but also has a selection set",
                     other_field.field_position,
                 );
@@ -187,7 +187,7 @@ impl SelectionSet {
                 selection_map::Entry::Occupied(existing) => match existing.get() {
                     Selection::Field(self_field_selection) => {
                         let Selection::Field(other_field_selection) = other_selection else {
-                            internal_error!(
+                            bail!(
                                 "Field selection key for field \"{}\" references non-field selection",
                                 self_field_selection.field.field_position,
                             );
@@ -201,7 +201,7 @@ impl SelectionSet {
                         let Selection::FragmentSpread(other_fragment_spread_selection) =
                             other_selection
                         else {
-                            internal_error!(
+                            bail!(
                                 "Fragment spread selection key for fragment \"{}\" references non-field selection",
                                 self_fragment_spread_selection.spread.fragment_name,
                             );
@@ -215,7 +215,7 @@ impl SelectionSet {
                         let Selection::InlineFragment(other_inline_fragment_selection) =
                             other_selection
                         else {
-                            internal_error!(
+                            bail!(
                                 "Inline fragment selection key under parent type \"{}\" {}references non-field selection",
                                 self_inline_fragment_selection.inline_fragment.parent_type_position,
                                 self_inline_fragment_selection.inline_fragment.type_condition_position.clone()
@@ -368,7 +368,7 @@ pub(crate) fn merge_selection_sets(
     mut selection_sets: Vec<SelectionSet>,
 ) -> Result<SelectionSet, FederationError> {
     let Some((first, remainder)) = selection_sets.split_first_mut() else {
-        internal_error!("merge_selection_sets(): must have at least one selection set");
+        bail!("merge_selection_sets(): must have at least one selection set");
     };
     first.merge_into(remainder.iter())?;
 
