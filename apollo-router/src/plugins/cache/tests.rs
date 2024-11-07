@@ -603,7 +603,14 @@ async fn no_data() {
     let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
     cache_keys.sort();
-    insta::assert_json_snapshot!(cache_keys);
+    insta::assert_json_snapshot!(cache_keys, {
+        "[].cache_control" => insta::dynamic_redaction(|value, _path| {
+            let cache_control = value.as_str().unwrap().to_string();
+            assert!(cache_control.contains("max-age="));
+            assert!(cache_control.contains("public"));
+            "[REDACTED]"
+        })
+    });
 
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
@@ -672,7 +679,14 @@ async fn no_data() {
     let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
     cache_keys.sort();
-    insta::assert_json_snapshot!(cache_keys);
+    insta::assert_json_snapshot!(cache_keys, {
+        "[].cache_control" => insta::dynamic_redaction(|value, _path| {
+            let cache_control = value.as_str().unwrap().to_string();
+            assert!(cache_control.contains("max-age="));
+            assert!(cache_control.contains("public"));
+            "[REDACTED]"
+        })
+    });
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response);
