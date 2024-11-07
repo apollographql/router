@@ -1026,7 +1026,7 @@ impl FederatedQueryGraphBuilder {
             .root_kinds_to_nodes_by_source
             .iter()
             .filter(|(source, _)| **source != self.base.query_graph.current_source)
-            .flat_map(|(_, root_kind_to_notes)| root_kind_to_notes.keys().copied())
+            .flat_map(|(_, root_kind_to_nodes)| root_kind_to_nodes.keys().copied())
             .collect::<IndexSet<_>>();
         for root_kind in root_kinds {
             self.base.create_root_node(root_kind.into(), root_kind)?;
