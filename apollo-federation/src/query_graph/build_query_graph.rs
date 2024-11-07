@@ -1510,7 +1510,7 @@ impl FederatedQueryGraphBuilder {
             };
 
             // Collect data for @context
-            let mut context_name_to_types: HashMap<&str, HashSet<&ObjectTypeDefinitionPosition>> =
+            let mut context_name_to_types: HashMap<&str, HashSet<CompositeTypeDefinitionPosition>> =
                 HashMap::default();
             for object_def_pos in &context_refs.object_types {
                 let object = object_def_pos.get(subgraph.schema())?;
@@ -1519,7 +1519,27 @@ impl FederatedQueryGraphBuilder {
                     context_name_to_types
                         .entry(application.name)
                         .or_default()
-                        .insert(object_def_pos);
+                        .insert(object_def_pos.clone().into());
+                }
+            }
+            for interface_def_pos in &context_refs.interface_types {
+                let interface = interface_def_pos.get(subgraph.schema())?;
+                for dir in interface.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(interface_def_pos.clone().into());
+                }
+            }
+            for union_def_pos in &context_refs.union_types {
+                let union = union_def_pos.get(subgraph.schema())?;
+                for dir in union.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(union_def_pos.clone().into());
                 }
             }
 
@@ -1542,7 +1562,7 @@ impl FederatedQueryGraphBuilder {
                         .get(context.as_str())
                         .into_iter()
                         .flatten()
-                        .map(|obj| ObjectTypeDefinitionPosition::clone(*obj))
+                        .cloned()
                         .collect();
                     let conditions = ContextCondition {
                         context,

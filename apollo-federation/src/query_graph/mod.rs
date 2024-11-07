@@ -141,7 +141,7 @@ pub struct ContextCondition {
     context: String,
     subgraph_name: Arc<str>,
     selection: String,
-    types_with_context_set: HashSet<ObjectTypeDefinitionPosition>,
+    types_with_context_set: HashSet<CompositeTypeDefinitionPosition>,
     coordinate: ObjectFieldDefinitionPosition,
 }
 
