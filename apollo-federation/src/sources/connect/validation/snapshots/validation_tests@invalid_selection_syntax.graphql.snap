@@ -8,7 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         code: InvalidJsonSelection,
         message: "`@connect(selection:)` on `Query.something` is not a valid JSONSelection: nom::error::ErrorKind::Eof at offset 0: &how",
         locations: [
-            8:86..8:92,
+            8:87..8:88,
         ],
     },
 ]
