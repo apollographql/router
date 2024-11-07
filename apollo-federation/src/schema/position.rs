@@ -2086,7 +2086,7 @@ impl Debug for ObjectFieldDefinitionPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ObjectFieldArgumentDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,

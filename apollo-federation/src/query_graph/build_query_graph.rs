@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
@@ -8,20 +9,26 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use itertools::Itertools;
+use multimap::MultiMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use regex::Regex;
 use strum::IntoEnumIterator;
 
+use crate::display_helpers::DisplaySlice;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::operation::merge_selection_sets;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::ContextCondition;
 use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
@@ -33,6 +40,7 @@ use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -42,7 +50,10 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
+use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::supergraph::extract_subgraphs_from_supergraph;
+use crate::utils::FallibleIterator;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -59,7 +70,7 @@ pub fn build_federated_query_graph(
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
     let for_query_planning = for_query_planning.unwrap_or(true);
-    let mut query_graph = QueryGraph {
+    let query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
         current_source: "".into(),
         graph: Default::default(),
@@ -68,22 +79,23 @@ pub fn build_federated_query_graph(
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        subgraph_to_args: Default::default(),
+        subgraph_to_arg_indices: Default::default(),
     };
-    let subgraphs =
-        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
-    for (subgraph_name, subgraph) in subgraphs {
-        let builder = SchemaQueryGraphBuilder::new(
-            query_graph,
-            subgraph_name,
-            subgraph.schema,
-            Some(api_schema.clone()),
-            for_query_planning,
-        )?;
-        query_graph = builder.build()?;
-    }
-    let federated_builder = FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?;
-    query_graph = federated_builder.build()?;
-    Ok(query_graph)
+    let query_graph =
+        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
+            .into_iter()
+            .fallible_fold(query_graph, |query_graph, (subgraph_name, subgraph)| {
+                SchemaQueryGraphBuilder::new(
+                    query_graph,
+                    subgraph_name,
+                    subgraph.schema,
+                    Some(api_schema.clone()),
+                    for_query_planning,
+                )?
+                .build()
+            })?;
+    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?.build()
 }
 
 /// Builds a query graph based on the provided schema (usually an API schema outside of testing).
@@ -102,6 +114,8 @@ pub fn build_query_graph(
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        subgraph_to_args: Default::default(),
+        subgraph_to_arg_indices: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
@@ -136,15 +150,9 @@ impl BaseQueryGraphBuilder {
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        self.query_graph.graph.add_edge(
-            head,
-            tail,
-            QueryGraphEdge {
-                transition,
-                conditions,
-                override_condition: None,
-            },
-        );
+        self.query_graph
+            .graph
+            .add_edge(head, tail, QueryGraphEdge::new(transition, conditions));
         let head_weight = self.query_graph.node_weight(head)?;
         let tail_weight = self.query_graph.node_weight(tail)?;
         if head_weight.source != tail_weight.source {
@@ -986,6 +994,7 @@ impl FederatedQueryGraphBuilder {
         self.handle_key()?;
         self.handle_requires()?;
         self.handle_progressive_overrides()?;
+        self.handle_context()?;
         // Note that @provides must be handled last when building since it requires copying nodes
         // and their edges, and it's easier to reason about this if we know previous
         self.handle_provides()?;
@@ -1011,15 +1020,14 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {
-        let mut root_kinds = IndexSet::default();
-        for (source, root_kinds_to_nodes) in &self.base.query_graph.root_kinds_to_nodes_by_source {
-            if *source == self.base.query_graph.current_source {
-                continue;
-            }
-            for root_kind in root_kinds_to_nodes.keys() {
-                root_kinds.insert(*root_kind);
-            }
-        }
+        let root_kinds = self
+            .base
+            .query_graph
+            .root_kinds_to_nodes_by_source
+            .iter()
+            .filter(|(source, _)| **source != self.base.query_graph.current_source)
+            .flat_map(|(_, root_kind_to_nodes)| root_kind_to_nodes.keys().copied())
+            .collect::<IndexSet<_>>();
         for root_kind in root_kinds {
             self.base.create_root_node(root_kind.into(), root_kind)?;
         }
@@ -1471,6 +1479,151 @@ impl FederatedQueryGraphBuilder {
             let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
             mutable_edge.override_condition = Some(condition);
         }
+        Ok(())
+    }
+
+    fn handle_context(&mut self) -> Result<(), FederationError> {
+        let mut subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>> =
+            IndexMap::default();
+        let mut coordinate_map: IndexMap<
+            Arc<str>,
+            IndexMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>>,
+        > = IndexMap::default();
+        for (subgraph_name, subgraph) in self.base.query_graph.subgraphs() {
+            let subgraph_data = self.subgraphs.get(subgraph_name)?;
+            let Some((_, context_refs)) = &subgraph
+                .referencers()
+                .directives
+                .iter()
+                .find(|(dir, _)| **dir == subgraph_data.context_directive_definition_name)
+            else {
+                continue;
+            };
+
+            let Some((_, from_context_refs)) = &subgraph
+                .referencers()
+                .directives
+                .iter()
+                .find(|(dir, _)| **dir == subgraph_data.from_context_directive_definition_name)
+            else {
+                continue;
+            };
+
+            // Collect data for @context
+            let mut context_name_to_types: HashMap<&str, HashSet<CompositeTypeDefinitionPosition>> =
+                HashMap::default();
+            for object_def_pos in &context_refs.object_types {
+                let object = object_def_pos.get(subgraph.schema())?;
+                for dir in object.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(object_def_pos.clone().into());
+                }
+            }
+            for interface_def_pos in &context_refs.interface_types {
+                let interface = interface_def_pos.get(subgraph.schema())?;
+                for dir in interface.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(interface_def_pos.clone().into());
+                }
+            }
+            for union_def_pos in &context_refs.union_types {
+                let union = union_def_pos.get(subgraph.schema())?;
+                for dir in union.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(union_def_pos.clone().into());
+                }
+            }
+
+            // Collect data for @fromContext
+            let coordinate_map = coordinate_map.entry(subgraph_name.clone()).or_default();
+            for object_field_arg in &from_context_refs.object_field_arguments {
+                let input_value = object_field_arg.get(subgraph.schema())?;
+                let coordinate = object_field_arg.parent();
+                subgraph_to_args
+                    .entry(subgraph_name.clone())
+                    .or_default()
+                    .push(object_field_arg.clone());
+                for dir in input_value.directives.get_all(&FROM_CONTEXT_DIRECTIVE_NAME) {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .from_context_directive_arguments(dir)?;
+                    let (context, selection) = parse_context(application.field)?;
+
+                    let types_with_context_set = context_name_to_types
+                        .get(context.as_str())
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                        .collect();
+                    let conditions = ContextCondition {
+                        context,
+                        selection,
+                        subgraph_name: subgraph_name.clone(),
+                        coordinate: coordinate.clone(),
+                        types_with_context_set,
+                    };
+                    coordinate_map
+                        .entry(coordinate.clone())
+                        .or_default()
+                        .push(conditions);
+                }
+            }
+        }
+
+        for edge in self.base.query_graph.graph.edge_indices() {
+            let edge_weight = self.base.query_graph.edge_weight(edge)?;
+            let QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } = &edge_weight.transition
+            else {
+                continue;
+            };
+            let FieldDefinitionPosition::Object(obj_field) = field_definition_position else {
+                continue;
+            };
+            let Some(contexts) = coordinate_map.get_mut(source) else {
+                continue;
+            };
+            let Some(required_contexts) = contexts.get(obj_field) else {
+                continue;
+            };
+            self.base
+                .query_graph
+                .edge_weight_mut(edge)?
+                .required_contexts
+                .extend_from_slice(&required_contexts);
+        }
+
+        // Add the context argument mapping
+        self.base.query_graph.subgraph_to_arg_indices = self
+            .base
+            .query_graph
+            .subgraphs()
+            .filter_map(|(source, _)| subgraph_to_args.get_key_value(source))
+            .map(|(source, args)| {
+                (
+                    source.clone(),
+                    args.iter()
+                        .sorted()
+                        .enumerate()
+                        .map(|(i, arg)| (arg.clone(), format!("contextualArgument__{source}_{i}")))
+                        .collect(),
+                )
+            })
+            .collect();
+        self.base.query_graph.subgraph_to_args = subgraph_to_args;
+
         Ok(())
     }
 
@@ -2083,6 +2236,14 @@ impl FederatedQueryGraphBuilderSubgraphs {
                 .override_directive_definition(schema)?
                 .name
                 .clone();
+            let context_directive_definition_name = federation_spec_definition
+                .context_directive_definition(schema)?
+                .name
+                .clone();
+            let from_context_directive_definition_name = federation_spec_definition
+                .from_context_directive_definition(schema)?
+                .name
+                .clone();
             subgraphs.map.insert(
                 source.clone(),
                 FederatedQueryGraphBuilderSubgraphData {
@@ -2092,6 +2253,8 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     provides_directive_definition_name,
                     interface_object_directive_definition_name,
                     overrides_directive_definition_name,
+                    context_directive_definition_name,
+                    from_context_directive_definition_name,
                 },
             );
         }
@@ -2118,6 +2281,8 @@ struct FederatedQueryGraphBuilderSubgraphData {
     provides_directive_definition_name: Name,
     interface_object_directive_definition_name: Name,
     overrides_directive_definition_name: Name,
+    context_directive_definition_name: Name,
+    from_context_directive_definition_name: Name,
 }
 
 #[derive(Debug)]
@@ -2149,6 +2314,45 @@ fn resolvable_key_applications<'doc>(
         applications.push(key_directive_application);
     }
     Ok(applications)
+}
+
+fn parse_context(field: &str) -> Result<(String, String), FederationError> {
+    let pattern = Regex::new(
+        r#"^(?:[\n\r\t ,]|#[^\n\r]*)*\$(?:[\n\r\t ,]|#[^\n\r]*)*([A-Za-z_]\w*)([\s\S]*)$"#,
+    )
+    .unwrap();
+
+    let mut iter = pattern.captures_iter(field);
+
+    let Some(captures) = iter.next() else {
+        internal_error!("Expected to find the name of a context and a selection inside the field argument to `@fromContext`: {field:?}");
+    };
+
+    if iter.next().is_some() {
+        internal_error!("Expected only one context and selection pair inside the field argument to `@fromContext`: {field:?}");
+    }
+
+    let (context, selection) = captures
+        .iter()
+        // Ignore the first match because it is always the whole matching substring
+        .skip(1)
+        .filter_map(|group| group)
+        .fold(("", ""), |(a, b), group| (b, group.as_str()));
+
+    if context.is_empty() {
+        internal_error!("Expected to find the name of a context inside the field argument to `@fromContext`: {field:?}");
+    }
+
+    if selection.is_empty() {
+        internal_error!(
+            "Expected to find and a selection inside the field argument to `@fromContext`: {field:?}"
+        );
+    }
+
+    Ok((
+        context.trim_end().to_owned(),
+        selection.trim_start().to_owned(),
+    ))
 }
 
 #[cfg(test)]
@@ -2251,6 +2455,43 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(tails.len(), 1);
         Ok(tails.pop().unwrap())
+    }
+
+    #[test]
+    fn test_parse_context() {
+        let fields = [
+            ("$context { prop }", ("context", "{ prop }")),
+            (
+                "$context ... on A { prop } ... on B { prop }",
+                ("context", "... on A { prop } ... on B { prop }"),
+            ),
+            (
+                "$topLevelQuery { me { locale } }",
+                ("topLevelQuery", "{ me { locale } }"),
+            ),
+            (
+                "$context { a { b { c { prop }}} }",
+                ("context", "{ a { b { c { prop }}} }"),
+            ),
+            (
+                "$ctx { identifiers { legacyUserId } }",
+                ("ctx", "{ identifiers { legacyUserId } }"),
+            ),
+            (
+                "$retailCtx { identifiers { id5 } }",
+                ("retailCtx", "{ identifiers { id5 } }"),
+            ),
+            ("$retailCtx { mid }", ("retailCtx", "{ mid }")),
+            (
+                "$widCtx { identifiers { wid } }",
+                ("widCtx", "{ identifiers { wid } }"),
+            ),
+        ];
+        for (field, (known_context, known_selection)) in fields {
+            let (context, selection) = super::parse_context(field).unwrap();
+            assert_eq!(context, known_context);
+            assert_eq!(selection, known_selection);
+        }
     }
 
     #[test]
