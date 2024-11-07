@@ -40,6 +40,7 @@ pub(crate) enum ConditionResolution {
 #[derive(Debug, Clone)]
 pub(crate) enum UnsatisfiedConditionReason {
     NoPostRequireKey,
+    NoSetContext,
 }
 
 impl ConditionResolution {
