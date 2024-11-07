@@ -627,6 +627,7 @@ impl InnerCacheService {
 
                             if private_id.is_none() {
                                 // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                // We don't need to fill the context with this cache key as it will never be cached
                                 return Ok(response);
                             }
                         }
@@ -986,7 +987,6 @@ async fn cache_lookup_entities(
                     });
                 }
                 None => {
-                    // TODO: check if it's a private element it should still be with that status ?
                     cache_entries.push(CacheKeyContext {
                         key: intermediate_result.key.clone(),
                         status: CacheKeyStatus::New,
