@@ -348,15 +348,29 @@ impl InlineFragmentSelection {
         } else {
             let rebased_inline_fragment = self.inline_fragment.rebase_on(parent_type, schema)?;
             let rebased_casted_type = rebased_inline_fragment.casted_type();
-            let rebased_selection_set =
-                selection_set.rebase_on(&rebased_casted_type, named_fragments, schema)?;
-            Ok(Some(
-                Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(
-                    rebased_inline_fragment,
-                    rebased_selection_set,
-                )))
-                .into(),
-            ))
+            // Re-flatten with the rebased casted type, which could further flatten away.
+            let selection_set = selection_set.flatten_unnecessary_fragments(
+                &rebased_casted_type,
+                named_fragments,
+                schema,
+            )?;
+            if selection_set.is_empty() {
+                Ok(None)
+            } else {
+                // We need to rebase since the parent type for the selection set could be
+                // changed.
+                // Note: Rebasing after flattening, since rebasing before that can error out.
+                //       Or, `flatten_unnecessary_fragments` could `rebase` at the same time.
+                let rebased_selection_set =
+                    selection_set.rebase_on(&rebased_casted_type, named_fragments, schema)?;
+                Ok(Some(
+                    Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(
+                        rebased_inline_fragment,
+                        rebased_selection_set,
+                    )))
+                    .into(),
+                ))
+            }
         }
     }
 }
