@@ -1,9 +1,11 @@
+use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
 use futures::future::join_all;
 use futures::prelude::*;
+use serde_json_bytes::Entry;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -39,6 +41,7 @@ use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::TYPENAME;
 use crate::Context;
 
 impl QueryPlan {
@@ -139,7 +142,7 @@ impl PlanNode {
                                 )
                                 .in_current_span()
                                 .await;
-                            value.deep_merge(v);
+                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -167,7 +170,7 @@ impl PlanNode {
                             .collect();
 
                         while let Some((v, err)) = stream.next().in_current_span().await {
-                            value.deep_merge(v);
+                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -305,7 +308,7 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            value.deep_merge(v);
+                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
 
                             let _ = primary_sender.send((value.clone(), errors.clone()));
@@ -353,12 +356,16 @@ impl PlanNode {
                                         "otel.kind" = "INTERNAL"
                                     ))
                                     .await;
-                                value.deep_merge(v);
+                                Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
                                 errors.extend(err.into_iter());
                             } else if current_dir.is_empty() {
                                 // If the condition is on the root selection set and it's the only one
                                 // For queries like {get @skip(if: true) {id name}}
-                                value.deep_merge(Value::Object(Default::default()));
+                                Self::type_aware_deep_merge(
+                                    &parameters.schema,
+                                    &mut value,
+                                    Value::Object(Default::default()),
+                                );
                             }
                         } else if let Some(node) = else_clause {
                             let (v, err) = node
@@ -373,7 +380,7 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            value.deep_merge(v);
+                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
                         } else if current_dir.is_empty() {
                             // If the condition is on the root selection set and it's the only one
@@ -392,6 +399,56 @@ impl PlanNode {
 
             (value, errors)
         })
+    }
+
+    /// This is a reimplementation of `ValueExt::deep_merge` which takes type hierarchies into account
+    /// when merging response objects. If we are merging two instances of `__typename`, we check the
+    /// schema to make sure we do not overwrite a subtype with an interface or parent type. Otherwise,
+    /// the data associated with the interface/parent type is removed from the response later on.
+    fn type_aware_deep_merge(schema: &Schema, target: &mut Value, source: Value) {
+        match (target, source) {
+            (Value::Object(a), Value::Object(b)) => {
+                for (key, value) in b.into_iter() {
+                    let k = key.clone();
+                    match a.entry(key) {
+                        Entry::Vacant(e) => {
+                            e.insert(value);
+                        }
+                        Entry::Occupied(e) => match (e.into_mut(), value) {
+                            (Value::String(type1), Value::String(type2))
+                                if k.as_str() == TYPENAME =>
+                            {
+                                if !schema.is_implementation(type2.as_str(), type1.as_str())
+                                    && !schema.is_subtype(type2.as_str(), type1.as_str())
+                                {
+                                    *type1 = type2;
+                                }
+                            }
+                            (target, source) => Self::type_aware_deep_merge(schema, target, source),
+                        },
+                    }
+                }
+            }
+            (Value::Array(a), Value::Array(mut b)) => {
+                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
+                    Self::type_aware_deep_merge(schema, a_value, b_value);
+                }
+
+                a.extend(b);
+            }
+            (_, Value::Null) => {}
+            (Value::Object(_), Value::Array(_)) => {
+                failfast_debug!("trying to replace an object with an array");
+            }
+            (Value::Array(_), Value::Object(_)) => {
+                failfast_debug!("trying to replace an array with an object");
+            }
+            (a, b) => {
+                if b != Value::Null {
+                    *a = b;
+                }
+            }
+        }
     }
 }
 
@@ -451,7 +508,7 @@ impl DeferredNode {
             if is_depends_empty {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
-                value.deep_merge(primary_value);
+                PlanNode::type_aware_deep_merge(&sc, &mut value, primary_value);
                 errors.extend(primary_errors)
             } else {
                 while let Some((v, _remaining)) = stream.next().await {
@@ -460,7 +517,7 @@ impl DeferredNode {
                     // or because it is lagging, but here we only send one message so it
                     // will not happen
                     if let Some(Ok((deferred_value, err))) = v {
-                        value.deep_merge(deferred_value);
+                        PlanNode::type_aware_deep_merge(&sc, &mut value, deferred_value);
                         errors.extend(err.into_iter())
                     }
                 }
@@ -524,7 +581,7 @@ impl DeferredNode {
             } else {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
-                value.deep_merge(primary_value);
+                PlanNode::type_aware_deep_merge(&sc, &mut value, primary_value);
                 errors.extend(primary_errors);
 
                 if let Err(e) = tx
@@ -547,5 +604,73 @@ impl DeferredNode {
                 drop(tx);
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::spec::Schema;
+    use serde_json_bytes::json;
+
+    use super::PlanNode;
+
+    #[test]
+    fn interface_typename_merging() {
+        let schema = Schema::parse(
+                r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+                query: Query
+            }
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            scalar link__Import
+            scalar join__FieldSet
+
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+
+            interface I {
+                s: String
+            }
+
+            type C implements I {
+                s: String
+            }
+
+            type Query {
+                i: I
+            }
+        "#,
+            &Default::default(),
+        )
+        .expect("valid schema");
+        let mut response1 = json!({
+            "__typename": "C"
+        });
+        let response2 = json!({
+            "__typename": "I",
+            "s": "data"
+        });
+
+        PlanNode::type_aware_deep_merge(&schema, &mut response1, response2);
+
+        assert_eq!(
+            response1,
+            json!({
+                "__typename": "C",
+                "s": "data"
+            })
+        );
     }
 }
