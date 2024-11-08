@@ -63,7 +63,7 @@ pub struct QueryPlannerConfig {
     /// queries with many fragments. This option may be removed in the future in favour of
     /// [`generate_query_fragments`][QueryPlannerConfig::generate_query_fragments].
     ///
-    /// Defaults to true.
+    /// Defaults to false.
     pub reuse_query_fragments: bool,
 
     /// If enabled, the query planner will extract inline fragments into fragment
@@ -106,7 +106,7 @@ pub struct QueryPlannerConfig {
 impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
-            reuse_query_fragments: true,
+            reuse_query_fragments: false,
             generate_query_fragments: false,
             subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
@@ -1381,7 +1381,11 @@ type User
         )
         .unwrap();
 
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let config = QueryPlannerConfig {
+            reuse_query_fragments: true,
+            ..Default::default()
+        };
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
@@ -1442,7 +1446,11 @@ type User
         )
         .unwrap();
 
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let config = QueryPlannerConfig {
+            reuse_query_fragments: true,
+            ..Default::default()
+        };
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
@@ -1504,7 +1512,11 @@ type User
         )
         .unwrap();
 
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let config = QueryPlannerConfig {
+            reuse_query_fragments: true,
+            ..Default::default()
+        };
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();

@@ -1,6 +1,13 @@
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+
+fn reuse_fragments_config() -> QueryPlannerConfig {
+    QueryPlannerConfig { reuse_query_fragments: true, ..Default::default() }
+}
+
 #[test]
 fn handles_mix_of_fragments_indirection_and_unions() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             parent: Parent
@@ -74,6 +81,7 @@ fn another_mix_of_fragments_indirection_and_unions() {
     // This tests that the issue reported on https://github.com/apollographql/router/issues/3172 is resolved.
 
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             owner: Owner!
@@ -252,6 +260,7 @@ fn another_mix_of_fragments_indirection_and_unions() {
 #[test]
 fn handles_fragments_with_interface_field_subtyping() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             t1: T1!
@@ -313,6 +322,7 @@ fn handles_fragments_with_interface_field_subtyping() {
 #[test]
 fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             t1: T
@@ -416,6 +426,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch
 #[test]
 fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_entity_fetch() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             t: T
