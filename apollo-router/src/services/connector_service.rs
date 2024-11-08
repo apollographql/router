@@ -6,10 +6,14 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
+use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
+use opentelemetry_api::metrics::MeterProvider as _;
+use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,6 +27,7 @@ use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
 use crate::error::FetchError;
+use crate::metrics::meter_provider;
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::handle_responses;
 use crate::plugins::connectors::http::Request;
@@ -171,7 +176,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             );
             // TODO: I think we should get rid of these attributes by default and only add it from custom telemetry. We just need to double check it's not required for Studio.
 
-            // These additionnal attributes will be added to custom telemetry feature
+            // These additional attributes will be added to custom telemetry feature
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set
@@ -267,10 +272,18 @@ async fn execute(
                         },
                         Err(e) => e,
                     }
-                })?;
+                });
+
+                u64_counter!(
+                    "apollo.router.operations.connectors",
+                    "Total number of requests to connectors",
+                    1,
+                    "connector.type" = "http",
+                    "subgraph.name" = original_subgraph_name
+                );
 
                 Ok::<_, BoxError>(ConnectorResponse {
-                    result: ConnectorResult::HttpResponse(res.http_response),
+                    result: ConnectorResult::HttpResponse(res?.http_response),
                     key,
                     debug_request,
                 })
@@ -294,6 +307,7 @@ pub(crate) struct ConnectorServiceFactory {
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
 }
 
 impl ConnectorServiceFactory {
@@ -307,9 +321,10 @@ impl ConnectorServiceFactory {
         Self {
             http_service_factory,
             subgraph_schemas,
-            schema,
+            schema: schema.clone(),
             subscription_config,
             connectors_by_service_name,
+            _connect_spec_version_instrument: connect_spec_version_instrument(schema),
         }
     }
 
@@ -321,6 +336,7 @@ impl ConnectorServiceFactory {
             subscription_config: Default::default(),
             connectors_by_service_name: Default::default(),
             schema,
+            _connect_spec_version_instrument: None,
         }
     }
 }
@@ -337,5 +353,97 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
             connectors_by_service_name: self.connectors_by_service_name.clone(),
         }
         .boxed()
+    }
+}
+
+/// Create a gauge instrument for the number of connectors and their spec versions
+fn connect_spec_version_instrument(schema: Arc<Schema>) -> Option<ObservableGauge<u64>> {
+    schema.connectors.as_ref().map(|connectors| {
+        let spec_counts = connect_spec_counts(connectors);
+        meter_provider()
+            .meter("apollo/router")
+            .u64_observable_gauge("apollo.router.schema.connectors")
+            .with_description("Number connect directives in the supergraph")
+            .with_callback(move |observer| {
+                spec_counts.iter().for_each(|(spec, &count)| {
+                    observer.observe(
+                        count,
+                        &[KeyValue::new("connect.spec.version", spec.clone())],
+                    )
+                })
+            })
+            .init()
+    })
+}
+
+/// Map from connect spec version to the number of connectors with that version
+fn connect_spec_counts(connectors: &Connectors) -> HashMap<String, u64> {
+    connectors
+        .by_service_name
+        .values()
+        .map(|connector| connector.spec.as_str().to_string())
+        .fold(HashMap::new(), |mut acc, spec| {
+            *acc.entry(spec).or_insert(0u64) += 1u64;
+            acc
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use apollo_compiler::name;
+    use apollo_federation::sources::connect::expand::Connectors;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
+    use url::Url;
+
+    use super::connect_spec_counts;
+
+    #[test]
+    fn test_connect_spec_counts() {
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(users),
+                0,
+                "label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        let connectors = Connectors {
+            by_service_name: Arc::new(
+                [
+                    ("service_name_1".into(), connector.clone()),
+                    ("service_name_2".into(), connector.clone()),
+                    ("service_name_3".into(), connector),
+                ]
+                .into(),
+            ),
+            labels_by_service_name: Default::default(),
+        };
+
+        assert_eq!(
+            connect_spec_counts(&connectors),
+            [(ConnectSpec::V0_1.to_string(), 3u64)].into()
+        );
     }
 }

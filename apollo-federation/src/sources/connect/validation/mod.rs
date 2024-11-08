@@ -64,7 +64,7 @@ use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -79,7 +79,7 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
     // TODO: Handle schema errors rather than relying on JavaScript to catch it later
     let schema = Schema::parse(source_text, file_name)
         .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
-    let connect_identity = ConnectSpecDefinition::identity();
+    let connect_identity = ConnectSpec::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
         return Vec::new(); // There are no connectors-related directives to validate
     };
@@ -91,8 +91,8 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
 
     let mut messages = check_conflicting_directives(&schema);
 
-    let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
-    let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
+    let source_directive_name = ConnectSpec::source_directive_name(&link);
+    let connect_directive_name = ConnectSpec::connect_directive_name(&link);
     let schema_info = SchemaInfo::new(
         &schema,
         source_text,

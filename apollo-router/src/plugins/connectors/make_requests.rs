@@ -518,6 +518,7 @@ mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
@@ -559,6 +560,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -693,6 +695,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -855,6 +858,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1087,6 +1091,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1406,6 +1411,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1706,6 +1712,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1928,6 +1935,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -2203,6 +2211,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -2475,6 +2484,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -2612,6 +2622,7 @@ mod tests {
             .build();
 
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
