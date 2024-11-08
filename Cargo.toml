@@ -78,4 +78,4 @@ tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.4.13", features = ["full"] }
 
 [patch.crates-io]
-"hyper" = { git = "https://github.com/IvanGoncharov/hyper.git", branch = "backpor_header_size" }
+"hyper" = { git = "https://github.com/apollographql/hyper.git", tag = "header-customizations-20241108" }

@@ -3340,7 +3340,7 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "0.14.31"
-source = "git+https://github.com/IvanGoncharov/hyper.git?branch=backpor_header_size#c42aec785394b40645a283384838b856beace011"
+source = "git+https://github.com/apollographql/hyper.git?tag=header-customizations-20241108#c42aec785394b40645a283384838b856beace011"
 dependencies = [
  "bytes",
  "futures-channel",
