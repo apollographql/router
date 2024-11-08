@@ -103,6 +103,7 @@ pub struct QueryPlannerConfig {
     pub type_conditioned_fetching: bool,
 }
 
+#[allow(clippy::derivable_impls)] // it's derivable right now, but we might change the defaults
 impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
@@ -111,7 +112,7 @@ impl Default for QueryPlannerConfig {
             subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
-            type_conditioned_fetching: Default::default(),
+            type_conditioned_fetching: false,
         }
     }
 }

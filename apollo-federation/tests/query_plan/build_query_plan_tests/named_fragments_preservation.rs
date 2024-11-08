@@ -1,7 +1,10 @@
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn reuse_fragments_config() -> QueryPlannerConfig {
-    QueryPlannerConfig { reuse_query_fragments: true, ..Default::default() }
+    QueryPlannerConfig {
+        reuse_query_fragments: true,
+        ..Default::default()
+    }
 }
 
 #[test]
