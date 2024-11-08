@@ -1,0 +1,219 @@
+---
+title: GraphQL Subscriptions in Cloud Supergraphs
+subtitle: Real-time data delivery across your services
+description: Cloud routers support GraphQL subscriptions by default, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
+redirectFrom:
+    - /graphos/operations/subscriptions
+---
+
+<PreviewFeature >
+
+Cloud supergraph support for GraphQL subscriptions is currently in [preview](/graphos/reference/feature-launch-stages#preview).
+
+You can also use subscriptions with an Enterprise self-hosted supergraph. See the [GraphOS Router documentation](/graphos/routing/operations/subscriptions/).
+
+</PreviewFeature>
+
+Cloud supergraphs provide preview support for GraphQL subscription operations:
+
+```graphql
+subscription OnStockPricesChanged {
+  stockPricesChanged {
+    symbol
+    price
+  }
+}
+```
+
+With a cloud supergraph, you can add `Subscription` fields to the schema of any subgraph that supports the [`graphql-transport-ws` WebSocket protocol](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md):
+
+```graphql title="stocks.graphql"
+type Subscription {
+  stockPricesChanged: [Stock!]!
+}
+```
+
+Clients can then execute subscriptions on your cloud router, which executes them on your subgraphs.
+
+## Prerequisites
+
+Before you add `Subscription` fields to your subgraphs, do all the following in the order shown to prevent errors:
+
+1. Make sure you've created a [cloud supergraph](/graphos/routing/cloud#cloud-supergraphs) and connected your GraphQL API to it.
+
+2. [Update your supergraph's build pipeline](/graphos/platform/graph-management/updates#2-update-your-build-pipeline) to use Apollo Federation 2.4 or later.
+   - Previous versions of Apollo Federation don't support subscription operations.
+3. If your subgraph schemas specify an Apollo Federation version, modify them to use Apollo Federation 2.4 or later:
+
+   ```graphql title="stocks.graphql"
+   extend schema
+     @link(
+       url: "https://specs.apollo.dev/federation/v2.4" #highlight-line
+       import: ["@key", "@shareable"]
+     )
+
+   type Subscription {
+     stockPricesChanged: [Stock!]!
+   }
+   ```
+
+   - You can skip modifying subgraph schemas that don't define any `Subscription` fields.
+
+4. In each subgraph with subscriptions, make sure the subgraph uses the [`graphql-transport-ws`](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md) WebSocket protocol for subscriptions.
+
+5. In each subgraph with subscriptions, make sure the subgraph hosts its subscriptions WebSocket endpoint at the path `/ws`.
+
+   - If your WebSocket endpoint is currently hosted at a different path, you can add `/ws` as an additional path instead of removing the original path. This is helpful if legacy clients will continue executing subscriptions on your subgraph directly using the original path.
+
+6. Deploy your updated subgraphs.
+
+After you complete these prerequisites, you begin [executing subscriptions](#example-execution) on your cloud router.
+
+## Default configuration
+
+Subscriptions are enabled automatically for GraphOS Cloud with the following default router configuration:
+
+```yaml
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        path: /ws
+```
+
+## Example execution
+
+Let's say our supergraph includes the following subgraphs and partial schemas:
+
+<CodeColumns>
+
+```graphql title="Products subgraph"
+type Product @key(fields: "id") {
+  id: ID!
+  name: String!
+  price: Int!
+}
+
+# highlight-start
+type Subscription {
+  productPriceChanged: Product!
+}
+#highlight-end
+```
+
+```graphql title="Reviews subgraph"
+type Product @key(fields: "id") {
+  id: ID!
+  reviews: [Review!]!
+}
+
+type Review {
+  score: Int!
+}
+```
+
+</CodeColumns>
+
+A client can execute the following subscription against our router:
+
+<Note>
+
+Remember, clients execute subscriptions against your router [over HTTP!](#how-it-works)
+
+Apollo Client for [Web](/react/data/subscriptions#http), [Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [iOS](/ios/fetching/subscriptions#http) all support HTTP-based subscriptions.
+
+</Note>
+
+```graphql
+subscription OnProductPriceChanged {
+  productPriceChanged {
+    # Defined in Products subgraph
+    name
+    price
+    reviews {
+      # Defined in Reviews subgraph!
+      score
+    }
+  }
+}
+```
+
+When our router receives this operation, it executes a corresponding subscription operation against the Products subgraph (over a new WebSocket connection):
+
+```graphql
+subscription {
+  productPriceChanged {
+    id # Added for entity fetching
+    name
+    price
+    # Reviews fields removed!
+  }
+}
+```
+
+<Note>
+
+- This operation adds the `Product.id` field. The router needs `@key` fields of the `Product` entity to merge entity fields from across subgraphs.
+- This operation removes all fields defined in the Reviews subgraph, because the Products subgraph can't resolve them.
+
+</Note>
+
+At any point after the subscription is initiated, the Products subgraph might send updated data to our router. Whenever this happens, the router does not immediately return this data to the client, because it's missing requested fields from the Reviews subgraph!
+
+Instead, our router executes a standard GraphQL query against the Reviews subgraph to fetch the missing entity fields:
+
+```graphql
+query {
+  _entities(representations: [...]) {
+    ... on Product {
+      reviews {
+        score
+      }
+    }
+  }
+}
+```
+
+After receiving this query result from the Reviews subgraph, our router combines it with the data from Products and returns the combination to the subscribing client.
+
+## Trying subscriptions with `curl`
+
+To quickly try out HTTP-based subscriptions without setting up an Apollo Client library, you can execute a `curl` command against your cloud router with the following format:
+
+```bash title="Example curl request" showLineNumbers=false
+ curl 'https://main--my-org-supergraph.apollographos.net/graphql' -v \
+  -H 'accept: multipart/mixed; boundary="graphql"; subscriptionSpec=1.0, application/json' \
+  -H 'content-type: application/json' \
+  --data-raw '{"query":"subscription OnProductPriceChanged { productPriceChanged { name price reviews { score } } }","operationName":"OnProductPriceChanged"}'
+```
+
+This command creates an HTTP multipart request and keeps an open connection that receives new subscription data in multiple response parts:
+
+```text showLineNumbers=false disableCopy=true
+--graphql
+content-type: application/json
+
+{}
+--graphql
+content-type: application/json
+
+{"payload":{"data":{"productPriceChanged":{"name":"Croissant","price":400,"reviews":[{"score":5}]}}}}
+--graphql
+content-type: application/json
+
+{"payload":{"data":{"productPriceChanged":{"name":"Croissant","price":375,"reviews":[{"score":5}]}}}}
+--graphql
+content-type: application/json
+
+{"payload":{"data":{"productPriceChanged":{"name":"Croissant","price":425,"reviews":[{"score":5}]}}}}
+--graphql--
+```
+
+<Note>
+
+This example subscription only emits three events and then directly closes the connection.
+
+For more information on this multipart HTTP subscription protocol, see [this article](/graphos/routing/operations/subscriptions/multipart-protocol/).
+
+</Note>
