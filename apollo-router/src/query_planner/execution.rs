@@ -142,7 +142,7 @@ impl PlanNode {
                                 )
                                 .in_current_span()
                                 .await;
-                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
+                            Self::type_aware_deep_merge(parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -170,7 +170,7 @@ impl PlanNode {
                             .collect();
 
                         while let Some((v, err)) = stream.next().in_current_span().await {
-                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
+                            Self::type_aware_deep_merge(parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -308,7 +308,7 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
+                            Self::type_aware_deep_merge(parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
 
                             let _ = primary_sender.send((value.clone(), errors.clone()));
@@ -356,13 +356,13 @@ impl PlanNode {
                                         "otel.kind" = "INTERNAL"
                                     ))
                                     .await;
-                                Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
+                                Self::type_aware_deep_merge(parameters.schema, &mut value, v);
                                 errors.extend(err.into_iter());
                             } else if current_dir.is_empty() {
                                 // If the condition is on the root selection set and it's the only one
                                 // For queries like {get @skip(if: true) {id name}}
                                 Self::type_aware_deep_merge(
-                                    &parameters.schema,
+                                    parameters.schema,
                                     &mut value,
                                     Value::Object(Default::default()),
                                 );
@@ -380,7 +380,7 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            Self::type_aware_deep_merge(&parameters.schema, &mut value, v);
+                            Self::type_aware_deep_merge(parameters.schema, &mut value, v);
                             errors.extend(err.into_iter());
                         } else if current_dir.is_empty() {
                             // If the condition is on the root selection set and it's the only one
@@ -609,10 +609,10 @@ impl DeferredNode {
 
 #[cfg(test)]
 mod tests {
-    use crate::spec::Schema;
     use serde_json_bytes::json;
 
     use super::PlanNode;
+    use crate::spec::Schema;
 
     #[test]
     fn interface_typename_merging() {
