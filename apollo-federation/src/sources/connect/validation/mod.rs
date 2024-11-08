@@ -21,6 +21,7 @@ mod graphql;
 mod http;
 mod selection;
 mod source_name;
+mod variable;
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -332,6 +333,7 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
         errors.extend(
             headers::validate_arg(
                 http_arg,
+                schema,
                 &schema.sources,
                 HttpHeadersCoordinate::Source {
                     directive_name: &directive.name,

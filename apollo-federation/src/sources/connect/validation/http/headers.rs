@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::SourceMap;
@@ -6,17 +7,25 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use http::HeaderName;
 
+use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME as FROM_ARG;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME as NAME_ARG;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME as VALUE_ARG;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
+use crate::sources::connect::validation::graphql::GraphQLString;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::require_value_is_str;
+use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
+use crate::sources::connect::variable::ConnectorsContext;
+use crate::sources::connect::variable::Directive;
+use crate::sources::connect::variable::Target;
 
 pub(crate) fn validate_arg<'a>(
     http_arg: &'a [(Name, Node<Value>)],
+    schema: &'a SchemaInfo,
     source_map: &'a SourceMap,
     coordinate: HttpHeadersCoordinate<'a>,
 ) -> Option<impl Iterator<Item = Message> + 'a> {
@@ -79,7 +88,7 @@ pub(crate) fn validate_arg<'a>(
                     validate_name(&FROM_ARG, from_value, coordinate, source_map).err()
                 },
                 (None, Some(value_arg)) => {
-                    validate_value(value_arg, coordinate, source_map)
+                    validate_value(value_arg, schema, coordinate, source_map)
                 },
                 (Some(from_arg), Some(value_arg)) => Some(
                     Message {
@@ -111,6 +120,7 @@ pub(crate) fn validate_arg<'a>(
 
 fn validate_value(
     value: &Node<Value>,
+    schema: &SchemaInfo,
     coordinate: HttpHeadersCoordinate,
     source_map: &SourceMap,
 ) -> Option<Message> {
@@ -119,13 +129,74 @@ fn validate_value(
         Err(err) => return Some(err),
     };
 
-    http::HeaderValue::try_from(str_value)
-        .map_err(|_| Message {
-            code: Code::InvalidHttpHeaderValue,
-            message: format!("The value `{value}` at {coordinate} is an invalid HTTP header"),
-            locations: value.line_column_range(source_map).into_iter().collect(),
-        })
-        .err()
+    if let Err(message) = http::HeaderValue::try_from(str_value).map_err(|_| Message {
+        code: Code::InvalidHttpHeaderValue,
+        message: format!("The value `{str_value}` at {coordinate} is an invalid HTTP header"),
+        locations: value.line_column_range(source_map).into_iter().collect(),
+    }) {
+        return Some(message);
+    }
+
+    let variable_resolver = match coordinate {
+        HttpHeadersCoordinate::Source { .. } => VariableResolver::new(
+            ConnectorsContext::new(Directive::Source, Target::RequestHeader),
+            schema,
+        ),
+        HttpHeadersCoordinate::Connect { connect, .. } => VariableResolver::new(
+            ConnectorsContext::new(connect.into(), Target::RequestHeader),
+            schema,
+        ),
+    };
+
+    // Validate that the header value can be parsed, then validate any variable expressions
+    match HeaderValue::from_str(str_value).map_err(|_| Message {
+        code: Code::InvalidHttpHeaderValue,
+        message: format!("The value `{str_value}` at {coordinate} is an invalid HTTP header"),
+        locations: value.line_column_range(source_map).into_iter().collect(),
+    }) {
+        Err(message) => return Some(message),
+        Ok(header_value) => {
+            let expression = GraphQLString::new(value, &schema.sources)
+                .map_err(|_| Message {
+                    code: Code::GraphQLError,
+                    message: format!("The value for {coordinate} must be a string."),
+                    locations: value
+                        .line_column_range(&schema.sources)
+                        .into_iter()
+                        .collect(),
+                })
+                .ok()?;
+            for reference in header_value.variable_references() {
+                match variable_resolver.resolve(reference, expression) {
+                    Err(message) => {
+                        return Some(Message {
+                            code: message.code,
+                            message: format!("{coordinate} contains an invalid variable reference {{{reference}}} - {message}", message = message.message),
+                            locations: message.locations,
+                        })
+                    },
+                    Ok(Some(ty)) => {
+                        if !ty.is_non_null() {
+                            return Some(Message {
+                                code: Code::NullablePathVariable,
+                                message: format!(
+                                    "Variables in headers should be non-null, but {coordinate} contains `{{{reference}}}` which is nullable. \
+                                    If a null value is provided at runtime, the header will be incorrect.",
+                                ),
+                                locations: expression
+                                    .line_col_for_subslice(reference.location.clone(), schema)
+                                    .into_iter()
+                                    .collect(),
+                            });
+                        }
+                    }
+                    Ok(_) => {} // Type cannot be resolved
+                }
+            }
+        }
+    };
+
+    None
 }
 
 fn validate_name(

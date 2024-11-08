@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid-p
 [
     Message {
         code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.resources` must be a valid URL template. Variable type must be one of $args, $this, $config, got `$blah`",
+        message: "`GET` in `@connect(http:)` on `Query.resources` must be a valid URL template. Unknown variable namespace `$blah`",
         locations: [
             12:23..12:28,
         ],

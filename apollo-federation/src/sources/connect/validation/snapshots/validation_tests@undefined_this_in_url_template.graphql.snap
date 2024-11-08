@@ -6,14 +6,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/undefined
 [
     Message {
         code: UndefinedField,
-        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$this.blah}`, but Query does not have a field named `blah`.",
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains an invalid variable reference {$this.blah} - `Query` does not have a field named `blah`",
         locations: [
             10:45..10:49,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$this.something}`, but Query does not have a field named `something`.",
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains an invalid variable reference {$this.something} - `Query` does not have a field named `something`",
         locations: [
             10:68..10:77,
         ],

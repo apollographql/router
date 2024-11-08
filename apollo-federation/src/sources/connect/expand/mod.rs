@@ -211,9 +211,8 @@ mod helpers {
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
     use crate::sources::connect::json_selection::ExternalVarPaths;
-    use crate::sources::connect::json_selection::KnownVariable;
-    use crate::sources::connect::url_template::Variable;
-    use crate::sources::connect::url_template::VariableType;
+    use crate::sources::connect::variable::Namespace;
+    use crate::sources::connect::variable::VariableReference;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
@@ -456,28 +455,28 @@ mod helpers {
             // The actual selection might make use of the $this variable, so we grab them too
             let selection_parameters = extract_params_from_selection(&connector.selection);
 
-            let (key_for_type, var_filter) =
+            let (key_for_type, namespace_filter) =
                 if matches!(connector.entity_resolver, Some(EntityResolver::Explicit)) {
                     // `entity: true` connectors only exist on Query.
                     // We don't generate keys for `Query`, these are keys for the output type of the field.
                     // Therefore, we're also only considering the `$args` fields as keys, which should
                     // map 1-1 with output type fields.
-                    (output_type, VariableType::Args)
+                    (output_type, Namespace::Args)
                 } else {
                     // We're extending an entity by adding a new field dependent on some other fields
                     // (identified by `$this`).
-                    (parent_type, VariableType::This)
+                    (parent_type, Namespace::This)
                 };
 
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();
-            for Variable { path, .. } in body_parameters
+            for VariableReference { path, .. } in body_parameters
                 .into_iter()
                 .chain(url_parameters)
                 .chain(selection_parameters)
                 .unique()
-                .filter(|var| var.var_type == var_filter)
+                .filter(|var| var.namespace.namespace == namespace_filter)
             {
                 // Arguments should be added to the synthesized key, since they are mandatory
                 // to resolving the output type. The synthesized key should only include the portions
@@ -489,7 +488,8 @@ mod helpers {
                 //
                 // All sibling fields marked by $this in a transport must be carried over to the output type
                 // regardless of its use in the output selection.
-                let field_and_selection = FieldAndSelection::from_path(&path);
+                let joined = path.iter().map(|part| part.to_string()).join(".");
+                let field_and_selection = FieldAndSelection::from_path(&joined);
                 let field_name = Name::new(field_and_selection.field_name)?;
                 let field: Box<dyn Field> = match &key_for_type {
                     TypeDefinitionPosition::Object(o)  => Box::new(o.field(field_name)),
@@ -756,33 +756,11 @@ mod helpers {
     /// Extract all seen parameters from a JSONSelection
     fn extract_params_from_selection(
         selection: &JSONSelection,
-    ) -> impl Iterator<Item = Variable> + '_ {
+    ) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
         selection
             .external_var_paths()
             .into_iter()
-            .flat_map(|var_path| {
-                let (known_type, keys) = var_path.var_name_and_nested_keys()?;
-                let var_type = match known_type {
-                    KnownVariable::Args => VariableType::Args,
-                    KnownVariable::This => VariableType::This,
-                    KnownVariable::Config => VariableType::Config,
-                    // To get the safety benefits of the KnownVariable enum, we need
-                    // to enumerate all the cases explicitly, without wildcard
-                    // matches. However, body.external_var_paths() only returns free
-                    // (externally-provided) variables like $this, $args, and
-                    // $config. The $ and @ variables, by contrast, are always bound
-                    // to something within the input data.
-                    KnownVariable::Dollar | KnownVariable::AtSign | KnownVariable::Status => {
-                        return None;
-                    }
-                };
-
-                Some(Variable {
-                    var_type,
-                    path: keys.join("."),
-                    location: 0..0, // Doesn't matter for this case, we won't report errors here
-                })
-            })
+            .flat_map(|var_path| var_path.var_name_and_nested_keys()?.try_into().ok())
     }
 
     // TODO: contribute some code to `position.rs` to make those types more flexible rather than adding it here

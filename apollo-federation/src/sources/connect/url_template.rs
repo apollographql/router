@@ -8,9 +8,10 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSON;
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
 use url::Url;
+
+use crate::sources::connect::variable::Namespace;
+use crate::sources::connect::variable::VariableReference;
 
 /// A parser accepting URLTemplate syntax, which is useful both for
 /// generating new URL paths from provided variables and for extracting variable
@@ -35,22 +36,22 @@ pub(crate) struct Component {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum ValuePart {
     Text(String),
-    Var(Variable),
+    Var(VariableReference<Namespace>),
 }
 
 impl URLTemplate {
-    pub fn path_variables(&self) -> impl Iterator<Item = &Variable> {
+    pub(crate) fn path_variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
         self.path.iter().flat_map(Component::variables)
     }
 
-    pub fn query_variables(&self) -> impl Iterator<Item = &Variable> {
+    pub(crate) fn query_variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
         self.query
             .keys()
             .chain(self.query.values())
             .flat_map(Component::variables)
     }
     /// Return all variables in the template in the order they appeared
-    pub fn variables(&self) -> impl Iterator<Item = &Variable> {
+    pub(crate) fn variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
         self.path_variables().chain(self.query_variables())
     }
 
@@ -200,7 +201,13 @@ impl Component {
             remaining = suffix;
 
             if let Some((var, suffix)) = remaining.split_once('}') {
-                parts.push(ValuePart::Var(Variable::parse(var, url_template)?));
+                let start_offset = var.as_ptr() as usize - url_template.as_ptr() as usize;
+                parts.push(ValuePart::Var(
+                    VariableReference::parse(var, start_offset).map_err(|e| Error {
+                        message: e.message,
+                        location: e.location.clone(),
+                    })?,
+                ));
                 remaining = suffix;
             } else {
                 return Err(Error {
@@ -229,7 +236,15 @@ impl Component {
                     value.push_str(text);
                 }
                 ValuePart::Var(var) => {
-                    if let Some(var_value) = var.interpolate(vars) {
+                    if let Some(var_value) = vars.get(var.to_string().as_str()).map(|child_value| {
+                        // Need to remove quotes from string values, since the quotes don't
+                        // belong in the URL.
+                        if let JSON::String(string) = child_value {
+                            string.as_str().to_string()
+                        } else {
+                            child_value.to_string()
+                        }
+                    }) {
                         value.push_str(&var_value);
                     } else {
                         return None;
@@ -254,10 +269,14 @@ impl Component {
         }
 
         let mut concrete_suffix = concrete_text.as_str();
-        let mut pending_var: Option<&Variable> = None;
+        let mut pending_var: Option<&VariableReference<Namespace>> = None;
         let mut output = Map::new();
 
-        fn add_var_value(var: &Variable, value: &str, output: &mut Map<ByteString, JSON>) {
+        fn add_var_value(
+            var: &VariableReference<Namespace>,
+            value: &str,
+            output: &mut Map<ByteString, JSON>,
+        ) {
             let key = ByteString::from(var.to_string());
             if !value.is_empty() {
                 output.insert(key, JSON::String(ByteString::from(value)));
@@ -310,7 +329,7 @@ impl Component {
         Ok(output)
     }
 
-    fn variables(&self) -> impl Iterator<Item = &Variable> {
+    fn variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
         self.parts.iter().filter_map(|part| match part {
             ValuePart::Text(_) => None,
             ValuePart::Var(var) => Some(var),
@@ -333,56 +352,6 @@ impl Serialize for Component {
     }
 }
 
-/// A variable expression, starting with `$`, that can be used in JSONSelection or URLTemplate.
-///
-/// This is basically a subset of JSONSelection's `PathSelection`, but with fewer features.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct Variable {
-    pub var_type: VariableType,
-    pub path: String,
-    /// Where this variable is in the string template it came from—0-indexed offset.
-    pub location: Range<usize>,
-}
-
-/// The supported types of variables for URLs, a subset of `KnownVariable` in JSONSelection
-#[derive(Clone, Copy, Debug, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum VariableType {
-    Args,
-    This,
-    Config,
-}
-
-impl VariableType {
-    pub(crate) const fn as_str(&self) -> &'static str {
-        match self {
-            VariableType::Args => "$args",
-            VariableType::This => "$this",
-            VariableType::Config => "$config",
-        }
-    }
-}
-
-impl Display for VariableType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for VariableType {
-    type Err = String;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        Self::iter()
-            .find(|var_type| var_type.as_str() == input)
-            .ok_or_else(|| {
-                format!(
-                    "Variable type must be one of {}, got `{input}`",
-                    Self::iter().map(|var_type| var_type.as_str()).join(", ")
-                )
-            })
-    }
-}
-
 impl Serialize for ValuePart {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
@@ -402,75 +371,6 @@ impl Display for ValuePart {
             }
         }
         Ok(())
-    }
-}
-
-impl Variable {
-    /// Parse `input` as a variable. `url_template` should be the _entire_ URL template, for
-    /// example `http.GET`, for calculating the position of the variable in the template.
-    fn parse(input: &str, url_template: &str) -> Result<Self, Error> {
-        let start = input.as_ptr() as usize - url_template.as_ptr() as usize;
-        let end = start + input.len();
-        let location = start..end;
-
-        let mut parts = input.split('.');
-        let Some(var_type_str) = parts.next() else {
-            return Err(Error {
-                message: format!("Variable expression {input} can't be empty"),
-                location: Some(location),
-            });
-        };
-
-        let var_type = VariableType::from_str(var_type_str).map_err(|message| Error {
-            message,
-            location: Some(location.start..location.start + var_type_str.len()),
-        })?;
-        let path = parts.join(".");
-        if path.is_empty() {
-            return Err(Error {
-                message: format!(
-                    "Variable expression {input} must have a path after the variable type",
-                ),
-                location: Some(location),
-            });
-        }
-        if path.ends_with('.') {
-            return Err(Error {
-                message: format!("Variable expression {input} must not end with a period",),
-                location: Some(location),
-            });
-        }
-
-        Ok(Self {
-            var_type,
-            path,
-            location,
-        })
-    }
-
-    fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Option<String> {
-        let full_path = format!(
-            "{var_type}.{path}",
-            var_type = self.var_type,
-            path = self.path
-        );
-        vars.get(full_path.as_str()).map(|child_value| {
-            // Need to remove quotes from string values, since the quotes don't
-            // belong in the URL.
-            if let JSON::String(string) = child_value {
-                string.as_str().to_string()
-            } else {
-                child_value.to_string()
-            }
-        })
-    }
-}
-
-impl Display for Variable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.var_type.as_str())?;
-        f.write_str(".")?;
-        f.write_str(&self.path)
     }
 }
 
@@ -512,10 +412,7 @@ mod test_parse {
     #[test]
     fn test_invalid_variable_name() {
         let err = URLTemplate::from_str("/something/{$blah.stuff}/more").unwrap_err();
-        assert_eq!(
-            err.message,
-            "Variable type must be one of $args, $this, $config, got `$blah`"
-        );
+        assert_eq!(err.message, "Unknown variable namespace `$blah`");
         assert_eq!(err.location, Some(12..17));
     }
 

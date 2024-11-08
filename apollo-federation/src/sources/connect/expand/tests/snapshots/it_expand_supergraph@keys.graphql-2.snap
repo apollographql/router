@@ -46,9 +46,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 21..26,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 27..29,
+                                        },
+                                    ],
                                     location: 21..29,
                                 },
                             ),
@@ -154,9 +162,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 21..26,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 27..29,
+                                        },
+                                    ],
                                     location: 21..29,
                                 },
                             ),
@@ -173,9 +189,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     }: Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "id2",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 36..41,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id2",
+                                            location: 42..45,
+                                        },
+                                    ],
                                     location: 36..45,
                                 },
                             ),
@@ -280,9 +304,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "unselected",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 21..26,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "unselected",
+                                            location: 27..37,
+                                        },
+                                    ],
                                     location: 21..37,
                                 },
                             ),
@@ -388,9 +420,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: This,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $this,
+                                        location: 21..26,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 27..29,
+                                        },
+                                    ],
                                     location: 21..29,
                                 },
                             ),
@@ -484,9 +524,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: This,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $this,
+                                        location: 21..26,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 27..29,
+                                        },
+                                    ],
                                     location: 21..29,
                                 },
                             ),
@@ -503,9 +551,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     }: Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: This,
-                                    path: "id2",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $this,
+                                        location: 36..41,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id2",
+                                            location: 42..45,
+                                        },
+                                    ],
                                     location: 36..45,
                                 },
                             ),
@@ -598,9 +654,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: This,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $this,
+                                        location: 21..26,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 27..29,
+                                        },
+                                    ],
                                     location: 21..29,
                                 },
                             ),

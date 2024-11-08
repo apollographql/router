@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_namespace_in_url_template_variables.graphql
+---
+[
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.unknown` must be a valid URL template. Unknown variable namespace `$foo`",
+        locations: [
+            11:33..11:37,
+        ],
+    },
+    Message {
+        code: GraphQLError,
+        message: "`GET` in `@connect(http:)` on `Query.invalid` contains an invalid variable reference {$status.bar} - Variable namespace `$status` is not valid at this location, must be one of $args, $config, $context, $this",
+        locations: [
+            18:33..18:40,
+        ],
+    },
+]

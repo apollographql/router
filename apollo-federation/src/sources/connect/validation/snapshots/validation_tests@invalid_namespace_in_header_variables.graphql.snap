@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_namespace_in_header_variables.graphql
+---
+[
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "The value `{$foo.bar}` at `@source(http.headers:)` is an invalid HTTP header",
+        locations: [
+            11:47..11:59,
+        ],
+    },
+    Message {
+        code: GraphQLError,
+        message: "`@source(http.headers:)` contains an invalid variable reference {$this.bar} - Variable namespace `$this` is not valid at this location, must be one of $config, $context",
+        locations: [
+            12:62..12:67,
+        ],
+    },
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "The value `{$foo.bar}` at `@connect(http.headers:)` on `Query.scalar` is an invalid HTTP header",
+        locations: [
+            23:49..23:61,
+        ],
+    },
+    Message {
+        code: GraphQLError,
+        message: "`@connect(http.headers:)` on `Query.scalar` contains an invalid variable reference {$status} - Variable namespace `$status` is not valid at this location, must be one of $args, $config, $context, $this",
+        locations: [
+            24:64..24:71,
+        ],
+    },
+]

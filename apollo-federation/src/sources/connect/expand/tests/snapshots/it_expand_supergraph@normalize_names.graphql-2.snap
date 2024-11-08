@@ -118,9 +118,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 2..7,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 8..10,
+                                        },
+                                    ],
                                     location: 2..10,
                                 },
                             ),

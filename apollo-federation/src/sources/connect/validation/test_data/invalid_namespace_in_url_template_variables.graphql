@@ -1,0 +1,21 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect"]
+  )
+
+type Query {
+  unknown(bar: String): String
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/{$foo.bar}"
+      }
+      selection: "$"
+    )
+  invalid(bar: String): String
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/{$status.bar}"
+      }
+      selection: "$"
+    )
