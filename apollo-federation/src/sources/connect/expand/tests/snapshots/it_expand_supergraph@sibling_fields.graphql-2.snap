@@ -1,0 +1,182 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: connectors.by_service_name
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/sibling_fields.graphql
+---
+{
+    "connectors_Query_f_0": Connector {
+        id: ConnectId {
+            label: "connectors. http: GET https://my.api/t",
+            subgraph_name: "connectors",
+            source_name: None,
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.f),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: None,
+            connect_template: URLTemplate {
+                base: Some(
+                    Url {
+                        scheme: "https",
+                        cannot_be_a_base: false,
+                        username: "",
+                        password: None,
+                        host: Some(
+                            Domain(
+                                "my.api",
+                            ),
+                        ),
+                        port: None,
+                        path: "/",
+                        query: None,
+                        fragment: None,
+                    },
+                ),
+                path: [
+                    Component {
+                        parts: [
+                            Text(
+                                "t",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "k",
+                            ),
+                            range: Some(
+                                0..1,
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                4..6,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                ],
+                                range: Some(
+                                    2..8,
+                                ),
+                            },
+                        ),
+                    ),
+                ],
+                range: Some(
+                    0..8,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+    },
+    "connectors_T_b_0": Connector {
+        id: ConnectId {
+            label: "connectors. http: GET https://my.api/t/{$this.k.id}",
+            subgraph_name: "connectors",
+            source_name: None,
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(T.b),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: None,
+            connect_template: URLTemplate {
+                base: Some(
+                    Url {
+                        scheme: "https",
+                        cannot_be_a_base: false,
+                        username: "",
+                        password: None,
+                        host: Some(
+                            Domain(
+                                "my.api",
+                            ),
+                        ),
+                        port: None,
+                        path: "/",
+                        query: None,
+                        fragment: None,
+                    },
+                ),
+                path: [
+                    Component {
+                        parts: [
+                            Text(
+                                "t",
+                            ),
+                        ],
+                    },
+                    Component {
+                        parts: [
+                            Var(
+                                Variable {
+                                    var_type: This,
+                                    path: "k.id",
+                                    location: 18..28,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "b",
+                            ),
+                            range: Some(
+                                0..1,
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                range: Some(
+                    0..1,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: Some(
+            Implicit,
+        ),
+    },
+}

@@ -299,8 +299,7 @@ mod tests {
         }
         "###,
         )
-        .unwrap()
-        .1;
+        .unwrap();
 
         let schema = Schema::parse_and_validate(
             r###"
@@ -368,8 +367,7 @@ mod tests {
         }
         "###,
         )
-        .unwrap()
-        .1;
+        .unwrap();
 
         let schema = Schema::parse_and_validate(
             r###"
@@ -474,8 +472,7 @@ mod tests {
         }
         "###,
         )
-        .unwrap()
-        .1;
+        .unwrap();
 
         let schema = Schema::parse_and_validate(
             r###"
@@ -545,8 +542,7 @@ mod tests {
             }
             "###,
         )
-        .unwrap()
-        .1;
+        .unwrap();
 
         let schema = Schema::parse_and_validate(
             r###"
@@ -595,8 +591,7 @@ mod tests {
             }
             "###,
         )
-        .unwrap()
-        .1;
+        .unwrap();
 
         let schema = Schema::parse_and_validate(
             r###"

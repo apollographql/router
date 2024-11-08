@@ -775,9 +775,13 @@ where
         }
         // Stub span to make sure the custom attributes are saved in current span extensions
         // It won't be extracted or sampled at all
-        let span = info_span!("supergraph_event_send_event");
-        let _entered = span.enter();
-        inner.send_event(attributes);
+        if Span::current().is_none() {
+            let span = info_span!("supergraph_event_send_event");
+            let _entered = span.enter();
+            inner.send_event(attributes);
+        } else {
+            inner.send_event(attributes);
+        }
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {

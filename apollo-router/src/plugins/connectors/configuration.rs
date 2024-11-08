@@ -25,6 +25,21 @@ pub(crate) struct ConnectorsConfig {
     /// The maximum number of requests for a connector source
     #[serde(default)]
     pub(crate) max_requests_per_operation_per_source: Option<usize>,
+
+    /// When enabled, adds an entry to the context for use in coprocessors
+    /// ```json
+    /// {
+    ///   "context": {
+    ///     "entries": {
+    ///       "apollo_connectors::sources_in_query_plan": [
+    ///         { "subgraph_name": "subgraph", "source_name": "source" }
+    ///       ]
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    #[serde(default)]
+    pub(crate) expose_sources_in_context: bool,
 }
 
 /// Configuration for a connector subgraph

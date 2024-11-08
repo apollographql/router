@@ -4,7 +4,6 @@ use std::ops::Range;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
@@ -36,7 +35,7 @@ pub(super) fn validate_selection(
     schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Result<(), Message> {
-    let (selection_arg, json_selection) = get_json_selection(coordinate, &schema.sources)?;
+    let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
     let field = coordinate.field_coordinate.field;
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
@@ -76,7 +75,7 @@ pub(super) fn validate_body_selection(
 
     let selection_str = require_value_is_str(selection_node, &coordinate, &schema.sources)?;
 
-    let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
+    let selection = JSONSelection::parse(selection_str).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
         message: format!("{coordinate} is not a valid JSONSelection: {err}"),
         locations: selection_node
@@ -102,7 +101,7 @@ pub(super) fn validate_body_selection(
 
 fn get_json_selection<'a>(
     connect_directive: ConnectDirectiveCoordinate<'a>,
-    source_map: &'a SourceMap,
+    schema: &'a SchemaInfo<'a>,
 ) -> Result<(SelectionArg<'a>, JSONSelection), Message> {
     let coordinate = SelectionCoordinate::from(connect_directive);
     let selection_arg = connect_directive
@@ -115,30 +114,28 @@ fn get_json_selection<'a>(
             message: format!("{coordinate} is required."),
             locations: connect_directive
                 .directive
-                .line_column_range(source_map)
+                .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         })?;
     let selection_str =
-        GraphQLString::new(&selection_arg.value, source_map).map_err(|_| Message {
+        GraphQLString::new(&selection_arg.value, &schema.sources).map_err(|_| Message {
             code: Code::GraphQLError,
             message: format!("{coordinate} must be a string."),
             locations: selection_arg
-                .line_column_range(source_map)
+                .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         })?;
 
-    let (_rest, selection) =
-        JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
-            code: Code::InvalidJsonSelection,
-            message: format!("{coordinate} is not a valid JSONSelection: {err}",),
-            locations: selection_arg
-                .value
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
-        })?;
+    let selection = JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
+        code: Code::InvalidJsonSelection,
+        message: format!("{coordinate} is not a valid JSONSelection: {err}",),
+        locations: selection_str
+            .line_col_for_subslice(err.offset..err.offset + 1, schema)
+            .into_iter()
+            .collect(),
+    })?;
 
     if selection.is_empty() {
         return Err(Message {
@@ -146,7 +143,7 @@ fn get_json_selection<'a>(
             message: format!("{coordinate} is empty",),
             locations: selection_arg
                 .value
-                .line_column_range(source_map)
+                .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         });
