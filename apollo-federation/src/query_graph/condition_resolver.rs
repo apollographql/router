@@ -17,14 +17,14 @@ use apollo_compiler::ast::Type;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContextMapEntry {
-    pub levels_in_data_path: usize,
-    pub levels_in_query_path: usize,
-    pub path_tree: Option<OpPathTree>,
-    pub selection_set: SelectionSet,
-    pub inbound_edge: EdgeIndex,
-    pub param_name: String,
-    pub arg_type: Type,
-    pub id: String,
+    pub(crate) levels_in_data_path: usize,
+    pub(crate) levels_in_query_path: usize,
+    pub(crate) path_tree: Option<OpPathTree>,
+    pub(crate) selection_set: SelectionSet,
+    pub(crate) inbound_edge: EdgeIndex,
+    pub(crate) param_name: String,
+    pub(crate) arg_type: Type,
+    pub(crate) id: String,
 }
 
 /// Note that `ConditionResolver`s are guaranteed to be only called for edge with conditions.

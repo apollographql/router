@@ -70,11 +70,11 @@ use crate::schema::ValidFederationSchema;
 
 use super::condition_resolver::ContextMapEntry;
 
-pub struct ContextAtUsageEntry {
-    pub context_id: String,
-    pub relative_path: Vec<String>,
-    pub selection_set: SelectionSet,
-    pub subgraph_arg_type: Type,
+pub(crate) struct ContextAtUsageEntry {
+    pub(crate) context_id: String,
+    pub(crate) relative_path: Vec<String>,
+    pub(crate) selection_set: SelectionSet,
+    pub(crate) subgraph_arg_type: Type,
 }
 
 /// An immutable path in a query graph.
@@ -1208,9 +1208,9 @@ where
             }
         }
 
-        let (a, b, c) =
+        let (new_edge_conditions,new_context_to_selection, new_parameter_to_context) =
             self.merge_edge_conditions_with_resolution(&condition_path_tree, &context_map);
-        let last_parameter_to_context = c.last();
+        let last_parameter_to_context = new_parameter_to_context.last();
 
         let trigger = {
             let mut trigger_rc = Arc::new(trigger);
@@ -1282,7 +1282,6 @@ where
 
         edges.push(edge);
         edge_triggers.push(trigger);
-        edge_conditions.push(condition_path_tree);
         if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
             last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
                 index: self.edges.len(),
@@ -1295,7 +1294,7 @@ where
             tail: edge_tail,
             edges,
             edge_triggers,
-            edge_conditions,
+            edge_conditions: new_edge_conditions,
             // Again, we don't want to set `last_subgraph_entering_edge_info` if we're entering a
             // `@defer` (see above).
             last_subgraph_entering_edge_info,
@@ -1327,8 +1326,8 @@ where
             } else {
                 None
             },
-            context_to_selection: self.context_to_selection.clone(),
-            parameter_to_context: self.parameter_to_context.clone(),
+            context_to_selection: new_context_to_selection,
+            parameter_to_context: new_parameter_to_context,
         })
     }
 
