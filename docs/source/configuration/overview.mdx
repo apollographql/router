@@ -364,6 +364,7 @@ GraphOS Router and Apollo Router Core provide a set of subcommands for interacti
 ```
 ./router config schema
 ./router config upgrade <path-to-config-file.yaml>
+./router config validate <path-to-config-file.yaml>
 ```
 
 <table class="field-table api-ref">
@@ -402,6 +403,19 @@ Use this schema to enable [configuration awareness in your text editor](#configu
 Takes a config file created for a _previous_ version of the router and outputs the corresponding configuration for the _current_ version.
 
 For details, see [Upgrading your router configuration](#upgrading-your-router-configuration).
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `validate`
+
+</td>
+<td>
+
+Takes a config file and validates it against the router's full supported configuration format.
 
 </td>
 </tr>
