@@ -106,8 +106,8 @@ pub struct QueryPlannerConfig {
 impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
-            reuse_query_fragments: true,
-            generate_query_fragments: false,
+            reuse_query_fragments: false,
+            generate_query_fragments: true,
             subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
