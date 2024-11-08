@@ -62,6 +62,7 @@ pub(crate) static mut DHAT_HEAP_PROFILER: OnceCell<dhat::Profiler> = OnceCell::n
 pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
 
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
+pub(crate) const APOLLO_TELEMETRY_DISABLED: &str = "APOLLO_TELEMETRY_DISABLED";
 
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
@@ -240,7 +241,7 @@ pub struct Opt {
     apollo_uplink_poll_interval: Duration,
 
     /// Disable sending anonymous usage information to Apollo.
-    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
+    #[clap(long, env = APOLLO_TELEMETRY_DISABLED, value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.

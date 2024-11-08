@@ -1,3 +1,4 @@
+use std::env;
 use std::env::consts::ARCH;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -15,6 +16,7 @@ use tokio::sync::mpsc::Sender;
 use tower::BoxError;
 use tracing::debug;
 
+use crate::executable::APOLLO_TELEMETRY_DISABLED;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -138,6 +140,12 @@ impl PluginPrivate for FleetDetector {
         debug!("initialising fleet detection plugin");
         let (gauge_initializer, mut rx) = tokio::sync::mpsc::channel(1);
 
+        if env::var(APOLLO_TELEMETRY_DISABLED).is_ok() {
+            debug!("fleet detection disabled, no telemetry will be sent");
+            rx.close();
+            return Ok(FleetDetector { gauge_initializer });
+        }
+
         debug!("spawning gauge initializer task");
         tokio::spawn(async move {
             let mut gauge_store = GaugeStore::new();
@@ -152,9 +160,11 @@ impl PluginPrivate for FleetDetector {
     }
 
     async fn activate(&self) {
-        debug!("initializing gauges");
-        if let Err(e) = self.gauge_initializer.send(()).await {
-            debug!("failed to activate fleet detector plugin: {:?}", e);
+        if !self.gauge_initializer.is_closed() {
+            debug!("initializing gauges");
+            if let Err(e) = self.gauge_initializer.send(()).await {
+                debug!("failed to activate fleet detector plugin: {:?}", e);
+            }
         }
     }
 }
