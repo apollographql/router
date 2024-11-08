@@ -404,6 +404,9 @@ fn require_value_is_str<'a, Coordinate: Display>(
     })
 }
 
+/// For an object type, get all the keys that are resolvable.
+///
+/// The FieldSet returned here is what goes in the `fields` argument, so `id` in `@key(fields: "id")`
 fn resolvable_key_fields<'a>(
     object: &'a Node<ObjectType>,
     schema: &'a Schema,
@@ -574,7 +577,7 @@ mod test_validate_source {
     #[test]
     fn validation_tests() {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
-            glob!("test_data", "*.graphql", |path| {
+            glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
                 let errors = validate(&schema, path.to_str().unwrap());
                 assert_snapshot!(format!("{:#?}", errors));

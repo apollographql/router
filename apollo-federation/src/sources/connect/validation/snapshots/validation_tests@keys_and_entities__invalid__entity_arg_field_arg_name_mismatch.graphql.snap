@@ -1,7 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:#?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_field_arg_name_mismatch.graphql
+input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_entities/invalid/entity_arg_field_arg_name_mismatch.graphql
 ---
 [
     Message {
