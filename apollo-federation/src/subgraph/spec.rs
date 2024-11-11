@@ -418,6 +418,7 @@ impl FederationSpecDefinitions {
     }
 
     /// directive @fromContext(field: String!) on ARGUMENT_DEFINITION
+    #[allow(clippy::wrong_self_convention)]
     fn from_context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,

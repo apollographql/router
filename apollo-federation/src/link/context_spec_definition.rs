@@ -145,6 +145,7 @@ impl ContextSpecDefinition {
         Ok(Directive { name, arguments })
     }
 
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn from_context_directive(
         &self,
         schema: &FederationSchema,
