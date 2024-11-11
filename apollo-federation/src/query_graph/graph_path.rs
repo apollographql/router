@@ -1253,7 +1253,7 @@ where
                             }
                         }
                         let new_field = Field::new(FieldData {
-                            schema: ValidFederationSchema::new(Valid::assume_valid(schema))?,
+                            schema: ValidFederationSchema::new(schema.validate()?)?,
                             field_position: field.field_position.clone(),
                             alias: field.alias.clone(),
                             arguments: field.arguments.clone(),
