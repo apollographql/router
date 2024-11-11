@@ -1234,10 +1234,7 @@ where
                                 apollo_compiler::schema::ExtendedType::InputObject(_) => None,
                             })
                         else {
-                            Err(FederationError::internal(format!(
-                                "Unexpectedly failed to lookup field {}.{}",
-                                type_name, field_name
-                            )))?
+                            internal_error!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                         };
                         let field_def = field_def.deref_mut().make_mut();
                         for (param_name, usage_entry) in last_parameter_to_context.iter() {
