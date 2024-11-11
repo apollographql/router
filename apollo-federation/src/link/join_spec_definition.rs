@@ -116,10 +116,10 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
         let mut selection = None;
         for (arg_name, value) in names.as_slice() {
             match arg_name.as_str() {
-                "name" => insert_value(&arg_name, &mut name, value)?,
-                "type" => insert_value(&arg_name, &mut type_, value)?,
-                "context" => insert_value(&arg_name, &mut context, value)?,
-                "selection" => insert_value(&arg_name, &mut selection, value)?,
+                "name" => insert_value(arg_name, &mut name, value)?,
+                "type" => insert_value(arg_name, &mut type_, value)?,
+                "context" => insert_value(arg_name, &mut context, value)?,
+                "selection" => insert_value(arg_name, &mut selection, value)?,
                 _ => internal_error!("Found unknown contextArgument {arg_name}"),
             }
         }

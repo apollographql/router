@@ -7,11 +7,25 @@ use apollo_compiler::collections::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
+use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
+use apollo_compiler::ast::Type;
+
+#[derive(Debug, Clone)]
+pub(crate) struct ContextMapEntry {
+    pub(crate) levels_in_data_path: usize,
+    pub(crate) levels_in_query_path: usize,
+    pub(crate) path_tree: Option<OpPathTree>,
+    pub(crate) selection_set: SelectionSet,
+    pub(crate) inbound_edge: EdgeIndex,
+    pub(crate) param_name: String,
+    pub(crate) arg_type: Type,
+    pub(crate) id: String,
+}
 
 /// Note that `ConditionResolver`s are guaranteed to be only called for edge with conditions.
 pub(crate) trait ConditionResolver {
@@ -29,6 +43,7 @@ pub(crate) enum ConditionResolution {
     Satisfied {
         cost: QueryPlanCost,
         path_tree: Option<Arc<OpPathTree>>,
+        context_map: Option<IndexMap<String, ContextMapEntry>>,
     },
     Unsatisfied {
         // NOTE: This seems to be a false positive...
@@ -48,6 +63,7 @@ impl ConditionResolution {
         Self::Satisfied {
             cost: 0.0,
             path_tree: None,
+            context_map: None,
         }
     }
 
