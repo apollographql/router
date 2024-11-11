@@ -887,9 +887,7 @@ impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
     fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
         match value {
             GraphPathTrigger::Op(op) => Ok(op.into()),
-            GraphPathTrigger::Transition(transition) => Err(FederationError::internal(format!(
-                "Failed to convert to GraphPathTrigger"
-            ))),
+            GraphPathTrigger::Transition(transition) => internal_error!("Failed to convert to GraphPathTrigger"),
         }
     }
 }
