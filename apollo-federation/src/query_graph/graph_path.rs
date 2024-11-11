@@ -1349,11 +1349,8 @@ where
             context_to_selection.push(None);
             let mut new_parameter_to_context = IndexMap::default();
             for (_, entry) in context_map.as_ref().into_iter().flat_map(|map| map.iter()) {
-                let idx = edge_conditions
-                    .len()
-                    .checked_sub(entry.levels_in_query_path + 1)
-                    .expect("calculated condition index must be positive");
-
+                let idx = edge_conditions.len() - entry.levels_in_query_path - 1;
+                
                 match entry.path_tree.as_ref() {
                     Some(path_tree) => {
                         let merged_conditions = match edge_conditions[idx].as_ref() {
