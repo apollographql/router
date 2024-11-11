@@ -1348,7 +1348,7 @@ where
             // parameter_to_context.push(Some(Arc::new(IndexMap::default())));
             context_to_selection.push(None);
             let mut new_parameter_to_context = IndexMap::default();
-            for (_, entry) in context_map.as_ref().into_iter().flat_map(|map| map.iter()) {
+            for (_, entry) in context_map.iter().flat_map(|map| map.iter()) {
                 let idx = edge_conditions.len() - entry.levels_in_query_path - 1;
                 
                 match entry.path_tree.as_ref() {
