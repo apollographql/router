@@ -418,13 +418,15 @@ impl PlanNode {
                             (Value::String(type1), Value::String(type2))
                                 if k.as_str() == TYPENAME =>
                             {
+                                // If type1 implements type2, or if it is a subtype of type2, we skip this overwrite
+                                // to preserve the more specific `__typename` in the response
                                 if !schema.is_implementation(type2.as_str(), type1.as_str())
                                     && !schema.is_subtype(type2.as_str(), type1.as_str())
                                 {
                                     *type1 = type2;
                                 }
                             }
-                            (target, source) => Self::type_aware_deep_merge(schema, target, source),
+                            (t, s) => Self::type_aware_deep_merge(schema, t, s),
                         },
                     }
                 }
