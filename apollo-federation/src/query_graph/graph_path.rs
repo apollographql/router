@@ -32,6 +32,7 @@ use crate::display_helpers::DisplaySlice;
 use crate::display_helpers::State as IndentedFormatter;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::BooleanOrVariable;
@@ -70,6 +71,7 @@ use crate::schema::ValidFederationSchema;
 
 use super::condition_resolver::ContextMapEntry;
 
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct ContextAtUsageEntry {
     pub(crate) context_id: String,
     pub(crate) relative_path: Vec<String>,
@@ -180,7 +182,6 @@ where
     context_to_selection: Vec<Option<IndexSet<String>>>,
     /// Where a context is used (i.e. `@fromContext`) there will exist a ContextAtUsageEntry map
     /// (1 for each parameter)
-    #[serde(skip)]
     parameter_to_context: Vec<Option<Arc<IndexMap<String, ContextAtUsageEntry>>>>,
 }
 
@@ -887,7 +888,9 @@ impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
     fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
         match value {
             GraphPathTrigger::Op(op) => Ok(op.into()),
-            GraphPathTrigger::Transition(transition) => internal_error!("Failed to convert to GraphPathTrigger"),
+            GraphPathTrigger::Transition(transition) => {
+                internal_error!("Failed to convert to GraphPathTrigger")
+            }
         }
     }
 }
@@ -1206,7 +1209,7 @@ where
             }
         }
 
-        let (new_edge_conditions,new_context_to_selection, new_parameter_to_context) =
+        let (new_edge_conditions, new_context_to_selection, new_parameter_to_context) =
             self.merge_edge_conditions_with_resolution(&condition_path_tree, &context_map);
         let last_parameter_to_context = new_parameter_to_context.last();
 
@@ -1234,7 +1237,9 @@ where
                                 apollo_compiler::schema::ExtendedType::InputObject(_) => None,
                             })
                         else {
-                            internal_error!("Unexpectedly failed to lookup field {type_name}.{field_name}")
+                            internal_error!(
+                                "Unexpectedly failed to lookup field {type_name}.{field_name}"
+                            )
                         };
                         let field_def = field_def.deref_mut().make_mut();
                         for (param_name, usage_entry) in last_parameter_to_context.iter() {
@@ -1350,18 +1355,17 @@ where
             let mut new_parameter_to_context = IndexMap::default();
             for (_, entry) in context_map.iter().flat_map(|map| map.iter()) {
                 let idx = edge_conditions.len() - entry.levels_in_query_path - 1;
-                
-                match entry.path_tree.as_ref() {
-                    Some(path_tree) => {
-                        let merged_conditions = match edge_conditions[idx].as_ref() {
-                            Some(condition) => condition.merge(&Arc::new(path_tree.clone())),
-                            None => Arc::new(path_tree.clone()),
-                        };
-                        edge_conditions[idx] = Some(merged_conditions);
-                    }
-                    None => {}
+
+                if let Some(path_tree) = &entry.path_tree {
+                    let merged_conditions = edge_conditions[idx].as_ref().map_or_else(
+                        || Arc::new(path_tree.clone()),
+                        |condition| condition.merge(&Arc::new(path_tree.clone())),
+                    );
+                    edge_conditions[idx] = Some(merged_conditions);
                 }
-                context_to_selection[idx].get_or_insert_with(Default::default).insert(entry.id.clone());
+                context_to_selection[idx]
+                    .get_or_insert_with(Default::default)
+                    .insert(entry.id.clone());
 
                 new_parameter_to_context.insert(
                     entry.param_name.clone(),

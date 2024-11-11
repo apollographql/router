@@ -1104,7 +1104,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             Some(best_plan) => Ok(ConditionResolution::Satisfied {
                 cost: best_plan.cost,
                 path_tree: Some(best_plan.path_tree),
-                context_map: todo!()
+                context_map: todo!(),
             }),
             None => Ok(ConditionResolution::unsatisfied_conditions()),
         }
