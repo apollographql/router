@@ -887,7 +887,7 @@ impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
 
     fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
         match value {
-            GraphPathTrigger::Op(op) => Ok(op.into()),
+            GraphPathTrigger::Op(op) => Ok(op),
             GraphPathTrigger::Transition(transition) => {
                 internal_error!("Failed to convert to GraphPathTrigger")
             }
@@ -900,10 +900,10 @@ impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
 
     fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
         match value {
-            GraphPathTrigger::Transition(transition) => Ok(transition.into()),
-            GraphPathTrigger::Op(op) => Err(FederationError::internal(format!(
-                "Failed to convert to GraphPathTrigger"
-            ))),
+            GraphPathTrigger::Transition(transition) => Ok(transition),
+            GraphPathTrigger::Op(op) => Err(FederationError::internal(
+                "Failed to convert to GraphPathTrigger",
+            )),
         }
     }
 }
@@ -1220,7 +1220,7 @@ where
                     if let OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) =
                         op.as_ref()
                     {
-                        let mut schema = Schema::clone(&*field.schema.schema());
+                        let mut schema = field.schema.schema().clone().into_inner();
                         let type_name = field.field_position.type_name();
                         let field_name = field.field_position.field_name();
                         let Some(field_def) =
@@ -1269,9 +1269,9 @@ where
                             OpPathElement::Field(new_field),
                         )));
                         let z: Arc<TTrigger> = z.try_into().map_err(|e| {
-                            FederationError::internal(format!(
-                                "Failed to convert GraphPathTrigger to TTrigger"
-                            ))
+                            FederationError::internal(
+                                "Failed to convert GraphPathTrigger to TTrigger",
+                            )
                         })?;
                         trigger_rc = z;
                     }
@@ -1345,7 +1345,7 @@ where
         let mut parameter_to_context = self.parameter_to_context.clone();
 
         edge_conditions.push(condition_path_tree.clone());
-        if (context_map.is_none() || context_map.as_ref().is_some_and(|m| m.len() == 0)) {
+        if (context_map.is_none() || context_map.as_ref().is_some_and(|m| m.is_empty())) {
             context_to_selection.push(None);
             parameter_to_context.push(None);
             (edge_conditions, context_to_selection, parameter_to_context)
