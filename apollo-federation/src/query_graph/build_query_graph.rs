@@ -1602,7 +1602,7 @@ impl FederatedQueryGraphBuilder {
                 .query_graph
                 .edge_weight_mut(edge)?
                 .required_contexts
-                .extend_from_slice(&required_contexts);
+                .extend_from_slice(required_contexts);
         }
 
         // Add the context argument mapping

@@ -507,6 +507,7 @@ mod tests {
         ConditionResolution::Satisfied {
             cost: 0.0,
             path_tree: None,
+            context_map: None,
         }
     }
 

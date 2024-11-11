@@ -471,14 +471,15 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn context_directive_arguments<'doc>(
-        application: &'doc Node<Directive>,
-    ) -> Result<ContextDirectiveArguments<'doc>, FederationError> {
+    pub(crate) fn context_directive_arguments(
+        application: &Node<Directive>,
+    ) -> Result<ContextDirectiveArguments, FederationError> {
         Ok(ContextDirectiveArguments {
             name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
-
+   
+    #[allow(clippy::wrong_self_convention)] 
     pub(crate) fn from_context_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -492,6 +493,7 @@ impl FederationSpecDefinition {
             })
     }
 
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn from_context_directive_arguments<'doc>(
         &self,
         application: &'doc Node<Directive>,
@@ -504,6 +506,7 @@ impl FederationSpecDefinition {
         })
     }
 
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn from_context_directive(
         &self,
         schema: &FederationSchema,
@@ -543,7 +546,7 @@ impl FederationSpecDefinition {
     ) -> Option<&'static ContextSpecDefinition> {
         schema
             .metadata()
-            .and_then(|metadata| metadata.for_identity(&&Identity::context_identity()))
+            .and_then(|metadata| metadata.for_identity(&Identity::context_identity()))
             .and_then(|link| CONTEXT_VERSIONS.find(&link.url.version))
             .or_else(|| CONTEXT_VERSIONS.find_for_federation_version(self.version()))
     }

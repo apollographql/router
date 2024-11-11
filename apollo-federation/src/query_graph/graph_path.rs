@@ -4,12 +4,19 @@ use std::fmt::Formatter;
 use std::fmt::Write;
 use std::hash::Hash;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::atomic;
 use std::sync::Arc;
 
+use apollo_compiler::ast::InputValueDefinition;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use either::Either;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
@@ -24,6 +31,8 @@ use crate::display_helpers::DisplayOption;
 use crate::display_helpers::DisplaySlice;
 use crate::display_helpers::State as IndentedFormatter;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::BooleanOrVariable;
@@ -57,6 +66,16 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+
+use super::condition_resolver::ContextMapEntry;
+
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct ContextAtUsageEntry {
+    pub(crate) context_id: String,
+    pub(crate) relative_path: Vec<String>,
+    pub(crate) selection_set: SelectionSet,
+    pub(crate) subgraph_arg_type: Type,
+}
 
 /// An immutable path in a query graph.
 ///
@@ -157,6 +176,11 @@ where
     // TODO(@TylerBloom): Add in once defer is supported.
     #[serde(skip)]
     defer_on_tail: Option<DeferDirectiveArguments>,
+    /// At the point where a `@context` is set, we will have fields to select
+    context_to_selection: Vec<Option<IndexSet<String>>>,
+    /// Where a context is used (i.e. `@fromContext`) there will exist a ContextAtUsageEntry map
+    /// (1 for each parameter)
+    parameter_to_context: Vec<Option<Arc<IndexMap<String, ContextAtUsageEntry>>>>,
 }
 
 impl<TTrigger, TEdge> std::fmt::Debug for GraphPath<TTrigger, TEdge>
@@ -183,6 +207,8 @@ where
             runtime_types_of_tail,
             runtime_types_before_tail_if_last_is_cast,
             defer_on_tail,
+            context_to_selection,
+            parameter_to_context,
         } = self;
 
         f.debug_struct("GraphPath")
@@ -854,10 +880,36 @@ where
     }
 }
 
+impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
+    type Error = FederationError;
+
+    fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
+        match value {
+            GraphPathTrigger::Op(op) => Ok(op),
+            GraphPathTrigger::Transition(transition) => {
+                internal_error!("Failed to convert to GraphPathTrigger")
+            }
+        }
+    }
+}
+
+impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
+    type Error = FederationError;
+
+    fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
+        match value {
+            GraphPathTrigger::Transition(transition) => Ok(transition),
+            GraphPathTrigger::Op(op) => Err(FederationError::internal(
+                "Failed to convert to GraphPathTrigger",
+            )),
+        }
+    }
+}
+
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash + std::fmt::Debug,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    Arc<TTrigger>: Into<GraphPathTrigger> + TryFrom<GraphPathTrigger, Error = FederationError>,
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
     EdgeIndex: Into<TEdge>,
 {
@@ -875,6 +927,8 @@ where
             runtime_types_of_tail: Arc::new(IndexSet::default()),
             runtime_types_before_tail_if_last_is_cast: None,
             defer_on_tail: None,
+            context_to_selection: Vec::default(),
+            parameter_to_context: Vec::default(),
         };
         path.runtime_types_of_tail = Arc::new(path.head_possible_runtime_types()?);
         Ok(path)
@@ -906,6 +960,7 @@ where
         let ConditionResolution::Satisfied {
             path_tree: condition_path_tree,
             cost: condition_cost,
+            context_map,
         } = condition_resolution
         else {
             return Err(FederationError::internal(
@@ -945,6 +1000,8 @@ where
                 ),
                 runtime_types_before_tail_if_last_is_cast: None,
                 defer_on_tail: defer,
+                context_to_selection: self.context_to_selection.clone(),
+                parameter_to_context: self.parameter_to_context.clone(),
             });
         };
 
@@ -1082,6 +1139,8 @@ where
                                         } else {
                                             self.defer_on_tail.clone()
                                         },
+                                        context_to_selection: self.context_to_selection.clone(),
+                                        parameter_to_context: self.parameter_to_context.clone(),
                                     });
                                 }
                             }
@@ -1142,13 +1201,85 @@ where
                     // We know last edge is not a cast.
                     runtime_types_before_tail_if_last_is_cast: None,
                     defer_on_tail: defer,
+                    context_to_selection: self.context_to_selection.clone(),
+                    parameter_to_context: self.parameter_to_context.clone(),
                 });
             }
         }
 
+        let (new_edge_conditions, new_context_to_selection, new_parameter_to_context) =
+            self.merge_edge_conditions_with_resolution(&condition_path_tree, &context_map);
+        let last_parameter_to_context = new_parameter_to_context.last();
+
+        let trigger = {
+            let mut trigger_rc = Arc::new(trigger);
+            if let Some(Some(last_parameter_to_context)) = last_parameter_to_context {
+                if let GraphPathTrigger::Op(op) = trigger_rc.clone().into() {
+                    if let OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) =
+                        op.as_ref()
+                    {
+                        let mut schema = field.schema.schema().clone().into_inner();
+                        let type_name = field.field_position.type_name();
+                        let field_name = field.field_position.field_name();
+                        let Some(field_def) =
+                            schema.types.get_mut(type_name).and_then(|t| match t {
+                                apollo_compiler::schema::ExtendedType::Scalar(_) => None,
+                                apollo_compiler::schema::ExtendedType::Object(obj) => {
+                                    obj.make_mut().fields.get_mut(field_name)
+                                }
+                                apollo_compiler::schema::ExtendedType::Interface(iface) => {
+                                    iface.make_mut().fields.get_mut(field_name)
+                                }
+                                apollo_compiler::schema::ExtendedType::Union(_) => None,
+                                apollo_compiler::schema::ExtendedType::Enum(_) => None,
+                                apollo_compiler::schema::ExtendedType::InputObject(_) => None,
+                            })
+                        else {
+                            internal_error!(
+                                "Unexpectedly failed to lookup field {type_name}.{field_name}"
+                            )
+                        };
+                        let field_def = field_def.deref_mut().make_mut();
+                        for (param_name, usage_entry) in last_parameter_to_context.iter() {
+                            if !field_def
+                                .arguments
+                                .iter()
+                                .any(|arg| arg.name.as_str() == param_name.as_str())
+                            {
+                                field_def.arguments.push(Node::new(InputValueDefinition {
+                                    name: Name::new(usage_entry.context_id.as_str())?,
+                                    ty: Node::new(usage_entry.subgraph_arg_type.clone()), // TODO: I think this is wrong. We want to lookup the type in schema
+                                    default_value: None,
+                                    description: None,
+                                    directives: Default::default(),
+                                }));
+                            }
+                        }
+                        let new_field = Field::new(FieldData {
+                            schema: ValidFederationSchema::new(schema.validate()?)?,
+                            field_position: field.field_position.clone(),
+                            alias: field.alias.clone(),
+                            arguments: field.arguments.clone(),
+                            directives: field.directives.clone(),
+                            sibling_typename: field.sibling_typename.clone(),
+                        });
+                        let z = GraphPathTrigger::Op(Arc::new(OpGraphPathTrigger::OpPathElement(
+                            OpPathElement::Field(new_field),
+                        )));
+                        let z: Arc<TTrigger> = z.try_into().map_err(|e| {
+                            FederationError::internal(
+                                "Failed to convert GraphPathTrigger to TTrigger",
+                            )
+                        })?;
+                        trigger_rc = z;
+                    }
+                }
+            }
+            trigger_rc
+        };
+
         edges.push(edge);
-        edge_triggers.push(Arc::new(trigger));
-        edge_conditions.push(condition_path_tree);
+        edge_triggers.push(trigger);
         if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
             last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
                 index: self.edges.len(),
@@ -1161,7 +1292,7 @@ where
             tail: edge_tail,
             edges,
             edge_triggers,
-            edge_conditions,
+            edge_conditions: new_edge_conditions,
             // Again, we don't want to set `last_subgraph_entering_edge_info` if we're entering a
             // `@defer` (see above).
             last_subgraph_entering_edge_info,
@@ -1193,7 +1324,60 @@ where
             } else {
                 None
             },
+            context_to_selection: new_context_to_selection,
+            parameter_to_context: new_parameter_to_context,
         })
+    }
+
+    fn merge_edge_conditions_with_resolution(
+        &self,
+        condition_path_tree: &Option<Arc<OpPathTree>>,
+        context_map: &Option<IndexMap<String, ContextMapEntry>>,
+    ) -> (
+        Vec<Option<Arc<OpPathTree>>>,
+        Vec<Option<IndexSet<String>>>,
+        Vec<Option<Arc<IndexMap<String, ContextAtUsageEntry>>>>,
+    ) {
+        let mut edge_conditions = self.edge_conditions.clone();
+        let mut context_to_selection = self.context_to_selection.clone();
+        let mut parameter_to_context = self.parameter_to_context.clone();
+
+        edge_conditions.push(condition_path_tree.clone());
+        if (context_map.is_none() || context_map.as_ref().is_some_and(|m| m.is_empty())) {
+            context_to_selection.push(None);
+            parameter_to_context.push(None);
+            (edge_conditions, context_to_selection, parameter_to_context)
+        } else {
+            // parameter_to_context.push(Some(Arc::new(IndexMap::default())));
+            context_to_selection.push(None);
+            let mut new_parameter_to_context = IndexMap::default();
+            for (_, entry) in context_map.iter().flat_map(|map| map.iter()) {
+                let idx = edge_conditions.len() - entry.levels_in_query_path - 1;
+
+                if let Some(path_tree) = &entry.path_tree {
+                    let merged_conditions = edge_conditions[idx].as_ref().map_or_else(
+                        || Arc::new(path_tree.clone()),
+                        |condition| condition.merge(&Arc::new(path_tree.clone())),
+                    );
+                    edge_conditions[idx] = Some(merged_conditions);
+                }
+                context_to_selection[idx]
+                    .get_or_insert_with(Default::default)
+                    .insert(entry.id.clone());
+
+                new_parameter_to_context.insert(
+                    entry.param_name.clone(),
+                    ContextAtUsageEntry {
+                        context_id: entry.id.clone(),
+                        relative_path: vec!["..".to_string(); entry.levels_in_data_path],
+                        selection_set: entry.selection_set.clone(),
+                        subgraph_arg_type: entry.arg_type.clone(),
+                    },
+                );
+            }
+            parameter_to_context.push(Some(Arc::new(new_parameter_to_context)));
+            (edge_conditions, context_to_selection, parameter_to_context)
+        }
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = GraphPathItem<'_, TTrigger, TEdge>> {
@@ -1597,7 +1781,12 @@ where
                     &excluded_destinations.add_excluded(&edge_tail_weight.source),
                     excluded_conditions,
                 )?;
-                if let ConditionResolution::Satisfied { path_tree, cost } = condition_resolution {
+                if let ConditionResolution::Satisfied {
+                    path_tree,
+                    cost,
+                    context_map,
+                } = condition_resolution
+                {
                     debug!("Condition satisfied");
                     drop(guard);
                     // We can get to `edge_tail_weight.source` with that edge. But if we had already
@@ -1784,7 +1973,11 @@ where
                     let updated_path = Arc::new(to_advance.add(
                         transition_and_context_to_trigger(&edge_weight.transition, context),
                         edge.into(),
-                        ConditionResolution::Satisfied { cost, path_tree },
+                        ConditionResolution::Satisfied {
+                            cost,
+                            path_tree,
+                            context_map,
+                        },
                         None,
                     )?);
                     best_path_by_source.insert(
@@ -2183,6 +2376,8 @@ impl OpGraphPath {
             runtime_types_before_tail_if_last_is_cast: None,
             // TODO: The JS codebase copied this from the current path, which seems like a bug.
             defer_on_tail: self.defer_on_tail.clone(),
+            context_to_selection: self.context_to_selection.clone(),
+            parameter_to_context: self.parameter_to_context.clone(),
         })
     }
 
@@ -3931,6 +4126,7 @@ mod tests {
                 ConditionResolution::Satisfied {
                     cost: 0.0,
                     path_tree: None,
+                    context_map: None,
                 },
                 None,
             )
@@ -3949,6 +4145,7 @@ mod tests {
                 ConditionResolution::Satisfied {
                     cost: 0.0,
                     path_tree: None,
+                    context_map: None,
                 },
                 None,
             )
