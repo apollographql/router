@@ -72,6 +72,12 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn deep_merge(&mut self, other: Self);
 
+    /// Deep merge two JSON objects, overwriting values in `self` if it has the same key as `other`.
+    /// For GraphQL response objects, this uses schema information to avoid overwriting a concrete
+    /// `__typename` with an interface name.
+    #[track_caller]
+    fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema);
+
     /// Returns `true` if the values are equal and the objects are ordered the same.
     ///
     /// **Note:** this is recursive.
@@ -173,6 +179,54 @@ impl ValueExt for Value {
             (Value::Array(a), Value::Array(mut b)) => {
                 for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
                     a_value.deep_merge(b_value);
+                }
+
+                a.extend(b);
+            }
+            (_, Value::Null) => {}
+            (Value::Object(_), Value::Array(_)) => {
+                failfast_debug!("trying to replace an object with an array");
+            }
+            (Value::Array(_), Value::Object(_)) => {
+                failfast_debug!("trying to replace an array with an object");
+            }
+            (a, b) => {
+                if b != Value::Null {
+                    *a = b;
+                }
+            }
+        }
+    }
+
+    fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema) {
+        match (self, other) {
+            (Value::Object(a), Value::Object(b)) => {
+                for (key, value) in b.into_iter() {
+                    let k = key.clone();
+                    match a.entry(key) {
+                        Entry::Vacant(e) => {
+                            e.insert(value);
+                        }
+                        Entry::Occupied(e) => match (e.into_mut(), value) {
+                            (Value::String(type1), Value::String(type2))
+                                if k.as_str() == TYPENAME =>
+                            {
+                                // If type1 implements type2, or if it is a subtype of type2, we skip this overwrite
+                                // to preserve the more specific `__typename` in the response
+                                if !schema.is_implementation(type2.as_str(), type1.as_str())
+                                    && !schema.is_subtype(type2.as_str(), type1.as_str())
+                                {
+                                    *type1 = type2;
+                                }
+                            }
+                            (t, s) => t.type_aware_deep_merge(s, schema),
+                        },
+                    }
+                }
+            }
+            (Value::Array(a), Value::Array(mut b)) => {
+                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
+                    a_value.type_aware_deep_merge(b_value, schema);
                 }
 
                 a.extend(b);
@@ -1330,6 +1384,66 @@ mod tests {
         assert_eq!(
             json,
             json!({"obj":{"arr":[{"prop1":2, "prop3":3},{"prop2":2, "prop4":4}]}})
+        );
+    }
+
+    #[test]
+    fn interface_typename_merging() {
+        let schema = Schema::parse(
+                r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+                query: Query
+            }
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            scalar link__Import
+            scalar join__FieldSet
+
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+
+            interface I {
+                s: String
+            }
+
+            type C implements I {
+                s: String
+            }
+
+            type Query {
+                i: I
+            }
+        "#,
+            &Default::default(),
+        )
+        .expect("valid schema");
+        let mut response1 = json!({
+            "__typename": "C"
+        });
+        let response2 = json!({
+            "__typename": "I",
+            "s": "data"
+        });
+
+        response1.type_aware_deep_merge(response2, &schema);
+
+        assert_eq!(
+            response1,
+            json!({
+                "__typename": "C",
+                "s": "data"
+            })
         );
     }
 
