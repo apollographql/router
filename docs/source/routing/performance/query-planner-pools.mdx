@@ -1,0 +1,34 @@
+---
+title: Query Planner Pools
+subtitle: Run multiple query planners in parallel
+minVersion: 1.44.0
+redirectFrom:
+  - /router/configuration/overview/#query-planner-pools
+---
+
+<ExperimentalFeature appendText="And join the [GitHub discussion about query planner pools](https://github.com/apollographql/router/discussions/4917)."
+/>
+
+You can improve the performance of the router's query planner by configuring parallelized query planning.
+
+By default, the query planner plans one operation at a time. It plans one operation to completion before planning the next one. This serial planning can be problematic when an operation takes a long time to plan and consequently blocks the query planner from working on other operations.
+
+## Configuring query planner pools
+
+To resolve such blocking scenarios, you can enable parallel query planning. Configure it in `router.yaml` with `supergraph.query_planning.experimental_parallelism`:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    experimental_parallelism: auto # number of available cpus 
+```
+
+The value of `experimental_parallelism` is the number of query planners in the router's _query planner pool_. A query planner pool is a preallocated set of query planners from which the router can use to plan operations. The total number of pools is the maximum number of query planners that can run in parallel and therefore the maximum number of operations that can be worked on simultaneously. 
+
+Valid values of `experimental_parallelism`:
+- Any integer starting from `1`
+- The special value `auto`, which sets the number of query planners equal to the number of available CPUs on the router's host machine
+
+The default value of `experimental_parallelism` is `1`.
+
+In practice, you should tune `experimental_parallelism` based on metrics and benchmarks gathered from your router.
