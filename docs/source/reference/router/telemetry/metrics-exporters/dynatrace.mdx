@@ -1,0 +1,45 @@
+---
+title: Dynatrace exporter (via OTLP)
+subtitle: Configure the Dynatrace exporter for metrics
+description: Configure the Dynatrace exporter for metrics via OpenTelemetry Protocol (OTLP) in the Apollo Router.
+---
+
+Enable and configure the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp) for metrics in the Apollo Router for use with [Dynatrace](https://dynatrace.com/).
+
+For general tracing configuration, refer to [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview).
+
+## Dynatrace configuration
+
+To configure the router:
+
+- Enable the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp#configuration)
+- Set `temporality: delta` (Using _Delta_ is required as _Cumulative_ temporality is **not** supported by Dynatrace)
+- Set the `protocol` as `http` (Dynatrace [doesn't currently support](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export) gRPC)
+- Set the `endpoint` to your [Dynatrace OpenTelemetry metrics endpoint](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/opentelemetry/post-metrics) (e.g., ensuring that it contains `{your-environment-id}` in the hostname and ends in `/api/v2/otlp/v1/metrics`) 
+- Provide your Dynatrace API token in the `Authorization` header (the header should start with [`Api-Token` and then your Dynatrace token](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export#authentication-export-to-activegate)
+
+For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        temporality: delta
+        # Endpoint for your region.
+        endpoint: <dynatrace-endpoint>
+        protocol: http
+        http:
+          headers:
+            Authorization: Api-Token <dynatrace-token>
+```
+
+<Note>
+
+You must specify `protocol: http` or the exporter will fail to connect to Dynatrace.  You must use `temporality: delta` or some metrics will fail to be delivered to your deployment. 
+ Additionally, if your Dynatrace endpoint does not contain a port, you **must** explicitly include `:443` as the port after the host address. For example: `https://subdomain.live.dynatrace.com:443/api/v2/otlp/v1/metrics`.
+
+</Note>
+
+For more details about Dynatrace configuration, see [Dynatrace's docs on OpenTelemetry configuration](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export).
