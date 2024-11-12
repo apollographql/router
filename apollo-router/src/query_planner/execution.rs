@@ -1,11 +1,9 @@
-use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
 use futures::future::join_all;
 use futures::prelude::*;
-use serde_json_bytes::Entry;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -41,7 +39,6 @@ use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::spec::TYPENAME;
 use crate::Context;
 
 impl QueryPlan {
