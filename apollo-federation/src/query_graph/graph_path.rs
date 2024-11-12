@@ -284,8 +284,13 @@ pub(crate) type ContextToSelection = HashSet<String>;
 pub(crate) type ParameterToContext = IndexMap<String, ContextAtUsageEntry>;
 
 /// The item type for [`GraphPath::iter`]
-pub(crate) type GraphPathItem<'path, TTrigger, TEdge> =
-    (TEdge, &'path Arc<TTrigger>, &'path Option<Arc<OpPathTree>>, Option<ContextToSelection>, Option<ParameterToContext>);
+pub(crate) type GraphPathItem<'path, TTrigger, TEdge> = (
+    TEdge,
+    &'path Arc<TTrigger>,
+    &'path Option<Arc<OpPathTree>>,
+    Option<ContextToSelection>,
+    Option<ParameterToContext>,
+);
 
 /// A `GraphPath` whose triggers are operation elements (essentially meaning that the path has been
 /// guided by a GraphQL operation).
@@ -1405,7 +1410,17 @@ where
             .zip(&self.edge_conditions)
             .zip(&self.context_to_selection)
             .zip(&self.parameter_to_context)
-            .map(|((((edge, trigger), condition), context_to_selection), parameter_to_context)| (edge, trigger, condition, context_to_selection.clone(), parameter_to_context.clone()))
+            .map(
+                |((((edge, trigger), condition), context_to_selection), parameter_to_context)| {
+                    (
+                        edge,
+                        trigger,
+                        condition,
+                        context_to_selection.clone(),
+                        parameter_to_context.clone(),
+                    )
+                },
+            )
     }
 
     pub(crate) fn next_edges(
