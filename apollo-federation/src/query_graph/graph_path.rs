@@ -24,6 +24,7 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
+use strum_macros::EnumTryAs;
 use tracing::debug;
 use tracing::debug_span;
 
@@ -916,10 +917,87 @@ impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
     }
 }
 
+pub(crate) enum GraphPathTriggerRef<'a> {
+    Op(&'a OpGraphPathTrigger),
+    Transition(&'a QueryGraphEdgeTransition),
+}
+
+pub(crate) enum GraphPathTriggerRefMut<'a> {
+    Op(&'a mut OpGraphPathTrigger),
+    Transition(&'a mut QueryGraphEdgeTransition),
+}
+
+impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
+    fn from(value: &'a GraphPathTrigger) -> Self {
+        match value {
+            GraphPathTrigger::Op(value) => value.as_ref().into(),
+            GraphPathTrigger::Transition(value) => value.as_ref().into(),
+        }
+    }
+}
+
+impl<'a> From<&'a OpGraphPathTrigger> for GraphPathTriggerRef<'a> {
+    fn from(value: &'a OpGraphPathTrigger) -> Self {
+        Self::Op(value)
+    }
+}
+
+impl<'a> From<&'a mut OpGraphPathTrigger> for GraphPathTriggerRefMut<'a> {
+    fn from(value: &'a mut OpGraphPathTrigger) -> Self {
+        Self::Op(value)
+    }
+}
+
+impl<'a> From<&'a QueryGraphEdgeTransition> for GraphPathTriggerRef<'a> {
+    fn from(value: &'a QueryGraphEdgeTransition) -> Self {
+        Self::Transition(value)
+    }
+}
+
+impl<'a> From<&'a mut QueryGraphEdgeTransition> for GraphPathTriggerRefMut<'a> {
+    fn from(value: &'a mut QueryGraphEdgeTransition) -> Self {
+        Self::Transition(value)
+    }
+}
+
+/// `GraphPath` is generic over two type, `TTrigger` and `TEdge`. This trait helps abstract over
+/// the `TTrigger` type bound. A `TTrigger` is one of the two types that make up the variants of
+/// the `GraphPathTrigger`. Rather than trying to cast into concrete types and cast back (and
+/// potentially raise errors), this trait provides ways to access the data needed within.
+pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
+    fn get_field_mut<'a>(&'a mut self) -> Option<&mut Field>
+    where
+        &'a mut Self: Into<GraphPathTriggerRefMut<'a>>,
+    {
+        match self.into() {
+            GraphPathTriggerRefMut::Op(OpGraphPathTrigger::OpPathElement(
+                OpPathElement::Field(field),
+            )) => Some(field),
+            _ => None,
+        }
+    }
+
+    fn get_field_parent_type<'a>(&'a self) -> Option<CompositeTypeDefinitionPosition>
+    where
+        &'a Self: Into<GraphPathTriggerRef<'a>>,
+    {
+        match self.into() {
+            GraphPathTriggerRef::Op(trigger) => todo!(),
+            GraphPathTriggerRef::Transition(trigger) => todo!(),
+        }
+    }
+}
+
+impl GraphPathTriggerVariant for OpGraphPathTrigger {}
+
+impl GraphPathTriggerVariant for QueryGraphEdgeTransition {}
+
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash + std::fmt::Debug,
-    Arc<TTrigger>: Into<GraphPathTrigger> + TryFrom<GraphPathTrigger, Error = FederationError>,
+    TTrigger: GraphPathTriggerVariant,
+    for<'a> &'a TTrigger: Into<GraphPathTriggerRef<'a>>,
+    for<'a> &'a mut TTrigger: Into<GraphPathTriggerRefMut<'a>>,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
     EdgeIndex: Into<TEdge>,
 {
@@ -962,7 +1040,7 @@ where
 
     pub(crate) fn add(
         &self,
-        trigger: TTrigger,
+        mut trigger: TTrigger,
         edge: TEdge,
         condition_resolution: ConditionResolution,
         defer: Option<DeferDirectiveArguments>,
@@ -1221,12 +1299,33 @@ where
             self.merge_edge_conditions_with_resolution(&condition_path_tree, &context_map);
         let last_parameter_to_context = new_parameter_to_context.last();
 
-        let trigger = {
-            let mut trigger_rc = Arc::new(trigger);
-            if let Some(Some(last_parameter_to_context)) = last_parameter_to_context {
-                if let GraphPathTrigger::Op(op) = trigger_rc.clone().into() {
-                    if let OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) =
-                        op.as_ref()
+        if let Some(Some(last_parameter_to_context)) = last_parameter_to_context {
+            // TODO: Perhaps it is better to explicitly cast this to `GraphPathTriggerRefMut` and
+            // pull out the field from there.
+            if let Some(field) = trigger.get_field_mut() {
+                let mut schema = field.schema.schema().clone().into_inner();
+                let type_name = field.field_position.type_name();
+                let field_name = field.field_position.field_name();
+                let Some(field_def) = schema.types.get_mut(type_name).and_then(|t| match t {
+                    apollo_compiler::schema::ExtendedType::Scalar(_) => None,
+                    apollo_compiler::schema::ExtendedType::Object(obj) => {
+                        obj.make_mut().fields.get_mut(field_name)
+                    }
+                    apollo_compiler::schema::ExtendedType::Interface(iface) => {
+                        iface.make_mut().fields.get_mut(field_name)
+                    }
+                    apollo_compiler::schema::ExtendedType::Union(_) => None,
+                    apollo_compiler::schema::ExtendedType::Enum(_) => None,
+                    apollo_compiler::schema::ExtendedType::InputObject(_) => None,
+                }) else {
+                    internal_error!("Unexpectedly failed to lookup field {type_name}.{field_name}")
+                };
+                let field_def = field_def.deref_mut().make_mut();
+                for (param_name, usage_entry) in last_parameter_to_context.iter() {
+                    if !field_def
+                        .arguments
+                        .iter()
+                        .any(|arg| arg.name.as_str() == param_name.as_str())
                     {
                         let mut schema = field.schema.schema().clone().into_inner();
                         let type_name = field.field_position.type_name();
@@ -1284,12 +1383,19 @@ where
                         })?;
                     }
                 }
+                *field = Field::new(FieldData {
+                    schema: ValidFederationSchema::new(schema.validate()?)?,
+                    field_position: field.field_position.clone(),
+                    alias: field.alias.clone(),
+                    arguments: field.arguments.clone(),
+                    directives: field.directives.clone(),
+                    sibling_typename: field.sibling_typename.clone(),
+                });
             }
-            trigger_rc
-        };
+        }
 
         edges.push(edge);
-        edge_triggers.push(trigger);
+        edge_triggers.push(Arc::new(trigger));
         if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
             last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
                 index: self.edges.len(),
@@ -1574,9 +1680,25 @@ where
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
         let edge_weight = self.graph.edge_weight(edge)?;
-        if edge_weight.conditions.is_none() {
+        if edge_weight.conditions.is_none() && edge_weight.required_contexts.is_empty() {
             return Ok(ConditionResolution::no_conditions());
         }
+
+        /* Resolve context conditions */
+
+        if !edge_weight.required_contexts.is_empty() {
+            for ctx in &edge_weight.required_contexts {
+                let mut levels_in_query_path = 0;
+                let mut levels_in_data_path = 0;
+                // TODO: Verify that `self.edges` and `self.edge_triggers` are the same length.
+                // Otherwise, this loop will be truncated.
+                for (e, trigger) in self.edges.iter().zip(self.edge_triggers.iter()).rev() {}
+            }
+            todo!()
+        }
+
+        /* Resolve all other conditions */
+
         debug_span!("Checking conditions {conditions} on edge {edge_weight}");
         let resolution = condition_resolver.resolve(
             edge,
