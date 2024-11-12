@@ -107,8 +107,10 @@ telemetry:
          parent_based_sampler: true # (default) If an incoming span has OpenTelemetry headers then the request will always be sampled. 
 ```
 
-- `sampler` sets the sampling rate as a decimal percentage, `always_on`, or `always_off`. For example, setting `sampler: 0.1` samples 10% of your requests.
-  - [`always_off`](https://opentelemetry.io/docs/specs/otel/trace/tracestate-probability-sampling/#always-off-sampler) means that no spans will make it to your APM. It doesn't mean that sampling is disabled
+- `sampler` sets the sampling rate as a decimal percentage, `always_on`, or `always_off`.
+  - For example, setting `sampler: 0.1` samples 10% of your requests.
+  - `always_on` (the default) sends all spans to your APM.
+  - `always_off` turns off sampling. No spans reach your APM.
 
 - `parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to disable it (setting `parent_based_sampler: false`) if your router is exposed directly to the internet.
 
