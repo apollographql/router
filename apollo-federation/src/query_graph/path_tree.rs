@@ -3,6 +3,7 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use indexmap::map::Entry;
 use petgraph::graph::EdgeIndex;
@@ -17,6 +18,10 @@ use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
 use crate::utils::FallibleIterator;
+
+use super::graph_path::ContextAtUsageEntry;
+use super::graph_path::ContextToSelection;
+use super::graph_path::ParameterToContext;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
 /// node, in which each node of the tree corresponds to a node in the query graph, and a tree's node
@@ -92,6 +97,10 @@ where
     pub(crate) conditions: Option<Arc<OpPathTree>>,
     /// The child `PathTree` reached by taking the edge.
     pub(crate) tree: Arc<PathTree<TTrigger, TEdge>>,
+    // a list of contexts set at this point in the path tree
+    pub(crate) context_to_selection: Option<ContextToSelection>,
+    // a list of contexts used at this point in the path tree
+    pub(crate) parameter_to_context: Option<ParameterToContext>,
 }
 
 impl<TTrigger, TEdge> PartialEq for PathTreeChild<TTrigger, TEdge>
@@ -242,12 +251,14 @@ where
             trigger: &'inputs Arc<TTrigger>,
             conditions: Option<Arc<OpPathTree>>,
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
+            context_to_selection: Option<ContextToSelection>,
+            parameter_to_context: Option<ParameterToContext>,
         }
 
         let mut local_selection_sets = Vec::new();
 
         for (mut graph_path_iter, selection) in graph_paths_and_selections {
-            let Some((generic_edge, trigger, conditions)) = graph_path_iter.next() else {
+            let Some((generic_edge, trigger, conditions, context_to_selection, parameter_to_context)) = graph_path_iter.next() else {
                 // End of an input `GraphPath`
                 if let Some(selection) = selection {
                     local_selection_sets.push(selection.clone());
@@ -274,6 +285,16 @@ where
                     let existing = entry.into_mut();
                     existing.trigger = trigger;
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
+                    if let Some(other) = context_to_selection {
+                        existing.context_to_selection
+                            .get_or_insert_with(HashSet::default)
+                            .extend(other);
+                    }
+                    if let Some(other) = parameter_to_context {
+                        existing.parameter_to_context
+                            .get_or_insert_with(IndexMap::default)
+                            .extend(other);
+                    }
                     existing
                         .sub_paths_and_selections
                         .push((graph_path_iter, selection))
@@ -284,6 +305,8 @@ where
                         trigger,
                         conditions: conditions.clone(),
                         sub_paths_and_selections: vec![(graph_path_iter, selection)],
+                        context_to_selection,
+                        parameter_to_context,
                     });
                 }
             }
@@ -301,6 +324,8 @@ where
                         by_unique_edge.target_node,
                         child.sub_paths_and_selections,
                     )?),
+                    context_to_selection: child.context_to_selection.clone(),
+                    parameter_to_context: child.parameter_to_context.clone(),
                 }))
             }
         }
@@ -333,6 +358,16 @@ where
                         (None, None) => true,
                         (Some(cond_a), Some(cond_b)) => cond_a.equals_same_root(cond_b),
                         _ => false,
+                    }
+                    && match (&a.context_to_selection, &b.context_to_selection) {
+                        (None, None) => true,
+                        (Some(set_a), Some(set_b)) => set_a == set_b,
+                        _ => false,                        
+                    }
+                    && match (&a.parameter_to_context, &b.parameter_to_context) {
+                        (None, None) => true,
+                        (Some(map_a), Some(map_b)) => map_a == map_b,
+                        _ => false,                        
                     }
                     && a.tree.equals_same_root(&b.tree)
             })
@@ -415,6 +450,8 @@ where
                     trigger: child.trigger.clone(),
                     conditions: merge_conditions(&child.conditions, &other_child.conditions),
                     tree: child.tree.merge(&other_child.tree),
+                    context_to_selection: merge_context_to_selection(&child.context_to_selection, &other_child.context_to_selection),
+                    parameter_to_context: merge_parameter_to_context(&child.parameter_to_context, &other_child.parameter_to_context),
                 })
             } else {
                 childs.push(other_child.clone())
@@ -433,6 +470,40 @@ where
                 .collect(),
             childs,
         })
+    }
+}
+
+fn merge_context_to_selection(
+    a: &Option<ContextToSelection>,
+    b: &Option<ContextToSelection>,
+) -> Option<ContextToSelection> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            let mut merged: ContextToSelection = Default::default();
+            merged.extend(a.iter().cloned());
+            merged.extend(b.iter().cloned());
+            Some(merged)
+        },
+        (Some(a), None) => Some(a.clone()),
+        (None, Some(b)) => Some(b.clone()),
+        (None, None) => None,
+    }
+}
+
+fn merge_parameter_to_context(
+    a: &Option<ParameterToContext>,
+    b: &Option<ParameterToContext>,
+) -> Option<ParameterToContext> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            let mut merged: ParameterToContext = Default::default();
+            merged.extend(a.iter().map(|(k,v)| (k.clone(), v.clone())));
+            merged.extend(b.iter().map(|(k,v)| (k.clone(), v.clone())));
+            Some(merged)
+        },
+        (Some(a), None) => Some(a.clone()),
+        (None, Some(b)) => Some(b.clone()),
+        (None, None) => None,
     }
 }
 
