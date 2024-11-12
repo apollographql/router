@@ -203,8 +203,12 @@ fn detect_cpu_count(system: &System) -> u64 {
                     system_cpus
                 } else {
                     // If it's not max then divide the two to get an integer answer
-                    let (a, b) = readings.split_once(' ').unwrap();
-                    a.parse::<u64>().unwrap() / b.parse::<u64>().unwrap()
+                    match readings.split_once(' ') {
+                        None => system_cpus,
+                        Some((quota, period)) => {
+                            calculate_cpu_count_with_default(system_cpus, quota, period)
+                        }
+                    }
                 }
             }
             Err(_) => system_cpus,
@@ -224,13 +228,22 @@ fn detect_cpu_count(system: &System) -> u64 {
                 if quota == "-1" {
                     system_cpus
                 } else {
-                    quota.parse::<u64>().unwrap() / period.parse::<u64>().unwrap()
+                    calculate_cpu_count_with_default(system_cpus, &quota, &period)
                 }
             }
             _ => system_cpus,
         }
     } else {
         system_cpus
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn calculate_cpu_count_with_default(default: u64, quota: &str, period: &str) -> u64 {
+    if let (Ok(q), Ok(p)) = (quota.parse::<u64>(), period.parse::<u64>()) {
+        q / p
+    } else {
+        default
     }
 }
 
