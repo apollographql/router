@@ -211,11 +211,10 @@ impl ValueExt for Value {
                             (Value::String(type1), Value::String(type2))
                                 if k.as_str() == TYPENAME =>
                             {
-                                // If type1 implements type2, or if it is a subtype of type2, we skip this overwrite
-                                // to preserve the more specific `__typename` in the response
-                                if !schema.is_implementation(type2.as_str(), type1.as_str())
-                                    && !schema.is_subtype(type2.as_str(), type1.as_str())
-                                {
+                                // If type1 is a subtype of type2, we skip this overwrite to preserve the more specific `__typename`
+                                // in the response. Ideally, we could use `Schema::is_implementation`, but that looks to be buggy
+                                // and does not catch the problem we are trying to resolve.
+                                if !schema.is_subtype(type2.as_str(), type1.as_str()) {
                                     *type1 = type2;
                                 }
                             }
