@@ -12,7 +12,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         ],
     },
     Message {
-        code: GraphQLError,
+        code: InvalidHttpHeaderValue,
         message: "`@source(http.headers:)` contains an invalid variable reference {$this.bar} - Variable namespace `$this` is not valid at this location, must be one of $config, $context",
         locations: [
             12:62..12:67,
@@ -26,7 +26,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         ],
     },
     Message {
-        code: GraphQLError,
+        code: InvalidHttpHeaderValue,
         message: "`@connect(http.headers:)` on `Query.scalar` contains an invalid variable reference {$status} - Variable namespace `$status` is not valid at this location, must be one of $args, $config, $context, $this",
         locations: [
             24:64..24:71,

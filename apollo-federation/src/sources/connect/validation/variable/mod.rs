@@ -17,6 +17,7 @@ use crate::sources::connect::variable::ConnectorsContext;
 use crate::sources::connect::variable::Directive;
 use crate::sources::connect::variable::ExpressionContext;
 use crate::sources::connect::variable::Namespace;
+use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableReference;
 
 pub(crate) struct VariableResolver<'a> {
@@ -53,7 +54,7 @@ impl<'a> VariableResolver<'a> {
             .contains(&reference.namespace.namespace)
         {
             Err(Message {
-                code: Code::GraphQLError,
+                code: self.error_code(),
                 message: format!(
                     "Variable namespace `{namespace}` is not valid at this location, must be one of {available}",
                     namespace = reference.namespace.namespace.as_str(),
@@ -71,6 +72,14 @@ impl<'a> VariableResolver<'a> {
                 .map(|x| &**x)
                 .map(|resolver| resolver.resolve(reference, expression, self.schema))
                 .unwrap_or(Ok(None))
+        }
+    }
+
+    fn error_code(&self) -> Code {
+        match self.expression_context.target {
+            Target::RequestUrl => Code::InvalidUrl,
+            Target::RequestHeader => Code::InvalidHttpHeaderValue,
+            _ => Code::GraphQLError,
         }
     }
 }
