@@ -64,12 +64,12 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxError> {
+async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
             supergraph:
-              experimental_http1_max_buf_size: 1000000
+              experimental_http1_max_buf_size: 100000
             "#,
         )
         .build()
@@ -89,8 +89,7 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
-) -> Result<(), BoxError> {
+async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
