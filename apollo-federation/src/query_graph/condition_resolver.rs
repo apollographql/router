@@ -3,6 +3,7 @@
 //            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
+use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use petgraph::graph::EdgeIndex;
 
@@ -13,7 +14,6 @@ use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
-use apollo_compiler::ast::Type;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContextMapEntry {
