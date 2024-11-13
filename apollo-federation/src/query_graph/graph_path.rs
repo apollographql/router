@@ -1710,8 +1710,6 @@ where
             for ctx in &edge_weight.required_contexts {
                 let mut levels_in_query_path = 0;
                 let mut levels_in_data_path = 0;
-                // TODO: Verify that `self.edges` and `self.edge_triggers` are the same length.
-                // Otherwise, this loop will be truncated.
                 for (levels_in_query_graph, (e, trigger)) in self
                     .edges
                     .iter()
