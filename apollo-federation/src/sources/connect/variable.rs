@@ -178,6 +178,7 @@ impl<I> ParseError<I> for VariableParseError<I> {
         other
     }
 }
+
 impl<I> From<nom::Err<Error<I>>> for VariableParseError<I> {
     fn from(value: nom::Err<Error<I>>) -> Self {
         match value {
@@ -243,19 +244,7 @@ impl<N: FromStr<Err = VariableError> + ToString> FromStr for VariableReference<N
         variable_reference(Span::new(s))
             .map(|(_, reference)| reference)
             .map_err(move |e| match e {
-                nom::Err::Error(VariableParseError::Nom(span, _)) => VariableError {
-                    message: format!("Invalid variable reference `{s}`"),
-                    location: Some(
-                        span.location_offset()..span.location_offset() + span.fragment().len(),
-                    ),
-                },
-                nom::Err::Error(VariableParseError::InvalidNamespace {
-                    namespace,
-                    location,
-                }) => VariableError {
-                    message: format!("Unknown variable namespace `{namespace}`"),
-                    location: Some(location),
-                },
+                nom::Err::Error(e) => e.into(),
                 _ => VariableError {
                     message: format!("Invalid variable reference `{s}`"),
                     location: None,
@@ -362,6 +351,26 @@ fn identifier(input: Span) -> IResult<Span, Span> {
 pub(crate) struct VariableError {
     pub(crate) message: String,
     pub(crate) location: Option<Range<usize>>,
+}
+
+impl From<VariableParseError<Span<'_>>> for VariableError {
+    fn from(value: VariableParseError<Span>) -> Self {
+        match value {
+            VariableParseError::Nom(span, _) => VariableError {
+                message: format!("Invalid variable reference `{s}`", s = span.fragment()),
+                location: Some(
+                    span.location_offset()..span.location_offset() + span.fragment().len(),
+                ),
+            },
+            VariableParseError::InvalidNamespace {
+                namespace,
+                location,
+            } => VariableError {
+                message: format!("Unknown variable namespace `{namespace}`"),
+                location: Some(location),
+            },
+        }
+    }
 }
 
 #[cfg(test)]

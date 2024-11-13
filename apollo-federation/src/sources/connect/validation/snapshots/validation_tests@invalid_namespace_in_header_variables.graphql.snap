@@ -6,9 +6,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
 [
     Message {
         code: InvalidHttpHeaderValue,
-        message: "The value `{$foo.bar}` at `@source(http.headers:)` is an invalid HTTP header",
+        message: "The value `{$foo.bar}` at `@source(http.headers:)` is an invalid HTTP header - Unknown variable namespace `$foo`",
         locations: [
-            11:47..11:59,
+            11:49..11:53,
         ],
     },
     Message {
@@ -20,9 +20,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
     },
     Message {
         code: InvalidHttpHeaderValue,
-        message: "The value `{$foo.bar}` at `@connect(http.headers:)` on `Query.scalar` is an invalid HTTP header",
+        message: "The value `{$foo.bar}` at `@connect(http.headers:)` on `Query.scalar` is an invalid HTTP header - Unknown variable namespace `$foo`",
         locations: [
-            23:49..23:61,
+            23:51..23:55,
         ],
     },
     Message {

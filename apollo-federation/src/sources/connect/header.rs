@@ -1,5 +1,6 @@
 //! Headers defined in connectors `@source` and `@connect` directives.
 
+use std::ops::Range;
 use std::str::FromStr;
 
 use nom::branch::alt;
@@ -8,8 +9,6 @@ use nom::character::complete::none_of;
 use nom::combinator::all_consuming;
 use nom::combinator::map;
 use nom::combinator::recognize;
-use nom::error::ErrorKind;
-use nom::error::ParseError;
 use nom::multi::many1;
 use nom::sequence::delimited;
 use nom::IResult;
@@ -19,6 +18,7 @@ use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSON;
 
 use crate::sources::connect::variable::Namespace;
+use crate::sources::connect::variable::VariableError;
 use crate::sources::connect::variable::VariableParseError;
 use crate::sources::connect::variable::VariableReference;
 
@@ -33,7 +33,7 @@ impl HeaderValue {
         Self { parts }
     }
 
-    fn parse(input: Span) -> IResult<Span, Self> {
+    fn parse(input: Span) -> IResult<Span, Self, VariableParseError<Span>> {
         all_consuming(map(many1(HeaderValuePart::parse), Self::new))(input)
     }
 
@@ -77,14 +77,31 @@ impl HeaderValue {
 }
 
 impl FromStr for HeaderValue {
-    type Err = String;
+    type Err = HeaderValueError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Self::parse(Span::new(s)) {
-            Ok((_, value)) => Ok(value),
-            Err(e) => Err(format!("Invalid header value: {}", e)),
-        }
+        Self::parse(Span::new(s))
+            .map(|(_, value)| value)
+            .map_err(|e| match e {
+                nom::Err::Error(e) | nom::Err::Failure(e) => {
+                    let variable_error: VariableError = e.into();
+                    HeaderValueError {
+                        message: variable_error.message,
+                        location: variable_error.location,
+                    }
+                }
+                nom::Err::Incomplete(_) => HeaderValueError {
+                    message: "Invalid header value".into(),
+                    location: None,
+                },
+            })
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct HeaderValueError {
+    pub(crate) message: String,
+    pub(crate) location: Option<Range<usize>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -94,7 +111,7 @@ enum HeaderValuePart {
 }
 
 impl HeaderValuePart {
-    fn parse(input: Span) -> IResult<Span, Self> {
+    fn parse(input: Span) -> IResult<Span, Self, VariableParseError<Span>> {
         alt((
             map(variable_reference, Self::Variable),
             map(map(text, |s| s.fragment().to_string()), Self::Text),
@@ -104,19 +121,19 @@ impl HeaderValuePart {
 
 type Span<'a> = LocatedSpan<&'a str>;
 
-fn text(input: Span) -> IResult<Span, Span> {
+fn text(input: Span) -> IResult<Span, Span, VariableParseError<Span>> {
     recognize(many1(none_of("{")))(input)
 }
 
-fn variable_reference(input: Span) -> IResult<Span, VariableReference<Namespace>> {
+fn variable_reference(
+    input: Span,
+) -> IResult<Span, VariableReference<Namespace>, VariableParseError<Span>> {
     delimited(
         char('{'),
         |input| {
             super::variable::variable_reference(input).map_err(|e| match e {
-                nom::Err::Error(VariableParseError::Nom(span, e)) => {
-                    nom::Err::Error(nom::error::Error::from_error_kind(span, e))
-                }
-                _ => nom::Err::Error(nom::error::Error::from_error_kind(input, ErrorKind::IsNot)),
+                nom::Err::Error(e) | nom::Err::Failure(e) => nom::Err::Failure(e),
+                nom::Err::Incomplete(e) => nom::Err::Incomplete(e),
             })
         },
         char('}'),
@@ -235,6 +252,13 @@ mod tests {
                     }),
                     HeaderValuePart::Text("    ".to_string())
                 ]
+            })
+        );
+        assert_eq!(
+            "{$foobar}".parse::<HeaderValue>(),
+            Err(HeaderValueError {
+                message: "Unknown variable namespace `$foobar`".into(),
+                location: Some(1..8)
             })
         );
     }

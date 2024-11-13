@@ -149,23 +149,31 @@ fn validate_value(
     };
 
     // Validate that the header value can be parsed, then validate any variable expressions
-    match HeaderValue::from_str(str_value).map_err(|_| Message {
+    let expression = GraphQLString::new(value, &schema.sources)
+        .map_err(|_| Message {
+            code: Code::GraphQLError,
+            message: format!("The value for {coordinate} must be a string."),
+            locations: value
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
+        .ok()?;
+    match HeaderValue::from_str(str_value).map_err(|e| Message {
         code: Code::InvalidHttpHeaderValue,
-        message: format!("The value `{str_value}` at {coordinate} is an invalid HTTP header"),
-        locations: value.line_column_range(source_map).into_iter().collect(),
+        message: format!(
+            "The value `{str_value}` at {coordinate} is an invalid HTTP header - {message}",
+            message = e.message
+        ),
+        locations: e
+            .location
+            .and_then(|location| expression.line_col_for_subslice(location, schema))
+            .or_else(|| value.line_column_range(source_map))
+            .into_iter()
+            .collect(),
     }) {
         Err(message) => return Some(message),
         Ok(header_value) => {
-            let expression = GraphQLString::new(value, &schema.sources)
-                .map_err(|_| Message {
-                    code: Code::GraphQLError,
-                    message: format!("The value for {coordinate} must be a string."),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                })
-                .ok()?;
             for reference in header_value.variable_references() {
                 match variable_resolver.resolve(reference, expression) {
                     Err(message) => {
