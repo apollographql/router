@@ -7,8 +7,12 @@ use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
+use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::NamedType;
+use apollo_compiler::schema::Type;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
@@ -142,7 +146,10 @@ pub struct ContextCondition {
     subgraph_name: Arc<str>,
     selection: String,
     types_with_context_set: HashSet<CompositeTypeDefinitionPosition>,
-    coordinate: ObjectFieldDefinitionPosition,
+    // PORT_NOTE: This field was renamed because the JS name (`coordinate`) was too vague.
+    argument_coordinate: ObjectFieldArgumentDefinitionPosition,
+    named_parameter: String,
+    arg_type: Node<Type>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -400,9 +407,9 @@ pub struct QueryGraph {
     /// ~10 seconds.
     non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
     /// Maps each subgraph name to each field argument of `@fromContext`.
-    subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>>,
+    pub(crate) subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>>,
     /// Like `self.subgraph_to_args` but pairs each field argument with a unique identifier string.
-    subgraph_to_arg_indices:
+    pub(crate) subgraph_to_arg_indices:
         IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, String>>,
 }
 

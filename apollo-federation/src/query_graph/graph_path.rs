@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -48,8 +49,10 @@ use crate::operation::FieldData;
 use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
+use crate::operation::NamedFragments;
 use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
+use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
 use crate::query_graph::condition_resolver::ConditionResolution;
@@ -62,9 +65,11 @@ use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
+use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::Captures;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -77,7 +82,7 @@ pub(crate) struct ContextAtUsageEntry {
     pub(crate) context_id: String,
     pub(crate) relative_path: Vec<String>,
     pub(crate) selection_set: SelectionSet,
-    pub(crate) subgraph_arg_type: Type,
+    pub(crate) subgraph_arg_type: Node<Type>,
 }
 
 /// An immutable path in a query graph.
@@ -977,13 +982,24 @@ pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
         }
     }
 
-    fn get_field_parent_type<'a>(&'a self) -> Option<CompositeTypeDefinitionPosition>
+    fn get_field_parent_type<'a>(&'a self) -> Option<FieldDefinitionPosition>
     where
         &'a Self: Into<GraphPathTriggerRef<'a>>,
     {
         match self.into() {
-            GraphPathTriggerRef::Op(trigger) => todo!(),
-            GraphPathTriggerRef::Transition(trigger) => todo!(),
+            GraphPathTriggerRef::Op(trigger) => match trigger {
+                OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
+                    Some(field.data().field_position.clone())
+                }
+                _ => None,
+            },
+            GraphPathTriggerRef::Transition(trigger) => match trigger {
+                QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } => Some(field_definition_position.clone()),
+                _ => None,
+            },
         }
     }
 }
@@ -1471,10 +1487,9 @@ where
                 let idx = edge_conditions.len() - entry.levels_in_query_path - 1;
 
                 if let Some(path_tree) = &entry.path_tree {
-                    let merged_conditions = edge_conditions[idx].as_ref().map_or_else(
-                        || Arc::new(path_tree.clone()),
-                        |condition| condition.merge(&Arc::new(path_tree.clone())),
-                    );
+                    let merged_conditions = edge_conditions[idx]
+                        .as_ref()
+                        .map_or_else(|| path_tree.clone(), |condition| condition.merge(path_tree));
                     edge_conditions[idx] = Some(merged_conditions);
                 }
                 context_to_selection[idx]
@@ -1686,21 +1701,118 @@ where
 
         /* Resolve context conditions */
 
+        let mut total_cost = 0.;
+        let mut context_map: IndexMap<String, ContextMapEntry> = IndexMap::default();
+
         if !edge_weight.required_contexts.is_empty() {
+            let schema = self.graph.schema()?;
+            let mut was_unsatisfied = false;
             for ctx in &edge_weight.required_contexts {
                 let mut levels_in_query_path = 0;
                 let mut levels_in_data_path = 0;
                 // TODO: Verify that `self.edges` and `self.edge_triggers` are the same length.
                 // Otherwise, this loop will be truncated.
-                for (e, trigger) in self.edges.iter().zip(self.edge_triggers.iter()).rev() {}
+                for (levels_in_query_graph, (e, trigger)) in self
+                    .edges
+                    .iter()
+                    .zip(self.edge_triggers.iter())
+                    .rev()
+                    .enumerate()
+                {
+                    let parent_type = trigger.get_field_parent_type();
+                    if parent_type.is_some() {
+                        levels_in_data_path += 1;
+                    }
+                    // TODO: Change this key check. It is incorrect. The JS code used
+                    // `namedParameter`, which was not ported...
+                    // TODO: The JS code checked that `e` was not `null`. Do we need to do that?
+                    if !was_unsatisfied && !context_map.contains_key(&ctx.named_parameter) {
+                        if let Some(parent_type) = parent_type {
+                            let parent_type = parent_type.parent();
+                            let matches = ctx.types_with_context_set.iter().all(|ty| todo!());
+                            if matches {
+                                let selection_set = parse_field_set(
+                                    schema,
+                                    ctx.arg_type.inner_named_type().clone(),
+                                    &ctx.selection,
+                                )?
+                                .lazy_map(
+                                    &NamedFragments::default(),
+                                    |selection| {
+                                        if let OpPathElement::InlineFragment(fragment) =
+                                            selection.element()?
+                                        {
+                                            if let Some(CompositeTypeDefinitionPosition::Object(
+                                                obj,
+                                            )) = &fragment.type_condition_position
+                                            {
+                                                if !schema
+                                                    .possible_runtime_types(parent_type.clone())?
+                                                    .contains(obj)
+                                                {
+                                                    return Ok(SelectionMapperReturn::None);
+                                                }
+                                            }
+                                        }
+                                        Ok(SelectionMapperReturn::Selection(selection.clone()))
+                                    },
+                                )?;
+                                // TODO: What happens if we can't convert `e` into an EdgeIndex?
+                                let resolution = condition_resolver.resolve(
+                                    (*e).into().unwrap(),
+                                    context,
+                                    excluded_destinations,
+                                    excluded_conditions,
+                                )?;
+                                // TODO: Is this still needed?
+                                // assert(edge.transition.kind === 'FieldCollection', () => `Expected edge to be a FieldCollection edge, got ${edge.transition.kind}`);
+                                let Some(arg_indices) =
+                                    self.graph.subgraph_to_arg_indices.get(&ctx.subgraph_name)
+                                else {
+                                    internal_error!("TODO")
+                                };
+                                let Some(id) = arg_indices.get(&ctx.argument_coordinate).cloned()
+                                else {
+                                    internal_error!("TODO")
+                                };
+
+                                // TODO: This logic was in the JS code. Does a -1 cost me the
+                                // resolution was unsatisfied?
+                                // if (resolution.cost === -1 || totalCost === -1) {
+                                //  totalCost = -1;
+                                match &resolution {
+                                    ConditionResolution::Satisfied {
+                                        cost, path_tree, ..
+                                    } => {
+                                        total_cost += cost;
+                                        let entry = ContextMapEntry {
+                                            levels_in_data_path,
+                                            levels_in_query_path,
+                                            path_tree: path_tree.clone(),
+                                            selection_set,
+                                            inbound_edge: (*e).into().unwrap(),
+                                            param_name: ctx.named_parameter.clone(),
+                                            arg_type: ctx.arg_type.clone(),
+                                            id,
+                                        };
+                                        // TODO: Do we need to check for map collisions here?
+                                        context_map.insert(ctx.named_parameter.clone(), entry);
+                                    }
+                                    ConditionResolution::Unsatisfied { .. } => {
+                                        was_unsatisfied = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            todo!()
         }
 
         /* Resolve all other conditions */
 
         debug_span!("Checking conditions {conditions} on edge {edge_weight}");
-        let resolution = condition_resolver.resolve(
+        let mut resolution = condition_resolver.resolve(
             edge,
             context,
             excluded_destinations,
@@ -1755,6 +1867,13 @@ where
                     }
                 }
             }
+        }
+        if let ConditionResolution::Satisfied {
+            context_map: ctx_map,
+            ..
+        } = &mut resolution
+        {
+            *ctx_map = Some(context_map);
         }
         debug!("Condition resolution: {resolution:?}");
         Ok(resolution)
