@@ -538,7 +538,19 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    let res = self.delegate.ready().await?.call(request).await;
+                    let service = match self.delegate.ready().await {
+                        Ok(service) => service,
+                        Err(error) => {
+                            let e = Arc::new(error);
+                            let err = e.clone();
+                            tokio::spawn(async move {
+                                entry.insert(Err(err)).await;
+                            });
+                            return Err(CacheResolverError::RetrievalError(e));
+                        }
+                    };
+
+                    let res = service.call(request).await;
 
                     match res {
                         Ok(QueryPlannerResponse {
