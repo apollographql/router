@@ -216,7 +216,6 @@ This entry contains an object with the `all` field to affect all subgraph reques
 ### Entity cache invalidation
 
 ```mermaid
-%%{init: {"flowchart": {"htmlLabels": false}} }%%
 flowchart RL
 	subgraph QueryResponse["Cache invalidation POST"]
 		n1["{
@@ -236,14 +235,14 @@ flowchart RL
 	end
 
 	subgraph PriceQueryFragment["Price Query Fragment (e.g. TTL 2200)"]
-		n2["` ̶{̶
+		n2[" ̶{̶
     	&emsp;&emsp;&quot; ̶p̶r̶i̶c̶e̶&quot;:  ̶{̶
         &emsp;&emsp;&emsp;&emsp;&quot; ̶i̶d̶&quot;:  ̶1̶0̶1̶,
         &emsp;&emsp;&emsp;&emsp;&quot; ̶p̶r̶o̶d̶u̶c̶t̶_̶i̶d̶&quot;:  ̶1̶2̶,
         &emsp;&emsp;&emsp;&emsp;&quot; ̶a̶m̶o̶u̶n̶t̶&quot;:  ̶1̶5̶0̶0̶,
         &emsp;&emsp;&emsp;&emsp;&quot;̶c̶u̶r̶r̶e̶n̶c̶y̶_̶c̶o̶d̶e̶&quot;: &quot; ̶U̶S̶D̶&quot;
     	&emsp;&emsp; ̶}̶
-		 ̶}̶`"]
+		 ̶}̶"]
 	end
 
 	Router
