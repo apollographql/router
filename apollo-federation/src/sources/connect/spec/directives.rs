@@ -21,8 +21,8 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::FederationSchema;
 use crate::sources::connect::json_selection::JSONSelection;
+use crate::sources::connect::models::Header;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::sources::connect::HeaderSource;
 
 macro_rules! internal {
     ($s:expr) => {
@@ -157,10 +157,11 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
                 );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    HeaderSource::from_headers_arg(value)
-                        .map_err(|err| internal!(err))?
+                    Header::from_headers_arg(value)
                         .into_iter()
-                        .collect(),
+                        .map_ok(|Header { name, source, .. }| (name, source))
+                        .try_collect()
+                        .map_err(|(err, _)| internal!(err))?,
                 );
             } else {
                 return Err(internal!(format!(
@@ -255,10 +256,11 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    HeaderSource::from_headers_arg(value)
-                        .map_err(|err| internal!(err))?
+                    Header::from_headers_arg(value)
                         .into_iter()
-                        .collect(),
+                        .map_ok(|Header { name, source, .. }| (name, source))
+                        .try_collect()
+                        .map_err(|(err, _)| internal!(err))?,
                 );
             } else if name == "GET" {
                 get = Some(value.as_str().ok_or(internal!(
@@ -440,7 +442,7 @@ mod tests {
                     },
                     headers: {
                         "authtoken": From(
-                            "X-Auth-Token",
+                            "x-auth-token",
                         ),
                         "user-agent": Value(
                             HeaderValue {

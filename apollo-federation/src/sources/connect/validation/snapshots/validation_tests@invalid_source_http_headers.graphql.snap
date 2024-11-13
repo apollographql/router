@@ -5,52 +5,51 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
 ---
 [
     Message {
-        code: MissingHeaderSource,
-        message: "`@source(http.headers:)` must include either a `from` or `value` argument.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` either `from` or `value` must be set",
         locations: [
-            10:16..24:8,
+            13:9..13:37,
         ],
     },
     Message {
-        code: GraphQLError,
-        message: "`@source(http.headers:)` must include a `name` value.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` missing `name` field",
         locations: [
-            10:16..24:8,
+            14:9..14:35,
         ],
     },
     Message {
-        code: InvalidHttpHeaderMapping,
-        message: "`@source(http.headers:)` uses both `from` and `value` keys together. Please choose only one.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` `from` and `value` can't be set at the same time",
         locations: [
-            15:41..15:57,
-            15:66..15:77,
+            15:9..15:79,
         ],
     },
     Message {
         code: HttpHeaderNameCollision,
         message: "Duplicate header names are not allowed. The header name 'x-name-collision' at `@source(http.headers:)` is already defined.",
         locations: [
-            17:17..17:35,
-            16:17..16:35,
+            17:9..17:63,
+            16:9..16:57,
         ],
     },
     Message {
-        code: InvalidHttpHeaderName,
-        message: "The value `<Invalid-Header>` for `name` at `@source(http.headers:)` must be a valid HTTP header name.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` the value `<Invalid-Header>` is an invalid HTTP header name",
         locations: [
             18:17..18:35,
         ],
     },
     Message {
-        code: InvalidHttpHeaderName,
-        message: "The value `<Invalid-Header>` for `from` at `@source(http.headers:)` must be a valid HTTP header name.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` the value `<Invalid-Header>` is an invalid HTTP header name",
         locations: [
             19:41..19:59,
         ],
     },
     Message {
-        code: InvalidHttpHeaderValue,
-        message: "The value `\"  Value with 😊 emoji and newline  \\n \"` at `@source(http.headers:)` is an invalid HTTP header",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` the value `  Value with 😊 emoji and newline  \n ` is an invalid HTTP header",
         locations: [
             22:18..22:60,
         ],

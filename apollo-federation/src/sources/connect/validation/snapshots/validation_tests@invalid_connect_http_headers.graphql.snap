@@ -5,52 +5,51 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_c
 ---
 [
     Message {
-        code: MissingHeaderSource,
-        message: "`@connect(http.headers:)` on `Query.resources` must include either a `from` or `value` argument.",
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` either `from` or `value` must be set",
         locations: [
-            9:18..23:10,
+            12:11..12:39,
         ],
     },
     Message {
-        code: GraphQLError,
-        message: "`@connect(http.headers:)` on `Query.resources` must include a `name` value.",
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` missing `name` field",
         locations: [
-            9:18..23:10,
+            13:11..13:37,
         ],
     },
     Message {
-        code: InvalidHttpHeaderMapping,
-        message: "`@connect(http.headers:)` on `Query.resources` uses both `from` and `value` keys together. Please choose only one.",
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` `from` and `value` can't be set at the same time",
         locations: [
-            14:43..14:59,
-            14:68..14:79,
+            14:11..14:81,
         ],
     },
     Message {
         code: HttpHeaderNameCollision,
         message: "Duplicate header names are not allowed. The header name 'x-name-collision' at `@connect(http.headers:)` on `Query.resources` is already defined.",
         locations: [
-            16:19..16:37,
-            15:19..15:37,
+            16:11..16:65,
+            15:11..15:59,
         ],
     },
     Message {
-        code: InvalidHttpHeaderName,
-        message: "The value `<Invalid-Header>` for `name` at `@connect(http.headers:)` on `Query.resources` must be a valid HTTP header name.",
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` the value `<Invalid-Header>` is an invalid HTTP header name",
         locations: [
             17:19..17:37,
         ],
     },
     Message {
-        code: InvalidHttpHeaderName,
-        message: "The value `<Invalid-Header>` for `from` at `@connect(http.headers:)` on `Query.resources` must be a valid HTTP header name.",
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` the value `<Invalid-Header>` is an invalid HTTP header name",
         locations: [
             18:43..18:61,
         ],
     },
     Message {
-        code: InvalidHttpHeaderValue,
-        message: "The value `\"  Value with 😊 emoji and newline  \\n \"` at `@connect(http.headers:)` on `Query.resources` is an invalid HTTP header",
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` the value `  Value with 😊 emoji and newline  \n ` is an invalid HTTP header",
         locations: [
             21:20..21:62,
         ],

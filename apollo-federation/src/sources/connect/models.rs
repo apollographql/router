@@ -231,91 +231,125 @@ impl HTTPMethod {
 
 #[derive(Clone, Debug)]
 pub enum HeaderSource {
-    From(String),
+    From(HeaderName),
     Value(HeaderValue),
 }
 
-impl HeaderSource {
+#[derive(Clone, Debug)]
+pub struct Header<'a> {
+    pub name: HeaderName,
+    pub source: HeaderSource,
+    pub node: &'a Node<ast::Value>,
+}
+
+impl<'a> Header<'a> {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
-    pub fn from_headers_arg(value: &Node<ast::Value>) -> Result<Vec<(HeaderName, Self)>, String> {
+    ///
+    /// The return type is a list of results—either a valid `HeaderName` and `HeaderSource` pair, or
+    /// an error message and the AST node that caused the error (for pointing at locations).
+    pub fn from_headers_arg(
+        value: &'a Node<ast::Value>,
+    ) -> Vec<Result<Self, (String, &Node<ast::Value>)>> {
         if let Some(values) = value.as_list() {
             values.iter().map(Self::from_single).collect()
         } else if value.as_object().is_some() {
-            Ok(vec![
-                Self::from_single(value).map_err(|err| format!("Invalid header mapping: {err}"))?
-            ])
+            vec![Self::from_single(value)]
         } else {
-            Err(format!(
-                "`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"
-            ))
+            vec![Err((
+                format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
+                value,
+            ))]
         }
     }
 
     /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(value: &Node<ast::Value>) -> Result<(HeaderName, Self), String> {
-        let mappings = value
+    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, (String, &Node<ast::Value>)> {
+        let mappings = node
             .as_object()
-            .ok_or_else(|| "HTTP header mapping is not an object".to_string())?;
-        let name = mappings
+            .ok_or_else(|| ("the HTTP header mapping is not an object".to_string(), node))?;
+        let name_node = mappings
             .iter()
             .find_map(|(name, value)| {
                 (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
             })
-            .ok_or_else(|| "missing `name` field in HTTP header mapping".to_string())
-            .and_then(|value| {
-                value.as_str().ok_or_else(|| {
-                    "`name` field in HTTP header mapping is not a string".to_string()
-                })
-            })
-            .and_then(|name_str| {
-                HeaderName::try_from(name_str).map_err(|err| format!("Invalid header name: {err}"))
+            .ok_or_else(|| {
+                (
+                    format!("missing `{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` field"),
+                    node,
+                )
             })?;
+        let name = name_node
+            .as_str()
+            .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` is not a string"))
+            .and_then(|name_str| {
+                HeaderName::try_from(name_str)
+                    .map_err(|_| format!("the value `{name_str}` is an invalid HTTP header name"))
+            })
+            .map_err(|message| (message, name_node))?;
 
         if Self::is_reserved(&name) {
-            return Err(format!(
-                "Header {name} is reserved and cannot be set by a connector"
+            return Err((
+                format!("header '{name}' is reserved and cannot be set by a connector"),
+                name_node,
             ));
         }
 
-        let from = mappings
-            .iter()
-            .find_map(|(name, value)| {
-                (*name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME).then_some(value)
-            })
-            .map(|value| {
-                value.as_str().ok_or_else(|| {
-                    "`from` field in HTTP header mapping is not a string".to_string()
-                })
-            })
-            .transpose()?;
-        if let Some(from) = from {
-            return if Self::is_static(&name) {
-                Err(format!(
-                    "Header {name} can't be set dynamically, only via {HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}."
+        let from_node = mappings.iter().find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME).then_some(value)
+        });
+        let value_node = mappings.iter().find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME).then_some(value)
+        });
+
+        match (from_node, value_node) {
+            (Some(_), None) if Self::is_static(&name) => {
+                Err((format!(
+                    "header '{name}' can't be set dynamically, only via `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
+                ), name_node))
+            }
+            (Some(from_node), None) => {
+                from_node.as_str()
+                    .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` is not a string"))
+                    .and_then(|from_str| {
+                        HeaderName::try_from(from_str).map_err(|_| {
+                            format!("the value `{from_str}` is an invalid HTTP header name")
+                        })
+                    })
+                    .map(|from| Self {
+                        name,
+                        source: HeaderSource::From(from),
+                        node,
+                    })
+                    .map_err(|message| (message, from_node))
+            }
+            (None, Some(value_node)) => {
+                value_node
+                    .as_str()
+                    .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` field in HTTP header mapping must be a string"))
+                    .and_then(|value_str| {
+                        value_str
+                            .parse::<HeaderValue>()
+                            .map_err(|_| format!("the value `{value_str}` is an invalid HTTP header"))
+                    })
+                    .map(|value| Self {
+                        name,
+                        source: HeaderSource::Value(value),
+                        node,
+                    })
+                    .map_err(|message| (message, value_node))
+            }
+            (None, None) => {
+                Err((
+                    format!("either `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` or `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` must be set"),
+                    node,
                 ))
-            } else {
-                Ok((name, HeaderSource::From(from.to_string())))
-            };
-        }
-
-        let value = mappings
-            .iter()
-            .find_map(|(name, value)| {
-                (*name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME).then_some(value)
-            })
-            .ok_or_else(|| "missing `from` or `value` field in HTTP header mapping".to_string())?;
-
-        if let Some(value) = value.as_str() {
-            Ok((
-                name,
-                HeaderSource::Value(
-                    value
-                        .parse::<HeaderValue>()
-                        .map_err(|err| format!("Invalid header value: {err}"))?,
-                ),
-            ))
-        } else {
-            Err("`value` field in HTTP header mapping is not a string".to_string())
+            },
+            (Some(_), Some(_)) => {
+                Err((
+                    format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` and `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` can't be set at the same time"),
+                    node,
+                ))
+            }
         }
     }
 
@@ -435,7 +469,7 @@ mod tests {
                     method: Get,
                     headers: {
                         "authtoken": From(
-                            "X-Auth-Token",
+                            "x-auth-token",
                         ),
                         "user-agent": Value(
                             HeaderValue {
@@ -544,7 +578,7 @@ mod tests {
                     method: Get,
                     headers: {
                         "authtoken": From(
-                            "X-Auth-Token",
+                            "x-auth-token",
                         ),
                         "user-agent": Value(
                             HeaderValue {

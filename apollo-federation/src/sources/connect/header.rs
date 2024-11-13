@@ -37,11 +37,11 @@ impl HeaderValue {
     ///
     /// # Errors
     /// Returns an error if a variable used in the header value is not defined.
-    pub fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<String, String> {
-        let mut result = String::new();
+    pub fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<http::HeaderValue, String> {
+        let mut result = Vec::new();
         for part in &self.parts {
             match part {
-                HeaderValuePart::Text(text) => result.push_str(text),
+                HeaderValuePart::Text(text) => result.extend(text.as_bytes()),
                 HeaderValuePart::Variable(var) => {
                     let var_path_bytes = ByteString::from(var.path.as_str());
                     let value = vars
@@ -52,11 +52,11 @@ impl HeaderValue {
                     } else {
                         value.to_string()
                     };
-                    result.push_str(value.as_str());
+                    result.extend(value.as_bytes());
                 }
             }
         }
-        Ok(result)
+        http::HeaderValue::from_bytes(&result).map_err(|e| e.to_string())
     }
 }
 
@@ -73,7 +73,7 @@ impl FromStr for HeaderValue {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 enum HeaderValuePart {
-    Text(String),
+    Text(http::HeaderValue),
     Variable(VariableReference),
 }
 
@@ -81,8 +81,19 @@ impl HeaderValuePart {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             map(VariableReference::parse, Self::Variable),
-            map(map(text, String::from), Self::Text),
+            map(parse_header_value, Self::Text),
         ))(input)
+    }
+}
+
+fn parse_header_value(input: &str) -> IResult<&str, http::HeaderValue> {
+    let (rest, header_value) = recognize(many1(none_of("{")))(input)?;
+    match http::HeaderValue::from_str(header_value) {
+        Ok(value) => Ok((rest, value)),
+        Err(_) => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Fail,
+        ))),
     }
 }
 
@@ -99,10 +110,6 @@ impl VariableReference {
     fn parse(input: &str) -> IResult<&str, Self> {
         map(map(variable_reference, String::from), Self::new)(input)
     }
-}
-
-fn text(input: &str) -> IResult<&str, &str> {
-    recognize(many1(none_of("{")))(input)
 }
 
 fn identifier(input: &str) -> IResult<&str, &str> {
@@ -203,17 +210,23 @@ mod tests {
     }
 
     #[test]
-    fn test_text() {
-        assert_eq!(text("text"), Ok(("", "text")));
-        assert!(text("{$config.one}").is_err());
-        assert_eq!(text("text{$config.one}"), Ok(("{$config.one}", "text")));
+    fn test_parse_header_value() {
+        assert_eq!(
+            parse_header_value("text"),
+            Ok(("", "text".parse().unwrap()))
+        );
+        assert!(parse_header_value("{$config.one}").is_err());
+        assert_eq!(
+            parse_header_value("text{$config.one}"),
+            Ok(("{$config.one}", "text".parse().unwrap()))
+        );
     }
 
     #[test]
     fn test_header_value_part_parse() {
         assert_eq!(
             HeaderValuePart::parse("text"),
-            Ok(("", HeaderValuePart::Text("text".to_string())))
+            Ok(("", HeaderValuePart::Text("text".parse().unwrap())))
         );
         assert_eq!(
             HeaderValuePart::parse("{$config.one}"),
@@ -226,7 +239,10 @@ mod tests {
         );
         assert_eq!(
             HeaderValuePart::parse("text{$config.one}"),
-            Ok(("{$config.one}", HeaderValuePart::Text("text".to_string())))
+            Ok((
+                "{$config.one}",
+                HeaderValuePart::Text("text".parse().unwrap())
+            ))
         );
     }
 
@@ -237,7 +253,7 @@ mod tests {
             Ok((
                 "",
                 HeaderValue {
-                    parts: vec![HeaderValuePart::Text("text".to_string())]
+                    parts: vec![HeaderValuePart::Text("text".parse().unwrap())]
                 }
             ))
         );
@@ -258,11 +274,11 @@ mod tests {
                 "",
                 HeaderValue {
                     parts: vec![
-                        HeaderValuePart::Text("text".to_string()),
+                        HeaderValuePart::Text("text".parse().unwrap()),
                         HeaderValuePart::Variable(VariableReference {
                             path: "$config.one".to_string()
                         }),
-                        HeaderValuePart::Text("text".to_string())
+                        HeaderValuePart::Text("text".parse().unwrap())
                     ]
                 }
             ))
@@ -273,11 +289,11 @@ mod tests {
                 "",
                 HeaderValue {
                     parts: vec![
-                        HeaderValuePart::Text("    ".to_string()),
+                        HeaderValuePart::Text("    ".parse().unwrap()),
                         HeaderValuePart::Variable(VariableReference {
                             path: "$config.one".to_string()
                         }),
-                        HeaderValuePart::Text("    ".to_string())
+                        HeaderValuePart::Text("    ".parse().unwrap())
                     ]
                 }
             ))
@@ -289,7 +305,10 @@ mod tests {
         let value = HeaderValue::from_str("before {$config.one} after").unwrap();
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::String("foo".into()));
-        assert_eq!(value.interpolate(&vars), Ok("before foo after".into()));
+        assert_eq!(
+            value.interpolate(&vars),
+            Ok("before foo after".parse().unwrap())
+        );
     }
 
     #[test]
@@ -303,15 +322,15 @@ mod tests {
     }
 
     #[rstest]
-    #[case(JSON::Array(vec!["one".into(), "two".into()]), Ok("[\"one\",\"two\"]".into()))]
-    #[case(JSON::Bool(true), Ok("true".into()))]
-    #[case(JSON::Null, Ok("null".into()))]
-    #[case(JSON::Number(1.into()), Ok("1".into()))]
-    #[case(JSON::Object(Map::new()), Ok("{}".into()))]
-    #[case(JSON::String("string".into()), Ok("string".into()))]
+    #[case(JSON::Array(vec!["one".into(), "two".into()]), Ok("[\"one\",\"two\"]".parse().unwrap()))]
+    #[case(JSON::Bool(true), Ok("true".parse().unwrap()))]
+    #[case(JSON::Null, Ok("null".parse().unwrap()))]
+    #[case(JSON::Number(1.into()), Ok("1".parse().unwrap()))]
+    #[case(JSON::Object(Map::new()), Ok("{}".parse().unwrap()))]
+    #[case(JSON::String("string".into()), Ok("string".parse().unwrap()))]
     fn test_interpolate_value_not_a_string(
         #[case] value: JSON,
-        #[case] expected: Result<String, String>,
+        #[case] expected: Result<http::HeaderValue, String>,
     ) {
         let header_value = HeaderValue::from_str("{$config.one}").unwrap();
         let mut vars = Map::new();

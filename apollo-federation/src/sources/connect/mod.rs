@@ -26,6 +26,7 @@ pub use url_template::Variable;
 pub use self::models::Connector;
 pub use self::models::EntityResolver;
 pub use self::models::HTTPMethod;
+pub use self::models::Header;
 pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
 use crate::schema::position::ObjectFieldDefinitionPosition;
