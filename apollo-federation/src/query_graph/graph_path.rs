@@ -1723,8 +1723,6 @@ where
                     if parent_type.is_some() {
                         levels_in_data_path += 1;
                     }
-                    // TODO: Change this key check. It is incorrect. The JS code used
-                    // `namedParameter`, which was not ported...
                     // TODO: The JS code checked that `e` was not `null`. Do we need to do that?
                     if !was_unsatisfied && !context_map.contains_key(&ctx.named_parameter) {
                         if let Some(parent_type) = parent_type {
@@ -1769,11 +1767,11 @@ where
                                 let Some(arg_indices) =
                                     self.graph.subgraph_to_arg_indices.get(&ctx.subgraph_name)
                                 else {
-                                    internal_error!("TODO")
+                                    internal_error!("Unknown subgraph, {:?}, in QueryGraph::subgraph_to_arg_indices", ctx.subgraph_name)
                                 };
                                 let Some(id) = arg_indices.get(&ctx.argument_coordinate).cloned()
                                 else {
-                                    internal_error!("TODO")
+                                    internal_error!("Unknown argument coordiate, {:?}, in QueryGraph::subgraph_to_arg_indices[{}]", ctx.argument_coordinate, ctx.subgraph_name)
                                 };
 
                                 // TODO: This logic was in the JS code. Does a -1 cost me the
