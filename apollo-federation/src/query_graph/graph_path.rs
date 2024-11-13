@@ -1723,7 +1723,7 @@ where
                     if parent_type.is_some() {
                         levels_in_data_path += 1;
                     }
-                    // TODO: The JS code checked that `e` was not `null`. Do we need to do that?
+                    let Some(e) = (*e).into() else { continue };
                     if !was_unsatisfied && !context_map.contains_key(&ctx.named_parameter) {
                         if let Some(parent_type) = parent_type {
                             let parent_type = parent_type.parent();
@@ -1755,9 +1755,8 @@ where
                                         Ok(SelectionMapperReturn::Selection(selection.clone()))
                                     },
                                 )?;
-                                // TODO: What happens if we can't convert `e` into an EdgeIndex?
                                 let resolution = condition_resolver.resolve(
-                                    (*e).into().unwrap(),
+                                    e,
                                     context,
                                     excluded_destinations,
                                     excluded_conditions,
@@ -1788,7 +1787,7 @@ where
                                             levels_in_query_path,
                                             path_tree: path_tree.clone(),
                                             selection_set,
-                                            inbound_edge: (*e).into().unwrap(),
+                                            inbound_edge: e,
                                             param_name: ctx.named_parameter.clone(),
                                             arg_type: ctx.arg_type.clone(),
                                             id,
