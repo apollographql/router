@@ -79,7 +79,7 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
     router.assert_started().await;
 
     let mut headers = HashMap::new();
-    headers.insert("test-header", "x".repeat(1048576 + 1));
+    headers.insert("test-header".to_string(), "x".repeat(1048576 + 1));
 
     let (_trace_id, response) = router
         .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
@@ -105,7 +105,7 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
     router.assert_started().await;
 
     let mut headers = HashMap::new();
-    headers.insert("test-header", "x".repeat(1048576 + 1));
+    headers.insert("test-header".to_string(), "x".repeat(1048576 + 1));
 
     let (_trace_id, response) = router
         .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
