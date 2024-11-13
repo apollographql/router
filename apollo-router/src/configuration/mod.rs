@@ -699,19 +699,6 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
-
-    /// Set the maximum number of headers for HTTP1 protocol
-    ///
-    /// If server receives more headers than the buffer size, it responds to the client with
-    /// "431 Request Header Fields Too Large".
-    ///
-    /// Default is 100.
-    pub(crate) experimental_http1_max_headers: Option<usize>,
-
-    /// Set the maximum buffer size for the HTTP1 connection.
-    ///
-    /// Default is ~400kb.
-    pub(crate) experimental_http1_max_buf_size: Option<usize>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -750,8 +737,6 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        experimental_http1_max_headers: Option<usize>,
-        experimental_http1_max_buf_size: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -771,8 +756,6 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            experimental_http1_max_headers,
-            experimental_http1_max_buf_size,
         }
     }
 }
@@ -791,8 +774,6 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        experimental_http1_max_headers: Option<usize>,
-        experimental_http1_max_buf_size: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -812,8 +793,6 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            experimental_http1_max_headers,
-            experimental_http1_max_buf_size,
         }
     }
 }

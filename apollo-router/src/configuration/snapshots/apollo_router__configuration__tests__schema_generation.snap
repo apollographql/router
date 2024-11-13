@@ -1318,6 +1318,20 @@ snapshot_kind: text
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
+        "experimental_http1_max_buf_size": {
+          "default": null,
+          "description": "Set the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kb.",
+          "nullable": true,
+          "type": "string"
+        },
+        "experimental_http1_max_headers": {
+          "default": null,
+          "description": "Set the maximum number of headers for HTTP1 protocol\n\nIf server receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".\n\nDefault is 100.",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
@@ -6592,22 +6606,6 @@ snapshot_kind: text
           "default": false,
           "description": "abort request handling when the client drops the connection. Default: false. When set to true, some parts of the request pipeline like telemetry will not work properly, but request handling will stop immediately when the client connection is closed.",
           "type": "boolean"
-        },
-        "experimental_http1_max_buf_size": {
-          "default": null,
-          "description": "Set the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kb.",
-          "format": "uint",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "experimental_http1_max_headers": {
-          "default": null,
-          "description": "Set the maximum number of headers for HTTP1 protocol\n\nIf server receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".\n\nDefault is 100.",
-          "format": "uint",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
         },
         "experimental_log_on_broken_pipe": {
           "default": false,

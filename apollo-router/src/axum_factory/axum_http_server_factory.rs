@@ -303,11 +303,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let mut http_config = Http::new();
             http_config.http1_keep_alive(true);
             http_config.http1_header_read_timeout(Duration::from_secs(10));
-            if let Some(max_headers) = configuration.supergraph.experimental_http1_max_headers {
+            if let Some(max_headers) = configuration.limits.experimental_http1_max_headers {
                 http_config.http1_max_headers(max_headers);
             }
-            if let Some(max_buf_size) = configuration.supergraph.experimental_http1_max_buf_size {
-                http_config.max_buf_size(max_buf_size);
+            if let Some(max_buf_size) = configuration.limits.experimental_http1_max_buf_size {
+                http_config.max_buf_size(max_buf_size.as_u64() as usize);
             }
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(

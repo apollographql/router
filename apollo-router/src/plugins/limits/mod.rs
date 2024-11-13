@@ -4,6 +4,7 @@ mod limited;
 use std::error::Error;
 
 use async_trait::async_trait;
+use bytesize::ByteSize;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -101,6 +102,20 @@ pub(crate) struct Config {
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
     pub(crate) http_max_request_bytes: usize,
+
+    /// Set the maximum number of headers for HTTP1 protocol
+    ///
+    /// If server receives more headers than the buffer size, it responds to the client with
+    /// "431 Request Header Fields Too Large".
+    ///
+    /// Default is 100.
+    pub(crate) experimental_http1_max_headers: Option<usize>,
+
+    /// Set the maximum buffer size for the HTTP1 connection.
+    ///
+    /// Default is ~400kb.
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) experimental_http1_max_buf_size: Option<ByteSize>,
 }
 
 impl Default for Config {
@@ -113,6 +128,8 @@ impl Default for Config {
             max_aliases: None,
             warn_only: false,
             http_max_request_bytes: 2_000_000,
+            experimental_http1_max_headers: None,
+            experimental_http1_max_buf_size: None,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
