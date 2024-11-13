@@ -54,4 +54,18 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_c
             21:20..21:62,
         ],
     },
+    Message {
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` header 'content-length' is reserved and cannot be set by a connector",
+        locations: [
+            23:19..23:35,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` header 'content-type' can't be set dynamically, only via `value`",
+        locations: [
+            24:19..24:33,
+        ],
+    },
 ]
