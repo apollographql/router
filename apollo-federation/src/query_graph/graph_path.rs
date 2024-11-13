@@ -80,15 +80,6 @@ pub(crate) struct ContextAtUsageEntry {
     pub(crate) subgraph_arg_type: Type,
 }
 
-impl PartialEq for ContextAtUsageEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.context_id == other.context_id
-            && self.relative_path == other.relative_path
-            && self.selection_set == other.selection_set
-            && self.subgraph_arg_type == other.subgraph_arg_type
-    }
-}
-
 /// An immutable path in a query graph.
 ///
 /// A "path" here is mostly understood in the graph-theoretical sense of the term, i.e. as "a

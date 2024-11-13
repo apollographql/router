@@ -368,16 +368,8 @@ where
                         (Some(cond_a), Some(cond_b)) => cond_a.equals_same_root(cond_b),
                         _ => false,
                     }
-                    && match (&a.context_to_selection, &b.context_to_selection) {
-                        (None, None) => true,
-                        (Some(set_a), Some(set_b)) => set_a == set_b,
-                        _ => false,
-                    }
-                    && match (&a.parameter_to_context, &b.parameter_to_context) {
-                        (None, None) => true,
-                        (Some(map_a), Some(map_b)) => map_a == map_b,
-                        _ => false,
-                    }
+                    && a.context_to_selection** == b.context_to_selection
+                    && a.parameter_to_context == b.parameter_to_context
                     && a.tree.equals_same_root(&b.tree)
             })
     }
