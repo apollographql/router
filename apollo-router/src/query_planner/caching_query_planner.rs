@@ -560,6 +560,10 @@ where
                                     tokio::spawn(async move {
                                         entry.insert(Ok(content)).await;
                                     });
+                                } else {
+                                    tokio::spawn(async move {
+                                        entry.send(Ok(content)).await;
+                                    });
                                 }
                             }
 
