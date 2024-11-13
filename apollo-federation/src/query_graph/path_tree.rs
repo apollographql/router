@@ -10,6 +10,9 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
 
+use super::graph_path::ContextAtUsageEntry;
+use super::graph_path::ContextToSelection;
+use super::graph_path::ParameterToContext;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::GraphPathItem;
@@ -18,10 +21,6 @@ use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
 use crate::utils::FallibleIterator;
-
-use super::graph_path::ContextAtUsageEntry;
-use super::graph_path::ContextToSelection;
-use super::graph_path::ParameterToContext;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
 /// node, in which each node of the tree corresponds to a node in the query graph, and a tree's node

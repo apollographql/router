@@ -27,6 +27,7 @@ use petgraph::visit::EdgeRef;
 use tracing::debug;
 use tracing::debug_span;
 
+use super::condition_resolver::ContextMapEntry;
 use crate::display_helpers::write_indented_lines;
 use crate::display_helpers::DisplayOption;
 use crate::display_helpers::DisplaySlice;
@@ -69,8 +70,6 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-
-use super::condition_resolver::ContextMapEntry;
 
 #[derive(Clone, serde::Serialize, Debug, Eq, PartialEq)]
 pub(crate) struct ContextAtUsageEntry {
