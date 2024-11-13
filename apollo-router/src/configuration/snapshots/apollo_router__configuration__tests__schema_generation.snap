@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -6591,6 +6592,14 @@ expression: "&schema"
           "default": false,
           "description": "abort request handling when the client drops the connection. Default: false. When set to true, some parts of the request pipeline like telemetry will not work properly, but request handling will stop immediately when the client connection is closed.",
           "type": "boolean"
+        },
+        "experimental_http1_max_buf_size": {
+          "default": null,
+          "description": "Set the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kb.",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
         },
         "experimental_http1_max_headers": {
           "default": null,
