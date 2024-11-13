@@ -11,6 +11,7 @@ use std::sync::Arc;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
@@ -26,6 +27,7 @@ use petgraph::visit::EdgeRef;
 use tracing::debug;
 use tracing::debug_span;
 
+use super::condition_resolver::ContextMapEntry;
 use crate::display_helpers::write_indented_lines;
 use crate::display_helpers::DisplayOption;
 use crate::display_helpers::DisplaySlice;
@@ -67,9 +69,7 @@ use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 
-use super::condition_resolver::ContextMapEntry;
-
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, Debug, Eq, PartialEq)]
 pub(crate) struct ContextAtUsageEntry {
     pub(crate) context_id: String,
     pub(crate) relative_path: Vec<String>,
@@ -177,10 +177,10 @@ where
     #[serde(skip)]
     defer_on_tail: Option<DeferDirectiveArguments>,
     /// At the point where a `@context` is set, we will have fields to select
-    context_to_selection: Vec<Option<IndexSet<String>>>,
+    context_to_selection: Vec<Option<ContextToSelection>>,
     /// Where a context is used (i.e. `@fromContext`) there will exist a ContextAtUsageEntry map
     /// (1 for each parameter)
-    parameter_to_context: Vec<Option<Arc<IndexMap<String, ContextAtUsageEntry>>>>,
+    parameter_to_context: Vec<Option<ParameterToContext>>,
 }
 
 impl<TTrigger, TEdge> std::fmt::Debug for GraphPath<TTrigger, TEdge>
@@ -268,9 +268,17 @@ impl OverrideId {
     }
 }
 
+pub(crate) type ContextToSelection = HashSet<String>;
+pub(crate) type ParameterToContext = IndexMap<String, ContextAtUsageEntry>;
+
 /// The item type for [`GraphPath::iter`]
-pub(crate) type GraphPathItem<'path, TTrigger, TEdge> =
-    (TEdge, &'path Arc<TTrigger>, &'path Option<Arc<OpPathTree>>);
+pub(crate) type GraphPathItem<'path, TTrigger, TEdge> = (
+    TEdge,
+    &'path Arc<TTrigger>,
+    &'path Option<Arc<OpPathTree>>,
+    Option<ContextToSelection>,
+    Option<ParameterToContext>,
+);
 
 /// A `GraphPath` whose triggers are operation elements (essentially meaning that the path has been
 /// guided by a GraphQL operation).
@@ -1248,7 +1256,7 @@ where
                             {
                                 field_def.arguments.push(Node::new(InputValueDefinition {
                                     name: Name::new(usage_entry.context_id.as_str())?,
-                                    ty: Node::new(usage_entry.subgraph_arg_type.clone()), // TODO: I think this is wrong. We want to lookup the type in schema
+                                    ty: Node::new(usage_entry.subgraph_arg_type.clone()),
                                     default_value: None,
                                     description: None,
                                     directives: Default::default(),
@@ -1263,15 +1271,15 @@ where
                             directives: field.directives.clone(),
                             sibling_typename: field.sibling_typename.clone(),
                         });
-                        let z = GraphPathTrigger::Op(Arc::new(OpGraphPathTrigger::OpPathElement(
-                            OpPathElement::Field(new_field),
-                        )));
-                        let z: Arc<TTrigger> = z.try_into().map_err(|e| {
+                        trigger_rc = GraphPathTrigger::Op(Arc::new(
+                            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(new_field)),
+                        ))
+                        .try_into()
+                        .map_err(|e| {
                             FederationError::internal(
                                 "Failed to convert GraphPathTrigger to TTrigger",
                             )
                         })?;
-                        trigger_rc = z;
                     }
                 }
             }
@@ -1335,8 +1343,8 @@ where
         context_map: &Option<IndexMap<String, ContextMapEntry>>,
     ) -> (
         Vec<Option<Arc<OpPathTree>>>,
-        Vec<Option<IndexSet<String>>>,
-        Vec<Option<Arc<IndexMap<String, ContextAtUsageEntry>>>>,
+        Vec<Option<HashSet<String>>>,
+        Vec<Option<IndexMap<String, ContextAtUsageEntry>>>,
     ) {
         let mut edge_conditions = self.edge_conditions.clone();
         let mut context_to_selection = self.context_to_selection.clone();
@@ -1375,7 +1383,7 @@ where
                     },
                 );
             }
-            parameter_to_context.push(Some(Arc::new(new_parameter_to_context)));
+            parameter_to_context.push(Some(new_parameter_to_context));
             (edge_conditions, context_to_selection, parameter_to_context)
         }
     }
@@ -1388,7 +1396,19 @@ where
             .copied()
             .zip(&self.edge_triggers)
             .zip(&self.edge_conditions)
-            .map(|((edge, trigger), condition)| (edge, trigger, condition))
+            .zip(&self.context_to_selection)
+            .zip(&self.parameter_to_context)
+            .map(
+                |((((edge, trigger), condition), context_to_selection), parameter_to_context)| {
+                    (
+                        edge,
+                        trigger,
+                        condition,
+                        context_to_selection.clone(),
+                        parameter_to_context.clone(),
+                    )
+                },
+            )
     }
 
     pub(crate) fn next_edges(

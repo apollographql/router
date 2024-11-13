@@ -478,8 +478,8 @@ impl FederationSpecDefinition {
             name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
-   
-    #[allow(clippy::wrong_self_convention)] 
+
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn from_context_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
