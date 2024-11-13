@@ -368,7 +368,7 @@ where
                         (Some(cond_a), Some(cond_b)) => cond_a.equals_same_root(cond_b),
                         _ => false,
                     }
-                    && a.context_to_selection** == b.context_to_selection
+                    && a.context_to_selection == b.context_to_selection
                     && a.parameter_to_context == b.parameter_to_context
                     && a.tree.equals_same_root(&b.tree)
             })

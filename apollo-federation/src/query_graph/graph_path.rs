@@ -72,7 +72,7 @@ use crate::schema::ValidFederationSchema;
 
 use super::condition_resolver::ContextMapEntry;
 
-#[derive(Clone, serde::Serialize, Debug, Eq)]
+#[derive(Clone, serde::Serialize, Debug, Eq, PartialEq)]
 pub(crate) struct ContextAtUsageEntry {
     pub(crate) context_id: String,
     pub(crate) relative_path: Vec<String>,
