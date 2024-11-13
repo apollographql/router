@@ -83,8 +83,6 @@ flowchart RL
 		}"]
     end
 
-
-
 	subgraph Subgraphs["Subgraphs"]
 		Purchases["Purchases"]
 		Inventory["Inventory"]
@@ -216,6 +214,10 @@ This entry contains an object with the `all` field to affect all subgraph reques
 ### Entity cache invalidation
 
 ```mermaid
+---
+title: Invalidating an Entity Cache
+---
+
 flowchart RL
 	subgraph QueryResponse["Cache invalidation POST"]
 		n1["{
