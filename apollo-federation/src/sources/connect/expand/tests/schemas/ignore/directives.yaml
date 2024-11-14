@@ -10,7 +10,7 @@ subgraphs:
               "@composeDirective"
             ]
           )
-          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
           @composeDirective(name: "@custom1")
           @composeDirective(name: "@custom2")
           @composeDirective(name: "@custom3")
@@ -36,7 +36,7 @@ subgraphs:
       sdl: |
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@composeDirective"])
-          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
           @composeDirective(name: "@custom1")
 
         directive @custom1 on OBJECT | FIELD_DEFINITION

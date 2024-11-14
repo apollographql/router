@@ -6,7 +6,7 @@ schema
   @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
-  @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+  @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", {name: "@originalName", as: "@custom3"}])
 {
   query: Query
 }
