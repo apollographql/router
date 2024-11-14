@@ -5,6 +5,7 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -143,7 +144,7 @@ pub(crate) fn directive_optional_list_argument<'a>(
         Some(value) => match value.as_ref() {
             Value::Null => Ok(None),
             Value::List(values) => Ok(Some(values.as_slice())),
-            _ => internal_error!(
+            _ => bail!(
                 r#"Argument "{name}" of directive "@{}" must be a boolean."#,
                 application.name
             ),

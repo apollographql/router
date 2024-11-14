@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -30,6 +29,7 @@ use tracing::debug;
 use tracing::debug_span;
 
 use super::condition_resolver::ContextMapEntry;
+use crate::bail;
 use crate::display_helpers::write_indented_lines;
 use crate::display_helpers::DisplayOption;
 use crate::display_helpers::DisplaySlice;
@@ -901,7 +901,7 @@ impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
         match value {
             GraphPathTrigger::Op(op) => Ok(op),
             GraphPathTrigger::Transition(transition) => {
-                internal_error!("Failed to convert to GraphPathTrigger")
+                bail!("Failed to convert to GraphPathTrigger")
             }
         }
     }
@@ -987,7 +987,7 @@ pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
         match self.into() {
             GraphPathTriggerRef::Op(trigger) => match trigger {
                 OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
-                    Some(field.data().field_position.clone())
+                    Some(field.field_position.clone())
                 }
                 _ => None,
             },
@@ -1332,7 +1332,7 @@ where
                     apollo_compiler::schema::ExtendedType::Enum(_) => None,
                     apollo_compiler::schema::ExtendedType::InputObject(_) => None,
                 }) else {
-                    internal_error!("Unexpectedly failed to lookup field {type_name}.{field_name}")
+                    bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                 };
                 let field_def = field_def.deref_mut().make_mut();
                 for (param_name, usage_entry) in last_parameter_to_context.iter() {
@@ -1358,9 +1358,7 @@ where
                                 apollo_compiler::schema::ExtendedType::InputObject(_) => None,
                             })
                         else {
-                            internal_error!(
-                                "Unexpectedly failed to lookup field {type_name}.{field_name}"
-                            )
+                            bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                         };
                         let field_def = field_def.deref_mut().make_mut();
                         for (param_name, usage_entry) in last_parameter_to_context.iter() {
@@ -1378,14 +1376,14 @@ where
                                 }));
                             }
                         }
-                        *field = Field::new(FieldData {
+                        *field = Field {
                             schema: ValidFederationSchema::new(schema.validate()?)?,
                             field_position: field.field_position.clone(),
                             alias: field.alias.clone(),
                             arguments: field.arguments.clone(),
                             directives: field.directives.clone(),
                             sibling_typename: field.sibling_typename.clone(),
-                        });
+                        };
                     }
                 }
             }
@@ -1743,11 +1741,11 @@ where
                                 let Some(arg_indices) =
                                     self.graph.subgraph_to_arg_indices.get(&ctx.subgraph_name)
                                 else {
-                                    internal_error!("Unknown subgraph, {:?}, in QueryGraph::subgraph_to_arg_indices", ctx.subgraph_name)
+                                    bail!("Unknown subgraph, {:?}, in QueryGraph::subgraph_to_arg_indices", ctx.subgraph_name)
                                 };
                                 let Some(id) = arg_indices.get(&ctx.argument_coordinate).cloned()
                                 else {
-                                    internal_error!("Unknown argument coordiate, {:?}, in QueryGraph::subgraph_to_arg_indices[{}]", ctx.argument_coordinate, ctx.subgraph_name)
+                                    bail!("Unknown argument coordiate, {:?}, in QueryGraph::subgraph_to_arg_indices[{}]", ctx.argument_coordinate, ctx.subgraph_name)
                                 };
 
                                 match &resolution {

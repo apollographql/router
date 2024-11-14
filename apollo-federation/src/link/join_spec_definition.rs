@@ -10,6 +10,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use super::argument::directive_optional_list_argument;
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -81,9 +82,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
             value: &'a Value,
         ) -> Result<(), FederationError> {
             if let Some(first_value) = field {
-                internal_error!(
-                    "Duplicate contextArgument for '{name}' field: {first_value} and {value}"
-                )
+                bail!("Duplicate contextArgument for '{name}' field: {first_value} and {value}")
             }
             field.insert(value);
             Ok(())
@@ -108,7 +107,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
         }
 
         let Value::Object(names) = value else {
-            internal_error!("Item in contextArgument list is not an object {value}")
+            bail!("Item in contextArgument list is not an object {value}")
         };
         let mut name = None;
         let mut type_ = None;
@@ -120,7 +119,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
                 "type" => insert_value(arg_name, &mut type_, value)?,
                 "context" => insert_value(arg_name, &mut context, value)?,
                 "selection" => insert_value(arg_name, &mut selection, value)?,
-                _ => internal_error!("Found unknown contextArgument {arg_name}"),
+                _ => bail!("Found unknown contextArgument {arg_name}"),
             }
         }
 

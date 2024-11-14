@@ -50,7 +50,7 @@ macro_rules! internal_error {
 #[macro_export]
 macro_rules! bail {
     ( $( $arg:tt )+ ) => {
-        return Err($crate::internal_error!( $( $arg )+ ).into());
+        return Err($crate::internal_error!( $( $arg )+ ).into())
     }
 }
 
