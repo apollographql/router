@@ -56,31 +56,26 @@ pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
-    /// Whether the query planner should try to reused the named fragments of the planned query in
+    /// Whether the query planner should try to reuse the named fragments of the planned query in
     /// subgraph fetches.
     ///
-    /// This is often a good idea as it can prevent very large subgraph queries in some cases (named
-    /// fragments can make some relatively small queries (using said fragments) expand to a very large
-    /// query if all the spreads are inline). However, due to architecture of the query planner, this
-    /// optimization is done as an additional pass on the subgraph queries of the generated plan and
-    /// can thus increase the latency of building a plan. As long as query plans are sufficiently
-    /// cached, this should not be a problem, which is why this option is enabled by default, but if
-    /// the distribution of inbound queries prevents efficient caching of query plans, this may become
-    /// an undesirable trade-off and can be disabled in that case.
+    /// Reusing fragments requires complicated validations, so it can take a long time on large
+    /// queries with many fragments. This option may be removed in the future in favour of
+    /// [`generate_query_fragments`][QueryPlannerConfig::generate_query_fragments].
     ///
-    /// Defaults to true.
+    /// Defaults to false.
     pub reuse_query_fragments: bool,
 
-    /// NOTE: **not implemented yet**
-    ///
     /// If enabled, the query planner will extract inline fragments into fragment
     /// definitions before sending queries to subgraphs. This can significantly
-    /// reduce the size of the query sent to subgraphs, but may increase the time
-    /// it takes to plan the query.
+    /// reduce the size of the query sent to subgraphs.
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
 
+    /// **TODO:** This option is not implemented, and the behaviour is *always enabled*.
+    /// <https://github.com/apollographql/router/pull/5871>
+    ///
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
     ///
@@ -108,27 +103,31 @@ pub struct QueryPlannerConfig {
     pub type_conditioned_fetching: bool,
 }
 
+#[allow(clippy::derivable_impls)] // it's derivable right now, but we might change the defaults
 impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
-            reuse_query_fragments: true,
-            subgraph_graphql_validation: false,
+            reuse_query_fragments: false,
             generate_query_fragments: false,
+            subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
-            type_conditioned_fetching: Default::default(),
+            type_conditioned_fetching: false,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Hash)]
 pub struct QueryPlanIncrementalDeliveryConfig {
-    /// Enables @defer support by the query planner.
+    /// Enables `@defer` support in the query planner, breaking up the query plan with [DeferNode]s
+    /// as appropriate.
     ///
-    /// If set, then the query plan for queries having some @defer will contains some `DeferNode`
-    /// (see `query_plan/mod.rs`).
+    /// If false, operations with `@defer` are still accepted, but are planned as if they did not
+    /// contain `@defer` directives.
     ///
-    /// Defaults to false (meaning that the @defer are ignored).
+    /// Defaults to false.
+    ///
+    /// [DeferNode]: crate::query_plan::DeferNode
     pub enable_defer: bool,
 }
 
@@ -1383,7 +1382,11 @@ type User
         )
         .unwrap();
 
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let config = QueryPlannerConfig {
+            reuse_query_fragments: true,
+            ..Default::default()
+        };
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
@@ -1444,7 +1447,11 @@ type User
         )
         .unwrap();
 
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let config = QueryPlannerConfig {
+            reuse_query_fragments: true,
+            ..Default::default()
+        };
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
@@ -1506,7 +1513,11 @@ type User
         )
         .unwrap();
 
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let config = QueryPlannerConfig {
+            reuse_query_fragments: true,
+            ..Default::default()
+        };
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();

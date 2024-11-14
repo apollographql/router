@@ -1,0 +1,49 @@
+---
+title: Self-Hosted Router
+subtitle: Host and deploy routers in your own infrastructure
+description: Distribute operations efficiently across microservices in your federated GraphQL API with the Apollo GraphOS Router or Apollo Router Core. Configure caching, security features, and more.
+---
+
+A self-hosted GraphOS Router or Apollo Router Core enables you to fully manage the runtime infrastructure and deployments of your supergraph.
+
+```mermaid
+flowchart LR;
+  clients(Clients);
+  subgraph "Your infrastructure";
+  router(["<b>Router</b>"]);
+  serviceB[Products<br/>API];
+  serviceC[Reviews<br/>API];
+  router -->|Sub-query| serviceB & serviceC;
+  end;
+  clients -.->|Query| router;
+  class clients secondary;
+```
+
+<EnterpriseFeature>
+
+Self-hosting the GraphOS Router is limited to [GraphOS Enterprise plans](https://www.apollographql.com/pricing). Other plan types use [managed cloud routing with GraphOS](/graphos/cloud-routing). Check out the [pricing page](https://www.apollographql.com/pricing#graphos-router) to learn more.
+
+</EnterpriseFeature>
+
+## Downloading and installing a self-hosted router
+
+Apollo provides the router as both a binary and as images to run in your containerized deployments.
+
+### Router binary
+
+Apollo provides a binary of the router for multiple platforms. You can download the router bundle, extract the router binary, and run it. 
+
+To learn more, follow the steps in the [self-hosted router installation](/graphos/reference/router/self-hosted-install) reference to run a router binary with a sample supergraph schema.
+
+### Router container image
+
+Apollo provides container images of the router to deploy in self-hosted environments. The router images are hosted on GitHub in its container repository. Each router release includes both production and debug images. 
+
+To learn more, go to the [containerization overview](/graphos/routing/self-hosted/containerization).
+
+- If running with Docker, go to the [Docker](/graphos/routing/self-hosted/containerization/docker) docs to learn how to run router images.
+- If running with Kubernetes, go to the [Kubernetes](/graphos/routing/self-hosted/containerization/kubernetes) docs to learn to deploy with router Helm charts.
+
+## Next steps
+
+- To prepare your routers for production deployment, follow the guides in [Production Readiness](/graphos/platform/production-readiness/checklist) docs.

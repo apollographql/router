@@ -191,13 +191,19 @@ mod test {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
+        let mut configuration = Configuration::default();
+        // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+        configuration.supergraph.generate_query_fragments = false;
+        let configuration = Arc::new(configuration);
+
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Schema::parse(schema, &Default::default()).unwrap();
+        let schema = Schema::parse(schema, &configuration).unwrap();
+
         let planner = BridgeQueryPlannerPool::new(
             Vec::new(),
             schema.into(),
-            Default::default(),
+            Arc::clone(&configuration),
             NonZeroUsize::new(1).unwrap(),
         )
         .await
@@ -207,15 +213,9 @@ mod test {
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let mut plugins = create_plugins(
-            &Configuration::default(),
-            &schema,
-            subgraph_schemas,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let mut plugins = create_plugins(&configuration, &schema, subgraph_schemas, None, None)
+            .await
+            .unwrap();
 
         plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
@@ -228,10 +228,10 @@ mod test {
         let supergraph_creator = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+            Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
             Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
+            configuration,
         )
         .await
         .unwrap()
