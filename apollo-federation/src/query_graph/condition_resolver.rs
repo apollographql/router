@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::Node;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
@@ -19,11 +20,11 @@ use crate::query_plan::QueryPlanCost;
 pub(crate) struct ContextMapEntry {
     pub(crate) levels_in_data_path: usize,
     pub(crate) levels_in_query_path: usize,
-    pub(crate) path_tree: Option<OpPathTree>,
+    pub(crate) path_tree: Option<Arc<OpPathTree>>,
     pub(crate) selection_set: SelectionSet,
     pub(crate) inbound_edge: EdgeIndex,
     pub(crate) param_name: String,
-    pub(crate) arg_type: Type,
+    pub(crate) arg_type: Node<Type>,
     pub(crate) id: String,
 }
 

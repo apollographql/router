@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -24,6 +25,7 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
+use strum_macros::EnumTryAs;
 use tracing::debug;
 use tracing::debug_span;
 
@@ -45,8 +47,10 @@ use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
+use crate::operation::NamedFragments;
 use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
+use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
 use crate::query_graph::condition_resolver::ConditionResolution;
@@ -59,9 +63,11 @@ use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
+use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::Captures;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -74,7 +80,7 @@ pub(crate) struct ContextAtUsageEntry {
     pub(crate) context_id: String,
     pub(crate) relative_path: Vec<String>,
     pub(crate) selection_set: SelectionSet,
-    pub(crate) subgraph_arg_type: Type,
+    pub(crate) subgraph_arg_type: Node<Type>,
 }
 
 /// An immutable path in a query graph.
@@ -914,10 +920,98 @@ impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
     }
 }
 
+pub(crate) enum GraphPathTriggerRef<'a> {
+    Op(&'a OpGraphPathTrigger),
+    Transition(&'a QueryGraphEdgeTransition),
+}
+
+pub(crate) enum GraphPathTriggerRefMut<'a> {
+    Op(&'a mut OpGraphPathTrigger),
+    Transition(&'a mut QueryGraphEdgeTransition),
+}
+
+impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
+    fn from(value: &'a GraphPathTrigger) -> Self {
+        match value {
+            GraphPathTrigger::Op(value) => value.as_ref().into(),
+            GraphPathTrigger::Transition(value) => value.as_ref().into(),
+        }
+    }
+}
+
+impl<'a> From<&'a OpGraphPathTrigger> for GraphPathTriggerRef<'a> {
+    fn from(value: &'a OpGraphPathTrigger) -> Self {
+        Self::Op(value)
+    }
+}
+
+impl<'a> From<&'a mut OpGraphPathTrigger> for GraphPathTriggerRefMut<'a> {
+    fn from(value: &'a mut OpGraphPathTrigger) -> Self {
+        Self::Op(value)
+    }
+}
+
+impl<'a> From<&'a QueryGraphEdgeTransition> for GraphPathTriggerRef<'a> {
+    fn from(value: &'a QueryGraphEdgeTransition) -> Self {
+        Self::Transition(value)
+    }
+}
+
+impl<'a> From<&'a mut QueryGraphEdgeTransition> for GraphPathTriggerRefMut<'a> {
+    fn from(value: &'a mut QueryGraphEdgeTransition) -> Self {
+        Self::Transition(value)
+    }
+}
+
+/// `GraphPath` is generic over two type, `TTrigger` and `TEdge`. This trait helps abstract over
+/// the `TTrigger` type bound. A `TTrigger` is one of the two types that make up the variants of
+/// the `GraphPathTrigger`. Rather than trying to cast into concrete types and cast back (and
+/// potentially raise errors), this trait provides ways to access the data needed within.
+pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
+    fn get_field_mut<'a>(&'a mut self) -> Option<&mut Field>
+    where
+        &'a mut Self: Into<GraphPathTriggerRefMut<'a>>,
+    {
+        match self.into() {
+            GraphPathTriggerRefMut::Op(OpGraphPathTrigger::OpPathElement(
+                OpPathElement::Field(field),
+            )) => Some(field),
+            _ => None,
+        }
+    }
+
+    fn get_field_parent_type<'a>(&'a self) -> Option<FieldDefinitionPosition>
+    where
+        &'a Self: Into<GraphPathTriggerRef<'a>>,
+    {
+        match self.into() {
+            GraphPathTriggerRef::Op(trigger) => match trigger {
+                OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
+                    Some(field.data().field_position.clone())
+                }
+                _ => None,
+            },
+            GraphPathTriggerRef::Transition(trigger) => match trigger {
+                QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } => Some(field_definition_position.clone()),
+                _ => None,
+            },
+        }
+    }
+}
+
+impl GraphPathTriggerVariant for OpGraphPathTrigger {}
+
+impl GraphPathTriggerVariant for QueryGraphEdgeTransition {}
+
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash + std::fmt::Debug,
-    Arc<TTrigger>: Into<GraphPathTrigger> + TryFrom<GraphPathTrigger, Error = FederationError>,
+    TTrigger: GraphPathTriggerVariant,
+    for<'a> &'a TTrigger: Into<GraphPathTriggerRef<'a>>,
+    for<'a> &'a mut TTrigger: Into<GraphPathTriggerRefMut<'a>>,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
     EdgeIndex: Into<TEdge>,
 {
@@ -960,7 +1054,7 @@ where
 
     pub(crate) fn add(
         &self,
-        trigger: TTrigger,
+        mut trigger: TTrigger,
         edge: TEdge,
         condition_resolution: ConditionResolution,
         defer: Option<DeferDirectiveArguments>,
@@ -1219,12 +1313,33 @@ where
             self.merge_edge_conditions_with_resolution(&condition_path_tree, &context_map);
         let last_parameter_to_context = new_parameter_to_context.last();
 
-        let trigger = {
-            let mut trigger_rc = Arc::new(trigger);
-            if let Some(Some(last_parameter_to_context)) = last_parameter_to_context {
-                if let GraphPathTrigger::Op(op) = trigger_rc.clone().into() {
-                    if let OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) =
-                        op.as_ref()
+        if let Some(Some(last_parameter_to_context)) = last_parameter_to_context {
+            // TODO: Perhaps it is better to explicitly cast this to `GraphPathTriggerRefMut` and
+            // pull out the field from there.
+            if let Some(field) = trigger.get_field_mut() {
+                let mut schema = field.schema.schema().clone().into_inner();
+                let type_name = field.field_position.type_name();
+                let field_name = field.field_position.field_name();
+                let Some(field_def) = schema.types.get_mut(type_name).and_then(|t| match t {
+                    apollo_compiler::schema::ExtendedType::Scalar(_) => None,
+                    apollo_compiler::schema::ExtendedType::Object(obj) => {
+                        obj.make_mut().fields.get_mut(field_name)
+                    }
+                    apollo_compiler::schema::ExtendedType::Interface(iface) => {
+                        iface.make_mut().fields.get_mut(field_name)
+                    }
+                    apollo_compiler::schema::ExtendedType::Union(_) => None,
+                    apollo_compiler::schema::ExtendedType::Enum(_) => None,
+                    apollo_compiler::schema::ExtendedType::InputObject(_) => None,
+                }) else {
+                    internal_error!("Unexpectedly failed to lookup field {type_name}.{field_name}")
+                };
+                let field_def = field_def.deref_mut().make_mut();
+                for (param_name, usage_entry) in last_parameter_to_context.iter() {
+                    if !field_def
+                        .arguments
+                        .iter()
+                        .any(|arg| arg.name.as_str() == param_name.as_str())
                     {
                         let mut schema = field.schema.schema().clone().into_inner();
                         let type_name = field.field_position.type_name();
@@ -1256,14 +1371,14 @@ where
                             {
                                 field_def.arguments.push(Node::new(InputValueDefinition {
                                     name: Name::new(usage_entry.context_id.as_str())?,
-                                    ty: Node::new(usage_entry.subgraph_arg_type.clone()),
+                                    ty: usage_entry.subgraph_arg_type.clone(),
                                     default_value: None,
                                     description: None,
                                     directives: Default::default(),
                                 }));
                             }
                         }
-                        let new_field = Field::new(FieldData {
+                        *field = Field::new(FieldData {
                             schema: ValidFederationSchema::new(schema.validate()?)?,
                             field_position: field.field_position.clone(),
                             alias: field.alias.clone(),
@@ -1271,23 +1386,13 @@ where
                             directives: field.directives.clone(),
                             sibling_typename: field.sibling_typename.clone(),
                         });
-                        trigger_rc = GraphPathTrigger::Op(Arc::new(
-                            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(new_field)),
-                        ))
-                        .try_into()
-                        .map_err(|e| {
-                            FederationError::internal(
-                                "Failed to convert GraphPathTrigger to TTrigger",
-                            )
-                        })?;
                     }
                 }
             }
-            trigger_rc
-        };
+        }
 
         edges.push(edge);
-        edge_triggers.push(trigger);
+        edge_triggers.push(Arc::new(trigger));
         if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
             last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
                 index: self.edges.len(),
@@ -1363,10 +1468,9 @@ where
                 let idx = edge_conditions.len() - entry.levels_in_query_path - 1;
 
                 if let Some(path_tree) = &entry.path_tree {
-                    let merged_conditions = edge_conditions[idx].as_ref().map_or_else(
-                        || Arc::new(path_tree.clone()),
-                        |condition| condition.merge(&Arc::new(path_tree.clone())),
-                    );
+                    let merged_conditions = edge_conditions[idx]
+                        .as_ref()
+                        .map_or_else(|| path_tree.clone(), |condition| condition.merge(path_tree));
                     edge_conditions[idx] = Some(merged_conditions);
                 }
                 context_to_selection[idx]
@@ -1572,11 +1676,112 @@ where
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
         let edge_weight = self.graph.edge_weight(edge)?;
-        if edge_weight.conditions.is_none() {
+        if edge_weight.conditions.is_none() && edge_weight.required_contexts.is_empty() {
             return Ok(ConditionResolution::no_conditions());
         }
+
+        /* Resolve context conditions */
+
+        let mut total_cost = 0.;
+        let mut context_map: IndexMap<String, ContextMapEntry> = IndexMap::default();
+
+        if !edge_weight.required_contexts.is_empty() {
+            let schema = self.graph.schema()?;
+            let mut was_unsatisfied = false;
+            for ctx in &edge_weight.required_contexts {
+                let mut levels_in_query_path = 0;
+                let mut levels_in_data_path = 0;
+                for (levels_in_query_graph, (e, trigger)) in self
+                    .edges
+                    .iter()
+                    .zip(self.edge_triggers.iter())
+                    .rev()
+                    .enumerate()
+                {
+                    let parent_type = trigger.get_field_parent_type();
+                    if parent_type.is_some() {
+                        levels_in_data_path += 1;
+                    }
+                    let Some(e) = (*e).into() else { continue };
+                    if !was_unsatisfied && !context_map.contains_key(&ctx.named_parameter) {
+                        if let Some(parent_type) = parent_type {
+                            let parent_type = parent_type.parent();
+                            let matches = ctx.types_with_context_set.iter().all(|ty| todo!());
+                            if matches {
+                                let selection_set = parse_field_set(
+                                    schema,
+                                    ctx.arg_type.inner_named_type().clone(),
+                                    &ctx.selection,
+                                )?
+                                .lazy_map(
+                                    &NamedFragments::default(),
+                                    |selection| {
+                                        if let OpPathElement::InlineFragment(fragment) =
+                                            selection.element()?
+                                        {
+                                            if let Some(CompositeTypeDefinitionPosition::Object(
+                                                obj,
+                                            )) = &fragment.type_condition_position
+                                            {
+                                                if !schema
+                                                    .possible_runtime_types(parent_type.clone())?
+                                                    .contains(obj)
+                                                {
+                                                    return Ok(SelectionMapperReturn::None);
+                                                }
+                                            }
+                                        }
+                                        Ok(SelectionMapperReturn::Selection(selection.clone()))
+                                    },
+                                )?;
+                                let resolution = condition_resolver.resolve(
+                                    e,
+                                    context,
+                                    excluded_destinations,
+                                    excluded_conditions,
+                                )?;
+                                let Some(arg_indices) =
+                                    self.graph.subgraph_to_arg_indices.get(&ctx.subgraph_name)
+                                else {
+                                    internal_error!("Unknown subgraph, {:?}, in QueryGraph::subgraph_to_arg_indices", ctx.subgraph_name)
+                                };
+                                let Some(id) = arg_indices.get(&ctx.argument_coordinate).cloned()
+                                else {
+                                    internal_error!("Unknown argument coordiate, {:?}, in QueryGraph::subgraph_to_arg_indices[{}]", ctx.argument_coordinate, ctx.subgraph_name)
+                                };
+
+                                match &resolution {
+                                    ConditionResolution::Satisfied {
+                                        cost, path_tree, ..
+                                    } => {
+                                        total_cost += cost;
+                                        let entry = ContextMapEntry {
+                                            levels_in_data_path,
+                                            levels_in_query_path,
+                                            path_tree: path_tree.clone(),
+                                            selection_set,
+                                            inbound_edge: e,
+                                            param_name: ctx.named_parameter.clone(),
+                                            arg_type: ctx.arg_type.clone(),
+                                            id,
+                                        };
+                                        context_map.insert(ctx.named_parameter.clone(), entry);
+                                    }
+                                    ConditionResolution::Unsatisfied { .. } => {
+                                        was_unsatisfied = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Resolve all other conditions */
+
         debug_span!("Checking conditions {conditions} on edge {edge_weight}");
-        let resolution = condition_resolver.resolve(
+        let mut resolution = condition_resolver.resolve(
             edge,
             context,
             excluded_destinations,
@@ -1631,6 +1836,13 @@ where
                     }
                 }
             }
+        }
+        if let ConditionResolution::Satisfied {
+            context_map: ctx_map,
+            ..
+        } = &mut resolution
+        {
+            *ctx_map = Some(context_map);
         }
         debug!("Condition resolution: {resolution:?}");
         Ok(resolution)
