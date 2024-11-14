@@ -42,6 +42,10 @@ async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)])
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }},
         mocks,
