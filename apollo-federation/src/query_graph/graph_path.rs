@@ -1373,14 +1373,14 @@ where
                             {
                                 field_def.arguments.push(Node::new(InputValueDefinition {
                                     name: Name::new(usage_entry.context_id.as_str())?,
-                                    ty: Node::new(usage_entry.subgraph_arg_type.clone()),
+                                    ty: usage_entry.subgraph_arg_type.clone(),
                                     default_value: None,
                                     description: None,
                                     directives: Default::default(),
                                 }));
                             }
                         }
-                        let new_field = Field::new(FieldData {
+                        *field = Field::new(FieldData {
                             schema: ValidFederationSchema::new(schema.validate()?)?,
                             field_position: field.field_position.clone(),
                             alias: field.alias.clone(),
@@ -1388,25 +1388,8 @@ where
                             directives: field.directives.clone(),
                             sibling_typename: field.sibling_typename.clone(),
                         });
-                        trigger_rc = GraphPathTrigger::Op(Arc::new(
-                            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(new_field)),
-                        ))
-                        .try_into()
-                        .map_err(|e| {
-                            FederationError::internal(
-                                "Failed to convert GraphPathTrigger to TTrigger",
-                            )
-                        })?;
                     }
                 }
-                *field = Field::new(FieldData {
-                    schema: ValidFederationSchema::new(schema.validate()?)?,
-                    field_position: field.field_position.clone(),
-                    alias: field.alias.clone(),
-                    arguments: field.arguments.clone(),
-                    directives: field.directives.clone(),
-                    sibling_typename: field.sibling_typename.clone(),
-                });
             }
         }
 
