@@ -11,7 +11,14 @@ impl Dist {
     pub fn run(&self) -> Result<()> {
         match &self.target {
             Some(target) => {
-                cargo!(["build", "--release", "--target", target]);
+                cargo!([
+                    "build",
+                    "--features",
+                    "experimental_hyper_header_limits",
+                    "--release",
+                    "--target",
+                    target
+                ]);
 
                 let bin_path = TARGET_DIR
                     .join(target.to_string())
