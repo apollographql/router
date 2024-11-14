@@ -43,18 +43,18 @@ enum join__Graph {
 }
 
 type A @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  id: ID @join__field(graph: CONNECTORS_QUERY_TS_0)
+  id: ID @join__field(graph: CONNECTORS_QUERY_TS_0, type: "ID")
 }
 
 type B @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  a: A @join__field(graph: CONNECTORS_QUERY_TS_0)
+  a: A @join__field(graph: CONNECTORS_QUERY_TS_0, type: "A")
 }
 
 type T @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  a: A @join__field(graph: CONNECTORS_QUERY_TS_0)
-  b: B @join__field(graph: CONNECTORS_QUERY_TS_0)
+  a: A @join__field(graph: CONNECTORS_QUERY_TS_0, type: "A")
+  b: B @join__field(graph: CONNECTORS_QUERY_TS_0, type: "B")
 }
 
 type Query @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  ts: [T] @join__field(graph: CONNECTORS_QUERY_TS_0)
+  ts: [T] @join__field(graph: CONNECTORS_QUERY_TS_0, type: "[T]")
 }

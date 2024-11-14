@@ -44,26 +44,26 @@ enum join__Graph {
 }
 
 interface Itf @join__type(graph: INTERFACE_OBJECT_1, key: "id") @join__type(graph: INTERFACE_OBJECT_2, isInterfaceObject: true, key: "id") @join__type(graph: INTERFACE_OBJECT_3, isInterfaceObject: true, key: "id") {
-  id: ID! @join__field(graph: INTERFACE_OBJECT_1) @join__field(graph: INTERFACE_OBJECT_2) @join__field(graph: INTERFACE_OBJECT_3)
-  c: Int! @join__field(graph: INTERFACE_OBJECT_2) @join__field(graph: INTERFACE_OBJECT_3)
-  d: Int! @join__field(graph: INTERFACE_OBJECT_3)
+  id: ID! @join__field(graph: INTERFACE_OBJECT_1, type: "ID!") @join__field(graph: INTERFACE_OBJECT_2, type: "ID!") @join__field(graph: INTERFACE_OBJECT_3, type: "ID!")
+  c: Int! @join__field(graph: INTERFACE_OBJECT_2, type: "Int!") @join__field(graph: INTERFACE_OBJECT_3, type: "Int!")
+  d: Int! @join__field(graph: INTERFACE_OBJECT_3, type: "Int!")
 }
 
 type T1 implements Itf @join__type(graph: INTERFACE_OBJECT_1, key: "id") @join__implements(graph: INTERFACE_OBJECT_1, interface: "Itf") {
-  id: ID! @join__field(graph: INTERFACE_OBJECT_1)
-  a: String @join__field(graph: INTERFACE_OBJECT_1)
+  id: ID! @join__field(graph: INTERFACE_OBJECT_1, type: "ID!")
+  a: String @join__field(graph: INTERFACE_OBJECT_1, type: "String")
   c: Int! @join__field
   d: Int! @join__field
 }
 
 type T2 implements Itf @join__type(graph: INTERFACE_OBJECT_1, key: "id") @join__implements(graph: INTERFACE_OBJECT_1, interface: "Itf") {
-  id: ID! @join__field(graph: INTERFACE_OBJECT_1)
-  b: String @join__field(graph: INTERFACE_OBJECT_1)
+  id: ID! @join__field(graph: INTERFACE_OBJECT_1, type: "ID!")
+  b: String @join__field(graph: INTERFACE_OBJECT_1, type: "String")
   c: Int! @join__field
   d: Int! @join__field
 }
 
 type Query @join__type(graph: INTERFACE_OBJECT_1) @join__type(graph: INTERFACE_OBJECT_2) @join__type(graph: INTERFACE_OBJECT_3) {
-  itfs: [Itf] @join__field(graph: INTERFACE_OBJECT_2)
-  itf(id: ID!): Itf @join__field(graph: INTERFACE_OBJECT_3)
+  itfs: [Itf] @join__field(graph: INTERFACE_OBJECT_2, type: "[Itf]")
+  itf(id: ID!): Itf @join__field(graph: INTERFACE_OBJECT_3, type: "Itf")
 }

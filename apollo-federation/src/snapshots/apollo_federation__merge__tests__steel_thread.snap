@@ -47,15 +47,15 @@ enum join__Graph {
 }
 
 type User @join__type(graph: CONNECTOR_QUERY_USER_0, key: "id") @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1, key: "__typename") @join__type(graph: GRAPHQL, key: "id") {
-  id: ID! @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0) @join__field(graph: GRAPHQL)
-  a: String @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0)
-  b: String @join__field(graph: CONNECTOR_QUERY_USER_0)
-  c: String @join__field(graph: CONNECTOR_USER_D_1, external: true) @join__field(graph: GRAPHQL)
-  d: String @join__field(graph: CONNECTOR_USER_D_1, requires: "c")
+  id: ID! @join__field(graph: CONNECTOR_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTOR_QUERY_USERS_0, type: "ID!") @join__field(graph: GRAPHQL, type: "ID!")
+  a: String @join__field(graph: CONNECTOR_QUERY_USER_0, type: "String") @join__field(graph: CONNECTOR_QUERY_USERS_0, type: "String")
+  b: String @join__field(graph: CONNECTOR_QUERY_USER_0, type: "String")
+  c: String @join__field(graph: CONNECTOR_USER_D_1, external: true, type: "String") @join__field(graph: GRAPHQL, type: "String")
+  d: String @join__field(graph: CONNECTOR_USER_D_1, requires: "c", type: "String")
 }
 
 type Query @join__type(graph: CONNECTOR_QUERY_USER_0) @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1) @join__type(graph: GRAPHQL) {
-  user(id: ID!): User @join__field(graph: CONNECTOR_QUERY_USER_0)
-  users(limit: Int): [User] @join__field(graph: CONNECTOR_QUERY_USERS_0)
-  _: ID @inaccessible @join__field(graph: CONNECTOR_USER_D_1)
+  user(id: ID!): User @join__field(graph: CONNECTOR_QUERY_USER_0, type: "User")
+  users(limit: Int): [User] @join__field(graph: CONNECTOR_QUERY_USERS_0, type: "[User]")
+  _: ID @inaccessible @join__field(graph: CONNECTOR_USER_D_1, type: "ID")
 }

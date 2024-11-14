@@ -43,26 +43,26 @@ enum join__Graph {
 }
 
 type Query @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
-  i: I @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  u: U @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  f(x: ID, y: YInput): T @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  i: I @join__field(graph: BASIC_1, type: "I") @join__field(graph: BASIC_2, type: "I")
+  u: U @join__field(graph: BASIC_1, type: "U") @join__field(graph: BASIC_2, type: "U")
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_1, type: "T") @join__field(graph: BASIC_2, type: "T")
 }
 
 interface I @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
-  id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  f(x: ID, y: YInput): T @join__field(graph: BASIC_2)
+  id: ID! @join__field(graph: BASIC_1, type: "ID!") @join__field(graph: BASIC_2, type: "ID!")
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_2, type: "T")
 }
 
 type A implements I @join__type(graph: BASIC_1) @join__implements(graph: BASIC_1, interface: "I") @join__type(graph: BASIC_2) @join__implements(graph: BASIC_2, interface: "I") {
-  id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  a: S @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  f(x: ID, y: YInput): T @join__field(graph: BASIC_2)
+  id: ID! @join__field(graph: BASIC_1, type: "ID!") @join__field(graph: BASIC_2, type: "ID!")
+  a: S @join__field(graph: BASIC_1, type: "S") @join__field(graph: BASIC_2, type: "S")
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_2, type: "T")
 }
 
 type B implements I @join__type(graph: BASIC_1) @join__implements(graph: BASIC_1, interface: "I") @join__type(graph: BASIC_2) @join__implements(graph: BASIC_2, interface: "I") {
-  id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  b: E @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  f(x: ID, y: YInput): T @join__field(graph: BASIC_2)
+  id: ID! @join__field(graph: BASIC_1, type: "ID!") @join__field(graph: BASIC_2, type: "ID!")
+  b: E @join__field(graph: BASIC_1, type: "E") @join__field(graph: BASIC_2, type: "E")
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_2, type: "T")
 }
 
 union U @join__type(graph: BASIC_1) @join__unionMember(graph: BASIC_1, member: "A") @join__unionMember(graph: BASIC_1, member: "B") @join__type(graph: BASIC_2) @join__unionMember(graph: BASIC_2, member: "A") @join__unionMember(graph: BASIC_2, member: "B") = A | B
@@ -75,14 +75,14 @@ enum E @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
 }
 
 type T @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
-  x: ID @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
-  y: Y @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  x: ID @join__field(graph: BASIC_1, type: "ID") @join__field(graph: BASIC_2, type: "ID")
+  y: Y @join__field(graph: BASIC_1, type: "Y") @join__field(graph: BASIC_2, type: "Y")
 }
 
 type Y @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
-  z: ID @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  z: ID @join__field(graph: BASIC_1, type: "ID") @join__field(graph: BASIC_2, type: "ID")
 }
 
 input YInput @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
-  z: ID
+  z: ID @join__field(graph: BASIC_1, type: "ID") @join__field(graph: BASIC_2, type: "ID")
 }

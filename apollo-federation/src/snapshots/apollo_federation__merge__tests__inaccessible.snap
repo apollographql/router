@@ -47,19 +47,19 @@ enum join__Graph {
 type Query @join__type(graph: INACCESSIBLE) @join__type(graph: INACCESSIBLE_2) {
   a(
     input: Input @inaccessible,
-  ): A @join__field(graph: INACCESSIBLE)
-  b: B @inaccessible @join__field(graph: INACCESSIBLE)
-  as: [A] @inaccessible @join__field(graph: INACCESSIBLE_2)
+  ): A @join__field(graph: INACCESSIBLE, type: "A")
+  b: B @inaccessible @join__field(graph: INACCESSIBLE, type: "B")
+  as: [A] @inaccessible @join__field(graph: INACCESSIBLE_2, type: "[A]")
 }
 
 type A @join__type(graph: INACCESSIBLE, key: "id") @join__type(graph: INACCESSIBLE_2, key: "id") {
-  id: ID! @join__field(graph: INACCESSIBLE) @join__field(graph: INACCESSIBLE_2)
-  c: Int @inaccessible @join__field(graph: INACCESSIBLE) @join__field(graph: INACCESSIBLE_2)
-  d: Enum @inaccessible @join__field(graph: INACCESSIBLE)
+  id: ID! @join__field(graph: INACCESSIBLE, type: "ID!") @join__field(graph: INACCESSIBLE_2, type: "ID!")
+  c: Int @inaccessible @join__field(graph: INACCESSIBLE, type: "Int") @join__field(graph: INACCESSIBLE_2, type: "Int")
+  d: Enum @inaccessible @join__field(graph: INACCESSIBLE, type: "Enum")
 }
 
 type B implements Interface @join__type(graph: INACCESSIBLE) @inaccessible @join__implements(graph: INACCESSIBLE, interface: "Interface") {
-  b: Scalar @join__field(graph: INACCESSIBLE)
+  b: Scalar @join__field(graph: INACCESSIBLE, type: "Scalar")
 }
 
 enum Enum @join__type(graph: INACCESSIBLE) @inaccessible {
@@ -69,14 +69,14 @@ enum Enum @join__type(graph: INACCESSIBLE) @inaccessible {
 }
 
 input Input @join__type(graph: INACCESSIBLE) @inaccessible {
-  a: Int @inaccessible
-  b: String
+  a: Int @inaccessible @join__field(graph: INACCESSIBLE, type: "Int")
+  b: String @join__field(graph: INACCESSIBLE, type: "String")
 }
 
 scalar Scalar @join__type(graph: INACCESSIBLE) @inaccessible
 
 interface Interface @join__type(graph: INACCESSIBLE) @inaccessible {
-  b: Scalar @inaccessible @join__field(graph: INACCESSIBLE)
+  b: Scalar @inaccessible @join__field(graph: INACCESSIBLE, type: "Scalar")
 }
 
 union Union @join__type(graph: INACCESSIBLE) @inaccessible @join__unionMember(graph: INACCESSIBLE, member: "A") @join__unionMember(graph: INACCESSIBLE, member: "B") = A | B
