@@ -334,7 +334,6 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
             headers::validate_arg(
                 http_arg,
                 schema,
-                &schema.sources,
                 HttpHeadersCoordinate::Source {
                     directive_name: &directive.name,
                 },
@@ -545,14 +544,14 @@ pub enum Code {
     UndefinedField,
     /// A type used in a variable is not yet supported (i.e., unions)
     UnsupportedVariableType,
-    /// A path variable is nullable, which can cause errors at runtime
-    NullablePathVariable,
+    /// A variable is nullable in a location which requires non-null at runtime
+    NullabilityMismatch,
 }
 
 impl Code {
     pub const fn severity(&self) -> Severity {
         match self {
-            Self::NoSourceImport | Self::NullablePathVariable => Severity::Warning,
+            Self::NoSourceImport | Self::NullabilityMismatch => Severity::Warning,
             _ => Severity::Error,
         }
     }

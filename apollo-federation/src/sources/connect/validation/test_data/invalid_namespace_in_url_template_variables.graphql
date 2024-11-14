@@ -19,3 +19,10 @@ type Query {
       }
       selection: "$"
     )
+  nodollar(bar: String): String
+  @connect(
+    http: {
+      GET: "http://127.0.0.1/{config.bar}"
+    }
+    selection: "$"
+  )

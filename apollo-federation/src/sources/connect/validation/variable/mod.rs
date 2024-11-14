@@ -58,11 +58,7 @@ impl<'a> VariableResolver<'a> {
                 message: format!(
                     "Variable namespace `{namespace}` is not valid at this location, must be one of {available}",
                     namespace = reference.namespace.namespace.as_str(),
-                    available = self.expression_context
-                        .available_namespaces()
-                        .map(|s| s.as_str())
-                        .sorted()
-                        .join(", ")
+                    available = self.expression_context.namespaces_joined(),
                 ),
                 locations: expression.line_col_for_subslice(reference.namespace.location.start..reference.namespace.location.end, self.schema).into_iter().collect(),
             })

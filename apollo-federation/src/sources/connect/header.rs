@@ -18,7 +18,6 @@ use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSON;
 
 use crate::sources::connect::variable::Namespace;
-use crate::sources::connect::variable::VariableError;
 use crate::sources::connect::variable::VariableParseError;
 use crate::sources::connect::variable::VariableReference;
 
@@ -83,27 +82,55 @@ impl FromStr for HeaderValue {
         Self::parse(Span::new(s))
             .map(|(_, value)| value)
             .map_err(|e| match e {
-                nom::Err::Error(e) | nom::Err::Failure(e) => {
-                    let variable_error: VariableError = e.into();
-                    HeaderValueError {
-                        message: variable_error.message,
-                        location: variable_error.location,
-                    }
-                }
-                nom::Err::Incomplete(_) => HeaderValueError {
+                nom::Err::Error(e) | nom::Err::Failure(e) => e.into(),
+                nom::Err::Incomplete(_) => HeaderValueError::ParseError {
                     message: "Invalid header value".into(),
-                    location: None,
+                    location: 0..s.len(),
                 },
             })
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct HeaderValueError {
-    pub(crate) message: String,
-    pub(crate) location: Option<Range<usize>>,
+pub enum HeaderValueError {
+    InvalidVariableNamespace {
+        namespace: String,
+        location: Range<usize>,
+    },
+    ParseError {
+        message: String,
+        location: Range<usize>,
+    },
 }
 
+impl HeaderValueError {
+    pub(crate) fn message(&self) -> String {
+        match self {
+            HeaderValueError::InvalidVariableNamespace { namespace, .. } => {
+                format!("Invalid variable namespace: {namespace}")
+            }
+            HeaderValueError::ParseError { message, .. } => message.clone(),
+        }
+    }
+}
+
+impl From<VariableParseError<Span<'_>>> for HeaderValueError {
+    fn from(error: VariableParseError<Span<'_>>) -> Self {
+        match error {
+            VariableParseError::Nom(span, _) => HeaderValueError::ParseError {
+                message: format!("Invalid variable reference `{s}`", s = span.fragment()),
+                location: span.location_offset()..span.location_offset() + span.fragment().len(),
+            },
+            VariableParseError::InvalidNamespace {
+                namespace,
+                location,
+            } => HeaderValueError::InvalidVariableNamespace {
+                namespace,
+                location,
+            },
+        }
+    }
+}
 #[derive(Debug, PartialEq, Clone)]
 enum HeaderValuePart {
     Text(String),
@@ -122,7 +149,7 @@ impl HeaderValuePart {
 type Span<'a> = LocatedSpan<&'a str>;
 
 fn text(input: Span) -> IResult<Span, Span, VariableParseError<Span>> {
-    recognize(many1(none_of("{")))(input)
+    recognize(many1(none_of("{}")))(input)
 }
 
 fn variable_reference(
@@ -159,6 +186,10 @@ mod tests {
             text(Span::new("text{$config.one}")).map(remove_spans),
             Ok(("{$config.one}".into(), "text".into()))
         );
+        assert_eq!(
+            text(Span::new("text}")).map(remove_spans),
+            Ok(("}".into(), "text".into()))
+        )
     }
 
     #[test]
@@ -255,10 +286,17 @@ mod tests {
             })
         );
         assert_eq!(
-            "{$foobar}".parse::<HeaderValue>(),
-            Err(HeaderValueError {
-                message: "Unknown variable namespace `$foobar`".into(),
-                location: Some(1..8)
+            "Before {$foobar} After".parse::<HeaderValue>(),
+            Err(HeaderValueError::InvalidVariableNamespace {
+                namespace: "$foobar".into(),
+                location: 8..15
+            })
+        );
+        assert_eq!(
+            "Before {foo.bar} After".parse::<HeaderValue>(),
+            Err(HeaderValueError::InvalidVariableNamespace {
+                namespace: "foo".into(),
+                location: 8..11
             })
         );
     }

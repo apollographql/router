@@ -11,6 +11,7 @@ use serde_json_bytes::Value as JSON;
 use url::Url;
 
 use crate::sources::connect::variable::Namespace;
+use crate::sources::connect::variable::VariableError;
 use crate::sources::connect::variable::VariableReference;
 
 /// A parser accepting URLTemplate syntax, which is useful both for
@@ -78,10 +79,45 @@ impl URLTemplate {
     }
 }
 
-#[derive(Debug)]
-pub struct Error {
-    pub(crate) message: String,
-    pub(crate) location: Option<Range<usize>>,
+#[derive(Debug, PartialEq)]
+pub enum Error {
+    InvalidVariableNamespace {
+        namespace: String,
+        location: Range<usize>,
+    },
+    ParseError {
+        message: String,
+        location: Option<Range<usize>>,
+    },
+}
+
+impl Error {
+    pub(crate) fn message(&self) -> String {
+        match self {
+            Error::InvalidVariableNamespace { namespace, .. } => {
+                format!("Invalid variable namespace: {namespace}")
+            }
+            Error::ParseError { message, .. } => message.clone(),
+        }
+    }
+}
+
+impl From<VariableError> for Error {
+    fn from(value: VariableError) -> Self {
+        match value {
+            VariableError::InvalidNamespace {
+                namespace,
+                location,
+            } => Self::InvalidVariableNamespace {
+                namespace,
+                location,
+            },
+            VariableError::ParseError { message, location } => Self::ParseError {
+                message,
+                location: Some(location),
+            },
+        }
+    }
 }
 
 impl FromStr for URLTemplate {
@@ -109,7 +145,7 @@ impl FromStr for URLTemplate {
         };
         let base = raw_base
             .map(|raw_base| {
-                Url::parse(raw_base).map_err(|err| Error {
+                Url::parse(raw_base).map_err(|err| Error::ParseError {
                     message: err.to_string(),
                     location: Some(0..raw_base.len()),
                 })
@@ -134,14 +170,14 @@ impl FromStr for URLTemplate {
                 let (key, value) = query_part.split_once('=').ok_or_else(|| {
                     let start = query_part.as_ptr() as usize - input.as_ptr() as usize;
                     let end = start + query_part.len();
-                    Error {
+                    Error::ParseError {
                         message: format!("Query parameter {query_part} must have a value"),
                         location: Some(start..end),
                     }
                 })?;
                 let key = Component::parse(key, input)?;
                 let value = Component::parse(value, input)?;
-                Ok((key, value))
+                Ok::<(Component, Component), Self::Err>((key, value))
             })
             .try_collect()?;
 
@@ -202,15 +238,10 @@ impl Component {
 
             if let Some((var, suffix)) = remaining.split_once('}') {
                 let start_offset = var.as_ptr() as usize - url_template.as_ptr() as usize;
-                parts.push(ValuePart::Var(
-                    VariableReference::parse(var, start_offset).map_err(|e| Error {
-                        message: e.message,
-                        location: e.location,
-                    })?,
-                ));
+                parts.push(ValuePart::Var(VariableReference::parse(var, start_offset)?));
                 remaining = suffix;
             } else {
-                return Err(Error {
+                return Err(Error::ParseError {
                     message: format!(
                         "Missing closing brace in URL suffix {} of path {}",
                         remaining, input
@@ -412,8 +443,13 @@ mod test_parse {
     #[test]
     fn test_invalid_variable_name() {
         let err = URLTemplate::from_str("/something/{$blah.stuff}/more").unwrap_err();
-        assert_eq!(err.message, "Unknown variable namespace `$blah`");
-        assert_eq!(err.location, Some(12..17));
+        assert_eq!(
+            err,
+            Error::InvalidVariableNamespace {
+                namespace: "$blah".into(),
+                location: 12..17
+            }
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::alpha1;
@@ -28,13 +29,22 @@ use nom_locate::LocatedSpan;
 
 /// The context of an expression containing variable references. The context determines what
 /// variable namespaces are available for use in the expression.
-pub(crate) trait ExpressionContext<N> {
+pub(crate) trait ExpressionContext<N: FromStr + ToString> {
     /// Get the variable namespaces that are available in this context
     fn available_namespaces(&self) -> impl Iterator<Item = N>;
+
+    /// Get the list of namespaces joined as a comma separated list
+    fn namespaces_joined(&self) -> String {
+        self.available_namespaces()
+            .map(|s| s.to_string())
+            .sorted()
+            .join(", ")
+    }
 }
 
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
 /// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
+#[derive(Clone, PartialEq)]
 pub(crate) struct ConnectorsContext<'schema> {
     pub(super) directive: Directive<'schema>,
     pub(super) phase: Phase,
@@ -81,6 +91,7 @@ impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
 }
 
 /// An Apollo Connectors directive in a schema
+#[derive(Clone, PartialEq)]
 pub(crate) enum Directive<'schema> {
     /// A `@source` directive
     Source,
@@ -97,6 +108,7 @@ pub(crate) enum Directive<'schema> {
 
 /// The phase an expression is associated with
 #[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Phase {
     /// The request phase
     Request,
@@ -107,6 +119,7 @@ pub(crate) enum Phase {
 
 /// The target of an expression containing a variable reference
 #[allow(unused)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Target {
     /// The expression is used in an HTTP header
     Header,
@@ -141,7 +154,7 @@ impl Namespace {
 }
 
 impl FromStr for Namespace {
-    type Err = VariableError;
+    type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -150,10 +163,7 @@ impl FromStr for Namespace {
             "$context" => Ok(Self::Context),
             "$status" => Ok(Self::Status),
             "$this" => Ok(Self::This),
-            _ => Err(VariableError {
-                message: format!("Unknown variable namespace `{s}`"),
-                location: Some(0..s.len()),
-            }),
+            _ => Err(()),
         }
     }
 }
@@ -205,7 +215,7 @@ impl<I> From<nom::Err<Error<I>>> for VariableParseError<I> {
 /// A variable reference. Consists of a namespace starting with a `$` and an optional path
 /// separated by '.' characters.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariableReference<N: FromStr<Err = VariableError> + ToString> {
+pub(crate) struct VariableReference<N: FromStr + ToString> {
     /// The namespace of the variable - `$this`, `$args`, `$status`, etc.
     pub(crate) namespace: VariableNamespace<N>,
 
@@ -217,7 +227,7 @@ pub(crate) struct VariableReference<N: FromStr<Err = VariableError> + ToString> 
     pub(crate) location: Range<usize>,
 }
 
-impl<N: FromStr<Err = VariableError> + ToString> VariableReference<N> {
+impl<N: FromStr + ToString> VariableReference<N> {
     /// Parse a variable reference at the given offset within the original text. The locations of
     /// the variable and the parts within it will be based on the provided offset.
     pub(crate) fn parse(reference: &str, start_offset: usize) -> Result<Self, VariableError> {
@@ -240,11 +250,18 @@ impl<N: FromStr<Err = VariableError> + ToString> VariableReference<N> {
                 location: reference.location.start + start_offset
                     ..reference.location.end + start_offset,
             })
-            .map_err(|e| VariableError {
-                message: e.message,
-                location: e
-                    .location
-                    .map(|range| range.start + start_offset..range.end + start_offset),
+            .map_err(|e| match e {
+                VariableError::ParseError { message, location } => VariableError::ParseError {
+                    message: message.to_string(),
+                    location: location.start + start_offset..location.end + start_offset,
+                },
+                VariableError::InvalidNamespace {
+                    namespace,
+                    location,
+                } => VariableError::InvalidNamespace {
+                    namespace: namespace.to_string(),
+                    location: location.start + start_offset..location.end + start_offset,
+                },
             })
     }
 
@@ -253,15 +270,15 @@ impl<N: FromStr<Err = VariableError> + ToString> VariableReference<N> {
             .map(|(_, reference)| reference)
             .map_err(move |e| match e {
                 nom::Err::Error(e) => e.into(),
-                _ => VariableError {
+                _ => VariableError::ParseError {
                     message: format!("Invalid variable reference `{s}`"),
-                    location: None,
+                    location: 0..s.len(),
                 },
             })
     }
 }
 
-impl<N: FromStr<Err = VariableError> + ToString> Display for VariableReference<N> {
+impl<N: FromStr + ToString> Display for VariableReference<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.namespace.namespace.to_string().as_str())?;
         for part in &self.path {
@@ -274,7 +291,7 @@ impl<N: FromStr<Err = VariableError> + ToString> Display for VariableReference<N
 
 /// A namespace in a variable reference, like `$this` in `$this.a.b.c`
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariableNamespace<N: FromStr<Err = VariableError> + ToString> {
+pub(crate) struct VariableNamespace<N: FromStr + ToString> {
     pub(crate) namespace: N,
     pub(crate) location: Range<usize>,
 }
@@ -299,7 +316,7 @@ impl Display for VariablePathPart {
     }
 }
 
-pub(crate) fn variable_reference<N: FromStr<Err = VariableError> + ToString>(
+pub(crate) fn variable_reference<N: FromStr + ToString>(
     input: Span,
 ) -> IResult<Span, VariableReference<N>, VariableParseError<Span>> {
     map(
@@ -327,7 +344,7 @@ fn path_part(input: Span) -> IResult<Span, VariablePathPart, VariableParseError<
     .map_err(|e| nom::Err::Error(e.into()))
 }
 
-fn namespace<N: FromStr<Err = VariableError> + ToString>(
+fn namespace<N: FromStr + ToString>(
     input: Span,
 ) -> IResult<Span, VariableNamespace<N>, VariableParseError<Span>> {
     match recognize(pair(char('$'), identifier))(input) {
@@ -345,7 +362,16 @@ fn namespace<N: FromStr<Err = VariableError> + ToString>(
                 location: span.location_offset()..span.location_offset() + span.fragment().len(),
             })),
         },
-        Err(e) => Err(nom::Err::Error(e.into())),
+        Err(_) => {
+            let end = input
+                .fragment()
+                .find(['.', '}'])
+                .unwrap_or(input.fragment().len());
+            Err(nom::Err::Error(VariableParseError::InvalidNamespace {
+                namespace: input.fragment()[0..end].to_string(),
+                location: input.location_offset()..input.location_offset() + end,
+            }))
+        }
     }
 }
 
@@ -357,26 +383,30 @@ fn identifier(input: Span) -> IResult<Span, Span> {
 }
 
 #[derive(Debug)]
-pub(crate) struct VariableError {
-    pub(crate) message: String,
-    pub(crate) location: Option<Range<usize>>,
+pub(crate) enum VariableError {
+    InvalidNamespace {
+        namespace: String,
+        location: Range<usize>,
+    },
+    ParseError {
+        message: String,
+        location: Range<usize>,
+    },
 }
 
 impl From<VariableParseError<Span<'_>>> for VariableError {
     fn from(value: VariableParseError<Span>) -> Self {
         match value {
-            VariableParseError::Nom(span, _) => VariableError {
+            VariableParseError::Nom(span, _) => VariableError::ParseError {
                 message: format!("Invalid variable reference `{s}`", s = span.fragment()),
-                location: Some(
-                    span.location_offset()..span.location_offset() + span.fragment().len(),
-                ),
+                location: span.location_offset()..span.location_offset() + span.fragment().len(),
             },
             VariableParseError::InvalidNamespace {
                 namespace,
                 location,
-            } => VariableError {
-                message: format!("Unknown variable namespace `{namespace}`"),
-                location: Some(location),
+            } => VariableError::InvalidNamespace {
+                namespace,
+                location,
             },
         }
     }
@@ -396,19 +426,28 @@ mod tests {
         assert_eq!(result.namespace, Namespace::Status);
         assert_eq!(result.location, 0..7);
 
-        let error = namespace::<Namespace>(Span::new("$foobar")).unwrap_err();
         assert_eq!(
-            error,
+            namespace::<Namespace>(Span::new("$foobar")).unwrap_err(),
             nom::Err::Error(VariableParseError::InvalidNamespace {
                 namespace: "$foobar".into(),
                 location: 0..7,
             })
         );
 
-        let error = namespace::<Namespace>(Span::new("")).unwrap_err();
         assert_eq!(
-            error,
-            nom::Err::Error(VariableParseError::Nom(Span::new(""), ErrorKind::Char))
+            namespace::<Namespace>(Span::new("foobar")).unwrap_err(),
+            nom::Err::Error(VariableParseError::InvalidNamespace {
+                namespace: "foobar".into(),
+                location: 0..6,
+            })
+        );
+
+        assert_eq!(
+            namespace::<Namespace>(Span::new("")).unwrap_err(),
+            nom::Err::Error(VariableParseError::InvalidNamespace {
+                namespace: "".into(),
+                location: 0..0,
+            })
         );
     }
 
@@ -427,6 +466,36 @@ mod tests {
         assert_eq!(result.path[0].location, 6..7);
         assert_eq!(result.path[1].location, 8..9);
         assert_eq!(result.path[2].location, 10..11);
+    }
+
+    #[test]
+    fn test_invalid_namespace() {
+        let result = variable_reference::<Namespace>(Span::new("$foo.a.b.c")).unwrap_err();
+        assert_eq!(
+            result,
+            nom::Err::Error(VariableParseError::InvalidNamespace {
+                namespace: "$foo".into(),
+                location: 0..4,
+            })
+        )
+    }
+
+    #[test]
+    fn test_namespace_missing_dollar() {
+        assert_eq!(
+            variable_reference::<Namespace>(Span::new("foo.a.b.c} After")).unwrap_err(),
+            nom::Err::Error(VariableParseError::InvalidNamespace {
+                namespace: "foo".into(),
+                location: 0..3,
+            })
+        );
+        assert_eq!(
+            variable_reference::<Namespace>(Span::new("foo} After")).unwrap_err(),
+            nom::Err::Error(VariableParseError::InvalidNamespace {
+                namespace: "foo".into(),
+                location: 0..3,
+            })
+        );
     }
 
     #[test]
@@ -482,17 +551,14 @@ mod tests {
         }
 
         impl FromStr for MiddleEarth {
-            type Err = VariableError;
+            type Err = ();
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s {
                     "$Mordor" => Ok(MiddleEarth::Mordor),
                     "$Gondor" => Ok(MiddleEarth::Gondor),
                     "$Rohan" => Ok(MiddleEarth::Rohan),
-                    _ => Err(VariableError {
-                        message: format!("Unknown realm `{s}`"),
-                        location: Some(0..s.len()),
-                    }),
+                    _ => Err(()),
                 }
             }
         }

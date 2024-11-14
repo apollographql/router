@@ -6,16 +6,23 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
 [
     Message {
         code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.unknown` must be a valid URL template. Unknown variable namespace `$foo`",
+        message: "`GET` in `@connect(http:)` on `Query.unknown` must be a valid URL template. Invalid variable namespace `$foo`,  must be one of $args, $config, $context, $this",
         locations: [
             11:33..11:37,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.invalid` contains an invalid variable reference {$status.bar} - Variable namespace `$status` is not valid at this location, must be one of $args, $config, $context, $this",
+        message: "`GET` in `@connect(http:)` on `Query.invalid` contains an invalid variable reference `{$status.bar}` - Variable namespace `$status` is not valid at this location, must be one of $args, $config, $context, $this",
         locations: [
             18:33..18:40,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.nodollar` must be a valid URL template. Invalid variable namespace `config`,  must be one of $args, $config, $context, $this",
+        locations: [
+            25:31..25:37,
         ],
     },
 ]

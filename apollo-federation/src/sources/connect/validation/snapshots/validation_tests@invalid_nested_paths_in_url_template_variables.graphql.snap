@@ -6,28 +6,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
 [
     Message {
         code: UndefinedField,
-        message: "`GET` in `@connect(http:)` on `Query.scalar` contains an invalid variable reference {$args.scalar.blah} - `String` does not have a field named `blah`.",
+        message: "`GET` in `@connect(http:)` on `Query.scalar` contains an invalid variable reference `{$args.scalar.blah}` - `String` does not have a field named `blah`.",
         locations: [
             10:62..10:66,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`GET` in `@connect(http:)` on `Query.object` contains an invalid variable reference {$args.input.fieldThatDoesntExist} - `InputObject` does not have a field named `fieldThatDoesntExist`.",
+        message: "`GET` in `@connect(http:)` on `Query.object` contains an invalid variable reference `{$args.input.fieldThatDoesntExist}` - `InputObject` does not have a field named `fieldThatDoesntExist`.",
         locations: [
             15:61..15:81,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`GET` in `@connect(http:)` on `Query.enum` contains an invalid variable reference {$args.enum.cantHaveFields} - `Enum` does not have a field named `cantHaveFields`.",
+        message: "`GET` in `@connect(http:)` on `Query.enum` contains an invalid variable reference `{$args.enum.cantHaveFields}` - `Enum` does not have a field named `cantHaveFields`.",
         locations: [
             20:58..20:72,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`GET` in `@connect(http:)` on `Object.newField` contains an invalid variable reference {$this.fieldThatDoesntExist} - `Object` does not have a field named `fieldThatDoesntExist`",
+        message: "`GET` in `@connect(http:)` on `Object.newField` contains an invalid variable reference `{$this.fieldThatDoesntExist}` - `Object` does not have a field named `fieldThatDoesntExist`",
         locations: [
             29:55..29:75,
         ],

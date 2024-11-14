@@ -301,7 +301,6 @@ fn validate_field(
             headers::validate_arg(
                 http_arg,
                 schema,
-                source_map,
                 HttpHeadersCoordinate::Connect {
                     connect: connect_coordinate,
                     object: &object.name,

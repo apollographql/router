@@ -10,6 +10,7 @@ extend schema
       headers: [
         { name: "x-unknown-namespace", value: "{$foo.bar}" }
         { name: "x-invalid-location-for-namespace", value: "{$this.bar}" }
+        { name: "x-namespace-missing-dollar", value: "{config.bar}" }
       ]
     }
   )
@@ -22,6 +23,7 @@ type Query {
         headers: [
           { name: "x-unknown-namespace", value: "{$foo.bar}"}
           { name: "x-invalid-location-for-namespace", value: "{$status}" }
+          { name: "x-namespace-missing-dollar", value: "{config.bar}" }
         ]
       }
       selection: "$"

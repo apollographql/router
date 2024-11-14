@@ -246,7 +246,7 @@ fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), Fed
             HeaderSource::Value(
                 value
                     .parse::<HeaderValue>()
-                    .map_err(|e| internal!(format!("Invalid header value: {}", e.message)))?,
+                    .map_err(|e| internal!(format!("Invalid header value: {}", e.message())))?,
             ),
         ))
     } else {

@@ -6,28 +6,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
 [
     Message {
         code: UndefinedField,
-        message: "`@connect(http.headers:)` on `Query.scalar` contains an invalid variable reference {$args.scalar.blah} - `String` does not have a field named `blah`.",
+        message: "`@connect(http.headers:)` on `Query.scalar` contains an invalid variable reference `{$args.scalar.blah}` - `String` does not have a field named `blah`.",
         locations: [
             13:60..13:64,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`@connect(http.headers:)` on `Query.object` contains an invalid variable reference {$args.input.fieldThatDoesntExist} - `InputObject` does not have a field named `fieldThatDoesntExist`.",
+        message: "`@connect(http.headers:)` on `Query.object` contains an invalid variable reference `{$args.input.fieldThatDoesntExist}` - `InputObject` does not have a field named `fieldThatDoesntExist`.",
         locations: [
             23:59..23:79,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`@connect(http.headers:)` on `Query.enum` contains an invalid variable reference {$args.enum.cantHaveFields} - `Enum` does not have a field named `cantHaveFields`.",
+        message: "`@connect(http.headers:)` on `Query.enum` contains an invalid variable reference `{$args.enum.cantHaveFields}` - `Enum` does not have a field named `cantHaveFields`.",
         locations: [
             33:56..33:70,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`@connect(http.headers:)` on `Object.newField` contains an invalid variable reference {$this.fieldThatDoesntExist} - `Object` does not have a field named `fieldThatDoesntExist`",
+        message: "`@connect(http.headers:)` on `Object.newField` contains an invalid variable reference `{$this.fieldThatDoesntExist}` - `Object` does not have a field named `fieldThatDoesntExist`",
         locations: [
             47:53..47:73,
         ],
