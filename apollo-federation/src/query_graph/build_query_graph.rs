@@ -1547,11 +1547,11 @@ impl FederatedQueryGraphBuilder {
             let coordinate_map = coordinate_map.entry(subgraph_name.clone()).or_default();
             for object_field_arg in &from_context_refs.object_field_arguments {
                 let input_value = object_field_arg.get(subgraph.schema())?;
-                let coordinate = object_field_arg.parent();
                 subgraph_to_args
                     .entry(subgraph_name.clone())
                     .or_default()
                     .push(object_field_arg.clone());
+                let field_coordinate = object_field_arg.parent();
                 for dir in input_value.directives.get_all(&FROM_CONTEXT_DIRECTIVE_NAME) {
                     let application = subgraph_data
                         .federation_spec_definition
@@ -1568,11 +1568,13 @@ impl FederatedQueryGraphBuilder {
                         context,
                         selection,
                         subgraph_name: subgraph_name.clone(),
-                        coordinate: coordinate.clone(),
+                        argument_coordinate: object_field_arg.clone(),
                         types_with_context_set,
+                        named_parameter: object_field_arg.argument_name.as_str().to_owned(),
+                        arg_type: input_value.ty.clone(),
                     };
                     coordinate_map
-                        .entry(coordinate.clone())
+                        .entry(field_coordinate.clone())
                         .or_default()
                         .push(conditions);
                 }
@@ -2336,7 +2338,7 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
         .iter()
         // Ignore the first match because it is always the whole matching substring
         .skip(1)
-        .filter_map(|group| group)
+        .flatten()
         .fold(("", ""), |(a, b), group| (b, group.as_str()));
 
     if context.is_empty() {
