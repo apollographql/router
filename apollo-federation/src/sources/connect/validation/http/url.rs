@@ -13,6 +13,7 @@ use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::variable::ConnectorsContext;
+use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::URLTemplate;
 
@@ -31,7 +32,7 @@ pub(crate) fn validate_template(
     }
 
     let variable_resolver = VariableResolver::new(
-        ConnectorsContext::new(coordinate.connect.into(), Target::RequestUrl),
+        ConnectorsContext::new(coordinate.connect.into(), Phase::Request, Target::Url),
         schema,
     );
     for variable in template.path_variables() {

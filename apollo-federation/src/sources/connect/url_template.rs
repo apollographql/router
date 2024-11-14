@@ -205,7 +205,7 @@ impl Component {
                 parts.push(ValuePart::Var(
                     VariableReference::parse(var, start_offset).map_err(|e| Error {
                         message: e.message,
-                        location: e.location.clone(),
+                        location: e.location,
                     })?,
                 ));
                 remaining = suffix;

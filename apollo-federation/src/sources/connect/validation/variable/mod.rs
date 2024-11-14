@@ -77,8 +77,8 @@ impl<'a> VariableResolver<'a> {
 
     fn error_code(&self) -> Code {
         match self.expression_context.target {
-            Target::RequestUrl => Code::InvalidUrl,
-            Target::RequestHeader => Code::InvalidHttpHeaderValue,
+            Target::Url => Code::InvalidUrl,
+            Target::Header => Code::InvalidHttpHeaderValue,
             _ => Code::GraphQLError,
         }
     }

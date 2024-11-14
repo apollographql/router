@@ -21,6 +21,7 @@ use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::variable::ConnectorsContext;
 use crate::sources::connect::variable::Directive;
+use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 
 pub(crate) fn validate_arg<'a>(
@@ -139,11 +140,11 @@ fn validate_value(
 
     let variable_resolver = match coordinate {
         HttpHeadersCoordinate::Source { .. } => VariableResolver::new(
-            ConnectorsContext::new(Directive::Source, Target::RequestHeader),
+            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Header),
             schema,
         ),
         HttpHeadersCoordinate::Connect { connect, .. } => VariableResolver::new(
-            ConnectorsContext::new(connect.into(), Target::RequestHeader),
+            ConnectorsContext::new(connect.into(), Phase::Request, Target::Header),
             schema,
         ),
     };

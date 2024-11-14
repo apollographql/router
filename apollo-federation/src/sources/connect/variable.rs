@@ -34,26 +34,31 @@ pub(crate) trait ExpressionContext<N> {
 }
 
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
-/// [`Directive`], and have a specific [`Target`].
+/// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
 pub(crate) struct ConnectorsContext<'schema> {
     pub(super) directive: Directive<'schema>,
+    pub(super) phase: Phase,
     pub(super) target: Target,
 }
 
 impl<'schema> ConnectorsContext<'schema> {
-    pub(crate) fn new(directive: Directive<'schema>, target: Target) -> Self {
-        Self { directive, target }
+    pub(crate) fn new(directive: Directive<'schema>, phase: Phase, target: Target) -> Self {
+        Self {
+            directive,
+            phase,
+            target,
+        }
     }
 }
 
 impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
     fn available_namespaces(&self) -> impl Iterator<Item = Namespace> {
-        match (&self.directive, &self.target) {
-            (Directive::Source, Target::ResponseBody) => {
+        match (&self.directive, &self.phase, &self.target) {
+            (Directive::Source, Phase::Response, _) => {
                 vec![Namespace::Config, Namespace::Context, Namespace::Status]
             }
-            (Directive::Source, _) => vec![Namespace::Config, Namespace::Context],
-            (Directive::Connect { .. }, Target::ResponseBody) => {
+            (Directive::Source, _, _) => vec![Namespace::Config, Namespace::Context],
+            (Directive::Connect { .. }, Phase::Response, _) => {
                 vec![
                     Namespace::Args,
                     Namespace::Config,
@@ -62,7 +67,7 @@ impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
                     Namespace::This,
                 ]
             }
-            (Directive::Connect { .. }, _) => {
+            (Directive::Connect { .. }, _, _) => {
                 vec![
                     Namespace::Config,
                     Namespace::Context,
@@ -90,20 +95,27 @@ pub(crate) enum Directive<'schema> {
     },
 }
 
+/// The phase an expression is associated with
+#[allow(dead_code)]
+pub(crate) enum Phase {
+    /// The request phase
+    Request,
+
+    /// The response phase
+    Response,
+}
+
 /// The target of an expression containing a variable reference
 #[allow(unused)]
 pub(crate) enum Target {
-    /// The expression is used in a request header
-    RequestHeader,
+    /// The expression is used in an HTTP header
+    Header,
 
-    /// The expression is used in a request URL
-    RequestUrl,
+    /// The expression is used in a URL
+    Url,
 
-    /// The expression is used in a request body
-    RequestBody,
-
-    /// The expression is used in a response body
-    ResponseBody,
+    /// The expression is used in the body of a request or response
+    Body,
 }
 
 /// The variable namespaces defined for Apollo Connectors
@@ -235,12 +247,8 @@ impl<N: FromStr<Err = VariableError> + ToString> VariableReference<N> {
                     .map(|range| range.start + start_offset..range.end + start_offset),
             })
     }
-}
 
-impl<N: FromStr<Err = VariableError> + ToString> FromStr for VariableReference<N> {
-    type Err = VariableError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, VariableError> {
         variable_reference(Span::new(s))
             .map(|(_, reference)| reference)
             .map_err(move |e| match e {
@@ -252,6 +260,7 @@ impl<N: FromStr<Err = VariableError> + ToString> FromStr for VariableReference<N
             })
     }
 }
+
 impl<N: FromStr<Err = VariableError> + ToString> Display for VariableReference<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.namespace.namespace.to_string().as_str())?;
@@ -438,25 +447,25 @@ mod tests {
     #[test]
     fn test_available_namespaces() {
         assert_eq!(
-            ConnectorsContext::new(Directive::Source, Target::RequestUrl)
+            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Url)
                 .available_namespaces()
                 .collect::<Vec<_>>(),
             vec![Namespace::Config, Namespace::Context,]
         );
         assert_eq!(
-            ConnectorsContext::new(Directive::Source, Target::RequestHeader)
+            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Header)
                 .available_namespaces()
                 .collect::<Vec<_>>(),
             vec![Namespace::Config, Namespace::Context,]
         );
         assert_eq!(
-            ConnectorsContext::new(Directive::Source, Target::RequestBody)
+            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Body)
                 .available_namespaces()
                 .collect::<Vec<_>>(),
             vec![Namespace::Config, Namespace::Context,]
         );
         assert_eq!(
-            ConnectorsContext::new(Directive::Source, Target::ResponseBody)
+            ConnectorsContext::new(Directive::Source, Phase::Response, Target::Header)
                 .available_namespaces()
                 .collect::<Vec<_>>(),
             vec![Namespace::Config, Namespace::Context, Namespace::Status,]
@@ -499,7 +508,7 @@ mod tests {
         }
 
         let result: VariableReference<MiddleEarth> =
-            "$Mordor.mount_doom.cracks_of_doom".parse().unwrap();
+            VariableReference::parse("$Mordor.mount_doom.cracks_of_doom", 0).unwrap();
         assert_eq!(result.namespace.namespace, MiddleEarth::Mordor);
         assert_eq!(result.path.len(), 2);
         assert_eq!(result.path[0].part, "mount_doom");
