@@ -1771,10 +1771,6 @@ where
                                     internal_error!("Unknown argument coordiate, {:?}, in QueryGraph::subgraph_to_arg_indices[{}]", ctx.argument_coordinate, ctx.subgraph_name)
                                 };
 
-                                // TODO: This logic was in the JS code. Does a -1 cost me the
-                                // resolution was unsatisfied?
-                                // if (resolution.cost === -1 || totalCost === -1) {
-                                //  totalCost = -1;
                                 match &resolution {
                                     ConditionResolution::Satisfied {
                                         cost, path_tree, ..
