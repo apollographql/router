@@ -18,6 +18,7 @@ use petgraph::Direction;
 use regex::Regex;
 use strum::IntoEnumIterator;
 
+use crate::bail;
 use crate::display_helpers::DisplaySlice;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -2327,11 +2328,11 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     let mut iter = pattern.captures_iter(field);
 
     let Some(captures) = iter.next() else {
-        internal_error!("Expected to find the name of a context and a selection inside the field argument to `@fromContext`: {field:?}");
+        bail!("Expected to find the name of a context and a selection inside the field argument to `@fromContext`: {field:?}");
     };
 
     if iter.next().is_some() {
-        internal_error!("Expected only one context and selection pair inside the field argument to `@fromContext`: {field:?}");
+        bail!("Expected only one context and selection pair inside the field argument to `@fromContext`: {field:?}");
     }
 
     let (context, selection) = captures
@@ -2342,11 +2343,11 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
         .fold(("", ""), |(a, b), group| (b, group.as_str()));
 
     if context.is_empty() {
-        internal_error!("Expected to find the name of a context inside the field argument to `@fromContext`: {field:?}");
+        bail!("Expected to find the name of a context inside the field argument to `@fromContext`: {field:?}");
     }
 
     if selection.is_empty() {
-        internal_error!(
+        bail!(
             "Expected to find and a selection inside the field argument to `@fromContext`: {field:?}"
         );
     }
