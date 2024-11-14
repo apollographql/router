@@ -61,10 +61,9 @@ With entity caching enabled for this example, the router can:
 - Cache the cart per user, with a small amount of data.
 - Cache inventory data with a short TTL or not cache it at all.
 
+For example, the diagram below shows how a price entity can be cached and then combined with purchase and inventory fragments to serve a `products` query. Because price data is subject to change less often than inventory data, it makes sense to cache it with a different TTL.
+
 ```mermaid
----
-title: Entity Caching using the "Price" entity
----
 flowchart RL
 	subgraph QueryResponse["JSON Response"]
 		n1["{
