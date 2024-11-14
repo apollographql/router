@@ -1767,7 +1767,6 @@ where
                                             arg_type: ctx.arg_type.clone(),
                                             id,
                                         };
-                                        // TODO: Do we need to check for map collisions here?
                                         context_map.insert(ctx.named_parameter.clone(), entry);
                                     }
                                     ConditionResolution::Unsatisfied { .. } => {
