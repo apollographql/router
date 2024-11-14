@@ -5,6 +5,26 @@ use tower::BoxError;
 
 use crate::integration::IntegrationTest;
 
+#[cfg(not(feature = "experimental_hyper_fork"))]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_supergraph_error_http1_max_headers_config() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            limits:
+              experimental_http1_max_request_headers: 100
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_log_contains("'limits.experimental_http1_max_request_headers' requires 'experimental_hyper_fork' feature: enable 'experimental_hyper_fork' feature in order to use 'limits.experimental_http1_max_request_headers'").await;
+    router.assert_not_started().await;
+    Ok(())
+}
+
+#[cfg(feature = "experimental_hyper_fork")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -32,6 +52,7 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[cfg(feature = "experimental_hyper_fork")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()

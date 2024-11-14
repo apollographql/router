@@ -492,6 +492,14 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        #[cfg(not(feature = "experimental_hyper_fork"))]
+        if self.limits.experimental_http1_max_request_headers.is_some() {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "'limits.experimental_http1_max_request_headers' requires 'experimental_hyper_fork' feature",
+                error: "enable 'experimental_hyper_fork' feature in order to use 'limits.experimental_http1_max_request_headers'".to_string(),
+            });
+        }
+
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
