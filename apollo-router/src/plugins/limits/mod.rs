@@ -103,19 +103,18 @@ pub(crate) struct Config {
     /// to protect against running out of memory. Default: 2000000 (2 MB)
     pub(crate) http_max_request_bytes: usize,
 
-    /// Set the maximum number of headers for HTTP1 protocol
+    /// Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.
     ///
-    /// If server receives more headers than the buffer size, it responds to the client with
+    /// If router receives more headers than the buffer size, it responds to the client with
     /// "431 Request Header Fields Too Large".
     ///
-    /// Default is 100.
-    pub(crate) experimental_http1_max_headers: Option<usize>,
+    pub(crate) experimental_http1_max_request_headers: Option<usize>,
 
-    /// Set the maximum buffer size for the HTTP1 connection.
+    /// Limit the maximum buffer size for the HTTP1 connection.
     ///
     /// Default is ~400kb.
     #[schemars(with = "Option<String>", default)]
-    pub(crate) experimental_http1_max_buf_size: Option<ByteSize>,
+    pub(crate) experimental_http1_max_request_buf_size: Option<ByteSize>,
 }
 
 impl Default for Config {
@@ -128,8 +127,8 @@ impl Default for Config {
             max_aliases: None,
             warn_only: false,
             http_max_request_bytes: 2_000_000,
-            experimental_http1_max_headers: None,
-            experimental_http1_max_buf_size: None,
+            experimental_http1_max_request_headers: None,
+            experimental_http1_max_request_buf_size: None,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
