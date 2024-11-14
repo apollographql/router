@@ -304,7 +304,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             http_config.http1_keep_alive(true);
             http_config.http1_header_read_timeout(Duration::from_secs(10));
 
-            #[cfg(feature = "experimental_hyper_fork")]
+            #[cfg(feature = "experimental_hyper_header_limits")]
             if let Some(max_headers) = configuration.limits.experimental_http1_max_request_headers {
                 http_config.http1_max_headers(max_headers);
             }

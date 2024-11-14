@@ -15,8 +15,8 @@ For enhanced security, the GraphOS Router can reject requests that violate any o
 limits:
   # Network-based limits
   http_max_request_bytes: 2000000 # Default value: 2 MB
-  experimental_http1_max_headers: 200 # Default value: 100
-  experimental_http1_max_buf_size: 800kb # Default value: 400kb
+  experimental_http1_max_request_headers: 200 # Default value: 100
+  experimental_http1_max_request_buf_size: 800kb # Default value: 400kb
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value

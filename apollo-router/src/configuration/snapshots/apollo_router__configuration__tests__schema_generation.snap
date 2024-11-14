@@ -1318,15 +1318,15 @@ snapshot_kind: text
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
-        "experimental_http1_max_buf_size": {
+        "experimental_http1_max_request_buf_size": {
           "default": null,
-          "description": "Set the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kb.",
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kb.",
           "nullable": true,
           "type": "string"
         },
-        "experimental_http1_max_headers": {
+        "experimental_http1_max_request_headers": {
           "default": null,
-          "description": "Set the maximum number of headers for HTTP1 protocol\n\nIf server receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".\n\nDefault is 100.",
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".",
           "format": "uint",
           "minimum": 0.0,
           "nullable": true,
