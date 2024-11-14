@@ -1742,8 +1742,6 @@ where
                                     excluded_destinations,
                                     excluded_conditions,
                                 )?;
-                                // TODO: Is this still needed?
-                                // assert(edge.transition.kind === 'FieldCollection', () => `Expected edge to be a FieldCollection edge, got ${edge.transition.kind}`);
                                 let Some(arg_indices) =
                                     self.graph.subgraph_to_arg_indices.get(&ctx.subgraph_name)
                                 else {
