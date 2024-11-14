@@ -212,10 +212,9 @@ This entry contains an object with the `all` field to affect all subgraph reques
 
 ### Entity cache invalidation
 
+You can invalidate entity cache entries with a [specifically formatted request](#invalidation-request-format once you [configure your router](#configuration) appropriately. For example, if price data changes before a price entity's TTL expires, you can send an invalidation request.
+
 ```mermaid
----
-title: Invalidating an Entity Cache
----
 
 flowchart RL
 	subgraph QueryResponse["Cache invalidation POST"]
