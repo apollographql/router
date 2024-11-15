@@ -2528,7 +2528,7 @@ impl FetchDependencyGraphNode {
             for rewrite in other.input_rewrites.iter() {
                 input_rewrites.push(rewrite.clone());
             }
-            
+
             if let Some(other_context_inputs) = &other.context_inputs {
                 self.context_inputs
                     .get_or_insert_with(Vec::new)
@@ -2921,14 +2921,13 @@ impl FetchDependencyGraphNode {
         };
         Some(format!("{subgraph_name}-{merge_at_str}"))
     }
-    
+
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
         let context_inputs = self.context_inputs.get_or_insert_with(Default::default);
         if !context_inputs.iter().any(|c| same_key_renamer(c, &renamer)) {
             context_inputs.push(renamer);
         }
     }
-    
 }
 
 fn same_key_renamer(k1: &FetchDataKeyRenamer, k2: &FetchDataKeyRenamer) -> bool {
@@ -3166,7 +3165,10 @@ impl FetchInputs {
         if self.used_contexts.len() != other.used_contexts.len() {
             return false;
         }
-        other.used_contexts.keys().all(|context| self.used_contexts.contains_key(context))
+        other
+            .used_contexts
+            .keys()
+            .all(|context| self.used_contexts.contains_key(context))
     }
 
     fn equals(&self, other: &Self) -> bool {
@@ -3192,7 +3194,10 @@ impl FetchInputs {
         if self.used_contexts.len() != other.used_contexts.len() {
             return false;
         }
-        other.used_contexts.keys().all(|context| self.used_contexts.contains_key(context))
+        other
+            .used_contexts
+            .keys()
+            .all(|context| self.used_contexts.contains_key(context))
     }
 
     fn to_selection_set_nodes(
@@ -3215,7 +3220,7 @@ impl FetchInputs {
             selections: Arc::new(selections),
         })
     }
-    
+
     fn add_context(&mut self, context: String, ty: CompositeTypeDefinitionPosition) {
         self.used_contexts.insert(context, ty);
     }
