@@ -426,7 +426,15 @@ pub(crate) fn subgraph_mocks(subgraph: &str) -> subgraph::BoxService {
       };
       builder.with_json(
           json!({
-              "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{author{__typename id}}}}}",
+              "query": "
+                query($representations: [_Any!]!) {
+                  _entities(representations: $representations) {
+                    ..._generated_onProduct1_0
+                  }
+                }
+                fragment _generated_onProduct1_0 on Product {
+                  reviews { author{ __typename id } }
+                }",
               "variables": {"representations": [
                   {"__typename": "Product", "upc": "1"},
                   {"__typename": "Product", "upc": "2"},
