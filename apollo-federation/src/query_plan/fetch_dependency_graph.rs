@@ -28,6 +28,7 @@ use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
 use super::query_planner::SubgraphOperationCompression;
+use super::FetchDataKeyRenamer;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -167,6 +168,8 @@ pub(crate) struct FetchDependencyGraphNode {
     inputs: Option<Arc<FetchInputs>>,
     /// Input rewrites for query plan execution to perform prior to executing the fetch.
     input_rewrites: Arc<Vec<Arc<FetchDataRewrite>>>,
+    /// Rewrites that will need to occur to store contextual data for future use
+    context_inputs: Option<Vec<FetchDataKeyRenamer>>,
     /// As query plan execution runs, it accumulates fetch data into a response object. This is the
     /// path at which to merge in the data for this particular fetch.
     merge_at: Option<Vec<FetchDataPathElement>>,
@@ -225,6 +228,8 @@ pub(crate) struct FetchInputs {
     /// The supergraph schema (primarily used for validation of added selection sets).
     #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
+    /// Contexts used as inputs
+    used_contexts: IndexMap<String, CompositeTypeDefinitionPosition>,
 }
 
 /// Represents a dependency between two subgraph fetches, namely that the tail/child depends on the
@@ -791,6 +796,7 @@ impl FetchDependencyGraph {
             cached_cost: None,
             must_preserve_selection_set: false,
             is_known_useful: false,
+            context_inputs: None,
         })))
     }
 
@@ -2522,6 +2528,12 @@ impl FetchDependencyGraphNode {
             for rewrite in other.input_rewrites.iter() {
                 input_rewrites.push(rewrite.clone());
             }
+            
+            if let Some(other_context_inputs) = &other.context_inputs {
+                self.context_inputs
+                    .get_or_insert_with(Vec::new)
+                    .extend(other_context_inputs.iter().cloned());
+            }
         }
         Ok(())
     }
@@ -2694,7 +2706,7 @@ impl FetchDependencyGraphNode {
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
             output_rewrites,
-            context_rewrites: Default::default(),
+            context_rewrites: todo!(),
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {
@@ -2909,6 +2921,22 @@ impl FetchDependencyGraphNode {
         };
         Some(format!("{subgraph_name}-{merge_at_str}"))
     }
+    
+    fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
+        let context_inputs = self.context_inputs.get_or_insert_with(Default::default);
+        if !context_inputs.iter().any(|c| same_key_renamer(c, &renamer)) {
+            context_inputs.push(renamer);
+        }
+    }
+    
+}
+
+fn same_key_renamer(k1: &FetchDataKeyRenamer, k2: &FetchDataKeyRenamer) -> bool {
+    if k1.rename_key_to != k2.rename_key_to || k1.path.len() != k2.path.len() {
+        return false;
+    }
+
+    k1.path.iter().zip(k2.path.iter()).all(|(p1, p2)| p1 == p2)
 }
 
 fn operation_for_entities_fetch(
@@ -3093,6 +3121,7 @@ impl FetchInputs {
         Self {
             selection_sets_per_parent_type: Default::default(),
             supergraph_schema,
+            used_contexts: Default::default(),
         }
     }
 
@@ -3118,7 +3147,11 @@ impl FetchInputs {
         other
             .selection_sets_per_parent_type
             .values()
-            .try_for_each(|selections| self.add(selections))
+            .try_for_each(|selections| self.add(selections))?;
+        Ok(other
+            .used_contexts
+            .iter()
+            .for_each(|(context, ty)| self.add_context(context.clone(), ty.clone())))
     }
 
     fn contains(&self, other: &Self) -> bool {
@@ -3130,7 +3163,10 @@ impl FetchInputs {
                 return false;
             }
         }
-        true
+        if self.used_contexts.len() != other.used_contexts.len() {
+            return false;
+        }
+        other.used_contexts.keys().all(|context| self.used_contexts.contains_key(context))
     }
 
     fn equals(&self, other: &Self) -> bool {
@@ -3153,8 +3189,10 @@ impl FetchInputs {
             }
             // so far so good
         }
-        // all clear
-        true
+        if self.used_contexts.len() != other.used_contexts.len() {
+            return false;
+        }
+        other.used_contexts.keys().all(|context| self.used_contexts.contains_key(context))
     }
 
     fn to_selection_set_nodes(
@@ -3176,6 +3214,10 @@ impl FetchInputs {
             type_position: type_position.clone(),
             selections: Arc::new(selections),
         })
+    }
+    
+    fn add_context(&mut self, context: String, ty: CompositeTypeDefinitionPosition) {
+        self.used_contexts.insert(context, ty);
     }
 }
 
