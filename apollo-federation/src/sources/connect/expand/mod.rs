@@ -488,8 +488,8 @@ mod helpers {
                 //
                 // All sibling fields marked by $this in a transport must be carried over to the output type
                 // regardless of its use in the output selection.
-                let joined = path.iter().map(|part| part.to_string()).join(".");
-                let field_and_selection = FieldAndSelection::from_path(&joined);
+                let parts = path.iter().map(|part| part.part.as_str());
+                let field_and_selection = FieldAndSelection::from_path(parts);
                 let field_name = Name::new(field_and_selection.field_name)?;
                 let field: Box<dyn Field> = match &key_for_type {
                     TypeDefinitionPosition::Object(o)  => Box::new(o.field(field_name)),
@@ -821,8 +821,8 @@ struct FieldAndSelection<'a> {
 
 impl<'a> FieldAndSelection<'a> {
     /// Extract from a path like `a.b.c` into `a` and `b { c }`
-    fn from_path(path: &'a str) -> Self {
-        let mut parts = path.split('.').peekable();
+    fn from_path<I: IntoIterator<Item = &'a str>>(parts: I) -> Self {
+        let mut parts = parts.into_iter().peekable();
         let field_name = parts.next().unwrap_or_default();
         let mut sub_selection = String::new();
         let mut closing_braces = 0;
@@ -865,7 +865,7 @@ mod test_field_and_selection {
         #[case] expected_field: &str,
         #[case] expected_selection: &str,
     ) {
-        let result = super::FieldAndSelection::from_path(path);
+        let result = super::FieldAndSelection::from_path(path.split('.'));
         assert_eq!(result.field_name, expected_field);
         assert_eq!(result.sub_selection, expected_selection);
     }
