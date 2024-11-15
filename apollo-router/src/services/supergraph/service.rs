@@ -40,7 +40,6 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
@@ -810,11 +809,7 @@ impl PluggableSupergraphServiceBuilder {
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
         for (_, plugin) in self.plugins.iter() {
-            if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
-                telemetry.activate();
-            } else {
-                plugin.activate().await;
-            }
+            plugin.activate();
         }
 
         // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.

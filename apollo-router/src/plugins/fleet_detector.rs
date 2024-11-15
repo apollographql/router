@@ -12,7 +12,6 @@ use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
-use tokio::sync::mpsc::Sender;
 use tower::BoxError;
 use tracing::debug;
 
@@ -54,19 +53,22 @@ impl SystemGetter {
     }
 }
 
-struct GaugeStore {
-    gauges: Vec<ObservableGauge<u64>>,
+#[derive(Default)]
+enum GaugeStore {
+    #[default]
+    Disabled,
+    Pending,
+    Active(Vec<ObservableGauge<u64>>),
 }
 
 impl GaugeStore {
-    fn new() -> Self {
-        GaugeStore { gauges: Vec::new() }
-    }
-    fn initialize_gauges(&mut self, system_getter: Arc<Mutex<SystemGetter>>) {
+    fn active() -> GaugeStore {
+        let system_getter = Arc::new(Mutex::new(SystemGetter::new()));
         let meter = meter_provider().meter("apollo/router");
+        let mut gauges = Vec::new();
         {
             let system_getter = system_getter.clone();
-            self.gauges.push(
+            gauges.push(
                 meter
                     .u64_observable_gauge("apollo.router.instance.cpu_freq")
                     .with_description(
@@ -87,7 +89,7 @@ impl GaugeStore {
         }
         {
             let system_getter = system_getter.clone();
-            self.gauges.push(
+            gauges.push(
                 meter
                     .u64_observable_gauge("apollo.router.instance.cpu_count")
                     .with_description(
@@ -105,7 +107,7 @@ impl GaugeStore {
         }
         {
             let system_getter = system_getter.clone();
-            self.gauges.push(
+            gauges.push(
                 meter
                     .u64_observable_gauge("apollo.router.instance.total_memory")
                     .with_description(
@@ -124,13 +126,13 @@ impl GaugeStore {
                     .init(),
             );
         }
+        GaugeStore::Active(gauges)
     }
 }
 
-#[derive(Debug)]
+#[derive(Default)]
 struct FleetDetector {
-    #[allow(dead_code)]
-    gauge_initializer: Sender<()>,
+    gauge_store: Mutex<GaugeStore>,
 }
 #[async_trait::async_trait]
 impl PluginPrivate for FleetDetector {
@@ -138,33 +140,20 @@ impl PluginPrivate for FleetDetector {
 
     async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
-        let (gauge_initializer, mut rx) = tokio::sync::mpsc::channel(1);
-
         if env::var(APOLLO_TELEMETRY_DISABLED).is_ok() {
             debug!("fleet detection disabled, no telemetry will be sent");
-            rx.close();
-            return Ok(FleetDetector { gauge_initializer });
+            return Ok(FleetDetector::default());
         }
 
-        debug!("spawning gauge initializer task");
-        tokio::spawn(async move {
-            let mut gauge_store = GaugeStore::new();
-            let system_getter = Arc::new(Mutex::new(SystemGetter::new()));
-            while rx.recv().await.is_some() {
-                let system_getter = system_getter.clone();
-                gauge_store.initialize_gauges(system_getter);
-            }
-        });
-
-        Ok(FleetDetector { gauge_initializer })
+        Ok(FleetDetector {
+            gauge_store: Mutex::new(GaugeStore::Pending),
+        })
     }
 
-    async fn activate(&self) {
-        if !self.gauge_initializer.is_closed() {
-            debug!("initializing gauges");
-            if let Err(e) = self.gauge_initializer.send(()).await {
-                debug!("failed to activate fleet detector plugin: {:?}", e);
-            }
+    fn activate(&self) {
+        let mut store = self.gauge_store.lock().expect("lock poisoned");
+        if matches!(*store, GaugeStore::Pending) {
+            *store = GaugeStore::active();
         }
     }
 }

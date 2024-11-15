@@ -631,8 +631,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         MultiMap::new()
     }
 
-    /// This is invoked once after the OTEL meter has been refreshed.
-    async fn activate(&self) {}
+    /// The point of no return this plugin is about to go live
+    fn activate(&self) {}
 }
 
 #[async_trait]
@@ -680,6 +680,8 @@ where
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         PluginUnstable::web_endpoints(self)
     }
+
+    fn activate(&self) {}
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -737,8 +739,8 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
-    /// This is invoked once after the OTEL meter has been refreshed.
-    async fn activate(&self) {}
+    /// The point of no return, this plugin is about to go live
+    fn activate(&self) {}
 }
 
 #[async_trait]
@@ -790,8 +792,17 @@ where
         self
     }
 
-    async fn activate(&self) {
-        self.activate().await
+    fn activate(&self) {
+        self.activate()
+    }
+}
+
+impl<T> From<T> for Box<dyn DynPlugin>
+where
+    T: PluginPrivate,
+{
+    fn from(value: T) -> Self {
+        Box::new(value)
     }
 }
 
