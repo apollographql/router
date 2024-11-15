@@ -94,11 +94,11 @@ fn resolve_path(
 }
 
 /// Require a variable reference to have a path
-fn get_root(
-    reference: &VariableReference<Namespace>,
-    expression: GraphQLString,
-    schema: &SchemaInfo,
-) -> Result<VariablePathPart, Message> {
+fn get_root<'a>(
+    reference: &'a VariableReference<'a, Namespace>,
+    expression: GraphQLString<'a>,
+    schema: &'a SchemaInfo<'a>,
+) -> Result<VariablePathPart<'a>, Message> {
     reference.path.first().cloned().ok_or(Message {
         code: Code::GraphQLError,
         message: format!(

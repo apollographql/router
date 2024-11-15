@@ -226,7 +226,7 @@ impl HTTPMethod {
 #[derive(Clone, Debug)]
 pub enum HeaderSource {
     From(String),
-    Value(HeaderValue),
+    Value(HeaderValue<'static>),
 }
 
 #[cfg(test)]

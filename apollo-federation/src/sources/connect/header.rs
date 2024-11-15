@@ -23,17 +23,38 @@ use crate::sources::connect::variable::VariableReference;
 
 /// A header value, optionally containing variable references.
 #[derive(Debug, PartialEq, Clone)]
-pub struct HeaderValue {
-    parts: Vec<HeaderValuePart>,
+pub struct HeaderValue<'a> {
+    parts: Vec<HeaderValuePart<'a>>,
 }
 
-impl HeaderValue {
-    fn new(parts: Vec<HeaderValuePart>) -> Self {
+impl FromStr for HeaderValue<'static> {
+    type Err = HeaderValueError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(HeaderValue::from_str(s)?.into_owned())
+    }
+}
+
+impl<'a> HeaderValue<'a> {
+    fn new(parts: Vec<HeaderValuePart<'a>>) -> Self {
         Self { parts }
     }
 
-    fn parse(input: Span) -> IResult<Span, Self, VariableParseError<Span>> {
+    fn parse(input: Span<'a>) -> IResult<Span, Self, VariableParseError<Span>> {
         all_consuming(map(many1(HeaderValuePart::parse), Self::new))(input)
+    }
+
+    pub(crate) fn into_owned(self) -> HeaderValue<'static> {
+        HeaderValue {
+            parts: self
+                .parts
+                .into_iter()
+                .map(|part| match part {
+                    HeaderValuePart::Text(text) => HeaderValuePart::Text(text),
+                    HeaderValuePart::Variable(var) => HeaderValuePart::Variable(var.into_owned()),
+                })
+                .collect(),
+        }
     }
 
     pub(crate) fn variable_references(
@@ -73,12 +94,8 @@ impl HeaderValue {
         }
         Ok(result)
     }
-}
 
-impl FromStr for HeaderValue {
-    type Err = HeaderValueError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    pub(crate) fn from_str(s: &'a str) -> Result<Self, HeaderValueError> {
         Self::parse(Span::new(s))
             .map(|(_, value)| value)
             .map_err(|e| match e {
@@ -132,13 +149,13 @@ impl From<VariableParseError<Span<'_>>> for HeaderValueError {
     }
 }
 #[derive(Debug, PartialEq, Clone)]
-enum HeaderValuePart {
+enum HeaderValuePart<'a> {
     Text(String),
-    Variable(VariableReference<Namespace>),
+    Variable(VariableReference<'a, Namespace>),
 }
 
-impl HeaderValuePart {
-    fn parse(input: Span) -> IResult<Span, Self, VariableParseError<Span>> {
+impl<'a> HeaderValuePart<'a> {
+    fn parse(input: Span<'a>) -> IResult<Span<'a>, Self, VariableParseError<Span>> {
         alt((
             map(variable_reference, Self::Variable),
             map(map(text, |s| s.fragment().to_string()), Self::Text),
@@ -169,6 +186,8 @@ fn variable_reference(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::sources::connect::variable::VariableNamespace;
     use crate::sources::connect::variable::VariablePathPart;
@@ -208,7 +227,7 @@ mod tests {
                         location: 1..8,
                     },
                     path: vec![VariablePathPart {
-                        part: "one".to_string(),
+                        part: Cow::from("one"),
                         location: 9..12
                     }],
                     location: 1..12
@@ -224,13 +243,13 @@ mod tests {
     #[test]
     fn test_header_value_parse() {
         assert_eq!(
-            "text".parse(),
+            HeaderValue::from_str("text"),
             Ok(HeaderValue {
                 parts: vec![HeaderValuePart::Text("text".to_string())]
             })
         );
         assert_eq!(
-            "{$config.one}".parse(),
+            HeaderValue::from_str("{$config.one}"),
             Ok(HeaderValue {
                 parts: vec![HeaderValuePart::Variable(VariableReference {
                     namespace: VariableNamespace {
@@ -238,7 +257,7 @@ mod tests {
                         location: 1..8,
                     },
                     path: vec![VariablePathPart {
-                        part: "one".to_string(),
+                        part: Cow::from("one"),
                         location: 9..12
                     }],
                     location: 1..12
@@ -246,7 +265,7 @@ mod tests {
             })
         );
         assert_eq!(
-            "text{$config.one}text".parse(),
+            HeaderValue::from_str("text{$config.one}text"),
             Ok(HeaderValue {
                 parts: vec![
                     HeaderValuePart::Text("text".to_string()),
@@ -256,7 +275,7 @@ mod tests {
                             location: 5..12,
                         },
                         path: vec![VariablePathPart {
-                            part: "one".to_string(),
+                            part: Cow::from("one"),
                             location: 13..16
                         }],
                         location: 5..16
@@ -266,7 +285,7 @@ mod tests {
             })
         );
         assert_eq!(
-            "    {$config.one}    ".parse(),
+            HeaderValue::from_str("    {$config.one}    "),
             Ok(HeaderValue {
                 parts: vec![
                     HeaderValuePart::Text("    ".to_string()),
@@ -276,7 +295,7 @@ mod tests {
                             location: 5..12,
                         },
                         path: vec![VariablePathPart {
-                            part: "one".to_string(),
+                            part: Cow::from("one"),
                             location: 13..16
                         }],
                         location: 5..16
@@ -286,14 +305,14 @@ mod tests {
             })
         );
         assert_eq!(
-            "Before {$foobar} After".parse::<HeaderValue>(),
+            HeaderValue::from_str("Before {$foobar} After"),
             Err(HeaderValueError::InvalidVariableNamespace {
                 namespace: "$foobar".into(),
                 location: 8..15
             })
         );
         assert_eq!(
-            "Before {foo.bar} After".parse::<HeaderValue>(),
+            HeaderValue::from_str("Before {foo.bar} After"),
             Err(HeaderValueError::InvalidVariableNamespace {
                 namespace: "foo".into(),
                 location: 8..11

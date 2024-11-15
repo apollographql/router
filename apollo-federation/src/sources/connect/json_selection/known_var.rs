@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[cfg(test)]
 use super::location::WithRange;
 use crate::sources::connect::variable::Namespace;
@@ -57,7 +59,7 @@ impl std::fmt::Display for KnownVariable {
     }
 }
 
-impl TryFrom<(&KnownVariable, Vec<&str>)> for VariableReference<Namespace> {
+impl TryFrom<(&KnownVariable, Vec<&str>)> for VariableReference<'static, Namespace> {
     type Error = ();
 
     fn try_from((variable, path): (&KnownVariable, Vec<&str>)) -> Result<Self, Self::Error> {
@@ -82,8 +84,8 @@ impl TryFrom<(&KnownVariable, Vec<&str>)> for VariableReference<Namespace> {
             },
             path: path
                 .iter()
-                .map(|key| VariablePathPart {
-                    part: key.to_string(),
+                .map(|&key| VariablePathPart {
+                    part: Cow::from(key.to_owned()),
                     location: Default::default(),
                 })
                 .collect(),
@@ -111,11 +113,11 @@ mod tests {
                 },
                 path: vec![
                     VariablePathPart {
-                        part: "foo".to_string(),
+                        part: Cow::from("foo"),
                         location: Default::default(),
                     },
                     VariablePathPart {
-                        part: "bar".to_string(),
+                        part: Cow::from("bar"),
                         location: Default::default(),
                     },
                 ],

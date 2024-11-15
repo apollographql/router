@@ -1,5 +1,6 @@
 //! Variables used in connector directives `@connect` and `@source`.
 
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Range;
@@ -215,22 +216,36 @@ impl<I> From<nom::Err<Error<I>>> for VariableParseError<I> {
 /// A variable reference. Consists of a namespace starting with a `$` and an optional path
 /// separated by '.' characters.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariableReference<N: FromStr + ToString> {
+pub(crate) struct VariableReference<'a, N: FromStr + ToString> {
     /// The namespace of the variable - `$this`, `$args`, `$status`, etc.
     pub(crate) namespace: VariableNamespace<N>,
 
     /// The path elements of this reference. For example, the reference `$this.a.b.c`
     /// has path elements `a`, `b`, `c`. May be empty in some cases, as in the reference `$status`.
-    pub(crate) path: Vec<VariablePathPart>,
+    pub(crate) path: Vec<VariablePathPart<'a>>,
 
     /// The location of the reference within the original text.
     pub(crate) location: Range<usize>,
 }
 
-impl<N: FromStr + ToString> VariableReference<N> {
+impl<'a> VariableReference<'a, Namespace> {
+    pub(crate) fn into_owned(self) -> VariableReference<'static, Namespace> {
+        VariableReference {
+            namespace: self.namespace,
+            path: self
+                .path
+                .into_iter()
+                .map(VariablePathPart::into_owned)
+                .collect(),
+            location: self.location,
+        }
+    }
+}
+
+impl<'a, N: FromStr + ToString> VariableReference<'a, N> {
     /// Parse a variable reference at the given offset within the original text. The locations of
     /// the variable and the parts within it will be based on the provided offset.
-    pub(crate) fn parse(reference: &str, start_offset: usize) -> Result<Self, VariableError> {
+    pub(crate) fn parse(reference: &'a str, start_offset: usize) -> Result<Self, VariableError> {
         VariableReference::from_str(reference)
             .map(|reference| Self {
                 namespace: VariableNamespace {
@@ -265,10 +280,10 @@ impl<N: FromStr + ToString> VariableReference<N> {
             })
     }
 
-    fn from_str(s: &str) -> Result<Self, VariableError> {
+    fn from_str(s: &'a str) -> Result<Self, VariableError> {
         variable_reference(Span::new(s))
             .map(|(_, reference)| reference)
-            .map_err(move |e| match e {
+            .map_err(|e| match e {
                 nom::Err::Error(e) => e.into(),
                 _ => VariableError::ParseError {
                     message: format!("Invalid variable reference `{s}`"),
@@ -278,7 +293,7 @@ impl<N: FromStr + ToString> VariableReference<N> {
     }
 }
 
-impl<N: FromStr + ToString> Display for VariableReference<N> {
+impl<N: FromStr + ToString> Display for VariableReference<'_, N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.namespace.namespace.to_string().as_str())?;
         for part in &self.path {
@@ -298,18 +313,27 @@ pub(crate) struct VariableNamespace<N: FromStr + ToString> {
 
 /// Part of a variable path, like `a` in `$this.a.b.c`
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariablePathPart {
-    pub(crate) part: String,
+pub(crate) struct VariablePathPart<'a> {
+    pub(crate) part: Cow<'a, str>,
     pub(crate) location: Range<usize>,
 }
 
-impl VariablePathPart {
-    pub(crate) fn as_str(&self) -> &str {
-        self.part.as_str()
+impl<'a> VariablePathPart<'a> {
+    fn into_owned(self) -> VariablePathPart<'static> {
+        VariablePathPart {
+            part: Cow::from(self.part.into_owned()),
+            location: self.location,
+        }
     }
 }
 
-impl Display for VariablePathPart {
+impl VariablePathPart<'_> {
+    pub(crate) fn as_str(&self) -> &str {
+        self.part.as_ref()
+    }
+}
+
+impl Display for VariablePathPart<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.part.to_string().as_str())?;
         Ok(())
@@ -338,7 +362,7 @@ pub(crate) fn variable_reference<N: FromStr + ToString>(
 
 fn path_part(input: Span) -> IResult<Span, VariablePathPart, VariableParseError<Span>> {
     map(identifier, |span| VariablePathPart {
-        part: span.fragment().to_string(),
+        part: Cow::from(*span.fragment()),
         location: span.location_offset()..span.location_offset() + span.fragment().len(),
     })(input)
     .map_err(|e| nom::Err::Error(e.into()))

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::SourceMap;

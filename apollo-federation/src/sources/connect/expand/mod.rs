@@ -488,7 +488,7 @@ mod helpers {
                 //
                 // All sibling fields marked by $this in a transport must be carried over to the output type
                 // regardless of its use in the output selection.
-                let parts = path.iter().map(|part| part.part.as_str());
+                let parts = path.iter().map(|part| part.part.as_ref());
                 let field_and_selection = FieldAndSelection::from_path(parts);
                 let field_name = Name::new(field_and_selection.field_name)?;
                 let field: Box<dyn Field> = match &key_for_type {

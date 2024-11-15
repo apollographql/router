@@ -37,7 +37,7 @@ pub(crate) struct Component {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum ValuePart {
     Text(String),
-    Var(VariableReference<Namespace>),
+    Var(VariableReference<'static, Namespace>),
 }
 
 impl URLTemplate {
@@ -238,7 +238,9 @@ impl Component {
 
             if let Some((var, suffix)) = remaining.split_once('}') {
                 let start_offset = var.as_ptr() as usize - url_template.as_ptr() as usize;
-                parts.push(ValuePart::Var(VariableReference::parse(var, start_offset)?));
+                let reference: VariableReference<'static, Namespace> =
+                    VariableReference::parse(var, start_offset)?.into_owned();
+                parts.push(ValuePart::Var(reference));
                 remaining = suffix;
             } else {
                 return Err(Error::ParseError {

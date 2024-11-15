@@ -244,9 +244,9 @@ fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), Fed
         Ok((
             name,
             HeaderSource::Value(
-                value
-                    .parse::<HeaderValue>()
-                    .map_err(|e| internal!(format!("Invalid header value: {}", e.message())))?,
+                HeaderValue::from_str(value)
+                    .map_err(|e| internal!(format!("Invalid header value: {}", e.message())))?
+                    .into_owned(),
             ),
         ))
     } else {
