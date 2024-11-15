@@ -3147,10 +3147,11 @@ impl FetchInputs {
             .selection_sets_per_parent_type
             .values()
             .try_for_each(|selections| self.add(selections))?;
-        Ok(other
+        other
             .used_contexts
             .iter()
-            .for_each(|(context, ty)| self.add_context(context.clone(), ty.clone())))
+            .for_each(|(context, ty)| self.add_context(context.clone(), ty.clone()));
+        Ok(())
     }
 
     fn contains(&self, other: &Self) -> bool {
