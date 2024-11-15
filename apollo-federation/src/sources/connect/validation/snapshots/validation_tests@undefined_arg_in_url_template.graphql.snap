@@ -6,14 +6,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/undefined
 [
     Message {
         code: UndefinedArgument,
-        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$args.blah}`, but `Query.resources` does not have an argument named `blah`.",
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains an invalid variable reference `{$args.blah}` - `resources` does not have an argument named `blah`",
         locations: [
             10:45..10:49,
         ],
     },
     Message {
         code: UndefinedArgument,
-        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$args.something}`, but `Query.resources` does not have an argument named `something`.",
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains an invalid variable reference `{$args.something}` - `resources` does not have an argument named `something`",
         locations: [
             10:68..10:77,
         ],

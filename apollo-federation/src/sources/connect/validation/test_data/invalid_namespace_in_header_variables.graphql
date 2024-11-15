@@ -1,0 +1,30 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "v1"
+    http: {
+      baseURL: "https://127.0.0.1"
+      headers: [
+        { name: "x-unknown-namespace", value: "{$foo.bar}" }
+        { name: "x-invalid-location-for-namespace", value: "{$this.bar}" }
+        { name: "x-namespace-missing-dollar", value: "{config.bar}" }
+      ]
+    }
+  )
+
+type Query {
+  scalar(bar: String): String
+    @connect(
+      http: {
+        GET: "http://127.0.0.1"
+        headers: [
+          { name: "x-unknown-namespace", value: "{$foo.bar}"}
+          { name: "x-invalid-location-for-namespace", value: "{$status}" }
+          { name: "x-namespace-missing-dollar", value: "{config.bar}" }
+        ]
+      }
+      selection: "$"
+    )

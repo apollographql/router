@@ -300,9 +300,9 @@ fn validate_field(
         errors.extend(
             headers::validate_arg(
                 http_arg,
-                source_map,
+                schema,
                 HttpHeadersCoordinate::Connect {
-                    directive_name: schema.connect_directive_name,
+                    connect: connect_coordinate,
                     object: &object.name,
                     field: &field.name,
                 },

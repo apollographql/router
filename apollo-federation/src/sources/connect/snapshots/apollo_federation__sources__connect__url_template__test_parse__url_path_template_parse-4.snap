@@ -16,9 +16,17 @@ Ok(
             Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: This,
-                            path: "lat",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $this,
+                                location: 11..16,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "lat",
+                                    location: 17..20,
+                                },
+                            ],
                             location: 11..20,
                         },
                     ),
@@ -26,9 +34,17 @@ Ok(
                         ",",
                     ),
                     Var(
-                        Variable {
-                            var_type: This,
-                            path: "lon",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $this,
+                                location: 23..28,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "lon",
+                                    location: 29..32,
+                                },
+                            ],
                             location: 23..32,
                         },
                     ),

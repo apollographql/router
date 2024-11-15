@@ -32,9 +32,17 @@ Ok(
             }: Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: Args,
-                            path: "abc",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $args,
+                                location: 24..29,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "abc",
+                                    location: 30..33,
+                                },
+                            ],
                             location: 24..33,
                         },
                     ),

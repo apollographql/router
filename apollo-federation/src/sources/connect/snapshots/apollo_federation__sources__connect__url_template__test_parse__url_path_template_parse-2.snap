@@ -16,9 +16,17 @@ Ok(
             Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: This,
-                            path: "user_id",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $this,
+                                location: 8..13,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "user_id",
+                                    location: 14..21,
+                                },
+                            ],
                             location: 8..21,
                         },
                     ),
@@ -35,9 +43,17 @@ Ok(
             }: Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: Args,
-                            path: "b",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $args,
+                                location: 26..31,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "b",
+                                    location: 32..33,
+                                },
+                            ],
                             location: 26..33,
                         },
                     ),
@@ -52,9 +68,17 @@ Ok(
             }: Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: Args,
-                            path: "d",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $args,
+                                location: 38..43,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "d",
+                                    location: 44..45,
+                                },
+                            ],
                             location: 38..45,
                         },
                     ),
@@ -69,9 +93,21 @@ Ok(
             }: Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: Args,
-                            path: "f.g",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $args,
+                                location: 50..55,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "f",
+                                    location: 56..57,
+                                },
+                                VariablePathPart {
+                                    part: "g",
+                                    location: 58..59,
+                                },
+                            ],
                             location: 50..59,
                         },
                     ),

@@ -41,9 +41,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "bar",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 2..7,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "bar",
+                                            location: 8..11,
+                                        },
+                                    ],
                                     location: 2..11,
                                 },
                             ),
@@ -52,9 +60,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "doubleBaz.buzz",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 14..19,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "doubleBaz",
+                                            location: 20..29,
+                                        },
+                                        VariablePathPart {
+                                            part: "buzz",
+                                            location: 30..34,
+                                        },
+                                    ],
                                     location: 14..34,
                                 },
                             ),
@@ -63,9 +83,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "baz.quux.quaz",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 37..42,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "baz",
+                                            location: 43..46,
+                                        },
+                                        VariablePathPart {
+                                            part: "quux",
+                                            location: 47..51,
+                                        },
+                                        VariablePathPart {
+                                            part: "quaz",
+                                            location: 52..56,
+                                        },
+                                    ],
                                     location: 37..56,
                                 },
                             ),

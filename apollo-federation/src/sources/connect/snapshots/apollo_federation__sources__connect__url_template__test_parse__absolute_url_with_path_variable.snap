@@ -25,9 +25,17 @@ Ok(
             Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: Args,
-                            path: "abc",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $args,
+                                location: 20..25,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "abc",
+                                    location: 26..29,
+                                },
+                            ],
                             location: 20..29,
                         },
                     ),

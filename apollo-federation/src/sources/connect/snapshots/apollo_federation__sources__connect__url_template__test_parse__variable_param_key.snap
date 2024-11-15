@@ -10,9 +10,21 @@ Ok(
             Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: Args,
-                            path: "filter.field",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $args,
+                                location: 2..7,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "filter",
+                                    location: 8..14,
+                                },
+                                VariablePathPart {
+                                    part: "field",
+                                    location: 15..20,
+                                },
+                            ],
                             location: 2..20,
                         },
                     ),
@@ -20,9 +32,21 @@ Ok(
             }: Component {
                 parts: [
                     Var(
-                        Variable {
-                            var_type: Args,
-                            path: "filter.value",
+                        VariableReference {
+                            namespace: VariableNamespace {
+                                namespace: $args,
+                                location: 23..28,
+                            },
+                            path: [
+                                VariablePathPart {
+                                    part: "filter",
+                                    location: 29..35,
+                                },
+                                VariablePathPart {
+                                    part: "value",
+                                    location: 36..41,
+                                },
+                            ],
                             location: 23..41,
                         },
                     ),

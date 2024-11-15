@@ -490,9 +490,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "company.name",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 13..18,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "company",
+                                            location: 19..26,
+                                        },
+                                        VariablePathPart {
+                                            part: "name",
+                                            location: 27..31,
+                                        },
+                                    ],
                                     location: 13..31,
                                 },
                             ),
@@ -635,9 +647,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 2..7,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 8..10,
+                                        },
+                                    ],
                                     location: 2..10,
                                 },
                             ),
