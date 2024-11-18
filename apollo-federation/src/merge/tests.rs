@@ -78,9 +78,39 @@ fn test_inaccessible() {
 #[test]
 fn test_interface_object() {
     let subgraphs = subgraphs! {
-      "interface_object_1" => "../sources/connect/expand/merge/interface_object_1.graphql",
-      "interface_object_2" => "../sources/connect/expand/merge/interface_object_2.graphql",
-      "interface_object_3" => "../sources/connect/expand/merge/interface_object_3.graphql",
+      "interface_object_1" => "./testdata/interface_object/one.graphql",
+      "interface_object_2" => "./testdata/interface_object/two.graphql",
+      "interface_object_3" => "./testdata/interface_object/three.graphql",
+    };
+
+    let result = merge_federation_subgraphs(subgraphs).unwrap();
+
+    let schema = result.schema.into_inner();
+    let validation = schema.clone().validate();
+    assert!(validation.is_ok(), "{:?}", validation);
+
+    assert_snapshot!(schema.serialize());
+}
+
+#[test]
+fn test_input_types() {
+    let subgraphs = subgraphs! {
+      "one" => "./testdata/input_types/one.graphql",
+    };
+
+    let result = merge_federation_subgraphs(subgraphs).unwrap();
+
+    let schema = result.schema.into_inner();
+    let validation = schema.clone().validate();
+    assert!(validation.is_ok(), "{:?}", validation);
+
+    assert_snapshot!(schema.serialize());
+}
+
+#[test]
+fn test_interface_implementing_interface() {
+    let subgraphs = subgraphs! {
+      "one" => "./testdata/interface_implementing_interface/one.graphql",
     };
 
     let result = merge_federation_subgraphs(subgraphs).unwrap();

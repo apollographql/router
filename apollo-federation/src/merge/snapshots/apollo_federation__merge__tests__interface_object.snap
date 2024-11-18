@@ -1,5 +1,5 @@
 ---
-source: apollo-federation/src/merge.rs
+source: apollo-federation/src/merge/tests.rs
 expression: schema.serialize()
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
@@ -66,4 +66,9 @@ type T2 implements Itf @join__type(graph: INTERFACE_OBJECT_1, key: "id") @join__
 type Query @join__type(graph: INTERFACE_OBJECT_1) @join__type(graph: INTERFACE_OBJECT_2) @join__type(graph: INTERFACE_OBJECT_3) {
   itfs: [Itf] @join__field(graph: INTERFACE_OBJECT_2, type: "[Itf]")
   itf(id: ID!): Itf @join__field(graph: INTERFACE_OBJECT_3, type: "Itf")
+  itf2(id: ID!): Itf2 @join__field(graph: INTERFACE_OBJECT_3, type: "Itf2")
+}
+
+interface Itf2 @join__type(graph: INTERFACE_OBJECT_3, isInterfaceObject: true, key: "id") {
+  id: ID! @join__field(graph: INTERFACE_OBJECT_3, type: "ID!")
 }
