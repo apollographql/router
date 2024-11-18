@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tracing::info_span;
 use tracing::Span;
 
 use super::instruments::Instrumented;
@@ -738,8 +739,15 @@ where
             let mut new_attributes = selectors.on_response_event(response, ctx);
             attributes.append(&mut new_attributes);
         }
-
-        inner.send_event(attributes);
+        // Stub span to make sure the custom attributes are saved in current span extensions
+        // It won't be extracted or sampled at all
+        if Span::current().is_none() {
+            let span = info_span!("supergraph_event_send_event");
+            let _entered = span.enter();
+            inner.send_event(attributes);
+        } else {
+            inner.send_event(attributes);
+        }
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {

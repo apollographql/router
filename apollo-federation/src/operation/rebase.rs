@@ -11,10 +11,8 @@ use super::Field;
 use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpread;
-use super::FragmentSpreadData;
 use super::FragmentSpreadSelection;
 use super::InlineFragment;
-use super::InlineFragmentData;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::OperationElement;
@@ -22,6 +20,7 @@ use super::Selection;
 use super::SelectionId;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
@@ -190,28 +189,28 @@ impl Field {
                 }
                 .into())
             } else {
-                let mut updated_field_data = self.data().clone();
-                updated_field_data.schema = schema.clone();
-                updated_field_data.field_position = parent_type.introspection_typename_field();
-                Ok(Field::new(updated_field_data))
+                let mut updated_field = self.clone();
+                updated_field.schema = schema.clone();
+                updated_field.field_position = parent_type.introspection_typename_field();
+                Ok(updated_field)
             };
         }
 
         let field_from_parent = parent_type.field(self.name().clone())?;
-        return if field_from_parent.try_get(schema.schema()).is_some()
+        if field_from_parent.try_get(schema.schema()).is_some()
             && self.can_rebase_on(parent_type)?
         {
-            let mut updated_field_data = self.data().clone();
-            updated_field_data.schema = schema.clone();
-            updated_field_data.field_position = field_from_parent;
-            Ok(Field::new(updated_field_data))
+            let mut updated_field = self.clone();
+            updated_field.schema = schema.clone();
+            updated_field.field_position = field_from_parent;
+            Ok(updated_field)
         } else {
             Err(RebaseError::CannotRebase {
                 field_position: self.field_position.clone(),
                 parent_type: parent_type.clone(),
             }
             .into())
-        };
+        }
     }
 
     /// Verifies whether given field can be rebase on following parent type.
@@ -337,20 +336,6 @@ impl FieldSelection {
         }
     }
 
-    /// Returns a field selection "equivalent" to the one represented by this object, but such that its parent type
-    /// is the one provided as argument.
-    ///
-    /// Obviously, this operation will only succeed if this selection (both the field itself and its subselections)
-    /// make sense from the provided parent type. If this is not the case, this method will throw.
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-    ) -> Result<FieldSelection, FederationError> {
-        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
-    }
-
     fn can_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -390,12 +375,12 @@ impl FragmentSpread {
             }
             .into());
         };
-        debug_assert_eq!(
-            *schema, self.schema,
+        ensure!(
+            *schema == self.schema,
             "Fragment spread should only be rebased within the same subgraph"
         );
-        debug_assert_eq!(
-            *schema, named_fragment.schema,
+        ensure!(
+            *schema == named_fragment.schema,
             "Referenced named fragment should've been rebased for the subgraph"
         );
         if runtime_types_intersect(
@@ -403,10 +388,10 @@ impl FragmentSpread {
             &named_fragment.type_condition_position,
             &self.schema,
         ) {
-            Ok(FragmentSpread::new(FragmentSpreadData::from_fragment(
+            Ok(FragmentSpread::from_fragment(
                 named_fragment,
                 &self.directives,
-            )))
+            ))
         } else {
             Err(RebaseError::NonIntersectingCondition {
                 type_condition: named_fragment.type_condition_position.clone().into(),
@@ -487,23 +472,20 @@ impl FragmentSpreadSelection {
                 Err(RebaseError::EmptySelectionSet.into())
             } else {
                 Ok(InlineFragmentSelection::new(
-                    InlineFragment::new(InlineFragmentData {
+                    InlineFragment {
                         schema: schema.clone(),
                         parent_type_position: parent_type.clone(),
                         type_condition_position: None,
                         directives: Default::default(),
                         selection_id: SelectionId::new(),
-                    }),
+                    },
                     expanded_selection_set,
                 )
                 .into())
             };
         }
 
-        let spread = FragmentSpread::new(FragmentSpreadData::from_fragment(
-            named_fragment,
-            &self.spread.directives,
-        ));
+        let spread = FragmentSpread::from_fragment(named_fragment, &self.spread.directives);
         Ok(FragmentSpreadSelection {
             spread,
             selection_set: named_fragment.selection_set.clone(),
@@ -521,7 +503,7 @@ impl FragmentSpreadSelection {
     }
 }
 
-impl InlineFragmentData {
+impl InlineFragment {
     fn casted_type_if_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -530,33 +512,18 @@ impl InlineFragmentData {
         if self.schema == *schema && self.parent_type_position == *parent_type {
             return Some(self.casted_type());
         }
-        match self.can_rebase_on(parent_type, schema) {
-            (false, _) => None,
-            (true, None) => Some(parent_type.clone()),
-            (true, Some(ty)) => Some(ty),
-        }
-    }
-
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
         let Some(ty) = self.type_condition_position.as_ref() else {
-            return (true, None);
+            return Some(parent_type.clone());
         };
-        match schema
+
+        let rebased_type = schema
             .get_type(ty.type_name().clone())
             .ok()
-            .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())
-        {
-            Some(ty) if runtime_types_intersect(parent_type, &ty, schema) => (true, Some(ty)),
-            _ => (false, None),
-        }
-    }
-}
+            .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())?;
 
-impl InlineFragment {
+        runtime_types_intersect(parent_type, &rebased_type, schema).then_some(rebased_type)
+    }
+
     pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -579,11 +546,11 @@ impl InlineFragment {
             }
             .into())
         } else {
-            let mut rebased_fragment_data = self.data().clone();
-            rebased_fragment_data.parent_type_position = parent_type.clone();
-            rebased_fragment_data.type_condition_position = rebased_condition;
-            rebased_fragment_data.schema = schema.clone();
-            Ok(InlineFragment::new(rebased_fragment_data))
+            let mut rebased_fragment = self.clone();
+            rebased_fragment.parent_type_position = parent_type.clone();
+            rebased_fragment.type_condition_position = rebased_condition;
+            rebased_fragment.schema = schema.clone();
+            Ok(rebased_fragment)
         }
     }
 
@@ -660,15 +627,6 @@ impl InlineFragmentSelection {
         }
     }
 
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-    ) -> Result<Selection, FederationError> {
-        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
-    }
-
     fn can_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -690,16 +648,6 @@ impl InlineFragmentSelection {
         } else {
             Ok(true)
         }
-    }
-
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        parent_schema: &ValidFederationSchema,
-    ) -> bool {
-        self.inline_fragment
-            .can_rebase_on(parent_type, parent_schema)
-            .0
     }
 }
 
@@ -742,8 +690,8 @@ impl SelectionSet {
     ) -> Result<SelectionSet, FederationError> {
         let rebased_results = self
             .selections
-            .iter()
-            .map(|(_, selection)| {
+            .values()
+            .map(|selection| {
                 selection.rebase_inner(
                     parent_type,
                     named_fragments,
@@ -780,7 +728,7 @@ impl SelectionSet {
 
     /// Returns true if the selection set would select cleanly from the given type in the given
     /// schema.
-    pub fn can_rebase_on(
+    pub(crate) fn can_rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,

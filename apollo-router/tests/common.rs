@@ -103,6 +103,7 @@ struct TracedResponder {
     response_template: ResponseTemplate,
     telemetry: Telemetry,
     subscriber_subgraph: Dispatch,
+    subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Respond for TracedResponder {
@@ -112,6 +113,9 @@ impl Respond for TracedResponder {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
             let _span_guard = span.enter();
+            if let Some(callback) = &self.subgraph_callback {
+                callback();
+            }
             self.response_template.clone()
         })
     }
@@ -280,6 +284,7 @@ impl IntegrationTest {
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
         log: Option<String>,
+        subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -313,6 +318,7 @@ impl IntegrationTest {
                 ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
                 telemetry: telemetry.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
+                subgraph_callback
             })
             .mount(&subgraphs)
             .await;
@@ -483,6 +489,11 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub fn update_subgraph_overrides(&mut self, overrides: HashMap<String, String>) {
+        self._subgraph_overrides = overrides;
+    }
+
+    #[allow(dead_code)]
     pub async fn update_schema(&self, supergraph_path: &PathBuf) {
         fs::copy(supergraph_path, &self.test_schema_location).expect("could not write schema");
     }
@@ -517,7 +528,7 @@ impl IntegrationTest {
     pub fn execute_huge_query(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
     }
 
     #[allow(dead_code)]
@@ -576,7 +587,6 @@ impl IntegrationTest {
 
                 let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
-                request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {

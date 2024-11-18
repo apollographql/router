@@ -51,6 +51,7 @@ use super::Field;
 use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpreadSelection;
+use super::HasSelectionKey;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
@@ -60,7 +61,6 @@ use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
-use crate::operation::FragmentSpreadData;
 use crate::operation::SelectionValue;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -228,10 +228,7 @@ impl Selection {
             let diff = self_sub_selection.minus(other_sub_selection)?;
             if !diff.is_empty() {
                 return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        diff.into_iter().map(|(_, v)| v),
-                    )
+                    .with_updated_selections(self_sub_selection.type_position.clone(), diff)
                     .map(Some);
             }
         }
@@ -247,12 +244,11 @@ impl Selection {
             (self.selection_set(), other.selection_set())
         {
             let common = self_sub_selection.intersection(other_sub_selection)?;
-            if !common.is_empty() {
+            if common.is_empty() {
+                return Ok(None);
+            } else {
                 return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        common.into_iter().map(|(_, v)| v),
-                    )
+                    .with_updated_selections(self_sub_selection.type_position.clone(), common)
                     .map(Some);
             }
         }
@@ -266,9 +262,9 @@ impl SelectionSet {
     pub(crate) fn minus(&self, other: &SelectionSet) -> Result<SelectionSet, FederationError> {
         let iter = self
             .selections
-            .iter()
-            .map(|(k, v)| {
-                if let Some(other_v) = other.selections.get(k) {
+            .values()
+            .map(|v| {
+                if let Some(other_v) = other.selections.get(v.key()) {
                     v.minus(other_v)
                 } else {
                     Ok(Some(v.clone()))
@@ -295,9 +291,9 @@ impl SelectionSet {
 
         let iter = self
             .selections
-            .iter()
-            .map(|(k, v)| {
-                if let Some(other_v) = other.selections.get(k) {
+            .values()
+            .map(|v| {
+                if let Some(other_v) = other.selections.get(v.key()) {
                     v.intersection(other_v)
                 } else {
                     Ok(None)
@@ -411,7 +407,7 @@ impl FieldsConflictValidator {
         for selection_set in level {
             for field_selection in selection_set.field_selections() {
                 let response_name = field_selection.field.response_name();
-                let at_response_name = at_level.entry(response_name).or_default();
+                let at_response_name = at_level.entry(response_name.clone()).or_default();
                 let entry = at_response_name
                     .entry(field_selection.field.clone())
                     .or_default();
@@ -441,7 +437,7 @@ impl FieldsConflictValidator {
 
     fn for_field<'v>(&'v self, field: &Field) -> impl Iterator<Item = Arc<Self>> + 'v {
         self.by_response_name
-            .get(&field.response_name())
+            .get(field.response_name())
             .into_iter()
             .flat_map(|by_response_name| by_response_name.values())
             .flatten()
@@ -680,10 +676,11 @@ impl FragmentRestrictionAtType {
     // Using `F` in those cases is, while not 100% incorrect, at least not productive, and so we
     // skip it that case. This is essentially an optimization.
     fn is_useless(&self) -> bool {
-        match self.selections.selections.as_slice().split_first() {
-            None => true,
-            Some((first, rest)) => rest.is_empty() && first.0.is_typename_field(),
-        }
+        let mut iter = self.selections.iter();
+        let Some(first) = iter.next() else {
+            return true;
+        };
+        iter.next().is_none() && first.is_typename_field()
     }
 }
 
@@ -749,7 +746,7 @@ impl Fragment {
             return false;
         }
 
-        self.selection_set.selections.iter().any(|(_, selection)| {
+        self.selection_set.selections.values().any(|selection| {
             matches!(
                 selection,
                 Selection::FragmentSpread(fragment) if fragment.spread.fragment_name == *other_fragment_name
@@ -1007,7 +1004,7 @@ impl SelectionSet {
                 &fragment,
                 /*directives*/ &Default::default(),
             );
-            optimized.add_local_selection(&fragment_selection.into(), false)?;
+            optimized.add_local_selection(&fragment_selection.into())?;
         }
 
         optimized.add_local_selection_set(&not_covered_so_far)?;
@@ -1382,7 +1379,7 @@ impl InlineFragmentSelection {
                         // case they should be kept on the spread.
                         // PORT_NOTE: We are assuming directives on fragment definitions are
                         //            carried over to their spread sites as JS version does, which
-                        //            is handled differently in Rust version (see `FragmentSpreadData`).
+                        //            is handled differently in Rust version (see `FragmentSpread`).
                         let directives: executable::DirectiveList = self
                             .inline_fragment
                             .directives
@@ -1600,32 +1597,6 @@ impl Operation {
     }
 }
 
-/// Returns a consistent GraphQL name for the given index.
-fn fragment_name(mut index: usize) -> Name {
-    /// https://spec.graphql.org/draft/#NameContinue
-    const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-    /// https://spec.graphql.org/draft/#NameStart
-    const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
-
-    if index < NAME_START_CHARS.len() {
-        Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
-    } else {
-        let mut s = String::new();
-
-        let i = index % NAME_START_CHARS.len();
-        s.push(NAME_START_CHARS.as_bytes()[i].into());
-        index /= NAME_START_CHARS.len();
-
-        while index > 0 {
-            let i = index % NAME_CHARS.len();
-            s.push(NAME_CHARS.as_bytes()[i].into());
-            index /= NAME_CHARS.len();
-        }
-
-        Name::new_unchecked(&s)
-    }
-}
-
 #[derive(Debug, Default)]
 struct FragmentGenerator {
     fragments: NamedFragments,
@@ -1634,10 +1605,6 @@ struct FragmentGenerator {
 }
 
 impl FragmentGenerator {
-    fn next_name(&self) -> Name {
-        fragment_name(self.fragments.len())
-    }
-
     // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
     // In the future, we will just use `.next_name()`.
     fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
@@ -1690,31 +1657,41 @@ impl FragmentGenerator {
             selection_set.type_position.clone(),
         );
 
-        for (_key, selection) in Arc::make_mut(&mut selection_set.selections).iter_mut() {
+        for selection in Arc::make_mut(&mut selection_set.selections).values_mut() {
             match selection {
                 SelectionValue::Field(mut field) => {
                     if let Some(selection_set) = field.get_selection_set_mut() {
                         self.visit_selection_set(selection_set)?;
                     }
                     new_selection_set
-                        .add_local_selection(&Selection::Field(Arc::clone(field.get())), false)?;
+                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
                 }
                 SelectionValue::FragmentSpread(frag) => {
-                    new_selection_set.add_local_selection(
-                        &Selection::FragmentSpread(Arc::clone(frag.get())),
-                        false,
-                    )?;
+                    new_selection_set
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
                 }
                 SelectionValue::InlineFragment(frag)
                     if !Self::is_worth_using(&frag.get().selection_set) =>
                 {
-                    new_selection_set.add_local_selection(
-                        &Selection::InlineFragment(Arc::clone(frag.get())),
-                        false,
-                    )?;
+                    new_selection_set
+                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
                 }
                 SelectionValue::InlineFragment(mut candidate) => {
                     self.visit_selection_set(candidate.get_selection_set_mut())?;
+
+                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                    // JS federation does not consider fragments without a type condition.
+                    if candidate
+                        .get()
+                        .inline_fragment
+                        .type_condition_position
+                        .is_none()
+                    {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    }
 
                     let directives = &candidate.get().inline_fragment.directives;
                     let skip_include = directives
@@ -1729,10 +1706,9 @@ impl FragmentGenerator {
                     // we can't just transfer them to the generated fragment spread,
                     // so we have to keep this inline fragment.
                     let Ok(skip_include) = skip_include else {
-                        new_selection_set.add_local_selection(
-                            &Selection::InlineFragment(Arc::clone(candidate.get())),
-                            false,
-                        )?;
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
                         continue;
                     };
 
@@ -1741,10 +1717,9 @@ impl FragmentGenerator {
                     // there's any directives on it. This code duplicates the body from the
                     // previous condition so it's very easy to remove when we're ready :)
                     if !skip_include.is_empty() {
-                        new_selection_set.add_local_selection(
-                            &Selection::InlineFragment(Arc::clone(candidate.get())),
-                            false,
-                        )?;
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
                         continue;
                     }
 
@@ -1769,20 +1744,19 @@ impl FragmentGenerator {
                         });
                         self.fragments.get(&name).unwrap()
                     };
-                    new_selection_set.add_local_selection(
-                        &Selection::from(FragmentSpreadSelection {
-                            spread: FragmentSpread::new(FragmentSpreadData {
+                    new_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
+                            spread: FragmentSpread {
                                 schema: selection_set.schema.clone(),
                                 fragment_name: existing.name.clone(),
                                 type_condition_position: existing.type_condition_position.clone(),
                                 directives: skip_include.into(),
                                 fragment_directives: existing.directives.clone(),
                                 selection_id: crate::operation::SelectionId::new(),
-                            }),
+                            },
                             selection_set: existing.selection_set.clone(),
-                        }),
-                        false,
-                    )?;
+                        },
+                    ))?;
                 }
             }
         }
@@ -1823,6 +1797,32 @@ mod tests {
             validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    /// Returns a consistent GraphQL name for the given index.
+    fn fragment_name(mut index: usize) -> Name {
+        /// https://spec.graphql.org/draft/#NameContinue
+        const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+        /// https://spec.graphql.org/draft/#NameStart
+        const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+        if index < NAME_START_CHARS.len() {
+            Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
+        } else {
+            let mut s = String::new();
+
+            let i = index % NAME_START_CHARS.len();
+            s.push(NAME_START_CHARS.as_bytes()[i].into());
+            index /= NAME_START_CHARS.len();
+
+            while index > 0 {
+                let i = index % NAME_CHARS.len();
+                s.push(NAME_CHARS.as_bytes()[i].into());
+                index /= NAME_CHARS.len();
+            }
+
+            Name::new_unchecked(&s)
+        }
     }
 
     #[test]
@@ -3502,14 +3502,14 @@ mod tests {
             match path.split_first() {
                 None => {
                     // Base case
-                    Arc::make_mut(&mut ss.selections).clear();
+                    ss.selections = Default::default();
                     Ok(())
                 }
 
                 Some((first, rest)) => {
-                    let result = Arc::make_mut(&mut ss.selections).get_mut(&SelectionKey::Field {
-                        response_name: (*first).clone(),
-                        directives: Default::default(),
+                    let result = Arc::make_mut(&mut ss.selections).get_mut(SelectionKey::Field {
+                        response_name: first,
+                        directives: &Default::default(),
                     });
                     let Some(mut value) = result else {
                         return Err(FederationError::internal("No matching field found"));
