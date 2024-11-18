@@ -1,3 +1,0 @@
-[alias]
-xtask = "run --package xtask --"
-router = "run --package xtask -- router"

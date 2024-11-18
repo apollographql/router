@@ -4,8 +4,6 @@ default-members = ["apollo-router", "apollo-federation"]
 members = [
     "apollo-router",
     "apollo-router-benchmarks",
-    "apollo-router-scaffold",
-    "apollo-router-scaffold/scaffold-test",
     "apollo-federation",
     "apollo-federation/cli",
     "examples/add-timestamp-header/rhai",

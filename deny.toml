@@ -93,7 +93,7 @@ highlight = "all"
 
 # List of crates to deny
 deny = [
-  # `cargo-scaffold` uses `git2` which uses `libssh2-sys` and `libgit2-sys`.
+  # `<deleted>` uses `git2` which uses `libssh2-sys` and `libgit2-sys`.
   # Both require `openssl-sys`. Adding this rule in this way is sufficient to
   # allow those to use `openssl-sys` (not a runtime dependency), leveraging the
   # capabilities of `cargo-deny` to "block" `openssl-sys`.  However, this isn't
@@ -102,12 +102,12 @@ deny = [
   # _not_ be blocked.  That's bad!  Unfortunately, the `wrappers` technique of
   # `cargo-deny` only enables exceptions for _direct_ dependencies.  To defend
   # against the above risk, we add additional rules here (below) which _only_
-  # allows `git2` in `cargo-scaffold`.  This is a bit wonky, since we may at
+  # allows `git2` in `<deleted>`.  This is a bit wonky, since we may at
   # some point want `git2` but does accomplish what we want with the desired
   # exception.
   { name = "openssl-sys", wrappers = ["git2", "libssh2-sys", "libgit2-sys"] },
   # Note! This line is required to support the above exception.
-  { name = "git2", wrappers = ["auth-git2", "cargo-scaffold"] },
+  { name = "git2", wrappers = ["auth-git2"] },
   # Note! This line is required to support the above exception.
   { name = "libgit2-sys", wrappers = ["git2"] },
   # Note! This line is required to support the above exception.
