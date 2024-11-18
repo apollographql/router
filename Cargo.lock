@@ -229,6 +229,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "sha1",
+ "shape",
  "strum 0.26.3",
  "strum_macros 0.26.4",
  "tempfile",
@@ -6470,6 +6471,18 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shape"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5ecfc88a40021151872678a01eb1e74c784238d8cc613985c186717b93304a"
+dependencies = [
+ "indexmap 2.7.0",
+ "lazy_static",
+ "serde_json",
+ "serde_json_bytes",
 ]
 
 [[package]]
