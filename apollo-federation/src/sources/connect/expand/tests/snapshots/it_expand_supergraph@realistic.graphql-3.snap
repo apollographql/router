@@ -55,69 +55,69 @@ enum Status @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
 }
 
 input AddressGeoInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
-  lat: Float
-  lng: Float
+  lat: Float @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "Float")
+  lng: Float @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "Float")
 }
 
 input AddressInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
-  street: String
-  suite: String
-  city: String
-  zipcode: String
-  geo: AddressGeoInput
+  street: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  suite: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  city: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  zipcode: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  geo: AddressGeoInput @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "AddressGeoInput")
 }
 
 input CreateUserInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
-  name: String!
-  username: String!
-  email: EmailAddress!
-  status: Status!
-  address: AddressInput
+  name: String! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String!")
+  username: String! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String!")
+  email: EmailAddress! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "EmailAddress!")
+  status: Status! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "Status!")
+  address: AddressInput @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "AddressInput")
 }
 
 type User @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
-  id: ID! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  name: String @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  address: Address @join__field(graph: CONNECTORS_QUERY_USER_0)
-  company: CompanyInfo @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0)
-  phone: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-  username: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-  website: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+  id: ID! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "ID!")
+  name: String @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+  address: Address @join__field(graph: CONNECTORS_QUERY_USER_0, type: "Address")
+  company: CompanyInfo @join__field(graph: CONNECTORS_QUERY_USER_0, type: "CompanyInfo") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "CompanyInfo")
+  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0, type: "EmailAddress")
+  phone: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  username: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  website: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
 }
 
 type Mutation @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
-  createUser(input: CreateUserInput!): User @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0)
+  createUser(input: CreateUserInput!): User @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "User")
 }
 
 type Query @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
-  _: ID @inaccessible @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0)
-  filterUsersByEmailDomain(email: EmailAddress!): [User] @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0)
-  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0)
-  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
+  _: ID @inaccessible @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "ID")
+  filterUsersByEmailDomain(email: EmailAddress!): [User] @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "[User]")
+  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0, type: "User")
+  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "[User]")
 }
 
 type AddressGeo @join__type(graph: CONNECTORS_QUERY_USER_0) {
-  lat: Float @join__field(graph: CONNECTORS_QUERY_USER_0)
-  lng: Float @join__field(graph: CONNECTORS_QUERY_USER_0)
+  lat: Float @join__field(graph: CONNECTORS_QUERY_USER_0, type: "Float")
+  lng: Float @join__field(graph: CONNECTORS_QUERY_USER_0, type: "Float")
 }
 
 type Address @join__type(graph: CONNECTORS_QUERY_USER_0) {
-  city: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-  geo: AddressGeo @join__field(graph: CONNECTORS_QUERY_USER_0)
-  street: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-  suite: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-  zipcode: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+  city: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  geo: AddressGeo @join__field(graph: CONNECTORS_QUERY_USER_0, type: "AddressGeo")
+  street: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  suite: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  zipcode: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
 }
 
 type CompanyInfo @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
-  bs: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  catchPhrase: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0)
-  name: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
+  bs: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+  catchPhrase: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0, type: "EmailAddress")
+  name: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
 }
 
 input CompanyInput @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
-  name: String!
-  catchPhrase: String
+  name: String! @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String!")
+  catchPhrase: String @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
 }

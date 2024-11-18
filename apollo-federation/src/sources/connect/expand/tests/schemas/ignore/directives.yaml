@@ -10,7 +10,7 @@ subgraphs:
               "@composeDirective"
             ]
           )
-          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
           @composeDirective(name: "@custom1")
           @composeDirective(name: "@custom2")
           @composeDirective(name: "@custom3")
@@ -30,13 +30,34 @@ subgraphs:
         type T @custom2 {
           field: String @custom3
         }
+
+        # bug fix: if a customer tries to define @defer this way, it should be ignored
+        extend schema
+          @link(url: "http://bugfix/namespace/v1.0", import: ["@defer"])
+
+        directive @defer(label: String) on FIELD
+
+        # bug fix: don't redefine scalars if the user defines them for some reason
+        scalar federation__RequireScopes
+        scalar federation__Policy
+
+        # bug fix: here's a weird directive that's both executable and type system
+        extend schema
+          @link(url: "http://bugfix/weird/v1.0", import: ["@weird"])
+          @composeDirective(name: "@weird")
+
+        directive @weird on FIELD | FIELD_DEFINITION
+
+        extend type Query {
+          weird: String @weird
+        }
   two:
     routing_url: none
     schema:
       sdl: |
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@composeDirective"])
-          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
           @composeDirective(name: "@custom1")
 
         directive @custom1 on OBJECT | FIELD_DEFINITION

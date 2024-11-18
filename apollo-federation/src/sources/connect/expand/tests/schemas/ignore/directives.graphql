@@ -6,7 +6,8 @@ schema
   @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
-  @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+  @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", {name: "@originalName", as: "@custom3"}])
+  @link(url: "http://bugfix/weird/v1.0", import: ["@weird"])
 {
   query: Query
 }
@@ -42,6 +43,8 @@ directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT 
 directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
 directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+directive @weird on FIELD | FIELD_DEFINITION
 
 input join__ContextArgument {
   name: String!
@@ -88,6 +91,7 @@ type Query
   requiresScopes: String @join__field(graph: ONE) @requiresScopes(scopes: ["scope"])
   policy: String @join__field(graph: ONE) @policy(policies: [["admin"]])
   overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO, overrideLabel: "label")
+  weird: String @join__field(graph: ONE) @weird
   customAgain: String @join__field(graph: TWO) @custom1
 }
 

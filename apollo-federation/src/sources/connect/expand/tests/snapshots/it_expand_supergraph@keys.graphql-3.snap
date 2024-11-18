@@ -52,25 +52,25 @@ enum join__Graph {
 }
 
 type T @join__type(graph: ONE_QUERY_T2_0, key: "id id2") @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_QUERY_UNSELECTED_0, key: "unselected") @join__type(graph: ONE_T_R1_0, key: "id") @join__type(graph: ONE_T_R2_0, key: "id id2") @join__type(graph: ONE_T_R3_0, key: "id id2") @join__type(graph: ONE_T_R4_0, key: "id") @join__type(graph: ONE_T_R5_0, key: "id id2") {
-  id: ID! @join__field(graph: ONE_QUERY_T2_0) @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_UNSELECTED_0) @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
-  id2: ID! @join__field(graph: ONE_QUERY_T2_0) @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_UNSELECTED_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R5_0)
-  unselected: ID! @join__field(graph: ONE_QUERY_T2_0) @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_UNSELECTED_0)
-  accessibleByUnselected: ID! @join__field(graph: ONE_QUERY_UNSELECTED_0)
-  r1: R @join__field(graph: ONE_T_R1_0)
-  r2: R @join__field(graph: ONE_T_R2_0)
-  r3: R @join__field(graph: ONE_T_R3_0)
-  r4: R @join__field(graph: ONE_T_R4_0)
-  r5: R @join__field(graph: ONE_T_R5_0)
+  id: ID! @join__field(graph: ONE_QUERY_T2_0, type: "ID!") @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!") @join__field(graph: ONE_T_R1_0, type: "ID!") @join__field(graph: ONE_T_R2_0, type: "ID!") @join__field(graph: ONE_T_R3_0, type: "ID!") @join__field(graph: ONE_T_R4_0, type: "ID!") @join__field(graph: ONE_T_R5_0, type: "ID!")
+  id2: ID! @join__field(graph: ONE_QUERY_T2_0, type: "ID!") @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!") @join__field(graph: ONE_T_R2_0, type: "ID!") @join__field(graph: ONE_T_R3_0, type: "ID!") @join__field(graph: ONE_T_R5_0, type: "ID!")
+  unselected: ID! @join__field(graph: ONE_QUERY_T2_0, type: "ID!") @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!")
+  accessibleByUnselected: ID! @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!")
+  r1: R @join__field(graph: ONE_T_R1_0, type: "R")
+  r2: R @join__field(graph: ONE_T_R2_0, type: "R")
+  r3: R @join__field(graph: ONE_T_R3_0, type: "R")
+  r4: R @join__field(graph: ONE_T_R4_0, type: "R")
+  r5: R @join__field(graph: ONE_T_R5_0, type: "R")
 }
 
 type Query @join__type(graph: ONE_QUERY_T2_0) @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_UNSELECTED_0) @join__type(graph: ONE_T_R1_0) @join__type(graph: ONE_T_R2_0) @join__type(graph: ONE_T_R3_0) @join__type(graph: ONE_T_R4_0) @join__type(graph: ONE_T_R5_0) {
-  t2(id: ID!, id2: ID!): T @join__field(graph: ONE_QUERY_T2_0)
-  t(id: ID!): T @join__field(graph: ONE_QUERY_T_0)
-  unselected(unselected: ID!): T @join__field(graph: ONE_QUERY_UNSELECTED_0)
-  _: ID @inaccessible @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
+  t2(id: ID!, id2: ID!): T @join__field(graph: ONE_QUERY_T2_0, type: "T")
+  t(id: ID!): T @join__field(graph: ONE_QUERY_T_0, type: "T")
+  unselected(unselected: ID!): T @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "T")
+  _: ID @inaccessible @join__field(graph: ONE_T_R1_0, type: "ID") @join__field(graph: ONE_T_R2_0, type: "ID") @join__field(graph: ONE_T_R3_0, type: "ID") @join__field(graph: ONE_T_R4_0, type: "ID") @join__field(graph: ONE_T_R5_0, type: "ID")
 }
 
 type R @join__type(graph: ONE_T_R1_0) @join__type(graph: ONE_T_R2_0) @join__type(graph: ONE_T_R3_0) @join__type(graph: ONE_T_R4_0) @join__type(graph: ONE_T_R5_0) {
-  id: ID! @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
-  id2: ID! @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
+  id: ID! @join__field(graph: ONE_T_R1_0, type: "ID!") @join__field(graph: ONE_T_R2_0, type: "ID!") @join__field(graph: ONE_T_R3_0, type: "ID!") @join__field(graph: ONE_T_R4_0, type: "ID!") @join__field(graph: ONE_T_R5_0, type: "ID!")
+  id2: ID! @join__field(graph: ONE_T_R1_0, type: "ID!") @join__field(graph: ONE_T_R2_0, type: "ID!") @join__field(graph: ONE_T_R3_0, type: "ID!") @join__field(graph: ONE_T_R4_0, type: "ID!") @join__field(graph: ONE_T_R5_0, type: "ID!")
 }
