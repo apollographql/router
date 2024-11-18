@@ -230,7 +230,7 @@ mod tests {
                     _ => response.into(),
                 },
             };
-            serde_json_bytes::to_value(r).unwrap()
+            serde_json_bytes::to_value(r).expect("Failed to serialize response")
         });
 
         let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
