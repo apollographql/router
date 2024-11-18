@@ -4,7 +4,7 @@ subtitle: Upgrade from version 1.x to 2.x of GraphOS Router
 description: Learn how to upgrade from version 1.x to 2.x of the GraphOS Router.
 ---
 
-Learn how to upgrade from your GraphOS Router deployment from version 1.x to 2.x.
+Learn how to upgrade your GraphOS Router deployment from version 1.x to 2.x.
 
 <Note>
 
@@ -20,7 +20,7 @@ The router v2.x introduces some new features that can impact the configuration f
 
 The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
 
-Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTEL to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's disabled by default. 
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's off by default. 
 
 Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default.
 
@@ -43,7 +43,7 @@ If your router v1.x is configured with `experimental_otlp_tracing_sampler`, rena
 
 To [report operation usage metrics to GraphOS via OTLP](#apollo-operation-usage-reporting-via-otlp), you can either remove your configuration of `otlp_tracing_sampler` and use its default value, or you can explicitly enable it by setting it to [`always_on` or a sampling ratio](/router/configuration/telemetry/apollo-telemetry#configuring-usage-reporting-via-otlp).
 
-Otherwise, to use the behavior of v1.x, disable usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`. 
+Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`. 
 
 ### Configure metrics reporting defaults
 
