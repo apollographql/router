@@ -15,13 +15,13 @@ impl Dist {
     pub fn run(&self) -> Result<()> {
         let mut args = vec!["build", "--release"];
         if let Some(features) = &self.features {
-            args.push("--features".to_string());
-            args.push(features.to_owned());
+            args.push("--features");
+            args.push(features);
         }
 
         match &self.target {
             Some(target) => {
-                args.push("--target")
+                args.push("--target");
                 args.push(target);
                 cargo!(args);
 
