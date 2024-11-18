@@ -502,7 +502,7 @@ impl InstrumentData {
             && !configuration.supergraph.generate_query_fragments
         {
             self.data.insert(
-                "apollo.router.config.experimental_reuse_query_fragments".to_string(),
+                "apollo.router.config.reuse_query_fragments".to_string(),
                 (1, HashMap::new()),
             );
         }
