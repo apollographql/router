@@ -112,7 +112,7 @@ pub(crate) struct Config {
 
     /// Limit the maximum buffer size for the HTTP1 connection.
     ///
-    /// Default is ~400 kB.
+    /// Default is ~400kib.
     #[schemars(with = "Option<String>", default)]
     pub(crate) experimental_http1_max_request_buf_size: Option<ByteSize>,
 }

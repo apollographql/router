@@ -16,7 +16,7 @@ limits:
   # Network-based limits
   http_max_request_bytes: 2000000 # Default value: 2 MB
   experimental_http1_max_request_headers: 200 # Default value: 100
-  experimental_http1_max_request_buf_size: 800kb # Default value: 400kb
+  experimental_http1_max_request_buf_size: 800kb # Default value: 400kib
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
@@ -284,7 +284,7 @@ If router receives more headers than the buffer size, it responds to the client 
 
 ### `experimental_http1_max_request_buf_size`
 
-Limit the maximum buffer size for the HTTP1 connection. Default is ~400 kB.
+Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
 
 ## Parser-based limits
 

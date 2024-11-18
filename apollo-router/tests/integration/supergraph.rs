@@ -91,7 +91,7 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
         .config(
             r#"
             limits:
-              experimental_http1_max_request_buf_size: 100kb
+              experimental_http1_max_request_buf_size: 100kib
             "#,
         )
         .build()
@@ -116,7 +116,7 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
         .config(
             r#"
             limits:
-              experimental_http1_max_request_buf_size: 2mb
+              experimental_http1_max_request_buf_size: 2mib
             "#,
         )
         .build()
