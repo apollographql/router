@@ -1,0 +1,1330 @@
+---
+title: Router Configuration
+subtitle: Configure a router via environment variables, command-line options, and YAML
+description: Learn how to configure the Apollo GraphOS Router or Apollo Router Core with environment variables, command-line options and commands, and YAML configuration files.
+---
+
+Learn how to customize the behavior of your GraphOS Router or Apollo Router Core with environment variables, command-line commands and options, and YAML file configuration.
+
+## Environment variables
+
+If you're using the GraphOS Router with [managed federation](/federation/managed-federation/overview/) and GraphOS Studio, set these environment variables in the startup command:
+
+```bash
+APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+```
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_GRAPH_REF`
+
+</td>
+<td>
+
+The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
+
+</td>
+</tr>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_KEY`
+
+</td>
+<td>
+
+The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router or when using `APOLLO_KEY_PATH`.
+
+</td>
+</tr>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+⚠️ **This is not available on Windows.**
+
+A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router or when using `APOLLO_KEY`.
+
+</td>
+</tr>
+<tr>
+</tr>
+</tbody>
+</table>
+
+## Command-line options
+
+After [installing the Apollo Router Core](/router/quickstart) in your current working directory, you can run the router with the following example command:
+
+```bash
+./router --config router.yaml --supergraph supergraph-schema.graphql
+```
+
+This reference lists and describes the options supported by the `router` binary. Where indicated, some of these options can also be provided via an environment variable. If an option is provided _both_ ways, the command-line value takes precedence.
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Option / Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr class="required">
+<td>
+
+##### `-s` / `--supergraph`
+
+`APOLLO_ROUTER_SUPERGRAPH_PATH`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
+
+</td>
+<td>
+
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+
+> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages. 
+
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
+
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart).
+
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `-c` / `--config`
+
+`APOLLO_ROUTER_CONFIG_PATH`
+
+</td>
+<td>
+
+The absolute or relative path to the router's optional [YAML configuration file](#yaml-config-file).
+
+</td>
+
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-key-path`
+
+`APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+⚠️ **This is not available on Windows.**
+
+The absolute or relative path to a file containing the Apollo graph API key for use with managed federation.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--dev`
+
+</td>
+<td>
+
+⚠️ **Do not set this option in production!**
+
+If set, a router runs in dev mode to help with local development.
+
+[Learn more about dev mode.](#dev-mode-defaults)
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--hr` / `--hot-reload`
+
+`APOLLO_ROUTER_HOT_RELOAD`
+
+</td>
+<td>
+
+If set, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph` and reloads them automatically without downtime.  This setting only affects local files provided to the router.  The supergraph and configuration provided from GraphOS via Launches (and delivered via Uplink) are _always_ loaded automatically, regardless of this setting.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--log`
+
+`APOLLO_ROUTER_LOG`
+
+</td>
+<td>
+
+The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+
+The default value is `info`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--license`
+
+`APOLLO_ROUTER_LICENSE_PATH`, `APOLLO_ROUTER_LICENSE`
+
+</td>
+<td>
+
+An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.
+
+An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
+
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).
+
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/router/enterprise-features/#offline-enterprise-license).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-endpoints`
+
+`APOLLO_UPLINK_ENDPOINTS`
+
+</td>
+<td>
+
+If using [managed federation](/federation/managed-federation/overview/), the Apollo Uplink URL(s) that the router should poll to fetch its latest configuration. Almost all managed router instances should _omit_ this option to use the default set of Uplink URLs.
+
+If you specify multiple URLs, separate them with commas (no whitespace).
+
+For default behavior and possible values, see [Apollo Uplink](/federation/managed-federation/uplink/).
+
+</td>
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-poll-interval`
+
+`APOLLO_UPLINK_POLL_INTERVAL`
+
+</td>
+<td>
+
+The amount of time between polls to Apollo Uplink.
+
+The default value is `10s` (ten seconds), which is also the minimum allowed value.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-timeout`
+
+`APOLLO_UPLINK_TIMEOUT`
+
+</td>
+<td>
+
+The request timeout for each poll sent to Apollo Uplink.
+
+The default value is `30s` (thirty seconds).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--anonymous-telemetry-disabled`
+
+`APOLLO_TELEMETRY_DISABLED`
+
+</td>
+<td>
+
+If set, disables sending anonymous usage information to Apollo.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `--listen`
+
+`APOLLO_ROUTER_LISTEN_ADDRESS`
+
+</td>
+<td>
+
+If set, the listen address of the router.
+
+</td>
+</tr>
+
+
+<tr>
+<td>
+
+##### `-V` / `--version`
+
+</td>
+<td>
+
+If set, the router prints its version number, then exits.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--schema`
+
+</td>
+<td>
+
+**Deprecated**—use [`./router config schema`](#configuration-awareness-in-your-text-editor) instead.
+
+If set, the router prints a JSON schema representation of its full supported configuration format, then exits.
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+### Dev mode defaults
+
+<Caution>
+
+**Do not set the `--dev` option in production.** If you want to replicate any specific dev mode functionality in production, instead make the corresponding modifications to your [YAML config file](#yaml-config-file).
+
+</Caution>
+
+Setting the [`--dev`](#--dev) flag is equivalent to running `./router --hot-reload` with the following configuration options:
+
+```yaml
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+supergraph:
+  introspection: true
+include_subgraph_errors:
+  all: true
+plugins:
+  # Enable with the header, Apollo-Expose-Query-Plan: true
+  experimental.expose_query_plan: true
+```
+
+## `config` subcommands
+
+GraphOS Router and Apollo Router Core provide a set of subcommands for interacting with its configuration. You run these subcommands with the following syntax:
+
+```
+./router config schema
+./router config upgrade <path-to-config-file.yaml>
+```
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Subcommand</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr>
+<td>
+
+##### `schema`
+
+</td>
+<td>
+
+Prints a JSON schema representation of the router's full supported configuration format.
+
+Use this schema to enable [configuration awareness in your text editor](#configuration-awareness-in-your-text-editor).
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `upgrade`
+
+</td>
+<td>
+
+Takes a config file created for a _previous_ version of the router and outputs the corresponding configuration for the _current_ version.
+
+For details, see [Upgrading your router configuration](#upgrading-your-router-configuration).
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+## YAML config file
+
+GraphOS Router and Apollo Router Core take an optional YAML configuration file as input via the [`--config`](#-c----config) option:
+
+```bash
+./router --config router.yaml
+```
+
+This file enables you to customize numerous aspects of your router's behavior, covered in the subsections below.
+
+If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
+
+<Tip>
+
+Enable your text editor to validate the format and content of your router YAML configuration file by [configuring it with the router's configuration schema](#configuration-awareness-in-your-text-editor).
+
+</Tip>
+
+### Listen address
+
+By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen`:
+
+#### IPv4
+
+```yaml title="router.yaml"
+supergraph:
+  # The socket address and port to listen on
+  listen: 127.0.0.1:4000
+```
+
+#### IPv6
+
+```yaml title="router.yaml"
+supergraph:
+  # The socket address and port to listen on.
+  # Note that this must be quoted to avoid interpretation as an array in YAML.
+  listen: '[::1]:4000'
+```
+
+#### Unix socket
+
+<Note>
+
+Listening on a Unix socket is not supported on Windows.
+
+</Note>
+
+```yaml title="router_unix.yaml"
+supergraph:
+  # Absolute path to a Unix socket
+  listen: /tmp/router.sock
+```
+
+### Endpoint path
+
+By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
+
+You can specify a different path by setting `supergraph.path`:
+
+```yaml title="router.yaml"
+supergraph:
+  # The path for GraphQL execution
+  # (Defaults to /)
+  path: /graphql
+```
+
+The path must start with `/`.
+
+Path parameters and wildcards are supported. For example:
+
+- `/:my_dynamic_prefix/graphql` matches both `/my_project_a/graphql` and `/my_project_b/graphql`.
+- `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
+- `/g*` matches `/graphql`, `/gateway` and `/graphql/api`.
+
+<Note>
+
+The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
+
+</Note>
+
+### Introspection
+
+By default, the router does _not_ resolve introspection queries. You can enable introspection like so:
+
+```yaml title="router.yaml"
+# Do not enable introspection in production!
+supergraph:
+  introspection: true
+```
+
+### Debugging
+
+- To configure logging, see [Logging in the router](/router/configuration/telemetry/exporters/logging/overview).
+
+- To configure the inclusion of subgraph errors, see [Subgraph error inclusion](/router/configuration/subgraph-error-inclusion).
+
+### Landing pages
+
+The router can serve any of the following landing pages to browsers that visit its [endpoint path](#endpoint-path):
+
+- A basic landing page that displays an example query `curl` command (default)
+
+    ```yaml title="router.yaml"
+    # This is the default behavior. You don't need to include this config.
+    homepage:
+      enabled: true
+    ```
+
+- _No_ landing page
+
+    ```yaml title="router.yaml"
+    homepage:
+      enabled: false
+    ```
+
+- [Apollo Sandbox](/graphos/explorer/sandbox), which enables you to explore your schema and compose operations against it using the Explorer
+
+    Note the additional configuration required to use Sandbox:
+
+    ```yaml title="router.yaml"
+    sandbox:
+      enabled: true
+
+    # Sandbox uses introspection to obtain your router's schema.
+    supergraph:
+      introspection: true
+
+    # Sandbox requires the default landing page to be disabled.
+    homepage:
+      enabled: false
+    ```
+
+    <Caution>
+
+    **Do not enable Sandbox in production.** Sandbox requires enabling introspection, which is strongly discouraged in production environments.
+
+    </Caution>
+
+### Subgraph routing URLs
+
+By default, the router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
+
+However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
+
+```yaml
+override_subgraph_url:
+  organizations: http://localhost:8080
+  accounts: "${env.ACCOUNTS_SUBGRAPH_HOST_URL}"
+```
+
+In this example, the `organizations` subgraph URL is overridden to point to `http://localhost:8080`, and the  `accounts` subgraph URL is overridden to point to a new URL using [variable expansion](#variable-expansion). The URL specified in the supergraph schema is ignored.
+
+Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use the routing URL specified in the supergraph schema.
+
+If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](/router/customizations/overview/#request-path) in the `SubgraphService` layer.
+
+### Caching
+
+By default, the router stores the following data in its in-memory cache to improve performance:
+
+- Generated query plans
+- Automatic persisted queries (APQ)
+- Introspection responses
+
+You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-Memory Caching in the router](/router/configuration/in-memory-caching/).
+
+**If you have a GraphOS Enterprise plan:** 
+- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](/router/configuration/distributed-caching/).
+- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](/router/configuration/entity-caching/).
+
+<MinVersion version ="1.49.0">
+
+### Native query planner
+
+</MinVersion>
+
+Starting with v1.49.0, the router can run a Rust-native query planner. This native query planner can be run by itself to plan all queries, replacing the legacy JavaScript implementation.
+
+<Tip>
+
+Starting with v1.57.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following options in your `router.yaml`:
+
+```yaml title="router.yaml"
+experimental_query_planner_mode: new
+```
+
+You can also improve throughput by reducing the size of queries sent to subgraphs with the following option:
+
+```yaml title="router.yaml"
+supergraph:
+  generate_query_fragments: true
+```
+
+</Tip>
+
+Learn more in [Native Query Planner](/router/executing-operations/native-query-planner) docs.
+
+<MinVersion version="1.44.0">
+
+### Query planner pools
+
+</MinVersion>
+
+<ExperimentalFeature appendText="And join the [GitHub discussion about query planner pools](https://github.com/apollographql/router/discussions/4917)."
+/>
+
+You can improve the performance of the router's query planner by configuring parallelized query planning.
+
+By default, the query planner plans one operation at a time. It plans one operation to completion before planning the next one. This serial planning can be problematic when an operation takes a long time to plan and consequently blocks the query planner from working on other operations.
+
+To resolve such blocking scenarios, you can enable parallel query planning. Configure it in `router.yaml` with `supergraph.query_planning.experimental_parallelism`:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    experimental_parallelism: auto # number of available cpus 
+```
+
+The value of `experimental_parallelism` is the number of query planners in the router's _query planner pool_. A query planner pool is a preallocated set of query planners from which the router can use to plan operations. The total number of pools is the maximum number of query planners that can run in parallel and therefore the maximum number of operations that can be worked on simultaneously. 
+
+Valid values of `experimental_parallelism`:
+- Any integer starting from `1`
+- The special value `auto`, which sets the number of query planners equal to the number of available CPUs on the router's host machine
+
+The default value of `experimental_parallelism` is `1`.
+
+In practice, you should tune `experimental_parallelism` based on metrics and benchmarks gathered from your router.
+
+<MinVersion version="1.49.0">
+
+### Enhanced operation signature normalization
+
+</MinVersion>
+
+<Note>
+
+The router supports enhanced operation signature normalization in the following versions:
+
+- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.49.0 to v1.53.0
+
+</Note>
+
+Apollo's legacy operation signature algorithm removes information about certain fields, such as input objects and aliases.
+This removal means some operations may have the same normalized signature though they are distinct operations.
+
+Enhanced normalization incorporates [input types](#input-types) and [aliases](#aliases) in signature generation.
+It also includes other improvements that make it more likely that two operations that only vary slightly have the same signature.
+
+Configure enhanced operation signature normalization in `router.yaml` with the `telemetry.apollo.signature_normalization_algorithm` option:
+
+```yaml title="router.yaml"
+telemetry: 
+  apollo:
+    signature_normalization_algorithm: enhanced # Default is legacy
+```
+
+Once you enable this configuration, operations with enhanced signatures might appear with different operation IDs than they did previously in GraphOS Studio.
+
+#### Input types
+
+Enhanced signatures include input object type shapes, while still redacting any actual values.
+Legacy signatures [replace input object type with `{}`](/graphos/metrics/operation-signatures/#1-transform-in-line-argument-values).
+
+Given the following example operation:
+
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: { 
+      inputString: "foo", 
+      inputInt: 42, 
+      inputBoolean: null, 
+      nestedType: { someFloat: 4.2 }, 
+      enumInput: SOME_VALUE_1, 
+      nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ], 
+      listInput: [1, 2, 3] 
+    }
+  ) {
+    enumResponse
+  }
+}
+```
+
+The legacy normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(input: {}) {
+    enumResponse
+  }
+}
+```
+
+The enhanced normalization algorithm generates the following signature:
+
+```graphql {3-11} showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: {
+      inputString: "", 
+      inputInt: 0, 
+      inputBoolean: null, 
+      nestedType: {someFloat: 0}, 
+      enumInput: SOME_VALUE_1, 
+      nestedTypeList: [{someFloat: 0, someNullableFloat: null}], 
+      listInput: []
+    }
+  ) {
+      enumResponse
+  }
+}
+```
+
+#### Aliases
+
+Enhanced signatures include any field aliases used in an operation.
+Legacy signatures [remove aliases completely](/graphos/metrics/operation-signatures/#field-aliases), meaning the signature may be invalid if the same field was used with multiple aliases.
+
+Given the following example operation:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The legacy normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceResponse {
+      sharedField
+    }
+    interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The enhanced normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+<MinVersion version="1.50.0">
+
+### Extended reference reporting
+
+</MinVersion>
+
+<Note>
+
+The router supports extended reference reporting in the following versions:
+
+- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.50.0 to v1.53.0
+
+</Note>
+
+
+<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+
+You can configure the router to report enum and input object references for enhanced insights and operation checks.
+Apollo's legacy reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
+Legacy reporting can also cause [inaccurate operation checks](#enhanced-operation-checks).
+
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.metrics_reference_mode` option like so:
+
+```yaml title="router.yaml"
+telemetry: 
+  apollo:
+    metrics_reference_mode: extended # Default is legacy
+```
+#### Configuration effect timing
+
+Once you configure extended reference reporting, you can view enum value and input field usage alongside object [field usage in GraphOS Studio](/graphos/metrics/field-usage) for all subsequent operations.
+
+Configuring extended reference reporting automatically turns on [enhanced operation checks](#enhanced-operation-checks), though you won't see an immediate change in your operations check behavior.
+
+This delay is because operation checks rely on historical operation data.
+To ensure sufficient data to distinguish between genuinely unused values and those simply not reported in legacy data, enhanced checks require some operations with extended reference reporting turned on.
+
+#### Enhanced operation checks
+
+Thanks to extended reference reporting, operation checks can more accurately flag issues for changes to enum values and input object fields. See the comparison table below for differences between standard operation checks based on legacy reference reporting and enhanced checks based on extended reference reporting.
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th style={{ minWidth: '100px' }}></th>
+      <th style={{ minWidth: '200px' }}>
+        Standard Check Behavior<br/>
+        (Legacy reference reporting)
+      </th>
+      <th>
+        Enhanced Check Behavior<br/>
+        (Extended reference reporting)
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+
+##### Enum value removal
+
+      </td>
+      <td>Removing any enum values is considered a breaking change if any operations use the enum.</td>
+      <td>Removing enum values is only a breaking change if historical operations use the specific enum value(s) that were removed.</td>
+    </tr>
+    <tr>
+      <td>
+
+##### Default argument changes for input object fields
+
+      </td>
+      <td>
+        Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.
+      </td>
+      <td>
+        Changing or removing default values for input object fields is considered a breaking change.
+You can [configure checks to ignore default values changes](/graphos/platform/schema-management/checks#ignored-conditions-settings).
+
+      </td>
+    </tr>
+    <tr>
+      <td>
+
+##### Nullable input object field removal
+      </td>
+      <td>Removing a nullable input object field is always considered a breaking change.</td>
+      <td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field is always omitted in historical operations, its removal isn't considered a breaking change.</td>
+    </tr>
+    <tr>
+      <td>
+
+##### Changing nullable input object fields to non-nullable
+
+      </td>
+      <td>Changing a nullable input object field to non-nullable is considered a breaking change.</td>
+      <td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<Note>
+
+You won't see an immediate change in checks behavior when you first turn on extended reference reporting.
+[Learn more.](#configuration-effect-timing)
+
+</Note>
+
+### Safelisting with persisted queries
+
+You can enhance your graph's security with GraphOS Router by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
+
+See [Safelisting with persisted queries](/router/configuration/persisted-queries) for more information.
+
+### HTTP header rules
+
+See [Sending HTTP headers to subgraphs](/graphos/routing/header-propagation/).
+
+### Traffic shaping
+
+To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the router](/router/configuration/traffic-shaping).
+
+### Cross-Origin Resource Sharing (CORS)
+
+See [Configuring CORS in the router](/router/configuration/cors).
+
+### Defer support
+
+See [router support for `@defer`](/router/executing-operations/defer-support/#disabling-defer).
+
+### Query batching support
+
+See [GraphOS Router's support for query batching](/router/executing-operations/query-batching).
+
+### Subscription support
+
+See [GraphQL subscriptions in the GraphOS Router](/router/executing-operations/subscription-support/#router-setup).
+
+### Authorization support
+
+- To configure authorization directives, see [Authorization directives](/router/configuration/authorization/#authorization-directives).
+
+- To configure the authorization plugin, see [Configuration options](/router/configuration/authorization/#configuration-options).
+
+### JWT authentication
+
+To enable and configure JWT authentication, see [JWT authentication in the GraphOS Router](/router/configuration/authn-jwt).
+
+### Cross-site request forgery (CSRF) prevention
+
+To configure CSRF prevention, see [CSRF prevention in the router](/router/configuration/csrf).
+
+### Subgraph authentication
+
+To configure subgraph authentication with AWS SigV4, see a [configuration example](/router/configuration/authn-subgraph/#configuration-example).
+
+### External coprocessing
+
+See [External coprocessing in the GraphOS Router](/router/customizations/coprocessor/).
+
+### Telemetry and monitoring
+
+The router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
+
+See the [router telemetry overview](/router/configuration/telemetry/overview).
+
+### TLS
+
+The router supports TLS to authenticate and encrypt communications, both on the client side and the subgraph side. It works automatically on the subgraph side if the subgraph URL starts with `https://`.
+
+TLS support is configured in the `tls` section, under the `supergraph` key for the client side, and the `subgraph` key for the subgraph side, with configuration possible for all subgraphs and overriding per subgraph.
+
+The list of supported TLS versions and algorithms is static, it cannot be configured.
+
+Supported TLS versions:
+* TLS 1.2
+* TLS 1.3
+
+Supported cipher suites:
+* TLS13_AES_256_GCM_SHA384
+* TLS13_AES_128_GCM_SHA256
+* TLS13_CHACHA20_POLY1305_SHA256
+* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+* TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+* TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+* TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+
+Supported key exchange groups:
+* X25519
+* SECP256R1
+* SECP384R1
+
+#### TLS termination
+
+Clients can connect to the router directly over HTTPS, without terminating TLS in an intermediary. You can  configure this in the `tls` configuration section:
+
+```yaml
+tls:
+  supergraph:
+    certificate: ${file./path/to/certificate.pem}
+    certificate_chain: ${file./path/to/certificate_chain.pem}
+    key: ${file./path/to/key.pem}
+```
+
+To set the file paths in your configuration with Unix-style expansion, you can follow the examples in the [variable expansion](#variable-expansion) guide. 
+
+The router expects the file referenced in the `certificate_chain` value to be a combination of several PEM certificates concatenated together into a single file (as is commonplace with Apache TLS configuration).
+
+#### Overriding certificate authorities for subgraphs
+
+The router verifies TLS connections to subgraphs using the list of certificate authorities the system provides. You can override this list with a combination of global and per-subgraph settings:
+
+```yaml
+tls:
+  subgraph:
+    # Use these certificate authorities unless overridden per-subgraph
+    all:
+      certificate_authorities: "${file./path/to/ca.crt}"
+    # Override global setting for individual subgraphs
+    subgraphs:
+      products:
+        certificate_authorities: "${file./path/to/product_ca.crt}"
+```
+
+The router expects the file referenced in the `certificate_chain` value to be a combination of several PEM certificates concatenated together into a single file (as is commonplace with Apache TLS configuration).
+
+You can only configure these certificates via the router's configuration since using `SSL_CERT_FILE` also overrides certificates for sending telemetry and communicating with Apollo Uplink.
+
+If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled. You can generate it with the following command line command from a certificate signing request, in this example, `server.csr`:
+
+```
+openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
+```
+
+You can generate a `v3.ext` extension file like so:
+
+```
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer:always
+# this has to be disabled
+# basicConstraints       = CA:TRUE
+keyUsage               = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment, keyAgreement, keyCertSign
+subjectAltName         = DNS:local.apollo.dev
+issuerAltName          = issuer:copy
+```
+
+<Note>
+
+Make sure to change the `subjectAltName` field to the subgraph's name.
+
+</Note>
+
+This produces the file as `server.crt` which can be used in `certificate_authorities`.
+
+#### TLS client authentication for subgraph requests
+
+The router supports mutual TLS authentication (mTLS) with the subgraphs. This means that it can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
+
+```yaml
+tls:
+  subgraph:
+    # Use these certificates and key unless overridden per-subgraph
+    all:
+      client_authentication:
+        certificate_chain: ${file./path/to/certificate_chain.pem}
+        key: ${file./path/to/key.pem}
+    # Override global setting for individual subgraphs
+    subgraphs:
+      products:
+        client_authentication:
+          certificate_chain: ${file./path/to/certificate_chain.pem}
+          key: ${file./path/to/key.pem}
+```
+
+#### Redis TLS configuration
+
+For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](https://www.apollographql.com/docs/router/overview/#yaml-config-file). For example:
+
+```yaml
+apq:
+  router:
+    cache:
+      redis:
+        urls: [ "rediss://redis.example.com:6379" ]
+        #highlight-start
+        tls:
+          certificate_authorities: ${file./path/to/ca.crt}
+          client_authentication:
+            certificate_chain: ${file./path/to/certificate_chain.pem}
+            key: ${file./path/to/key.pem}
+        #highlight-end
+```
+
+### Request limits
+
+The GraphOS Router supports enforcing three types of request limits for enhanced security:
+
+- Network-based limits
+- Lexical, parser-based limits
+- Semantic, operation-based limits (this is an [Enterprise feature](/router/enterprise-features/))
+
+The router rejects any request that violates at least one of these limits.
+
+```yaml title="router.yaml"
+limits:
+  # Network-based limits
+  http_max_request_bytes: 2000000 # Default value: 2 MB
+
+  # Parser-based limits
+  parser_max_tokens: 15000 # Default value
+  parser_max_recursion: 500 # Default value
+
+  # Operation-based limits (Enterprise only)
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
+```
+
+#### Operation-based limits (Enterprise only)
+
+See [this article](/router/configuration/operation-limits/).
+
+#### Network-based limits
+
+##### `http_max_request_bytes`
+
+Limits the amount of data read from the network for the body of HTTP requests,
+to protect against unbounded memory consumption.
+This limit is checked before JSON parsing.
+Both the GraphQL document and associated variables count toward it.
+
+The default value is `2000000` bytes, 2 MB.
+
+Before increasing this limit significantly consider testing performance
+in an environment similar to your production, especially if some clients are untrusted.
+Many concurrent large requests could cause the router to run out of memory.
+
+#### Parser-based limits
+
+##### `parser_max_tokens`
+
+Limits the number of tokens a query document can include. This counts _all_ tokens, including both [lexical and ignored tokens](https://spec.graphql.org/October2021/#sec-Language.Source-Text.Lexical-Tokens).
+
+The default value is `15000`.
+
+##### `parser_max_recursion`
+
+Limits the deepest level of recursion allowed by the router's GraphQL parser to prevent stack overflows. This corresponds to the deepest nesting level of any single GraphQL operation or fragment defined in a query document.
+
+The default value is `500`.
+
+In the example below, the `GetProducts` operation has a recursion of three, and the `ProductVariation` fragment has a recursion of two. Therefore, the _max_ recursion of the query document is three.
+
+```graphql
+query GetProducts {
+  allProducts { #1
+    ...productVariation
+    delivery { #2
+      fastestDelivery #3
+    }
+  }
+}
+
+fragment ProductVariation on Product {
+  variation { #1
+    name #2
+  }
+}
+```
+
+Note that the router calculates the recursion depth for each operation and fragment _separately_.  Even if a fragment is included in an operation, that fragment's recursion depth does not contribute to the _operation's_ recursion depth.
+
+### Demand control
+
+See [Demand Control](/router/executing-operations/demand-control) to learn how to analyze the cost of operations and to reject requests with operations that exceed customizable cost limits. 
+
+### Early cancel
+
+Up until [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the router introduced a new behavior in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
+To go back to the previous behavior of immediately cancelling the request, the following configuration can be used:
+
+```yaml
+supergraph:
+  early_cancel: true
+```
+
+Additionally, since v1.43.1, the router can show a log when it detects that the client canceled the request. This log can be activated with:
+
+```yaml title="router.yaml"
+supergraph:
+  experimental_log_on_broken_pipe: true
+```
+
+
+### Plugins
+
+You can customize the router's behavior with [plugins](/router/customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
+
+```yaml {4,8} title="example-plugin-router.yaml"
+plugins:
+  example.plugin:
+    var1: "hello"
+    var2: 1
+```
+
+### Variable expansion
+
+You can reference variables directly in your YAML config file. This is useful for referencing secrets without including them in the file.
+
+Currently, the router supports expansion of environment variables and file paths. Corresponding variables are prefixed with `env.` and `file.`, respectively.
+
+The router uses Unix-style expansion. Here are some examples:
+
+- `${env.ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
+- `${env.ENV_VAR_NAME:-some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
+- `${file.a.txt}` expands to the contents of the file `a.txt`.
+- `${file.a.txt:-some_default}` expands to the contents of the file `a.txt`, or falls back to the value `some_default` if the file does not exist.
+
+Variable expansions are valid only for YAML _values_, not keys:
+
+<!-- TODO: Add back doc config validation when https://github.com/apollographql/router/issues/1374 is fixed -->
+```yaml
+supergraph:
+  listen: "${env.MY_LISTEN_ADDRESS}" #highlight-line
+example:
+  password: "${env.MY_PASSWORD}" #highlight-line
+```
+
+<!-- keep links to the old heading name working -->
+<a id="fragment-reuse-and-generation"></a>
+### Fragment generation and reuse
+
+By default, the router compresses subgraph requests by generating fragment
+definitions based on the shape of the subgraph operation. In many cases this
+significantly reduces the size of the query sent to subgraphs.
+
+The router also supports an experimental algorithm that attempts to reuse fragments
+from the original operation while forming subgraph requests. This experimental feature
+used to be enabled by default, but is still available to support subgraphs that rely
+on the specific shape of fragments in an operation:
+
+```yaml
+supergraph:
+  generate_query_fragments: false
+  experimental_reuse_query_fragments: true 
+```
+
+Note that `generate_query_fragments` and `experimental_reuse_query_fragments` are
+mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments`
+will take precedence.
+
+<Note>
+
+In the future, the `generate_query_fragments` option will be the only option for handling fragments.
+
+</Note>
+
+### Reusing configuration
+
+You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:
+
+```yaml title="router.yaml"
+headers:
+  subgraphs:
+    products:
+      request:
+        - insert: &insert_custom_header
+            name: "custom-header"
+            value: "something"
+    reviews:
+      request:
+        - insert: *insert_custom_header
+```
+
+Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
+
+## Configuration awareness in your text editor
+
+The router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
+
+Generate the schema with the following command:
+
+```bash
+./router config schema > configuration_schema.json
+```
+
+After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
+
+- [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
+- [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+- [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+- [Sublime](https://github.com/sublimelsp/LSP-yaml)
+- [Vim](https://github.com/Quramy/vison)
+
+## Upgrading your router configuration
+
+New releases of the router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
+
+**If you run a new version of your router with a configuration file that it no longer supports:**
+
+1. The router emits a warning on startup.
+2. The router attempts to translate your provided configuration to the new expected format.
+    - If the translation succeeds without errors, the router starts up as usual.
+    - If the translation fails, the router terminates.
+
+If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
+
+```bash
+./router config upgrade <path_to_config.yaml>
+```
+
+You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
+
+```bash
+./router config upgrade --diff <path_to_config.yaml>
+```
+
+## Related topics
+
+* [Checklist for configuring the router for production](/technotes/TN0008-production-readiness-checklist/#apollo-router)
