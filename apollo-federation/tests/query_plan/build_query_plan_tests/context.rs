@@ -92,7 +92,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -195,7 +195,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -231,7 +231,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
         type U @key(fields: "id") {
           id: ID!
         }
-      '#,
+      "#,
       Subgraph2: r#"
         type Query {
           a: Int!
@@ -285,7 +285,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_2_0)
+                  field(a: $contextualArgument_Subgraph2_0)
                 }
               }
             },
@@ -321,7 +321,7 @@ fn set_context_test_variable_is_a_list() {
         }
         type U @key(fields: "id") {
           id: ID!
-          field(a: [String]! @fromContext(field: "$context { prop }")): Int!
+          field(a: [String] @fromContext(field: "$context { prop }")): Int!
         }
         "#,
       Subgraph2: r#"
@@ -421,7 +421,7 @@ fn set_context_test_fetched_as_a_list() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -521,7 +521,7 @@ fn set_context_test_impacts_on_query_planning() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -647,7 +647,7 @@ fn set_context_test_with_type_conditions_for_union() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -739,7 +739,7 @@ fn set_context_test_accesses_a_different_top_level_query() {
               } =>
               {
                 ... on Product {
-                  price(locale: $contextualArgument_1_0)
+                  price(locale: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -820,7 +820,7 @@ fn set_context_variable_is_a_list() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -966,7 +966,7 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument_Subgraph1_0)
                 }
               }
             },
@@ -1045,7 +1045,7 @@ fn set_context_test_before_key_resolution_transition() {
         @r###"
       QueryPlan {
         Sequence {
-          Fetch(service: "subgraph1") {
+          Fetch(service: "Subgraph1") {
             {
               customer {
                 __typename
@@ -1060,7 +1060,7 @@ fn set_context_test_before_key_resolution_transition() {
             }
           },
           Flatten(path: "customer.child") {
-            Fetch(service: "subgraph2") {
+            Fetch(service: "Subgraph2") {
               {
                 ... on Child {
                   __typename
@@ -1069,7 +1069,7 @@ fn set_context_test_before_key_resolution_transition() {
               } =>
               {
                 ... on Child {
-                  prop(legacyUserId: $contextualArgument_2_0)
+                  prop(legacyUserId: $contextualArgument_Subgraph2_0)
                 }
               }
             },
@@ -1178,7 +1178,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
         @r###"
       QueryPlan {
         Sequence {
-          Fetch(service: "sg2") {
+          Fetch(service: "Subgraph2") {
             {
               customer {
                 __typename
@@ -1191,7 +1191,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
             }
           },
           Flatten(path: "customer") {
-            Fetch(service: "sg3") {
+            Fetch(service: "Subgraph3") {
               {
                 ... on Customer {
                   __typename
@@ -1201,7 +1201,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
               {
                 ... on Customer {
                   accounts {
-                    foo(ctx_id5: $contextualArgument_3_0, ctx_mid: $contextualArgument_3_1) {
+                    foo(ctx_id5: $contextualArgument_Subgraph3_0, ctx_mid: $contextualArgument_3_1) {
                       id
                     }
                   }
