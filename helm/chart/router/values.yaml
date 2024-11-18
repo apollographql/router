@@ -4,7 +4,7 @@
 
 replicaCount: 1
 
-# -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
+# -- See https://www.apollographql.com/docs/graphos/reference/router/configuration#yaml-config-file for yaml structure
 router:
   configuration:
     supergraph:
