@@ -1,19 +1,19 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use apollo_federation::sources::connect::expand::Connectors;
-use opentelemetry::metrics::MeterProvider;
+use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
 
 use crate::metrics::meter_provider;
-use crate::spec::Schema;
 
 pub(crate) const CONNECTOR_TYPE_HTTP: &str = "http";
 
 /// Create a gauge instrument for the number of connectors and their spec versions
-pub(crate) fn connect_spec_version_instrument(schema: Arc<Schema>) -> Option<ObservableGauge<u64>> {
-    schema.connectors.as_ref().map(|connectors| {
+pub(crate) fn connect_spec_version_instrument(
+    connectors: Option<&Connectors>,
+) -> Option<ObservableGauge<u64>> {
+    connectors.map(|connectors| {
         let spec_counts = connect_spec_counts(connectors);
         meter_provider()
             .meter("apollo/router")
@@ -57,7 +57,10 @@ mod tests {
     use apollo_federation::sources::connect::JSONSelection;
     use url::Url;
 
+    use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::connectors::tracing::connect_spec_counts;
+    use crate::services::connector_service::ConnectorServiceFactory;
+    use crate::spec::Schema;
 
     #[test]
     fn test_connect_spec_counts() {
@@ -100,5 +103,30 @@ mod tests {
             connect_spec_counts(&connectors),
             [(ConnectSpec::V0_1.to_string(), 3u64)].into()
         );
+    }
+
+    const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
+
+    #[tokio::test]
+    async fn test_connect_spec_version_instrument() {
+        async {
+            let config = Arc::default();
+            let schema = Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
+            let _factory = ConnectorServiceFactory::new(
+                schema.into(),
+                Arc::default(),
+                Arc::default(),
+                Default::default(),
+                Arc::default(),
+            );
+
+            assert_gauge!(
+                "apollo.router.schema.connectors",
+                6,
+                connect.spec.version = "0.1"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

@@ -321,7 +321,9 @@ impl ConnectorServiceFactory {
             schema: schema.clone(),
             subscription_config,
             connectors_by_service_name,
-            _connect_spec_version_instrument: connect_spec_version_instrument(schema),
+            _connect_spec_version_instrument: connect_spec_version_instrument(
+                schema.connectors.as_ref(),
+            ),
         }
     }
 

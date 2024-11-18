@@ -26,6 +26,7 @@ use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
 use crate::json_ext::ValueExt;
+use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -785,6 +786,39 @@ async fn test_tracing_connect_span() {
         None,
         |_| {},
     )
+    .await;
+}
+
+#[tokio::test]
+async fn test_operation_counter() {
+    async {
+        let mock_server = MockServer::start().await;
+        mock_api::users().mount(&mock_server).await;
+        execute(
+            STEEL_THREAD_SCHEMA,
+            &mock_server.uri(),
+            "query { users { id name username } }",
+            Default::default(),
+            None,
+            |_| {},
+        )
+        .await;
+        req_asserts::matches(
+            &mock_server.received_requests().await.unwrap(),
+            vec![
+                Matcher::new().method("GET").path("/users").build(),
+                Matcher::new().method("GET").path("/users/1").build(),
+                Matcher::new().method("GET").path("/users/2").build(),
+            ],
+        );
+        assert_counter!(
+            "apollo.router.operations.connectors",
+            3,
+            connector.type = "http",
+            subgraph.name = "connectors"
+        );
+    }
+    .with_metrics()
     .await;
 }
 
