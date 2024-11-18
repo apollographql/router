@@ -1051,7 +1051,6 @@ impl ScalarTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name)
                 || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(&self.type_name)
             {
@@ -1088,7 +1087,6 @@ impl ScalarTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name)
                 || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(&self.type_name)
             {
@@ -1346,7 +1344,6 @@ impl ObjectTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -1381,7 +1378,6 @@ impl ObjectTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -2403,7 +2399,6 @@ impl InterfaceTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -2438,7 +2433,6 @@ impl InterfaceTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -3369,7 +3363,6 @@ impl UnionTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -3400,7 +3393,6 @@ impl UnionTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -3774,7 +3766,6 @@ impl EnumTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -3802,7 +3793,6 @@ impl EnumTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -4218,7 +4208,6 @@ impl InputObjectTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -4253,7 +4242,6 @@ impl InputObjectTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
@@ -4749,7 +4737,6 @@ impl DirectiveDefinitionPosition {
             .directives
             .contains_key(&self.directive_name)
         {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.directive_name)
                 || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(&self.directive_name)
             {
@@ -4781,7 +4768,6 @@ impl DirectiveDefinitionPosition {
             .directive_definitions
             .contains_key(&self.directive_name)
         {
-            // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.directive_name)
                 || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(&self.directive_name)
             {
