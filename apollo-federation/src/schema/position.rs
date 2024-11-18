@@ -4,7 +4,6 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 
 use apollo_compiler::ast;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -25,7 +24,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use either::Either;
-use lazy_static::lazy_static;
 use serde::Serialize;
 use strum::IntoEnumIterator;
 
@@ -1051,11 +1049,6 @@ impl ScalarTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name)
-                || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(&self.type_name)
-            {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
@@ -1087,11 +1080,6 @@ impl ScalarTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name)
-                || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(&self.type_name)
-            {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
@@ -1344,9 +1332,6 @@ impl ObjectTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
@@ -1378,9 +1363,6 @@ impl ObjectTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
@@ -1912,10 +1894,7 @@ impl ObjectFieldDefinitionPosition {
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
         if !allow_built_ins && is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot insert reserved object field \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot insert reserved object field "{self}""#);
         }
         validate_node_directives(field.directives.deref())?;
         for directive_reference in field.directives.iter() {
@@ -1937,10 +1916,7 @@ impl ObjectFieldDefinitionPosition {
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
         if !allow_built_ins && is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot remove reserved object field \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot remove reserved object field "{self}""#);
         }
         for directive_reference in field.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -2166,10 +2142,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot insert reserved object field argument \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot insert reserved object field argument "{self}""#);
         }
         validate_node_directives(argument.directives.deref())?;
         for directive_reference in argument.directives.iter() {
@@ -2184,10 +2157,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot remove reserved object field argument \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot remove reserved object field argument "{self}""#);
         }
         for directive_reference in argument.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -2399,9 +2369,6 @@ impl InterfaceTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
@@ -2433,9 +2400,6 @@ impl InterfaceTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
@@ -2897,10 +2861,7 @@ impl InterfaceFieldDefinitionPosition {
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
         if !allow_built_ins && is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot insert reserved interface field \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot insert reserved interface field "{self}""#);
         }
         validate_node_directives(field.directives.deref())?;
         for directive_reference in field.directives.iter() {
@@ -2922,10 +2883,7 @@ impl InterfaceFieldDefinitionPosition {
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
         if !allow_built_ins && is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot remove reserved interface field \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot remove reserved interface field "{self}""#);
         }
         for directive_reference in field.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -3150,13 +3108,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Cannot insert reserved interface field argument \"{}\"",
-                    self
-                ),
-            }
-            .into());
+            bail!(r#"Cannot insert reserved interface field argument "{self}""#);
         }
         validate_node_directives(argument.directives.deref())?;
         for directive_reference in argument.directives.iter() {
@@ -3171,13 +3123,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Cannot remove reserved interface field argument \"{}\"",
-                    self
-                ),
-            }
-            .into());
+            bail!(r#"Cannot remove reserved interface field argument "{self}""#);
         }
         for directive_reference in argument.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -3363,9 +3309,6 @@ impl UnionTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
@@ -3393,9 +3336,6 @@ impl UnionTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
@@ -3766,9 +3706,6 @@ impl EnumTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
@@ -3793,9 +3730,6 @@ impl EnumTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
@@ -4073,9 +4007,7 @@ impl EnumValueDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.value_name) {
-            return Err(FederationError::internal(format!(
-                "Cannot insert reserved enum value \"{self}\""
-            )));
+            bail!(r#"Cannot insert reserved enum value "{self}""#);
         }
         validate_node_directives(value.directives.deref())?;
         for directive_reference in value.directives.iter() {
@@ -4090,10 +4022,7 @@ impl EnumValueDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.value_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot remove reserved enum value \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot remove reserved enum value "{self}""#);
         }
         for directive_reference in value.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -4208,9 +4137,6 @@ impl InputObjectTypeDefinitionPosition {
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.referencers.contains_type_name(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
@@ -4242,9 +4168,6 @@ impl InputObjectTypeDefinitionPosition {
             bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
-            if is_graphql_reserved_name(&self.type_name) {
-                return Ok(());
-            }
             bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
@@ -4566,10 +4489,7 @@ impl InputObjectFieldDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot insert reserved input object field \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot insert reserved input object field "{self}""#);
         }
         validate_node_directives(field.directives.deref())?;
         for directive_reference in field.directives.iter() {
@@ -4584,10 +4504,7 @@ impl InputObjectFieldDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot remove reserved input object field \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot remove reserved input object field "{self}""#);
         }
         for directive_reference in field.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -4737,11 +4654,6 @@ impl DirectiveDefinitionPosition {
             .directives
             .contains_key(&self.directive_name)
         {
-            if is_graphql_reserved_name(&self.directive_name)
-                || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(&self.directive_name)
-            {
-                return Ok(());
-            }
             bail!(r#"Directive "{self}" has already been pre-inserted"#);
         }
         schema
@@ -4768,11 +4680,6 @@ impl DirectiveDefinitionPosition {
             .directive_definitions
             .contains_key(&self.directive_name)
         {
-            if is_graphql_reserved_name(&self.directive_name)
-                || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(&self.directive_name)
-            {
-                return Ok(());
-            }
             bail!(r#"Directive "{self}" already exists in schema"#);
         }
         schema
@@ -4981,10 +4888,7 @@ impl DirectiveArgumentDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot insert reserved directive argument \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot insert reserved directive argument "{self}""#);
         }
         validate_node_directives(argument.directives.deref())?;
         for directive_reference in argument.directives.iter() {
@@ -4999,10 +4903,7 @@ impl DirectiveArgumentDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot remove reserved directive argument \"{}\"", self),
-            }
-            .into());
+            bail!(r#"Cannot remove reserved directive argument "{self}""#);
         }
         for directive_reference in argument.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -5108,27 +5009,6 @@ impl Display for DirectiveArgumentDefinitionPosition {
 
 pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
     name.starts_with("__")
-}
-
-lazy_static! {
-    static ref GRAPHQL_BUILTIN_SCALAR_NAMES: IndexSet<Name> = {
-        IndexSet::from_iter([
-            name!("Int"),
-            name!("Float"),
-            name!("String"),
-            name!("Boolean"),
-            name!("ID"),
-        ])
-    };
-    static ref GRAPHQL_BUILTIN_DIRECTIVE_NAMES: IndexSet<Name> = {
-        IndexSet::from_iter([
-            name!("include"),
-            name!("skip"),
-            name!("deprecated"),
-            name!("specifiedBy"),
-            name!("defer"),
-        ])
-    };
 }
 
 pub(crate) static INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
