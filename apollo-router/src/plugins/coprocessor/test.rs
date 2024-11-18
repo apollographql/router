@@ -15,6 +15,7 @@ mod tests {
     use router::body::RouterBody;
     use serde_json::json;
     use serde_json_bytes::Value;
+    use services::subgraph::SubgraphRequestId;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -282,13 +283,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
-                detached: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -346,13 +342,9 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
-                detached: false,
+                subgraph_request_id: true,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -389,16 +381,27 @@ mod tests {
                     req.subgraph_request.into_body().query.unwrap()
                 );
 
+                // this should be the same as the initial request id
+                assert_eq!(&*req.id, "5678");
+
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .id(req.id)
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+                assert_eq!(
+                    deserialized_request.subgraph_request_id.as_deref(),
+                    Some("5678")
+                );
                 Ok(http::Response::builder()
                     .body(RouterBody::from(
                         r#"{
@@ -443,7 +446,8 @@ mod tests {
                                     }
                                   },
                                   "serviceName": "service name shouldn't change",
-                                  "uri": "http://thisurihaschanged"
+                                  "uri": "http://thisurihaschanged",
+                                  "subgraphRequestId": "9abc"
                             }"#,
                     ))
                     .unwrap())
@@ -457,18 +461,15 @@ mod tests {
             "my_subgraph_service_name".to_string(),
         );
 
-        let request = subgraph::Request::fake_builder().build();
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
 
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!("5678", &*response.id);
         assert_eq!(
             serde_json_bytes::json!({ "test": 1234_u32 }),
-            service
-                .oneshot(request)
-                .await
-                .unwrap()
-                .response
-                .into_body()
-                .data
-                .unwrap()
+            response.response.into_body().data.unwrap()
         );
     }
 
@@ -485,13 +486,8 @@ mod tests {
                     SelectorOrValue::Value("value".to_string().into()),
                 ])
                 .into(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
-                detached: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -560,13 +556,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
-                detached: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -631,13 +622,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
-                detached: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -747,12 +733,9 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                service_name: false,
-                status_code: false,
-                detached: false,
+                subgraph_request_id: true,
+                ..Default::default()
             },
         };
 
@@ -762,16 +745,23 @@ mod tests {
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
+                assert_eq!(&*req.id, "5678");
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .id(req.id)
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value = serde_json::from_slice(&body.to_bytes().await.unwrap()).unwrap();
+                let subgraph_id = body.get("subgraphRequestId").unwrap();
+                assert_eq!(subgraph_id.as_str(), Some("5678"));
+
                 Ok(http::Response::builder()
                     .body(RouterBody::from(
                         r#"{
@@ -815,7 +805,8 @@ mod tests {
                                       "accepts-multipart": false,
                                       "this-is-a-test-context": 42
                                     }
-                                  }
+                                  },
+                                  "subgraphRequestId": "9abc"
                             }"#,
                     ))
                     .unwrap())
@@ -829,7 +820,8 @@ mod tests {
             "my_subgraph_service_name".to_string(),
         );
 
-        let request = subgraph::Request::fake_builder().build();
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
 
         let response = service.oneshot(request).await.unwrap();
 
@@ -838,6 +830,7 @@ mod tests {
             response.response.headers().get("cookie").unwrap(),
             "tasty_cookie=strawberry"
         );
+        assert_eq!(&*response.id, "5678");
 
         assert_eq!(
             response
@@ -913,12 +906,8 @@ mod tests {
                     default: None,
                 })
                 .into(),
-                headers: false,
-                context: false,
                 body: true,
-                service_name: false,
-                status_code: false,
-                detached: false,
+                ..Default::default()
             },
         };
 

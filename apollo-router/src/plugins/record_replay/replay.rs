@@ -219,6 +219,7 @@ impl Plugin for Replay {
                         http::Response::new(fetch.response.chunks[0].clone()),
                         req.context.clone(),
                         subgraph_name.clone(),
+                        req.id.clone(),
                     );
 
                     let runtime_variables = req.subgraph_request.body().variables.clone();

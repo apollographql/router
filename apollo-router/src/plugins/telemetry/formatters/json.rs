@@ -500,7 +500,7 @@ mod test {
                 .or_else(|| ctx.lookup_current())
                 .expect("current span expected");
             let extracted = extract_dd_trace_id(&current_span);
-            assert_eq!(extracted, Some("1234".to_string()));
+            assert_eq!(extracted, Some("1234".to_string()), "should have trace id");
         }
     }
 
@@ -535,7 +535,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "should have trace id")]
     fn test_missing_dd_attribute() {
         subscriber::with_default(
             Registry::default()

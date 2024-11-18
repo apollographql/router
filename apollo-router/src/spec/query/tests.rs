@@ -40,6 +40,7 @@ macro_rules! assert_eq_and_ordered_json {
 }
 
 #[derive(Default)]
+#[must_use = "Must call .test() to run the test"]
 struct FormatTest {
     schema: Option<&'static str>,
     query_type_name: Option<&'static str>,
@@ -100,6 +101,11 @@ impl FormatTest {
         self
     }
 
+    fn expected_errors(mut self, v: serde_json_bytes::Value) -> Self {
+        self.expected_errors = Some(v);
+        self
+    }
+
     fn expected_extensions(mut self, v: serde_json_bytes::Value) -> Self {
         self.expected_extensions = Some(v);
         self
@@ -131,7 +137,6 @@ impl FormatTest {
 
         query.format_response(
             &mut response,
-            self.operation,
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
@@ -1180,6 +1185,452 @@ fn reformat_response_array_of_id_duplicate() {
                 "array": ["hello","world"],
             },
         }})
+        .test();
+}
+
+#[test]
+// If this test fails, this means you got greedy about allocations,
+// beware of aliases!
+fn reformat_response_expected_types() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                i: Int
+                s: String
+                f: Float
+                b: Boolean
+                e: E
+                u: U
+                id: ID
+                l: [Int]
+            }
+            
+            enum E {
+              A
+              B
+            }
+            union U = ObjA | ObjB
+            type ObjA {
+                a: String
+            }
+            type ObjB {
+                a: String
+            }
+            ",
+        )
+        .query(
+            r#"{
+            get {
+                i
+                s
+                f
+                ... on Thing {
+                  b
+                  e
+                  u {
+                    ... on ObjA {
+                      a
+                    }
+                  }
+                  id
+                }
+                l
+            }
+        }"#,
+        )
+        .response(json! {{
+            "get": {
+                "i": "hello",
+                "s": 1.0,
+                "f": [1],
+                "b": 0,
+                "e": "X",
+                "u": 1,
+                "id": {
+                    "test": "test",
+                },
+                "l": "A"
+            },
+        }})
+        .expected(json! {{
+            "get": {
+                "i": null,
+                "s": null,
+                "f": null,
+                "b": null,
+                "e": null,
+                "u": null,
+                // FIXME(@goto-bus-stop): this should be null, but we do not
+                // validate ID values today
+                "id": {
+                    "test": "test",
+                },
+                "l": null
+            },
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Thing.i",
+                "path": ["get", "i"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.s",
+                "path": ["get", "s"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.f",
+                "path": ["get", "f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Thing.b",
+                "path": ["get", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Expected a valid enum value for type E",
+                "path": ["get", "e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-object value of type number for composite type U",
+                "path": ["get", "u"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-list value of type string for list type [Int]",
+                "path": ["get", "l"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_int() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: Int
+                b: Int
+                c: Int
+                d: Int
+                e: Int
+                f: Int
+                g: Int
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f g }"#)
+        .response(json!({
+            "a": 1,
+            "b": 1.0, // Should be accepted as Int 1
+            "c": 1.2, // Float should not be truncated
+            "d": "1234", // Optional to be coerced by spec: we do not do so
+            "e": true,
+            "f": [1],
+            "g": { "value": 1 },
+        }))
+        .expected(json!({
+            "a": 1,
+            // FIXME(@goto-bus-stop): we should accept this, and truncate it
+            // to Int value `1`, but do not do so today
+            "b": null,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+            "g": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field Query.b",
+                "path": ["b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.c",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.d",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.e",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.g",
+                "path": ["g"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_int_range() {
+    let schema = "type Query {
+        me: User
+    }
+
+    type User {
+        id: String!
+        name: String
+        someNumber: Int
+        someOtherNumber: Int!
+    }
+    ";
+
+    let query = "query  { me { id name someNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": null,
+            },
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field User.someNumber",
+                "path": ["me", "someNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]))
+        .test();
+
+    let query2 = "query  { me { id name someOtherNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query2)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someOtherNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field User.someOtherNumber",
+                "path": ["me", "someOtherNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_float() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: Float
+                b: Float
+                c: Float
+                d: Float
+                e: Float
+                f: Float
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f }"#)
+        .response(json!({
+            // Note: NaNs and Infinitys are not supported by GraphQL Floats,
+            // and handily not representable in JSON, so we don't need to handle them.
+            "a": 1, // Int can be interpreted as Float
+            "b": 1.2,
+            "c": "2.2", // Optional to be coerced by spec: we do not do so
+            "d": true,
+            "e": [1.234],
+            "f": { "value": 12.34 },
+        }))
+        .expected(json!({
+            "a": 1, // Representing int-valued float without the decimals is okay in JSON
+            "b": 1.2,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field Query.c",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.d",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.e",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_string() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: String
+                b: String
+                c: String
+                d: String
+                e: String
+                f: String
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f }"#)
+        .response(json!({
+            "a": "text",
+            "b": 1, // Optional to be coerced by spec: we do not do so
+            "c": false, // Optional to be coerced by spec: we do not do so
+            "d": 1234.5678, // Optional to be coerced by spec: we do not do so
+            "e": ["s"],
+            "f": { "text": "text" },
+        }))
+        .expected(json!({
+            "a": "text",
+            "b": null,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field Query.b",
+                "path": ["b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.c",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.d",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.e",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.f",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_id() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: ID
+                b: ID
+                c: ID
+                d: ID
+                e: ID
+                f: ID
+                g: ID
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f g }"#)
+        .response(json!({
+            "a": "1234",
+            "b": "ABCD",
+            "c": 1234,
+            "d": 1234.0, // Integer represented as a float should be coerced
+            "e": false,
+            "f": 1234.5678, // Float should not be truncated
+            "g": ["s"],
+        }))
+        .expected(json!({
+            // Note technically IDs should always be represented as a String in JSON,
+            // though the value returned from a field can be either Int or String.
+            // We do not coerce the acceptable types to strings today.
+            "a": "1234",
+            "b": "ABCD",
+            "c": 1234,
+            // FIXME(@goto-bus-stop): We should coerce this to string "1234" (without .0),
+            // but we don't do so today
+            "d": 1234.0,
+            // FIXME(@goto-bus-stop): We should null out all these values,
+            // but we don't validate IDs today
+            "e": false,
+            "f": 1234.5678,
+            "g": ["s"],
+        }))
+        .expected_errors(json!([
+            // FIXME(@goto-bus-stop): we should expect these errors:
+            // {
+            //     "message": "Invalid value found for field Query.e",
+            //     "path": ["e"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+            // {
+            //     "message": "Invalid value found for field Query.f",
+            //     "path": ["f"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+            // {
+            //     "message": "Invalid value found for field Query.g",
+            //     "path": ["g"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+        ]))
         .test();
 }
 
@@ -3506,10 +3957,8 @@ fn it_statically_includes() {
         &Default::default(),
     )
     .expect("could not parse query");
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3530,14 +3979,12 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3561,10 +4008,8 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3597,14 +4042,12 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3655,10 +4098,8 @@ fn it_statically_skips() {
         &Default::default(),
     )
     .expect("could not parse query");
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3679,14 +4120,12 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3710,10 +4149,8 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3746,14 +4183,12 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -5132,7 +5567,6 @@ fn fragment_on_interface_on_query() {
 
     query.format_response(
         &mut response,
-        None,
         Default::default(),
         api_schema,
         BooleanValues { bits: 0 },
@@ -5666,7 +6100,6 @@ fn test_error_path_works_across_inline_fragments() {
     .unwrap();
 
     assert!(query.contains_error_path(
-        None,
         &None,
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField"),
         BooleanValues { bits: 0 }
@@ -5713,7 +6146,7 @@ fn test_query_not_named_query() {
     )
     .unwrap();
     let query = Query::parse("{ example }", None, &schema, &config).unwrap();
-    let selection = &query.operations[0].selection_set[0];
+    let selection = &query.operation.selection_set[0];
     assert!(
         matches!(
             selection,
@@ -5784,12 +6217,12 @@ fn filtered_defer_fragment() {
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operations, defer_stats, schema_aware_hash) =
+    let (fragments, operation, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
-        &operations,
+        &operation,
         &fragments.map,
         &defer_stats,
     )
@@ -5797,7 +6230,7 @@ fn filtered_defer_fragment() {
     let mut query = Query {
         string: query.to_string(),
         fragments,
-        operations,
+        operation,
         filtered_query: None,
         subselections,
         defer_stats,
@@ -5810,12 +6243,12 @@ fn filtered_defer_fragment() {
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operations, defer_stats, schema_aware_hash) =
+    let (fragments, operation, defer_stats, schema_aware_hash) =
         Query::extract_query_information(&schema, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
-        &operations,
+        &operation,
         &fragments.map,
         &defer_stats,
     )
@@ -5824,7 +6257,7 @@ fn filtered_defer_fragment() {
     let filtered = Query {
         string: filtered_query.to_string(),
         fragments,
-        operations,
+        operation,
         filtered_query: None,
         subselections,
         defer_stats,
@@ -5845,7 +6278,6 @@ fn filtered_defer_fragment() {
 
     query.filtered_query.as_ref().unwrap().format_response(
         &mut response,
-        None,
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
@@ -5855,7 +6287,6 @@ fn filtered_defer_fragment() {
 
     query.format_response(
         &mut response,
-        None,
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },

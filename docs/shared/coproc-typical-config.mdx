@@ -59,6 +59,7 @@ coprocessor:
         uri: false
         method: false
         service_name: false
+        subgraph_request_id: false
       response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
         detached: false # optional. if set to true, the router will handle the response without waiting for the coprocessor to respond
         headers: true
@@ -66,4 +67,5 @@ coprocessor:
         context: false
         service_name: false
         status_code: false
+        subgraph_request_id: false
 ```
