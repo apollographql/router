@@ -49,6 +49,8 @@ impl Metrics {
         data.populate_user_plugins_instrument(configuration);
         data.populate_query_planner_experimental_parallelism(configuration);
         data.populate_deno_or_rust_mode_instruments(configuration);
+        data.populate_legacy_fragment_usage(configuration);
+
         data.into()
     }
 }
@@ -492,6 +494,18 @@ impl InstrumentData {
                 [].into(),
             ),
         );
+    }
+
+    pub(crate) fn populate_legacy_fragment_usage(&mut self, configuration: &Configuration) {
+        // Fragment generation takes precedence over fragment reuse. Only report when fragment reuse is *actually active*.
+        if configuration.supergraph.reuse_query_fragments == Some(true)
+            && !configuration.supergraph.generate_query_fragments
+        {
+            self.data.insert(
+                "apollo.router.config.reuse_query_fragments".to_string(),
+                (1, HashMap::new()),
+            );
+        }
     }
 
     pub(crate) fn populate_query_planner_experimental_parallelism(
