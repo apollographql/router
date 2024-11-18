@@ -330,17 +330,13 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
             }
         }
 
-        errors.extend(
-            headers::validate_arg(
-                http_arg,
-                schema,
-                HttpHeadersCoordinate::Source {
-                    directive_name: &directive.name,
-                },
-            )
-            .into_iter()
-            .flatten(),
-        );
+        errors.extend(headers::validate_arg(
+            http_arg,
+            schema,
+            HttpHeadersCoordinate::Source {
+                directive_name: &directive.name,
+            },
+        ));
     } else {
         errors.push(Message {
             code: Code::GraphQLError,
@@ -515,21 +511,14 @@ pub enum Code {
     SelectedFieldNotFound,
     /// A group selection (`a { b }`) was used, but the field is not an object
     GroupSelectionIsNotObject,
-    /// Invalid header name
-    /// The `name` and `as` mappings should be valid, HTTP header names.
-    InvalidHttpHeaderName,
-    /// The `value` mapping should be either a valid HTTP header value or list of valid HTTP header values.
-    InvalidHttpHeaderValue,
     /// The `name` mapping must be unique for all headers.
     HttpHeaderNameCollision,
-    /// Header mappings cannot include both `as` and `value` properties.
-    InvalidHttpHeaderMapping,
+    /// A provided header in `@source` or `@connect` was not valid
+    InvalidHeader,
     /// Certain directives are not allowed when using connectors
     UnsupportedFederationDirective,
     /// Abstract types are not allowed when using connectors
     UnsupportedAbstractType,
-    /// Header does not define `from` or `value`
-    MissingHeaderSource,
     /// Fields that return an object type must use a group JSONSelection `{}`
     GroupSelectionRequiredForObject,
     /// Fields in the schema that aren't resolved by a connector

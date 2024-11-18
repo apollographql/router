@@ -1,5 +1,7 @@
 //! Headers defined in connectors `@source` and `@connect` directives.
 
+use std::error::Error;
+use std::fmt::Display;
 use std::ops::Range;
 use std::str::FromStr;
 
@@ -120,22 +122,24 @@ pub enum HeaderValueError {
     },
 }
 
-impl HeaderValueError {
-    pub(crate) fn message(&self) -> String {
+impl Display for HeaderValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HeaderValueError::InvalidVariableNamespace { namespace, .. } => {
-                format!("Invalid variable namespace: {namespace}")
+                write!(f, "invalid variable namespace: {namespace}")
             }
-            HeaderValueError::ParseError { message, .. } => message.clone(),
+            HeaderValueError::ParseError { message, .. } => write!(f, "{message}"),
         }
     }
 }
+
+impl Error for HeaderValueError {}
 
 impl From<VariableParseError<Span<'_>>> for HeaderValueError {
     fn from(error: VariableParseError<Span<'_>>) -> Self {
         match error {
             VariableParseError::Nom(span, _) => HeaderValueError::ParseError {
-                message: format!("Invalid variable reference `{s}`", s = span.fragment()),
+                message: format!("invalid variable reference `{s}`", s = span.fragment()),
                 location: span.location_offset()..span.location_offset() + span.fragment().len(),
             },
             VariableParseError::InvalidNamespace {
@@ -147,7 +151,7 @@ impl From<VariableParseError<Span<'_>>> for HeaderValueError {
             },
             VariableParseError::InvalidHeaderValue { value, location } => {
                 HeaderValueError::ParseError {
-                    message: format!("Invalid HTTP header value `{value}`"),
+                    message: format!("invalid HTTP header value `{value}`"),
                     location,
                 }
             }
