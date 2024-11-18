@@ -185,9 +185,17 @@ pub(crate) mod strip_ranges {
                     key.strip_ranges(),
                     sub.as_ref().map(|s| s.strip_ranges()),
                 ),
-                Self::Path(alias, path) => {
+                Self::Path {
+                    alias,
+                    path,
+                    inline,
+                } => {
                     let stripped_alias = alias.as_ref().map(|a| a.strip_ranges());
-                    Self::Path(stripped_alias, path.strip_ranges())
+                    Self::Path {
+                        alias: stripped_alias,
+                        path: path.strip_ranges(),
+                        inline: *inline,
+                    }
                 }
                 Self::Group(alias, sub) => Self::Group(alias.strip_ranges(), sub.strip_ranges()),
             }
