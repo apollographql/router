@@ -1571,7 +1571,7 @@ impl FederatedQueryGraphBuilder {
                         subgraph_name: subgraph_name.clone(),
                         argument_coordinate: object_field_arg.clone(),
                         types_with_context_set,
-                        named_parameter: object_field_arg.argument_name.as_str().to_owned(),
+                        named_parameter: object_field_arg.argument_name.to_owned(),
                         arg_type: input_value.ty.clone(),
                     };
                     coordinate_map
@@ -1615,16 +1615,21 @@ impl FederatedQueryGraphBuilder {
             .subgraphs()
             .filter_map(|(source, _)| subgraph_to_args.get_key_value(source))
             .map(|(source, args)| {
-                (
+                Ok::<_, FederationError>((
                     source.clone(),
                     args.iter()
                         .sorted()
                         .enumerate()
-                        .map(|(i, arg)| (arg.clone(), format!("contextualArgument__{source}_{i}")))
-                        .collect(),
-                )
+                        .map(|(i, arg)| {
+                            Ok::<_, FederationError>((
+                                arg.clone(),
+                                format!("contextualArgument__{source}_{i}").try_into()?,
+                            ))
+                        })
+                        .process_results(|r| r.collect())?,
+                ))
             })
-            .collect();
+            .process_results(|r| r.collect())?;
         self.base.query_graph.subgraph_to_args = subgraph_to_args;
 
         Ok(())

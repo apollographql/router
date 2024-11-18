@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use petgraph::graph::EdgeIndex;
 
@@ -23,9 +24,9 @@ pub(crate) struct ContextMapEntry {
     pub(crate) path_tree: Option<Arc<OpPathTree>>,
     pub(crate) selection_set: SelectionSet,
     pub(crate) inbound_edge: EdgeIndex,
-    pub(crate) param_name: String,
+    pub(crate) param_name: Name,
     pub(crate) arg_type: Node<Type>,
-    pub(crate) id: String,
+    pub(crate) id: Name,
 }
 
 /// Note that `ConditionResolver`s are guaranteed to be only called for edge with conditions.
@@ -44,7 +45,7 @@ pub(crate) enum ConditionResolution {
     Satisfied {
         cost: QueryPlanCost,
         path_tree: Option<Arc<OpPathTree>>,
-        context_map: Option<IndexMap<String, ContextMapEntry>>,
+        context_map: Option<IndexMap<Name, ContextMapEntry>>,
     },
     Unsatisfied {
         // NOTE: This seems to be a false positive...

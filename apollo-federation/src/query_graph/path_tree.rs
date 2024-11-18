@@ -294,7 +294,7 @@ where
                     if let Some(other) = context_to_selection {
                         existing
                             .context_to_selection
-                            .get_or_insert_with(HashSet::default)
+                            .get_or_insert_with(Default::default)
                             .extend(other);
                     }
                     if let Some(other) = parameter_to_context {

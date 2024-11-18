@@ -11,7 +11,6 @@ use std::sync::Arc;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
@@ -77,8 +76,8 @@ use crate::schema::ValidFederationSchema;
 
 #[derive(Clone, serde::Serialize, Debug, Eq, PartialEq)]
 pub(crate) struct ContextAtUsageEntry {
-    pub(crate) context_id: String,
-    pub(crate) relative_path: Vec<String>,
+    pub(crate) context_id: Name,
+    pub(crate) relative_path: Vec<FetchDataPathElement>,
     pub(crate) selection_set: SelectionSet,
     pub(crate) subgraph_arg_type: Node<Type>,
 }
@@ -274,8 +273,8 @@ impl OverrideId {
     }
 }
 
-pub(crate) type ContextToSelection = HashSet<String>;
-pub(crate) type ParameterToContext = IndexMap<String, ContextAtUsageEntry>;
+pub(crate) type ContextToSelection = IndexSet<Name>;
+pub(crate) type ParameterToContext = IndexMap<Name, ContextAtUsageEntry>;
 
 /// The item type for [`GraphPath::iter`]
 pub(crate) type GraphPathItem<'path, TTrigger, TEdge> = (
@@ -1443,11 +1442,11 @@ where
     fn merge_edge_conditions_with_resolution(
         &self,
         condition_path_tree: &Option<Arc<OpPathTree>>,
-        context_map: &Option<IndexMap<String, ContextMapEntry>>,
+        context_map: &Option<IndexMap<Name, ContextMapEntry>>,
     ) -> (
         Vec<Option<Arc<OpPathTree>>>,
-        Vec<Option<HashSet<String>>>,
-        Vec<Option<IndexMap<String, ContextAtUsageEntry>>>,
+        Vec<Option<IndexSet<Name>>>,
+        Vec<Option<IndexMap<Name, ContextAtUsageEntry>>>,
     ) {
         let mut edge_conditions = self.edge_conditions.clone();
         let mut context_to_selection = self.context_to_selection.clone();
@@ -1479,7 +1478,10 @@ where
                     entry.param_name.clone(),
                     ContextAtUsageEntry {
                         context_id: entry.id.clone(),
-                        relative_path: vec!["..".to_string(); entry.levels_in_data_path],
+                        relative_path: vec![
+                            FetchDataPathElement::Parent;
+                            entry.levels_in_data_path
+                        ],
                         selection_set: entry.selection_set.clone(),
                         subgraph_arg_type: entry.arg_type.clone(),
                     },
@@ -1681,7 +1683,7 @@ where
         /* Resolve context conditions */
 
         let mut total_cost = 0.;
-        let mut context_map: IndexMap<String, ContextMapEntry> = IndexMap::default();
+        let mut context_map: IndexMap<Name, ContextMapEntry> = IndexMap::default();
 
         if !edge_weight.required_contexts.is_empty() {
             let schema = self.graph.schema()?;

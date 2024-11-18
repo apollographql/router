@@ -149,7 +149,7 @@ pub struct ContextCondition {
     types_with_context_set: HashSet<CompositeTypeDefinitionPosition>,
     // PORT_NOTE: This field was renamed because the JS name (`coordinate`) was too vague.
     argument_coordinate: ObjectFieldArgumentDefinitionPosition,
-    named_parameter: String,
+    named_parameter: Name,
     arg_type: Node<Type>,
 }
 
@@ -411,7 +411,7 @@ pub struct QueryGraph {
     pub(crate) subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>>,
     /// Like `self.subgraph_to_args` but pairs each field argument with a unique identifier string.
     pub(crate) subgraph_to_arg_indices:
-        IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, String>>,
+        IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, Name>>,
 }
 
 impl QueryGraph {
