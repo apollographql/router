@@ -1,0 +1,49 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_namespace_in_header_variables.graphql
+---
+[
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "The value `{$foo.bar}` at `@source(http.headers:)` is an invalid HTTP header - invalid variable namespace `$foo`, must be one of $config, $context",
+        locations: [
+            11:49..11:53,
+        ],
+    },
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "`@source(http.headers:)` contains an invalid variable reference `{$this.bar}` - Variable namespace `$this` is not valid at this location, must be one of $config, $context",
+        locations: [
+            12:62..12:67,
+        ],
+    },
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "The value `{config.bar}` at `@source(http.headers:)` is an invalid HTTP header - invalid variable namespace `config`, must be one of $config, $context",
+        locations: [
+            13:56..13:62,
+        ],
+    },
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "The value `{$foo.bar}` at `@connect(http.headers:)` on `Query.scalar` is an invalid HTTP header - invalid variable namespace `$foo`, must be one of $args, $config, $context, $this",
+        locations: [
+            24:51..24:55,
+        ],
+    },
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "`@connect(http.headers:)` on `Query.scalar` contains an invalid variable reference `{$status}` - Variable namespace `$status` is not valid at this location, must be one of $args, $config, $context, $this",
+        locations: [
+            25:64..25:71,
+        ],
+    },
+    Message {
+        code: InvalidHttpHeaderValue,
+        message: "The value `{config.bar}` at `@connect(http.headers:)` on `Query.scalar` is an invalid HTTP header - invalid variable namespace `config`, must be one of $args, $config, $context, $this",
+        locations: [
+            26:58..26:64,
+        ],
+    },
+]

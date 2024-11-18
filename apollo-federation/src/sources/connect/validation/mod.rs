@@ -21,6 +21,7 @@ mod graphql;
 mod http;
 mod selection;
 mod source_name;
+mod variable;
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -332,7 +333,7 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
         errors.extend(
             headers::validate_arg(
                 http_arg,
-                &schema.sources,
+                schema,
                 HttpHeadersCoordinate::Source {
                     directive_name: &directive.name,
                 },
@@ -404,6 +405,9 @@ fn require_value_is_str<'a, Coordinate: Display>(
     })
 }
 
+/// For an object type, get all the keys that are resolvable.
+///
+/// The FieldSet returned here is what goes in the `fields` argument, so `id` in `@key(fields: "id")`
 fn resolvable_key_fields<'a>(
     object: &'a Node<ObjectType>,
     schema: &'a Schema,
@@ -540,14 +544,14 @@ pub enum Code {
     UndefinedField,
     /// A type used in a variable is not yet supported (i.e., unions)
     UnsupportedVariableType,
-    /// A path variable is nullable, which can cause errors at runtime
-    NullablePathVariable,
+    /// A variable is nullable in a location which requires non-null at runtime
+    NullabilityMismatch,
 }
 
 impl Code {
     pub const fn severity(&self) -> Severity {
         match self {
-            Self::NoSourceImport | Self::NullablePathVariable => Severity::Warning,
+            Self::NoSourceImport | Self::NullabilityMismatch => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -574,7 +578,7 @@ mod test_validate_source {
     #[test]
     fn validation_tests() {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
-            glob!("test_data", "*.graphql", |path| {
+            glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
                 let errors = validate(&schema, path.to_str().unwrap());
                 assert_snapshot!(format!("{:#?}", errors));

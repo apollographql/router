@@ -1,6 +1,0 @@
----
-source: apollo-federation/src/sources/connect/models/validation.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/validation/valid_entity_arg_on_field.graphql
----
-[]

@@ -212,13 +212,8 @@ fn validate_field(
 
         errors.extend(validate_selection(connect_coordinate, schema, seen_fields).err());
 
-        errors.extend(validate_entity_arg(
-            field,
-            connect_directive,
-            object,
-            schema,
-            category,
-        ));
+        errors
+            .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
 
         let Some((http_arg, http_arg_node)) = connect_directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
@@ -305,9 +300,9 @@ fn validate_field(
         errors.extend(
             headers::validate_arg(
                 http_arg,
-                source_map,
+                schema,
                 HttpHeadersCoordinate::Connect {
-                    directive_name: schema.connect_directive_name,
+                    connect: connect_coordinate,
                     object: &object.name,
                     field: &field.name,
                 },

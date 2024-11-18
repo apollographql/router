@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_entities/valid/entity_field_counts_as_key_resolver.graphql
+---
+[]

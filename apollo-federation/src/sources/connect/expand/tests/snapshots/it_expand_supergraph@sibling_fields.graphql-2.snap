@@ -137,9 +137,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: This,
-                                    path: "k.id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $this,
+                                        location: 18..23,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "k",
+                                            location: 24..25,
+                                        },
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 26..28,
+                                        },
+                                    ],
                                     location: 18..28,
                                 },
                             ),

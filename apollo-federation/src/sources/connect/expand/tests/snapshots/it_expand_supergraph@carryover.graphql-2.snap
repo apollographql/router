@@ -205,9 +205,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: Args,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $args,
+                                        location: 4..9,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 10..12,
+                                        },
+                                    ],
                                     location: 4..12,
                                 },
                             ),
@@ -375,9 +383,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                     Component {
                         parts: [
                             Var(
-                                Variable {
-                                    var_type: This,
-                                    path: "id",
+                                VariableReference {
+                                    namespace: VariableNamespace {
+                                        namespace: $this,
+                                        location: 4..9,
+                                    },
+                                    path: [
+                                        VariablePathPart {
+                                            part: "id",
+                                            location: 10..12,
+                                        },
+                                    ],
                                     location: 4..12,
                                 },
                             ),

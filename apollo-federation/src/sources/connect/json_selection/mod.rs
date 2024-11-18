@@ -13,7 +13,6 @@ pub use apply_to::*;
 // Pretty code is currently only used in tests, so this cfg is to suppress the
 // unused lint warning. If pretty code is needed in not test code, feel free to
 // remove the `#[cfg(test)]`.
-pub(crate) use known_var::*;
 pub(crate) use location::Ranged;
 pub use parser::*;
 #[cfg(test)]
