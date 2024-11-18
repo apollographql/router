@@ -170,7 +170,7 @@ pub(crate) struct FetchDependencyGraphNode {
     /// Input rewrites for query plan execution to perform prior to executing the fetch.
     input_rewrites: Arc<Vec<Arc<FetchDataRewrite>>>,
     /// Rewrites that will need to occur to store contextual data for future use
-    context_inputs: Option<Vec<FetchDataKeyRenamer>>,
+    context_inputs: Vec<FetchDataRewrite>,
     /// As query plan execution runs, it accumulates fetch data into a response object. This is the
     /// path at which to merge in the data for this particular fetch.
     merge_at: Option<Vec<FetchDataPathElement>>,
@@ -797,7 +797,7 @@ impl FetchDependencyGraph {
             cached_cost: None,
             must_preserve_selection_set: false,
             is_known_useful: false,
-            context_inputs: None,
+            context_inputs: Vec::new(),
         })))
     }
 
@@ -2530,11 +2530,8 @@ impl FetchDependencyGraphNode {
                 input_rewrites.push(rewrite.clone());
             }
 
-            if let Some(other_context_inputs) = &other.context_inputs {
-                self.context_inputs
-                    .get_or_insert_with(Vec::new)
-                    .extend(other_context_inputs.iter().cloned());
-            }
+            self.context_inputs
+                .extend(other.context_inputs.iter().cloned());
         }
         Ok(())
     }
@@ -2707,7 +2704,7 @@ impl FetchDependencyGraphNode {
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
             output_rewrites,
-            context_rewrites: todo!(),
+            context_rewrites: self.context_inputs.clone(),
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {
@@ -2924,19 +2921,34 @@ impl FetchDependencyGraphNode {
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
-        let context_inputs = self.context_inputs.get_or_insert_with(Default::default);
-        if !context_inputs.iter().any(|c| same_key_renamer(c, &renamer)) {
-            context_inputs.push(renamer);
+        let rewrite = FetchDataRewrite::KeyRenamer(renamer);
+        if !self
+            .context_inputs
+            .iter()
+            .any(|c| same_data_rewrite(c, &rewrite))
+        {
+            self.context_inputs.push(rewrite);
         }
     }
 }
 
-fn same_key_renamer(k1: &FetchDataKeyRenamer, k2: &FetchDataKeyRenamer) -> bool {
-    if k1.rename_key_to != k2.rename_key_to || k1.path.len() != k2.path.len() {
-        return false;
-    }
+fn same_data_rewrite(r1: &FetchDataRewrite, r2: &FetchDataRewrite) -> bool {
+    match (r1, r2) {
+        (FetchDataRewrite::KeyRenamer(k1), FetchDataRewrite::KeyRenamer(k2)) => {
+            if k1.rename_key_to != k2.rename_key_to || k1.path.len() != k2.path.len() {
+                return false;
+            }
 
-    k1.path.iter().zip(k2.path.iter()).all(|(p1, p2)| p1 == p2)
+            return k1.path.iter().zip(k2.path.iter()).all(|(p1, p2)| p1 == p2);
+        }
+        (FetchDataRewrite::ValueSetter(v1), FetchDataRewrite::ValueSetter(v2)) => {
+            return v1.path.iter().zip(v2.path.iter()).all(|(p1, p2)| p1 == p2)
+                && v1.set_value_to == v2.set_value_to;
+        }
+        _ => {
+            return false;
+        }
+    }
 }
 
 fn operation_for_entities_fetch(
