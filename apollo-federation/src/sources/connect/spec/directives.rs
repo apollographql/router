@@ -1,12 +1,8 @@
-use std::iter::once;
-
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use http::HeaderName;
 use itertools::Itertools;
 
 use super::schema::ConnectDirectiveArguments;
@@ -18,16 +14,12 @@ use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
-use super::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
-use super::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
-use super::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::FederationSchema;
-use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::HeaderSource;
@@ -164,15 +156,12 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
                         .map_err(|err| internal!(format!("Invalid base URL: {}", err)))?,
                 );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
-                headers = if let Some(values) = value.as_list() {
-                    Some(nodes_to_headers(values)?)
-                } else if value.as_object().is_some() {
-                    Some(once(node_to_header(value)?).collect())
-                } else {
-                    return Err(internal!(
-                        "`headers` field in `@source` directive's `http` field is not an object or list of objects"
-                    ));
-                }
+                headers = Some(
+                    HeaderSource::from_headers_arg(value)
+                        .map_err(|err| internal!(err))?
+                        .into_iter()
+                        .collect(),
+                );
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive's `http` field: {name}"
@@ -186,73 +175,6 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
             ))?,
             headers: headers.unwrap_or_default(),
         })
-    }
-}
-
-/// Converts a list of (name, value) pairs into a list of HTTP headers.
-fn nodes_to_headers(
-    values: &[Node<Value>],
-) -> Result<IndexMap<HeaderName, HeaderSource>, FederationError> {
-    values.iter().map(node_to_header).try_collect()
-}
-
-fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), FederationError> {
-    let mappings = value
-        .as_object()
-        .ok_or(internal!("HTTP header mapping is not an object"))?;
-    let name = mappings
-        .iter()
-        .find_map(|(name, value)| {
-            (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
-        })
-        .ok_or(internal!("missing `name` field in HTTP header mapping"))
-        .and_then(|value| {
-            value.as_str().ok_or(internal!(
-                "`name` field in HTTP header mapping is not a string"
-            ))
-        })
-        .and_then(|name_str| {
-            HeaderName::try_from(name_str)
-                .map_err(|err| internal!(format!("Invalid header name: {}", err.to_string())))
-        })?;
-
-    let from = mappings
-        .iter()
-        .find_map(|(name, value)| {
-            (*name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME).then_some(value)
-        })
-        .map(|value| {
-            value.as_str().ok_or(internal!(
-                "`from` field in HTTP header mapping is not a string"
-            ))
-        })
-        .transpose()?;
-    if let Some(from) = from {
-        return Ok((name, HeaderSource::From(from.to_string())));
-    }
-
-    let value = mappings
-        .iter()
-        .find_map(|(name, value)| {
-            (*name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME).then_some(value)
-        })
-        .ok_or(internal!(
-            "missing `from` or `value` field in HTTP header mapping"
-        ))?;
-
-    if let Some(value) = value.as_str() {
-        Ok((
-            name,
-            HeaderSource::Value(
-                HeaderValue::from_str(value)
-                    .map_err(|e| internal!(format!("Invalid header value: {}", e.message())))?
-                    .into_owned(),
-            ),
-        ))
-    } else {
-        Err(internal!(
-            "`value` field in HTTP header mapping is not a string"
-        ))
     }
 }
 
@@ -332,8 +254,12 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                 ))?;
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
-                // TODO: handle a single object since the language spec allows it
-                headers = value.as_list().map(nodes_to_headers).transpose()?;
+                headers = Some(
+                    HeaderSource::from_headers_arg(value)
+                        .map_err(|err| internal!(err))?
+                        .into_iter()
+                        .collect(),
+                );
             } else if name == "GET" {
                 get = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"

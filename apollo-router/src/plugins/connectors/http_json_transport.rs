@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
@@ -7,23 +6,11 @@ use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::connect::URLTemplate;
 use displaydoc::Display;
-use http::header::ACCEPT;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONNECTION;
-use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::header::HOST;
-use http::header::PROXY_AUTHENTICATE;
-use http::header::PROXY_AUTHORIZATION;
-use http::header::TE;
-use http::header::TRAILER;
-use http::header::TRANSFER_ENCODING;
-use http::header::UPGRADE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
-use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -39,33 +26,6 @@ use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
-
-static KEEP_ALIVE: HeaderName = HeaderName::from_static("keep-alive");
-
-// Copied from plugins::headers
-// Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
-// These are not propagated by default using a regex match as they will not make sense for the
-// second hop.
-// In addition, because our requests are not regular proxy requests content-type, content-length
-// and host are also in the exclude list.
-lazy_static! {
-    static ref RESERVED_HEADERS: Arc<HashSet<&'static HeaderName>> = Arc::new(HashSet::from([
-        &CONNECTION,
-        &PROXY_AUTHENTICATE,
-        &PROXY_AUTHORIZATION,
-        &TE,
-        &TRAILER,
-        &TRANSFER_ENCODING,
-        &UPGRADE,
-        &CONTENT_LENGTH,
-        &CONTENT_TYPE,
-        &CONTENT_ENCODING,
-        &HOST,
-        &ACCEPT,
-        &ACCEPT_ENCODING,
-        &KEEP_ALIVE,
-    ]));
-}
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
@@ -231,21 +191,14 @@ fn add_headers(
     for (header_name, header_source) in config {
         match header_source {
             HeaderSource::From(from) => {
-                if RESERVED_HEADERS.contains(&header_name) {
-                    tracing::warn!(
-                        "Header '{}' is reserved and will not be propagated",
-                        header_name
-                    );
-                } else {
-                    let values = incoming_supergraph_headers.get_all(from);
-                    let mut propagated = false;
-                    for value in values {
-                        request = request.header(header_name.clone(), value.clone());
-                        propagated = true;
-                    }
-                    if !propagated {
-                        tracing::warn!("Header '{}' not found in incoming request", header_name);
-                    }
+                let values = incoming_supergraph_headers.get_all(from);
+                let mut propagated = false;
+                for value in values {
+                    request = request.header(header_name.clone(), value.clone());
+                    propagated = true;
+                }
+                if !propagated {
+                    tracing::warn!("Header '{}' not found in incoming request", header_name);
                 }
             }
             HeaderSource::Value(value) => match value.interpolate(inputs) {

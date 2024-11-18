@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
+use http::header;
 use http::HeaderName;
 use serde_json::Value;
 use url::Url;
@@ -18,6 +21,10 @@ use crate::schema::ValidFederationSchema;
 use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
+use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
 // --- Connector ---------------------------------------------------------------
 
@@ -227,6 +234,123 @@ impl HTTPMethod {
 pub enum HeaderSource {
     From(String),
     Value(HeaderValue<'static>),
+}
+
+impl HeaderSource {
+    /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
+    pub fn from_headers_arg(value: &Node<ast::Value>) -> Result<Vec<(HeaderName, Self)>, String> {
+        if let Some(values) = value.as_list() {
+            values.iter().map(Self::from_single).collect()
+        } else if value.as_object().is_some() {
+            Ok(vec![
+                Self::from_single(value).map_err(|err| format!("Invalid header mapping: {err}"))?
+            ])
+        } else {
+            Err(format!(
+                "`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"
+            ))
+        }
+    }
+
+    /// Build a single [`Self`] from a single entry in the `headers` arg.
+    fn from_single(value: &Node<ast::Value>) -> Result<(HeaderName, Self), String> {
+        let mappings = value
+            .as_object()
+            .ok_or_else(|| "HTTP header mapping is not an object".to_string())?;
+        let name = mappings
+            .iter()
+            .find_map(|(name, value)| {
+                (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
+            })
+            .ok_or_else(|| "missing `name` field in HTTP header mapping".to_string())
+            .and_then(|value| {
+                value.as_str().ok_or_else(|| {
+                    "`name` field in HTTP header mapping is not a string".to_string()
+                })
+            })
+            .and_then(|name_str| {
+                HeaderName::try_from(name_str).map_err(|err| format!("Invalid header name: {err}"))
+            })?;
+
+        if Self::is_reserved(&name) {
+            return Err(format!(
+                "Header {name} is reserved and cannot be set by a connector"
+            ));
+        }
+
+        let from = mappings
+            .iter()
+            .find_map(|(name, value)| {
+                (*name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME).then_some(value)
+            })
+            .map(|value| {
+                value.as_str().ok_or_else(|| {
+                    "`from` field in HTTP header mapping is not a string".to_string()
+                })
+            })
+            .transpose()?;
+        if let Some(from) = from {
+            return if Self::is_static(&name) {
+                Err(format!(
+                    "Header {name} can't be set dynamically, only via {HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}."
+                ))
+            } else {
+                Ok((name, HeaderSource::From(from.to_string())))
+            };
+        }
+
+        let value = mappings
+            .iter()
+            .find_map(|(name, value)| {
+                (*name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME).then_some(value)
+            })
+            .ok_or_else(|| "missing `from` or `value` field in HTTP header mapping".to_string())?;
+
+        if let Some(value) = value.as_str() {
+            Ok((
+                name,
+                HeaderSource::Value(
+                    value
+                        .parse::<HeaderValue>()
+                        .map_err(|err| format!("Invalid header value: {}", err.message()))?,
+                ),
+            ))
+        } else {
+            Err("`value` field in HTTP header mapping is not a string".to_string())
+        }
+    }
+
+    /// These headers are not allowed to be defined by connect directives at all.
+    /// Copied from Router's plugins::headers
+    /// Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
+    /// These are not propagated by default using a regex match as they will not make sense for the
+    /// second hop.
+    /// In addition, because our requests are not regular proxy requests content-type, content-length
+    /// and host are also in the exclude list.
+    fn is_reserved(header_name: &HeaderName) -> bool {
+        static KEEP_ALIVE: HeaderName = HeaderName::from_static("keep-alive");
+        matches!(
+            *header_name,
+            header::CONNECTION
+                | header::PROXY_AUTHENTICATE
+                | header::PROXY_AUTHORIZATION
+                | header::TE
+                | header::TRAILER
+                | header::TRANSFER_ENCODING
+                | header::UPGRADE
+                | header::CONTENT_LENGTH
+                | header::CONTENT_ENCODING
+                | header::HOST
+                | header::ACCEPT
+                | header::ACCEPT_ENCODING
+        ) || header_name == KEEP_ALIVE
+    }
+
+    /// These headers can be defined as static values in connect directives, but can't be
+    /// forwarded by the user.
+    fn is_static(header_name: &HeaderName) -> bool {
+        header::CONTENT_TYPE == *header_name
+    }
 }
 
 #[cfg(test)]
