@@ -286,6 +286,13 @@ If router receives more headers than the buffer size, it responds to the client 
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
 
+Note for Rust Crate Users: If you are using the Router as a Rust crate, the `experimental_http1_request_max_buf_size` option requires the `experimental_hyper_header_limits` feature and also necessitates using Apollo's fork of the Hyper crate until the [changes are merged upstream](https://github.com/hyperium/hyper/pull/3523).
+You can include this fork by adding the following patch to your Cargo.toml file:
+```toml
+[patch.crates-io]
+"hyper" = { git = "https://github.com/apollographql/hyper.git", tag = "header-customizations-20241108" }
+```
+
 ## Parser-based limits
 
 ### `parser_max_tokens`
