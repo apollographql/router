@@ -9,7 +9,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Type;
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -88,7 +87,7 @@ type DeferRef = String;
 /// Like a multimap with a Set instead of a Vec for value storage.
 #[derive(Debug, Clone, Default)]
 struct DeferredNodes {
-    inner: HashMap<DeferRef, IndexSet<NodeIndex<u32>>>,
+    inner: IndexMap<DeferRef, IndexSet<NodeIndex<u32>>>,
 }
 impl DeferredNodes {
     fn new() -> Self {

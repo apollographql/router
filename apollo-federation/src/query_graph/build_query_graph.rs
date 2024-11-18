@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashMap;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
@@ -1394,7 +1392,7 @@ impl FederatedQueryGraphBuilder {
     /// override condition of `false`, whereas the "to" subgraph will have an
     /// override condition of `true`.
     fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
-        let mut edge_to_conditions: HashMap<EdgeIndex, OverrideCondition> = Default::default();
+        let mut edge_to_conditions: IndexMap<EdgeIndex, OverrideCondition> = Default::default();
 
         fn collect_edge_condition(
             query_graph: &QueryGraph,
@@ -1402,7 +1400,7 @@ impl FederatedQueryGraphBuilder {
             target_field: &ObjectFieldDefinitionPosition,
             label: &str,
             condition: bool,
-            edge_to_conditions: &mut HashMap<EdgeIndex, OverrideCondition>,
+            edge_to_conditions: &mut IndexMap<EdgeIndex, OverrideCondition>,
         ) -> Result<(), FederationError> {
             let target_field = FieldDefinitionPosition::Object(target_field.clone());
             let subgraph_nodes = query_graph
@@ -1511,8 +1509,10 @@ impl FederatedQueryGraphBuilder {
             };
 
             // Collect data for @context
-            let mut context_name_to_types: HashMap<&str, HashSet<CompositeTypeDefinitionPosition>> =
-                HashMap::default();
+            let mut context_name_to_types: IndexMap<
+                &str,
+                IndexSet<CompositeTypeDefinitionPosition>,
+            > = Default::default();
             for object_def_pos in &context_refs.object_types {
                 let object = object_def_pos.get(subgraph.schema())?;
                 for dir in object.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {

@@ -3,7 +3,6 @@ use std::num::NonZeroU32;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
@@ -209,10 +208,10 @@ pub struct QueryPlanOptions {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct EnabledOverrideConditions(HashSet<String>);
+pub(crate) struct EnabledOverrideConditions(IndexSet<String>);
 
 impl Deref for EnabledOverrideConditions {
-    type Target = HashSet<String>;
+    type Target = IndexSet<String>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -488,7 +487,7 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: EnabledOverrideConditions(HashSet::from_iter(
+            override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
                 options.override_conditions,
             )),
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),

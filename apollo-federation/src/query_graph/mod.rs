@@ -3,8 +3,6 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashMap;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
@@ -146,7 +144,7 @@ pub struct ContextCondition {
     context: String,
     subgraph_name: Arc<str>,
     selection: String,
-    types_with_context_set: HashSet<CompositeTypeDefinitionPosition>,
+    types_with_context_set: IndexSet<CompositeTypeDefinitionPosition>,
     // PORT_NOTE: This field was renamed because the JS name (`coordinate`) was too vague.
     argument_coordinate: ObjectFieldArgumentDefinitionPosition,
     named_parameter: Name,
