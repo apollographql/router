@@ -682,7 +682,7 @@ pub(crate) struct Supergraph {
     pub(crate) reuse_query_fragments: Option<bool>,
 
     /// Enable QP generation of fragments for subgraph requests
-    /// Default: false
+    /// Default: true
     pub(crate) generate_query_fragments: bool,
 
     /// Set to false to disable defer support
@@ -700,6 +700,10 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+}
+
+const fn default_generate_query_fragments() -> bool {
+    true
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -754,7 +758,7 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -791,7 +795,7 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }

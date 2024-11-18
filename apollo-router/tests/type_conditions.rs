@@ -118,9 +118,6 @@ async fn _test_type_conditions_enabled_generate_query_fragments(planner_mode: &s
         json! {{
             "experimental_type_conditioned_fetching": true,
             "experimental_query_planner_mode": planner_mode,
-            "supergraph": {
-                "generate_query_fragments": true
-            },
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -320,6 +317,10 @@ async fn _test_type_conditions_enabled_shouldnt_make_article_fetch(planner_mode:
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
+            },
+            // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            "supergraph": {
+                "generate_query_fragments": false,
             },
             "include_subgraph_errors": {
                 "all": true

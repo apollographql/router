@@ -865,7 +865,13 @@ async fn alias_renaming() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1308,7 +1314,13 @@ async fn missing_typename_and_fragments_in_requires2() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1595,7 +1607,13 @@ async fn typename_propagation() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)
@@ -1692,7 +1710,13 @@ async fn typename_propagation2() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)
@@ -1790,7 +1814,13 @@ async fn typename_propagation3() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)

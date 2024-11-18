@@ -175,7 +175,7 @@ pub(crate) fn execute_selection_set<'a>(
                                         e.insert(value);
                                     }
                                     Entry::Occupied(e) => {
-                                        e.into_mut().deep_merge(value);
+                                        e.into_mut().type_aware_deep_merge(value, schema);
                                     }
                                 }
                             }
