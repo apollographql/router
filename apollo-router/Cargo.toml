@@ -54,7 +54,7 @@ telemetry_next = []
 
 # Allow Router to use feature from custom fork of Hyper until it is merged:
 # https://github.com/hyperium/hyper/pull/3523
-experimental_hyper_header_limits = []
+hyper_header_limits = []
 
 # is set when ci builds take place. It allows us to disable some tests when CI is running on certain platforms.
 ci = []

@@ -413,7 +413,7 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                #[cfg(not(feature = "experimental_hyper_header_limits"))]
+                #[cfg(not(feature = "hyper_header_limits"))]
                 if yaml.contains("http1_max_request_headers") {
                     continue;
                 }
