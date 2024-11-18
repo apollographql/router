@@ -5,21 +5,21 @@ use tower::BoxError;
 
 use crate::integration::IntegrationTest;
 
-#[cfg(not(feature = "experimental_hyper_header_limits"))]
+#[cfg(not(feature = "hyper_header_limits"))]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_error_http1_max_headers_config() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
             limits:
-              experimental_http1_max_request_headers: 100
+              http1_max_request_headers: 100
             "#,
         )
         .build()
         .await;
 
     router.start().await;
-    router.assert_log_contains("'limits.experimental_http1_max_request_headers' requires 'experimental_hyper_header_limits' feature: enable 'experimental_hyper_header_limits' feature in order to use 'limits.experimental_http1_max_request_headers'").await;
+    router.assert_log_contains("'limits.http1_max_request_headers' requires 'experimental_hyper_header_limits' feature: enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'").await;
     router.assert_not_started().await;
     Ok(())
 }
@@ -31,7 +31,7 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
         .config(
             r#"
             limits:
-              experimental_http1_max_request_headers: 100
+              http1_max_request_headers: 100
             "#,
         )
         .build()
@@ -59,7 +59,7 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
         .config(
             r#"
             limits:
-              experimental_http1_max_request_headers: 200
+              http1_max_request_headers: 200
             "#,
         )
         .build()
@@ -91,7 +91,7 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
         .config(
             r#"
             limits:
-              experimental_http1_max_request_buf_size: 100kib
+              http1_max_request_buf_size: 100kib
             "#,
         )
         .build()
@@ -116,7 +116,7 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
         .config(
             r#"
             limits:
-              experimental_http1_max_request_buf_size: 2mib
+              http1_max_request_buf_size: 2mib
             "#,
         )
         .build()

@@ -1114,8 +1114,8 @@ The router rejects any request that violates at least one of these limits.
 limits:
   # Network-based limits
   http_max_request_bytes: 2000000 # Default value: 2 MB
-  experimental_http1_max_request_headers: 200 # Default value: 100
-  experimental_http1_max_request_buf_size: 800kib # Default value: 400kib
+  http1_max_request_headers: 200 # Default value: 100
+  http1_max_request_buf_size: 800kib # Default value: 400kib
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
@@ -1147,18 +1147,18 @@ Before increasing this limit significantly consider testing performance
 in an environment similar to your production, especially if some clients are untrusted.
 Many concurrent large requests could cause the router to run out of memory.
 
-##### `experimental_http1_max_request_headers`
+##### `http1_max_request_headers`
 
 Limit the maximum number of headers of incoming HTTP1 requests.
 The default value is 100 headers.
 
 If router receives more headers than the buffer size, it responds to the client with `431 Request Header Fields Too Large`.
 
-##### `experimental_http1_max_request_buf_size`
+##### `http1_max_request_buf_size`
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
 
-Note for Rust Crate Users: If you are using the Router as a Rust crate, the `experimental_http1_request_max_buf_size` option requires the `experimental_hyper_header_limits` feature and also necessitates using Apollo's fork of the Hyper crate until the [changes are merged upstream](https://github.com/hyperium/hyper/pull/3523).
+Note for Rust Crate Users: If you are using the Router as a Rust crate, the `http1_request_max_buf_size` option requires the `experimental_hyper_header_limits` feature and also necessitates using Apollo's fork of the Hyper crate until the [changes are merged upstream](https://github.com/hyperium/hyper/pull/3523).
 You can include this fork by adding the following patch to your Cargo.toml file:
 ```toml
 [patch.crates-io]

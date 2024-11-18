@@ -493,10 +493,10 @@ impl Configuration {
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
         #[cfg(not(feature = "experimental_hyper_header_limits"))]
-        if self.limits.experimental_http1_max_request_headers.is_some() {
+        if self.limits.http1_max_request_headers.is_some() {
             return Err(ConfigurationError::InvalidConfiguration {
-                message: "'limits.experimental_http1_max_request_headers' requires 'experimental_hyper_header_limits' feature",
-                error: "enable 'experimental_hyper_header_limits' feature in order to use 'limits.experimental_http1_max_request_headers'".to_string(),
+                message: "'limits.http1_max_request_headers' requires 'experimental_hyper_header_limits' feature",
+                error: "enable 'experimental_hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'".to_string(),
             });
         }
 
