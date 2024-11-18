@@ -507,7 +507,7 @@ commands:
             # TODO: remove this workaround once we update to Xcode >= 15.1.0 
             # See: https://github.com/apollographql/router/pull/5462
             RUST_LIB_BACKTRACE: 0
-          command: xtask test --workspace --locked --features ci
+          command: xtask test --workspace --locked --features ci,experimental_hyper_header_limits
       - run:
           name: Delete large files from cache
           command: |
@@ -655,10 +655,10 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist --target aarch64-apple-darwin
+                  cargo xtask dist --target aarch64-apple-darwin --features experimental_hyper_header_limits
             - run:
                 command: >
-                  cargo xtask dist --target x86_64-apple-darwin
+                  cargo xtask dist --target x86_64-apple-darwin --features experimental_hyper_header_limits
             - run:
                 command: >
                   mkdir -p artifacts
@@ -718,7 +718,7 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --features experimental_hyper_header_limits
             - run:
                 command: >
                   mkdir -p artifacts

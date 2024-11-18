@@ -53,10 +53,7 @@ impl Test {
 
             if let Some(features) = &self.features {
                 args.push("--features".to_string());
-                args.push(format!("{} experimental_hyper_header_limits", features));
-            } else {
-                args.push("--features".to_string());
-                args.push("experimental_hyper_header_limits".to_string());
+                args.push(features.to_owned());
             }
 
             cargo!(args);
