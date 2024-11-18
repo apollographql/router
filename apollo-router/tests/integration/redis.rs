@@ -1029,7 +1029,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0fd0a376f59f0565768ea5ad8eadfbbf60d64c593c807457a0776d2f39773a25",
+        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734",
     )
     .await;
 }
