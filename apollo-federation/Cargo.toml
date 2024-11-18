@@ -23,6 +23,7 @@ time = { version = "0.3.34", default-features = false, features = [
 ] }
 derive_more = "0.99.17"
 http.workspace = true
+hashbrown = "0.15.0"
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
 lazy_static = "1.4.0"
