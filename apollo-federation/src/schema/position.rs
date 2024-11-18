@@ -29,6 +29,7 @@ use lazy_static::lazy_static;
 use serde::Serialize;
 use strum::IntoEnumIterator;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
@@ -1056,10 +1057,7 @@ impl ScalarTypeDefinitionPosition {
             {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has already been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
             .referencers
@@ -1087,10 +1085,7 @@ impl ScalarTypeDefinitionPosition {
             .scalar_types
             .contains_key(&self.type_name)
         {
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has not been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
@@ -1099,10 +1094,7 @@ impl ScalarTypeDefinitionPosition {
             {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
             .schema
@@ -1358,10 +1350,7 @@ impl ObjectTypeDefinitionPosition {
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has already been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
             .referencers
@@ -1389,20 +1378,14 @@ impl ObjectTypeDefinitionPosition {
             .object_types
             .contains_key(&self.type_name)
         {
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has not been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
             .schema
@@ -1824,10 +1807,7 @@ impl ObjectFieldDefinitionPosition {
             .into());
         }
         if self.try_get(&schema.schema).is_some() {
-            return Err(SingleFederationError::Internal {
-                message: format!("Object field \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Object field "{self}" already exists in schema"#);
         }
         self.parent()
             .make_mut(&mut schema.schema)?
@@ -2427,10 +2407,7 @@ impl InterfaceTypeDefinitionPosition {
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has already been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
             .referencers
@@ -2458,20 +2435,14 @@ impl InterfaceTypeDefinitionPosition {
             .interface_types
             .contains_key(&self.type_name)
         {
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has not been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
             .schema
@@ -2823,10 +2794,7 @@ impl InterfaceFieldDefinitionPosition {
             .into());
         }
         if self.try_get(&schema.schema).is_some() {
-            return Err(SingleFederationError::Internal {
-                message: format!("Interface field \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Interface field "{self}" already exists in schema"#);
         }
         self.parent()
             .make_mut(&mut schema.schema)?
@@ -3405,10 +3373,7 @@ impl UnionTypeDefinitionPosition {
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has already been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
             .referencers
@@ -3432,20 +3397,14 @@ impl UnionTypeDefinitionPosition {
             .into());
         }
         if !schema.referencers.union_types.contains_key(&self.type_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has not been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
             .schema
@@ -3819,10 +3778,7 @@ impl EnumTypeDefinitionPosition {
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has already been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
             .referencers
@@ -3843,20 +3799,14 @@ impl EnumTypeDefinitionPosition {
             .into());
         }
         if !schema.referencers.enum_types.contains_key(&self.type_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has not been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
             .schema
@@ -4088,10 +4038,7 @@ impl EnumValueDefinitionPosition {
             .into());
         }
         if self.try_get(&schema.schema).is_some() {
-            return Err(SingleFederationError::Internal {
-                message: format!("Enum value \"{}\" already exists in schema", self,),
-            }
-            .into());
+            bail!(r#"Enum value "{self}" already exists in schema"#);
         }
         self.parent()
             .make_mut(&mut schema.schema)?
@@ -4275,10 +4222,7 @@ impl InputObjectTypeDefinitionPosition {
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has already been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has already been pre-inserted"#);
         }
         schema
             .referencers
@@ -4306,20 +4250,14 @@ impl InputObjectTypeDefinitionPosition {
             .input_object_types
             .contains_key(&self.type_name)
         {
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" has not been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" has not been pre-inserted"#);
         }
         if schema.schema.types.contains_key(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name) {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Type "{self}" already exists in schema"#);
         }
         schema
             .schema
@@ -4578,10 +4516,7 @@ impl InputObjectFieldDefinitionPosition {
             .into());
         }
         if self.try_get(&schema.schema).is_some() {
-            return Err(SingleFederationError::Internal {
-                message: format!("Input object field \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Input object field "{self}" already exists in schema"#);
         }
         self.parent()
             .make_mut(&mut schema.schema)?
@@ -4820,10 +4755,7 @@ impl DirectiveDefinitionPosition {
             {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Directive \"{}\" has already been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Directive "{self}" has already been pre-inserted"#);
         }
         schema
             .referencers
@@ -4842,10 +4774,7 @@ impl DirectiveDefinitionPosition {
             .directives
             .contains_key(&self.directive_name)
         {
-            return Err(SingleFederationError::Internal {
-                message: format!("Directive \"{}\" has not been pre-inserted", self),
-            }
-            .into());
+            bail!(r#"Directive "{self}" has not been pre-inserted"#);
         }
         if schema
             .schema
@@ -4858,10 +4787,7 @@ impl DirectiveDefinitionPosition {
             {
                 return Ok(());
             }
-            return Err(SingleFederationError::Internal {
-                message: format!("Directive \"{}\" already exists in schema", self),
-            }
-            .into());
+            bail!(r#"Directive "{self}" already exists in schema"#);
         }
         schema
             .schema
