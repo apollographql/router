@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [ -z "${FEDERATION_VERSION:-}" ]; then
-  FEDERATION_VERSION="2.10.0-preview.0"
+  FEDERATION_VERSION="2.10.0-preview.2"
 fi
 
 regenerate_graphql() {

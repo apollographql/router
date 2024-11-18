@@ -58,25 +58,25 @@ enum join__Graph {
 }
 
 type T @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0, key: "id") @join__type(graph: TWO, key: "id") {
-  authenticated: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @authenticated
-  custom: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @custom
-  hidden: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @inaccessible
-  id: ID! @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @join__field(graph: ONE_T_R_0) @join__field(graph: TWO)
-  overridden: String @join__field(graph: ONE_QUERY_T_0, override: "two", overrideLabel: "label") @join__field(graph: ONE_QUERY_TS_0, override: "two", overrideLabel: "label") @join__field(graph: TWO)
-  policy: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @policy(policies: [["admin"]])
-  requiresScopes: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @requiresScopes(scopes: ["scope"])
-  tagged: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @tag(name: "tag")
-  r: R @join__field(graph: ONE_T_R_0)
+  authenticated: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @authenticated
+  custom: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @custom
+  hidden: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @inaccessible
+  id: ID! @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_TS_0, type: "ID!") @join__field(graph: ONE_T_R_0, type: "ID!") @join__field(graph: TWO, type: "ID!")
+  overridden: String @join__field(graph: ONE_QUERY_T_0, override: "two", overrideLabel: "label", type: "String") @join__field(graph: ONE_QUERY_TS_0, override: "two", overrideLabel: "label", type: "String") @join__field(graph: TWO, type: "String")
+  policy: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @policy(policies: [["admin"]])
+  requiresScopes: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @requiresScopes(scopes: ["scope"])
+  tagged: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @tag(name: "tag")
+  r: R @join__field(graph: ONE_T_R_0, type: "R")
 }
 
 type Query @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0) @join__type(graph: TWO) {
-  t(id: ID): T @join__field(graph: ONE_QUERY_T_0)
-  ts: [T] @join__field(graph: ONE_QUERY_TS_0)
-  _: ID @inaccessible @join__field(graph: ONE_T_R_0)
+  t(id: ID): T @join__field(graph: ONE_QUERY_T_0, type: "T")
+  ts: [T] @join__field(graph: ONE_QUERY_TS_0, type: "[T]")
+  _: ID @inaccessible @join__field(graph: ONE_T_R_0, type: "ID")
 }
 
 type R @join__type(graph: ONE_T_R_0) {
-  id: ID! @join__field(graph: ONE_T_R_0)
+  id: ID! @join__field(graph: ONE_T_R_0, type: "ID!")
 }
 
 scalar requiresScopes__Scope

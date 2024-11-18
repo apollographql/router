@@ -25,17 +25,17 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 scalar Import @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB)
 
 type Product @join__type(graph: SUBGRAPHA) {
-  sku: String! @join__field(graph: SUBGRAPHA)
-  name: String! @join__field(graph: SUBGRAPHA)
+  sku: String! @join__field(graph: SUBGRAPHA, type: "String!")
+  name: String! @join__field(graph: SUBGRAPHA, type: "String!")
 }
 
 type Query @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB) {
-  products: [Product!] @join__field(graph: SUBGRAPHA)
+  products: [Product!] @join__field(graph: SUBGRAPHA, type: "[Product!]")
 }
 
 type User @join__type(graph: SUBGRAPHB) {
-  name: String @join__field(graph: SUBGRAPHB)
-  email: String! @join__field(graph: SUBGRAPHB)
+  name: String @join__field(graph: SUBGRAPHB, type: "String")
+  email: String! @join__field(graph: SUBGRAPHB, type: "String!")
 }
 
 scalar join__DirectiveArguments

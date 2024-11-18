@@ -128,13 +128,17 @@ pub(super) fn carryover_directives(
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Scope)),
                     };
-                    scalar_type_pos
-                        .get(from.schema())
-                        .map_err(From::from)
-                        .and_then(|def| {
-                            scalar_type_pos.pre_insert(to)?;
-                            scalar_type_pos.insert(to, def.clone())
-                        })?;
+
+                    // The scalar might already exist if a subgraph defined it
+                    if scalar_type_pos.get(to.schema()).is_err() {
+                        scalar_type_pos
+                            .get(from.schema())
+                            .map_err(From::from)
+                            .and_then(|def| {
+                                scalar_type_pos.pre_insert(to)?;
+                                scalar_type_pos.insert(to, def.clone())
+                            })?;
+                    }
 
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
@@ -159,13 +163,17 @@ pub(super) fn carryover_directives(
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Policy)),
                     };
-                    scalar_type_pos
-                        .get(from.schema())
-                        .map_err(From::from)
-                        .and_then(|def| {
-                            scalar_type_pos.pre_insert(to)?;
-                            scalar_type_pos.insert(to, def.clone())
-                        })?;
+
+                    // The scalar might already exist if a subgraph defined it
+                    if scalar_type_pos.get(to.schema()).is_err() {
+                        scalar_type_pos
+                            .get(from.schema())
+                            .map_err(From::from)
+                            .and_then(|def| {
+                                scalar_type_pos.pre_insert(to)?;
+                                scalar_type_pos.insert(to, def.clone())
+                            })?;
+                    }
 
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
@@ -179,8 +187,12 @@ pub(super) fn carryover_directives(
         .directives_by_imported_name
         .iter()
         .filter(|(_name, (link, _import))| !is_known_link(link))
-        .try_for_each(|(name, (link, _import))| {
-            let directive_name = link.directive_name_in_schema(name);
+        .try_for_each(|(name, (link, import))| {
+            // This is a strange thing — someone is importing @defer, but it's not a type system directive so we don't need to carry it over
+            if name == "defer" {
+                return Ok(());
+            }
+            let directive_name = link.directive_name_in_schema(&import.element);
             from.referencers()
                 .get_directive(&directive_name)
                 .and_then(|referencers| {
@@ -231,6 +243,15 @@ fn copy_directive_definition(
     directive_name: Name,
 ) -> Result<(), FederationError> {
     let def_pos = DirectiveDefinitionPosition { directive_name };
+
+    // If it exists, remove it so we can add the directive as defined in the
+    // supergraph. In rare cases where a directive can be applied to both
+    // executable and type system locations, extract_subgraphs_from_supergraph
+    // will include the definition with only the executable locations, making
+    // other applications invalid.
+    if def_pos.get(to.schema()).is_ok() {
+        def_pos.remove(to)?;
+    }
 
     def_pos
         .get(from.schema())
@@ -295,7 +316,7 @@ impl Link {
 
                                     Value::Object(vec![
                                         (name!(name), Value::String(name).into()),
-                                        (name!(alias), Value::String(alias).into()),
+                                        (name!(as), Value::String(alias).into()),
                                     ])
                                 } else {
                                     Value::String(name)

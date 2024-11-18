@@ -1,5 +1,5 @@
 ---
-source: apollo-federation/src/merge.rs
+source: apollo-federation/src/merge/tests.rs
 expression: schema.serialize()
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
@@ -38,32 +38,30 @@ scalar join__FieldSet
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  INTERFACE_OBJECT_1 @join__graph(name: "interface_object_1", url: "")
-  INTERFACE_OBJECT_2 @join__graph(name: "interface_object_2", url: "")
-  INTERFACE_OBJECT_3 @join__graph(name: "interface_object_3", url: "")
+  ONE @join__graph(name: "one", url: "")
 }
 
-interface Itf @join__type(graph: INTERFACE_OBJECT_1, key: "id") @join__type(graph: INTERFACE_OBJECT_2, isInterfaceObject: true, key: "id") @join__type(graph: INTERFACE_OBJECT_3, isInterfaceObject: true, key: "id") {
-  id: ID! @join__field(graph: INTERFACE_OBJECT_1) @join__field(graph: INTERFACE_OBJECT_2) @join__field(graph: INTERFACE_OBJECT_3)
-  c: Int! @join__field(graph: INTERFACE_OBJECT_2) @join__field(graph: INTERFACE_OBJECT_3)
-  d: Int! @join__field(graph: INTERFACE_OBJECT_3)
+type Query @join__type(graph: ONE) {
+  i: I @join__field(graph: ONE, type: "I")
 }
 
-type T1 implements Itf @join__type(graph: INTERFACE_OBJECT_1, key: "id") @join__implements(graph: INTERFACE_OBJECT_1, interface: "Itf") {
-  id: ID! @join__field(graph: INTERFACE_OBJECT_1)
-  a: String @join__field(graph: INTERFACE_OBJECT_1)
-  c: Int! @join__field
-  d: Int! @join__field
+interface Node @join__type(graph: ONE) {
+  id: ID! @join__field(graph: ONE, type: "ID!")
 }
 
-type T2 implements Itf @join__type(graph: INTERFACE_OBJECT_1, key: "id") @join__implements(graph: INTERFACE_OBJECT_1, interface: "Itf") {
-  id: ID! @join__field(graph: INTERFACE_OBJECT_1)
-  b: String @join__field(graph: INTERFACE_OBJECT_1)
-  c: Int! @join__field
-  d: Int! @join__field
+interface I implements Node @join__type(graph: ONE) @join__implements(graph: ONE, interface: "Node") {
+  id: ID! @join__field(graph: ONE, type: "ID!")
+  i: String @join__field(graph: ONE, type: "String")
 }
 
-type Query @join__type(graph: INTERFACE_OBJECT_1) @join__type(graph: INTERFACE_OBJECT_2) @join__type(graph: INTERFACE_OBJECT_3) {
-  itfs: [Itf] @join__field(graph: INTERFACE_OBJECT_2)
-  itf(id: ID!): Itf @join__field(graph: INTERFACE_OBJECT_3)
+type A implements I & Node @join__type(graph: ONE) @join__implements(graph: ONE, interface: "I") @join__implements(graph: ONE, interface: "Node") {
+  id: ID! @join__field(graph: ONE, type: "ID!")
+  i: String @join__field(graph: ONE, type: "String")
+  a: String @join__field(graph: ONE, type: "String")
+}
+
+type B implements I & Node @join__type(graph: ONE) @join__implements(graph: ONE, interface: "I") @join__implements(graph: ONE, interface: "Node") {
+  id: ID! @join__field(graph: ONE, type: "ID!")
+  i: String @join__field(graph: ONE, type: "String")
+  b: String @join__field(graph: ONE, type: "String")
 }

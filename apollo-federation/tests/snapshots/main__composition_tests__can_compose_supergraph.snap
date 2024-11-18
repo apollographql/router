@@ -30,17 +30,17 @@ enum E @join__type(graph: SUBGRAPH2) {
 scalar Import @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2)
 
 type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
-  t: T @join__field(graph: SUBGRAPH1)
+  t: T @join__field(graph: SUBGRAPH1, type: "T")
 }
 
 type S @join__type(graph: SUBGRAPH1) {
-  x: Int @join__field(graph: SUBGRAPH1)
+  x: Int @join__field(graph: SUBGRAPH1, type: "Int")
 }
 
 type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2)
-  a: Int @join__field(graph: SUBGRAPH2)
-  b: String @join__field(graph: SUBGRAPH2)
+  k: ID @join__field(graph: SUBGRAPH1, type: "ID") @join__field(graph: SUBGRAPH2, type: "ID")
+  a: Int @join__field(graph: SUBGRAPH2, type: "Int")
+  b: String @join__field(graph: SUBGRAPH2, type: "String")
 }
 
 union U @join__type(graph: SUBGRAPH1) @join__unionMember(graph: SUBGRAPH1, member: "S") @join__unionMember(graph: SUBGRAPH1, member: "T") = S | T
