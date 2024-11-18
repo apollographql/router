@@ -223,10 +223,6 @@ impl ApplyToInternal for NamedSelection {
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
-        if let JSON::Array(array) = data {
-            return self.apply_to_array(array, vars, input_path);
-        }
-
         let mut output = JSONMap::new();
         let mut errors = Vec::new();
 
