@@ -1,0 +1,67 @@
+---
+title: Observability with GraphOS
+subtitle: Capture and export signals about supergraph health with GraphOS and router telemetry
+description: Learn how to collect supergraph metrics in order to monitor and optimize your GraphQL usage and performance. Collect raw metrics, insights, and alerts with Apollo GraphOS, GraphOS Studio, and GraphOS Router and Apollo Router Core.
+redirectFrom:
+  - /federation/performance/monitoring/
+---
+
+Monitoring a supergraph requires gathering metrics about each client, server, subgraph, and router involved in sending or handling requests. Ideally, the entire request pipeline—from client to router to subgraph and back—is instrumented with metrics that can be collected and exported for analysis. 
+
+Apollo GraphOS provides the observability signals and tools your team needs to maintain the health and performance of your deployed supergraphs. Via declarative configuration, GraphOS enables routers to collect GraphQL operation and field metrics and report them back. GraphOS also specifies how to capture metrics on the clients and subgraphs handling operations.
+
+## Understanding runtime health with router telemetry 
+
+Both the GraphOS Router and Apollo Router Core run a request-handling pipeline with multiple stages that starts with receiving requests and ends with sending back responses. The continuous operation and throughput of this request pipeline, or "request lifecycle," reflects the health of a running supergraph. Observability of the router request lifecycle is therefore key to understanding the health of a supergraph.
+
+<Wistia WistiaId="009wt60p7a" />
+
+To enable observability, the router supports telemetry that can be added and customized in every stage of the router request lifecycle. You can add logs, metrics, and traces, and you can export them to your application performance monitoring (APM) solution.
+
+To learn more, go to [Router Telemetry](/graphos/routing/observability/telemetry), then browse the pages in [Router Telemetry](/graphos/reference/router/telemetry/log-exporters/overview) reference docs.
+
+## Automating supergraph metrics collection with GraphOS
+
+Everything connected to GraphOS—including clients, routers, and subgraphs—can report metrics about GraphQL operations they send and service. GraphOS thus is the hub for collecting operation metrics, and its Studio IDE offers tools to visualize and analyze those operations and their field usage. 
+
+The metrics that GraphOS collects can be forwarded to your APM solution. Apollo offers a [Datadog integration](/graphos/platform/insights/datadog-forwarding) to forward your graph's performance metrics to your Datadog account.
+
+
+## Analyzing metrics and gathering insights with GraphOS
+
+Once the various metrics are collected by GraphOS, you can use the GraphOS Studio UI to visualize and analyze them to understand your supergraph's usage and performance. 
+
+- Examine them in the Studio IDE from any variant's **Insights** page and use them to improve your graph's performance.
+
+- Create GraphOS notifications to notify your team about changes to your graph and its performance.
+
+<EnterpriseFeature>
+
+The following require an [Enterprise plan](https://www.apollographql.com/pricing/):
+
+<br />
+<br />
+
+- Connecting a self-hosted router to GraphOS
+- Forwarding metrics to Datadog
+
+<br />
+
+Reporting metrics from [Apollo Server](/apollo-server) or a [monograph](/graphos/get-started/concepts/graphs/#monographs) requires an [Enterprise or legacy Team plan](https://www.apollographql.com/pricing).
+
+If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free [GraphOS trial](https://studio.apollographql.com/signup?referrer=docs-content).
+
+</EnterpriseFeature>
+
+
+## Next steps 
+
+- Learn about metrics collection with [GraphOS Metrics Collection](/graphos/platform/insights/sending-operation-metrics).
+
+- Learn about subgraph observability with [Subgraph Observability](/graphos/routing/observability/subgraph-error-inclusion).
+
+- Learn about client observability with [Client Observability](/graphos/routing/observability/client-id-enforcement/).
+
+- Learn how to use insights to improve your graph's performance with [GraphOS Metrics and Insights](/graphos/platform/insights/).
+
+- Learn how to use notifications with [GraphOS notifications](/graphos/platform/insights/notifications).

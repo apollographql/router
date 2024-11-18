@@ -24,11 +24,13 @@ use apollo_compiler::Schema;
 fn is_semantic_directive_application(directive: &Directive) -> bool {
     match directive.name.as_str() {
         "specifiedBy" => true,
-        // For @deprecated, explicitly writing `reason: null` disables the directive,
-        // as `null` overrides the default string value.
+        // graphql-js’ intropection returns `isDeprecated: false` for `@deprecated(reason: null)`,
+        // which is arguably a bug. Do the same here for now.
+        // TODO: remove this and allow `isDeprecated: true`, `deprecatedReason: null`
+        // after we fully move to Rust introspection?
         "deprecated"
             if directive
-                .argument_by_name("reason")
+                .specified_argument_by_name("reason")
                 .is_some_and(|value| value.is_null()) =>
         {
             false
@@ -42,7 +44,7 @@ fn is_semantic_directive_application(directive: &Directive) -> bool {
 fn standardize_deprecated(directive: &mut Directive) {
     if directive.name == "deprecated"
         && directive
-            .argument_by_name("reason")
+            .specified_argument_by_name("reason")
             .and_then(|value| value.as_str())
             .is_some_and(|reason| reason == "No longer supported")
     {
@@ -74,7 +76,7 @@ fn retain_semantic_directives_ast(directives: &mut apollo_compiler::ast::Directi
 
 /// Remove non-semantic directive applications from the schema representation.
 /// This only keeps directive applications that are observable in introspection.
-pub fn remove_non_semantic_directives(schema: &mut Schema) {
+pub(crate) fn remove_non_semantic_directives(schema: &mut Schema) {
     let root_definitions = schema.schema_definition.make_mut();
     retain_semantic_directives(&mut root_definitions.directives);
 
@@ -205,6 +207,7 @@ fn coerce_value(
         // Custom scalars accept any value, even objects and lists.
         (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
+        (Value::Enum(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         // Enums must match the type.
         (Value::Enum(value), Some(ExtendedType::Enum(enum_)))
             if enum_.values.contains_key(value) => {}
@@ -239,7 +242,7 @@ fn coerce_arguments_default_values(
 /// This is not what we would want to do for coercion in a real execution scenario, but it matches
 /// a behaviour in graphql-js so we can compare API schema results between federation-next and JS
 /// federation. We can consider removing this when we no longer rely on JS federation.
-pub fn coerce_schema_default_values(schema: &mut Schema) {
+pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
     // Keep a copy of the types in the schema so we can mutate the schema while walking it.
     let types = schema.types.clone();
 
@@ -355,19 +358,24 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
     coerce_selection_set_values(schema, &mut operation.selection_set);
 }
 
-pub fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
+pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
     if let Some(operation) = &mut document.operations.anonymous {
         coerce_operation_values(schema, operation);
     }
     for operation in document.operations.named.values_mut() {
         coerce_operation_values(schema, operation);
     }
+    for fragment in document.fragments.values_mut() {
+        let fragment = fragment.make_mut();
+        coerce_directive_application_values(schema, &mut fragment.directives);
+        coerce_selection_set_values(schema, &mut fragment.selection_set);
+    }
 }
 
 /// Applies default value coercion and removes non-semantic directives so that
 /// the apollo-rs serialized output of the schema matches the result of
 /// `printSchema(buildSchema()` in graphql-js.
-pub fn make_print_schema_compatible(schema: &mut Schema) {
+pub(crate) fn make_print_schema_compatible(schema: &mut Schema) {
     remove_non_semantic_directives(schema);
     coerce_schema_default_values(schema);
 }
@@ -412,5 +420,73 @@ mod tests {
           test(bools: [true], ints: [1], strings: ["string"], floats: [2.0])
         }
         "#);
+    }
+
+    #[test]
+    fn coerces_enum_values() {
+        let schema = Schema::parse_and_validate(
+            r#"
+        scalar CustomScalar
+        type Query {
+          test(
+            string: String!,
+            strings: [String!]!,
+            custom: CustomScalar!,
+            customList: [CustomScalar!]!,
+          ): Int
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        // Enum literals are only coerced into lists if the item type is a custom scalar type.
+        insta::assert_snapshot!(parse_and_coerce(&schema, r#"
+        {
+          test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: enumVal2)
+        }
+        "#), @r###"
+        {
+          test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: [enumVal2])
+        }
+        "###);
+    }
+
+    #[test]
+    fn coerces_in_fragment_definitions() {
+        let schema = Schema::parse_and_validate(
+            r#"
+        type T {
+            get(bools: [Boolean!]!): Int
+        }
+        type Query {
+          test: T
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!(parse_and_coerce(&schema, r#"
+        {
+          test {
+            ...f
+          }
+        }
+
+        fragment f on T {
+            get(bools: true)
+        }
+        "#), @r###"
+        {
+          test {
+            ...f
+          }
+        }
+
+        fragment f on T {
+          get(bools: [true])
+        }
+        "###);
     }
 }

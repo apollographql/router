@@ -111,7 +111,7 @@ fn scopes_argument(
     opt_directive: Option<&impl AsRef<ast::Directive>>,
 ) -> impl Iterator<Item = String> + '_ {
     opt_directive
-        .and_then(|directive| directive.as_ref().argument_by_name("scopes"))
+        .and_then(|directive| directive.as_ref().specified_argument_by_name("scopes"))
         // outer array
         .and_then(|value| value.as_list())
         .into_iter()
@@ -188,7 +188,7 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
 
 fn scopes_sets_argument(directive: &ast::Directive) -> impl Iterator<Item = HashSet<String>> + '_ {
     directive
-        .argument_by_name("scopes")
+        .specified_argument_by_name("scopes")
         // outer array
         .and_then(|value| value.as_list())
         .into_iter()

@@ -11,7 +11,6 @@ use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::spec::TYPENAME;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Selection {
@@ -190,10 +189,6 @@ impl Selection {
         })
     }
 
-    pub(crate) fn is_typename_field(&self) -> bool {
-        matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
-    }
-
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
         match (path.first(), self) {
             (None, _) => true,
@@ -304,7 +299,7 @@ fn parse_defer(
         }
         let label = if condition != Condition::No {
             directive
-                .argument_by_name("label")
+                .specified_argument_by_name("label")
                 .and_then(|value| value.as_str())
                 .map(|str| str.to_owned())
         } else {
@@ -355,7 +350,7 @@ impl IncludeSkip {
 
 impl Condition {
     pub(crate) fn parse(directive: &executable::Directive) -> Option<Self> {
-        match directive.argument_by_name("if")?.as_ref() {
+        match directive.specified_argument_by_name("if")?.as_ref() {
             executable::Value::Boolean(true) => Some(Condition::Yes),
             executable::Value::Boolean(false) => Some(Condition::No),
             executable::Value::Variable(variable) => {

@@ -549,6 +549,11 @@ expression: "&schema"
     "Client": {
       "additionalProperties": false,
       "properties": {
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
@@ -2163,6 +2168,45 @@ expression: "&schema"
         }
       ]
     },
+    "DnsResolutionStrategy": {
+      "oneOf": [
+        {
+          "description": "Only query for `A` (IPv4) records",
+          "enum": [
+            "ipv4_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Only query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv6_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel",
+          "enum": [
+            "ipv4_and_ipv6"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records",
+          "enum": [
+            "ipv6_then_ipv4"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv4_then_ipv6"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "Enabled": {
       "enum": [
         "enabled"
@@ -3562,32 +3606,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "IntrospectionMode": {
-      "description": "Which implementation of GraphQL schema introspection to use, if enabled",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
@@ -4479,11 +4497,6 @@ expression: "&schema"
           "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
           "type": "boolean"
         },
-        "legacy_introspection_caching": {
-          "default": true,
-          "description": "Activates introspection response caching Historically, the Router has executed introspection queries in the query planner, and cached their response in its cache because they were expensive. This will change soon as introspection will be removed from the query planner. In the meantime, since storing introspection responses can fill up the cache, this option can be used to deactivate it. Default: true",
-          "type": "boolean"
-        },
         "warmed_up_queries": {
           "default": null,
           "description": "Warms up the cache on reloads by running the query plan over a list of the most used queries (from the in memory cache) Configures the number of queries warmed up. Defaults to 1/3 of the in memory cache",
@@ -5023,6 +5036,25 @@ expression: "&schema"
           },
           "required": [
             "request_method"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A value from context.",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "request_context": {
+              "description": "The request context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_context"
           ],
           "type": "object"
         },
@@ -5942,6 +5974,11 @@ expression: "&schema"
           "description": "Send the service name",
           "type": "boolean"
         },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
+          "type": "boolean"
+        },
         "uri": {
           "default": false,
           "description": "Send the subgraph URI",
@@ -5982,6 +6019,11 @@ expression: "&schema"
         "status_code": {
           "default": false,
           "description": "Send the http status",
+          "type": "boolean"
+        },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
           "type": "boolean"
         }
       },
@@ -6407,6 +6449,11 @@ expression: "&schema"
           "nullable": true,
           "type": "boolean"
         },
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
@@ -6557,8 +6604,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "generate_query_fragments": {
-          "default": false,
-          "description": "Enable QP generation of fragments for subgraph requests Default: false",
+          "default": true,
+          "description": "Enable QP generation of fragments for subgraph requests Default: true",
           "type": "boolean"
         },
         "introspection": {
@@ -8266,10 +8313,6 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
-    },
-    "experimental_introspection_mode": {
-      "$ref": "#/definitions/IntrospectionMode",
-      "description": "#/definitions/IntrospectionMode"
     },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",
