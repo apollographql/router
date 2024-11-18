@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::ops::Deref;
+use std::hash::Hasher;
 use std::sync::Arc;
 use std::task;
 
@@ -14,7 +14,6 @@ use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
-use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -36,7 +35,6 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
@@ -49,7 +47,6 @@ use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
-use crate::Context;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -57,11 +54,11 @@ pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Hash)]
 pub(crate) enum ConfigMode {
     //FIXME: add the Rust planner structure once it is hashable and serializable,
     // for now use the JS config as it expected to be identical to the Rust one
-    Rust(Arc<QueryPlannerConfig>),
+    Rust(Arc<apollo_federation::query_plan::query_planner::QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
     BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
@@ -80,7 +77,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
-    config_mode: ConfigMode,
+    config_mode_hash: Arc<QueryHash>,
 }
 
 fn init_query_plan_from_redis(
@@ -125,20 +122,34 @@ where
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
-        let config_mode = match configuration.experimental_query_planner_mode {
+        let mut hasher = StructHasher::new();
+        match configuration.experimental_query_planner_mode {
             crate::configuration::QueryPlannerMode::New => {
-                ConfigMode::Rust(Arc::new(configuration.js_query_planner_config()))
+                "PLANNER-NEW".hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
+                    .hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Legacy => {
-                ConfigMode::Js(Arc::new(configuration.js_query_planner_config()))
+                "PLANNER-LEGACY".hash(&mut hasher);
+                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Both => {
+                "PLANNER-BOTH".hash(&mut hasher);
                 ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+                    .hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
+                    .hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::BothBestEffort => {
+                "PLANNER-BOTH-BEST-EFFORT".hash(&mut hasher);
                 ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
+                    .hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
+                    .hash(&mut hasher);
             }
         };
+        let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
+
         Ok(Self {
             cache,
             delegate,
@@ -146,7 +157,7 @@ where
             subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
-            config_mode,
+            config_mode_hash,
         })
     }
 
@@ -204,7 +215,7 @@ where
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
-                            config_mode: self.config_mode.clone(),
+                            config_mode: self.config_mode_hash.clone(),
                         },
                     )
                     .take(count)
@@ -249,7 +260,7 @@ where
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
-                        config_mode: self.config_mode.clone(),
+                        config_mode: self.config_mode_hash.clone(),
                     });
                 }
             }
@@ -260,7 +271,7 @@ where
         let mut count = 0usize;
         let mut reused = 0usize;
         for WarmUpCachingQueryKey {
-            mut query,
+            query,
             operation_name,
             hash,
             metadata,
@@ -268,7 +279,6 @@ where
             config_mode: _,
         } in all_cache_keys
         {
-            let context = Context::new();
             let doc = match query_analysis
                 .parse_document(&query, operation_name.as_deref())
                 .await
@@ -284,7 +294,7 @@ where
                 schema_id: Arc::clone(&self.schema.schema_id),
                 metadata,
                 plan_options,
-                config_mode: self.config_mode.clone(),
+                config_mode: self.config_mode_hash.clone(),
             };
 
             if experimental_reuse_query_plans {
@@ -326,20 +336,12 @@ where
                     }
                 };
 
-                let schema = self.schema.api_schema();
-                if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
-                    query = modified_query.to_string();
-                }
-
-                context.extensions().with_lock(|mut lock| {
-                    lock.insert::<ParsedDocument>(doc);
-                    lock.insert(caching_key.metadata)
-                });
-
                 let request = QueryPlannerRequest {
                     query,
                     operation_name,
-                    context: context.clone(),
+                    document: doc,
+                    metadata: caching_key.metadata,
+                    plan_options: caching_key.plan_options,
                 };
 
                 let res = match service.ready().await {
@@ -410,16 +412,16 @@ where
         let qp = self.clone();
         Box::pin(async move {
             let context = request.context.clone();
-            qp.plan(request).await.inspect(|response| {
+            qp.plan(request).await.inspect(|_response| {
                 if let Some(usage_reporting) = context
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
-                    let _ = response.context.insert(
+                    let _ = context.insert(
                         APOLLO_OPERATION_ID,
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
-                    let _ = response.context.insert(
+                    let _ = context.insert(
                         "apollo_operation_signature",
                         usage_reporting.stats_report_key.clone(),
                     );
@@ -485,7 +487,7 @@ where
             schema_id: Arc::clone(&self.schema.schema_id),
             metadata,
             plan_options,
-            config_mode: self.config_mode.clone(),
+            config_mode: self.config_mode_hash.clone(),
         };
 
         let context = request.context.clone();
@@ -497,20 +499,17 @@ where
             .await;
         if entry.is_first() {
             let query_planner::CachingRequest {
-                mut query,
+                query,
                 operation_name,
                 context,
             } = request;
 
-            let schema = self.schema.api_schema();
-            if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
-                query = modified_query.to_string();
-            }
-
             let request = QueryPlannerRequest::builder()
                 .query(query)
                 .and_operation_name(operation_name)
-                .context(context)
+                .document(doc)
+                .metadata(caching_key.metadata)
+                .plan_options(caching_key.plan_options)
                 .build();
 
             // some clients might timeout and cancel the request before query planning is finished,
@@ -519,14 +518,22 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    let res = self.delegate.ready().await?.call(request).await;
+                    let service = match self.delegate.ready().await {
+                        Ok(service) => service,
+                        Err(error) => {
+                            let e = Arc::new(error);
+                            let err = e.clone();
+                            tokio::spawn(async move {
+                                entry.insert(Err(err)).await;
+                            });
+                            return Err(CacheResolverError::RetrievalError(e));
+                        }
+                    };
+
+                    let res = service.call(request).await;
 
                     match res {
-                        Ok(QueryPlannerResponse {
-                            content,
-                            context,
-                            errors,
-                        }) => {
+                        Ok(QueryPlannerResponse { content, errors }) => {
                             if let Some(content) = content.clone() {
                                 let can_cache = match &content {
                                     // Already cached in an introspection-specific, small-size,
@@ -541,6 +548,10 @@ where
                                     tokio::spawn(async move {
                                         entry.insert(Ok(content)).await;
                                     });
+                                } else {
+                                    tokio::spawn(async move {
+                                        entry.send(Ok(content)).await;
+                                    });
                                 }
                             }
 
@@ -550,11 +561,7 @@ where
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                                 });
                             }
-                            Ok(QueryPlannerResponse {
-                                content,
-                                context,
-                                errors,
-                            })
+                            Ok(QueryPlannerResponse { content, errors })
                         }
                         Err(error) => {
                             let e = Arc::new(error);
@@ -562,6 +569,11 @@ where
                             tokio::spawn(async move {
                                 entry.insert(Err(err)).await;
                             });
+                            if let Some(usage_reporting) = e.usage_reporting() {
+                                context.extensions().with_lock(|mut lock| {
+                                    lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
+                                });
+                            }
                             Err(CacheResolverError::RetrievalError(e))
                         }
                     }
@@ -588,29 +600,13 @@ where
                         });
                     }
 
-                    Ok(QueryPlannerResponse::builder()
-                        .content(content)
-                        .context(context)
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(content).build())
                 }
                 Err(error) => {
-                    match error.deref() {
-                        QueryPlannerError::PlanningErrors(pe) => {
-                            request.context.extensions().with_lock(|mut lock| {
-                                lock.insert::<Arc<UsageReporting>>(Arc::new(
-                                    pe.usage_reporting.clone(),
-                                ))
-                            });
-                        }
-                        QueryPlannerError::SpecError(e) => {
-                            request.context.extensions().with_lock(|mut lock| {
-                                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
-                                    stats_report_key: e.get_error_key().to_string(),
-                                    referenced_fields_by_type: HashMap::new(),
-                                }))
-                            });
-                        }
-                        _ => {}
+                    if let Some(usage_reporting) = error.usage_reporting() {
+                        context.extensions().with_lock(|mut lock| {
+                            lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
+                        });
                     }
 
                     Err(CacheResolverError::RetrievalError(error))
@@ -627,7 +623,7 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
     hex::encode(result)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
     pub(crate) schema_id: Arc<String>,
@@ -635,12 +631,12 @@ pub(crate) struct CachingQueryKey {
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: ConfigMode,
+    pub(crate) config_mode: Arc<QueryHash>,
 }
 
 // Update this key every time the cache key or the query plan format has to change.
 // When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 0;
+const CACHE_KEY_VERSION: usize = 1;
 const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
@@ -649,31 +645,20 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(self.operation.as_deref().unwrap_or("-"));
         let operation = hex::encode(hasher.finalize());
 
-        let mut hasher = Sha256::new();
-        hasher.update(serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
-        hasher
-            .update(serde_json::to_vec(&self.plan_options).expect("serialization should not fail"));
-        hasher
-            .update(serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
-        hasher.update(&*self.schema_id);
+        let mut hasher = StructHasher::new();
+        "^metadata".hash(&mut hasher);
+        self.metadata.hash(&mut hasher);
+        "^plan_options".hash(&mut hasher);
+        self.plan_options.hash(&mut hasher);
+        "^config_mode".hash(&mut hasher);
+        self.config_mode.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
             f,
-            "plan:{}:{}:{}:{}:{}",
+            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
             CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
         )
-    }
-}
-
-impl Hash for CachingQueryKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.schema_id.hash(state);
-        self.hash.0.hash(state);
-        self.operation.hash(state);
-        self.metadata.hash(state);
-        self.plan_options.hash(state);
-        self.config_mode.hash(state);
     }
 }
 
@@ -684,7 +669,33 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: ConfigMode,
+    pub(crate) config_mode: Arc<QueryHash>,
+}
+
+struct StructHasher {
+    hasher: Sha256,
+}
+
+impl StructHasher {
+    fn new() -> Self {
+        Self {
+            hasher: Sha256::new(),
+        }
+    }
+    fn finalize(self) -> Vec<u8> {
+        self.hasher.finalize().as_slice().into()
+    }
+}
+
+impl Hasher for StructHasher {
+    fn finish(&self) -> u64 {
+        unreachable!()
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.hasher.update(&[0xFF][..]);
+        self.hasher.update(bytes);
+    }
 }
 
 impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
@@ -716,6 +727,7 @@ mod tests {
     use crate::spec::Query;
     use crate::spec::Schema;
     use crate::Configuration;
+    use crate::Context;
 
     mock! {
         #[derive(Debug)]
@@ -858,10 +870,7 @@ mod tests {
                     plan: Arc::new(query_plan),
                 };
 
-                Ok(QueryPlannerResponse::builder()
-                    .content(qp_content)
-                    .context(Context::new())
-                    .build())
+                Ok(QueryPlannerResponse::builder().content(qp_content).build())
             });
             planner
         });
@@ -895,15 +904,15 @@ mod tests {
             .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
 
         for _ in 0..5 {
-            assert!(planner
+            let _ = planner
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
                     context.clone(),
                 ))
                 .await
-                .unwrap()
-                .context
+                .unwrap();
+            assert!(context
                 .extensions()
                 .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>()));
         }
@@ -936,10 +945,7 @@ mod tests {
                         ),
                     };
 
-                    Ok(QueryPlannerResponse::builder()
-                        .content(qp_content)
-                        .context(Context::new())
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
                 });
                 planner
             });

@@ -1,0 +1,44 @@
+---
+title: New Relic exporter (via OTLP)
+subtitle: Configure the New Relic exporter for metrics
+description: Configure the New Relic exporter for metrics via OpenTelemetry Protocol (OTLP) in the Apollo GraphOS Router or Apollo Router Core.
+---
+
+Enable and configure the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp) for metrics in the GraphOS Router or Apollo Router Core for use with [New Relic](https://newrelic.com/).
+
+For general tracing configuration, refer to [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview).
+
+## New Relic configuration
+
+To configure the router, enable the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp#configuration) with `temporality: delta` and the appropriate endpoint and New Relic API key.
+
+<Note>
+
+For New Relic, `temporality: delta` must be set and the value of the `endpoint` **must** end with `/v1/metrics`.  The example below uses a common default for New Relic.  Check your New Relic account to verify the correct value as the actual domain may vary by region.
+
+</Note>
+
+For example: 
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        protocol: grpc
+
+        # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+        temporality: delta
+
+        # Ensure the endpoint provided ends with "/v1/metrics"
+        # Be sure to use the correct URL for your region.
+        endpoint: https://otlp.nr-data.net:4317/v1/metrics
+        grpc:
+          metadata:
+            api-key:
+              - "<new-relic-api-key>"
+```
+
+For more details about New Relic configuration, see [New Relic's docs on OpenTelemetry configuration](https://docs.newrelic.com/docs/more-integrations/open-source-telemetry-integrations/opentelemetry/get-started/opentelemetry-set-up-your-app/#review-settings).
+

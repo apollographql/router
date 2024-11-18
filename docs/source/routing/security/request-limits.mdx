@@ -1,0 +1,315 @@
+---
+title: Request Limits
+subtitle: Protect your router from requests exceeding network, parser, and operation-based limits 
+redirectFrom:
+  - /router/configuration/operation-limits/
+---
+
+For enhanced security, the GraphOS Router can reject requests that violate any of the following kinds of limits:
+
+- Operation-based semantic limits
+- Network-based limits
+- Parser-based lexical limits
+
+```yaml title="router.yaml"
+limits:
+  # Network-based limits
+  http_max_request_bytes: 2000000 # Default value: 2 MB
+
+  # Parser-based limits
+  parser_max_tokens: 15000 # Default value
+  parser_max_recursion: 500 # Default value
+
+  # Operation-based limits (Enterprise only)
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
+```
+
+## Operation-based limits
+
+<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+
+You can define **operation limits** in your router's configuration to reject potentially malicious requests. An operation that exceeds _any_ specified limit is rejected (unless you run your router in [`warn_only` mode](#warn_only-mode)).
+
+### Setup
+
+To use operation limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](/graphos/reference/router/self-hosted-install/#download-options)
+
+You define operation limits in your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file), like so:
+
+```yaml title="router.yaml"
+limits:
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
+
+  # Uncomment to enable warn_only mode
+  # warn_only: true
+```
+
+Each limit takes an integer value. You can define any combination of [supported limits](#supported-limits).
+
+### Supported limits
+
+#### `max_depth`
+
+Limits the deepest nesting of selection sets in an operation, including fields in fragments.
+
+The `GetBook` operation below has depth three:
+
+```graphql
+query GetBook {
+  book { # Depth 1 (root field)
+    ...bookDetails
+  }
+}
+
+fragment bookDetails on Book {
+  details { # Depth 2 (nested under `book`)
+    ... on ProductDetailsBook {
+      country # Depth 3 (nested under `details`)
+    }
+  }
+}
+```
+
+#### `max_height`
+
+Limits the number of unique fields included in an operation, including fields of fragments. If a particular field is included _multiple_ times via aliases, it's counted only _once_.
+
+The `GetUser` operation below has height three:
+
+```graphql
+query GetUser {
+  user { # 1
+    id   # 2
+    name # 3
+    username: name # Aliased duplicate (not counted)
+  }
+}
+```
+
+Each unique field increments an operation's height by one, regardless of that field's return type (scalar, object, or list). 
+
+#### `max_aliases`
+
+Limits the total number of aliased fields in an operation, including fields of fragments.
+
+The `GetUser` operation below includes three aliases:
+
+```graphql
+query GetUser {
+  user {
+    nickname: name # 1
+    username: name # 2
+    handle: name   # 3
+  }
+}
+```
+
+Each aliased field increments the alias count by one, regardless of that field's return type (scalar, object, or list).
+
+#### `max_root_fields`
+
+Limits the number of root fields in an operation, including root fields in fragments. If a particular root field is included _multiple_ times via aliases, _each usage_ is counted.
+
+The following operation includes three root fields:
+
+```graphql
+query GetTopProducts {
+  topBooks { # 1
+    id
+  }
+  topMovies { # 2
+    id
+  }
+  topGames { # 3
+    id
+  }
+}
+```
+
+### `warn_only` mode
+
+If you run your router in `warn_only` mode, operations that exceed defined limits are _not_ rejected. Instead, the router processes these operations as usual and emits a `WARN` trace that notes all exceeded limits, like so:
+
+```
+2023-03-15T19:08:23.123456Z WARN apollo_router::operation_limits: max_depth exceeded, max_depth: 3, current_op_depth: 5, operation: "query GetOwnerLocation {cat {owner {location {postalCode}}}}"
+```
+
+Running in `warn_only` mode can be useful while you're testing to determine the most appropriate limits to set for your supergraph.
+
+You can enable or disable `warn_only` mode in your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file), like so:
+
+```yaml title="router.yaml"
+limits:
+  warn_only: true # warn_only mode always enabled
+```
+
+### Response format for exceeded limits
+
+Whenever your router rejects a request because it exceeds an operation limit, the router responds with a 400 HTTP status code and a standard GraphQL error response body:
+
+```json5
+# HTTP 400
+{
+  "data": {},
+  "errors": [
+    {
+      "message": "Maximum height (field count) limit exceeded in this operation",
+      "extensions": {
+        "code": "MAX_HEIGHT_LIMIT"
+      }
+    }
+  ]
+}
+```
+
+If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
+
+### Using telemetry to set operation-based limits
+
+Router telemetry can help you set operation limits, especially when you have a large number of existing operations. You can measure incoming operations over a fixed duration, then use the captured data as a baseline configuration.
+
+#### Logging values
+
+To log limit information about every operation, you can configure the router with a [custom event](/graphos/reference/router/telemetry/instrumentation/events#custom-events) to log the values of aliases, depth, height, and root_fields for each operation:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        OPERATION_LIMIT_INFO:
+          message: operation limit info
+          on: response
+          level: info
+          attributes:
+            graphql.operation.name: true
+            query.aliases:
+              query: aliases
+            query.depth:
+              query: depth
+            query.height:
+              query: height
+            query.root_fields:
+              query: root_fields
+```
+
+<Note>
+
+For a large amount of traffic, you may prefer to collect and export metrics to your APM instead.
+
+</Note>
+
+#### Collecting metrics
+
+To capture and view metrics to help set your operation limits, you can configure the router to collect [custom metrics](/graphos/reference/router/telemetry/instrumentation/instruments#custom-instruments) on the values of aliases, depth, height, and root_fields for each operation:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          # Define a custom view because operation limits are different than the default latency-oriented view of OpenTelemetry
+          - name: oplimits.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0
+                  - 5
+                  - 10
+                  - 25
+                  - 50
+                  - 100
+                  - 500
+                  - 1000
+  instrumentation:
+    instruments:
+      supergraph:
+        oplimits.aliases:
+          value:
+            query: aliases
+          type: histogram
+          unit: number
+          description: "Aliases for an operation"
+        oplimits.depth:
+          value:
+            query: depth
+          type: histogram
+          unit: number
+          description: "Depth for an operation"
+        oplimits.height:
+          value:
+            query: height
+          type: histogram
+          unit: number
+          description: "Height for an operation"
+        oplimits.root_fields:
+          value:
+            query: root_fields
+          type: histogram
+          unit: number
+          description: "Root fields for an operation"
+```
+You should also configure the router to [export metrics](/graphos/reference/router/telemetry/metrics-exporters/overview) to your APM tool.
+
+## Network-based limits
+
+### `http_max_request_bytes`
+
+Limits the amount of data read from the network for the body of HTTP requests,
+to protect against unbounded memory consumption.
+This limit is checked before JSON parsing.
+Both the GraphQL document and associated variables count toward it.
+
+The default value is `2000000` bytes, 2 MB.
+
+Before increasing this limit significantly consider testing performance
+in an environment similar to your production, especially if some clients are untrusted.
+Many concurrent large requests could cause the router to run out of memory.
+
+## Parser-based limits
+
+### `parser_max_tokens`
+
+Limits the number of tokens a query document can include. This counts _all_ tokens, including both [lexical and ignored tokens](https://spec.graphql.org/October2021/#sec-Language.Source-Text.Lexical-Tokens).
+
+The default value is `15000`.
+
+### `parser_max_recursion`
+
+Limits the deepest level of recursion allowed by the router's GraphQL parser to prevent stack overflows. This corresponds to the deepest nesting level of any single GraphQL operation or fragment defined in a query document.
+
+The default value is `500`.
+
+In the example below, the `GetProducts` operation has a recursion of three, and the `ProductVariation` fragment has a recursion of two. Therefore, the _max_ recursion of the query document is three.
+
+```graphql
+query GetProducts {
+  allProducts { #1
+    ...productVariation
+    delivery { #2
+      fastestDelivery #3
+    }
+  }
+}
+
+fragment ProductVariation on Product {
+  variation { #1
+    name #2
+  }
+}
+```
+
+Note that the router calculates the recursion depth for each operation and fragment _separately_.  Even if a fragment is included in an operation, that fragment's recursion depth does not contribute to the _operation's_ recursion depth.
+
+<Note>
+
+In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
+
+</Note>

@@ -163,7 +163,7 @@ async fn insert() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{creatorUser{__typename id}}}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onOrganization1_0}}fragment _generated_onOrganization1_0 on Organization{creatorUser{__typename id}}",
             "variables": {
                 "representations": [
                     {
@@ -286,7 +286,7 @@ async fn no_cache_control() {
         ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{creatorUser{__typename id}}}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onOrganization1_0}}fragment _generated_onOrganization1_0 on Organization{creatorUser{__typename id}}",
             "variables": {
                 "representations": [
                     {
@@ -377,7 +377,7 @@ async fn private() {
             .build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{creatorUser{__typename id}}}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onOrganization1_0}}fragment _generated_onOrganization1_0 on Organization{creatorUser{__typename id}}",
             "variables": {
                 "representations": [
                     {

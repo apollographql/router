@@ -32,7 +32,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onUser1_0}}fragment _generated_onUser1_0 on User{reviews{body}}",
                                     "variables": {
                                         "representations": [
                                             {
