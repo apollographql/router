@@ -202,18 +202,13 @@ fn add_headers(
                 }
             }
             HeaderSource::Value(value) => match value.interpolate(inputs) {
-                Ok(value) => match HeaderValue::from_str(value.as_str()) {
-                    Ok(value) => {
-                        request = request.header(header_name, value.clone());
+                Ok(value) => {
+                    request = request.header(header_name, value.clone());
 
-                        if header_name == CONTENT_TYPE {
-                            content_type = Some(value.clone());
-                        }
+                    if header_name == CONTENT_TYPE {
+                        content_type = Some(value.clone());
                     }
-                    Err(err) => {
-                        tracing::error!("Invalid header value '{:?}': {:?}", value, err);
-                    }
-                },
+                }
                 Err(err) => {
                     tracing::error!("Unable to interpolate header value: {:?}", err);
                 }

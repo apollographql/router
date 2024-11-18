@@ -190,6 +190,10 @@ pub(crate) enum VariableParseError<I> {
         location: Range<usize>,
     },
     Nom(I, ErrorKind),
+    InvalidHeaderValue {
+        value: String,
+        location: Range<usize>,
+    },
 }
 
 impl<I> ParseError<I> for VariableParseError<I> {
@@ -432,6 +436,12 @@ impl From<VariableParseError<Span<'_>>> for VariableError {
                 namespace,
                 location,
             },
+            VariableParseError::InvalidHeaderValue { value, location } => {
+                VariableError::ParseError {
+                    message: value,
+                    location,
+                }
+            }
         }
     }
 }

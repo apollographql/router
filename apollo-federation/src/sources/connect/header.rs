@@ -50,7 +50,7 @@ impl<'a> HeaderValue<'a> {
                 .parts
                 .into_iter()
                 .map(|part| match part {
-                    HeaderValuePart::Text(text) => HeaderValuePart::Text(text),
+                    HeaderValuePart::Constant(text) => HeaderValuePart::Constant(text),
                     HeaderValuePart::Variable(var) => HeaderValuePart::Variable(var.into_owned()),
                 })
                 .collect(),
@@ -73,11 +73,11 @@ impl<'a> HeaderValue<'a> {
     ///
     /// # Errors
     /// Returns an error if a variable used in the header value is not defined.
-    pub fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<String, String> {
-        let mut result = String::new();
+    pub fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<http::HeaderValue, String> {
+        let mut result = Vec::new();
         for part in &self.parts {
             match part {
-                HeaderValuePart::Text(text) => result.push_str(text),
+                HeaderValuePart::Constant(text) => result.extend(text.as_bytes()),
                 HeaderValuePart::Variable(var) => {
                     let var_path_bytes = ByteString::from(var.to_string());
                     let value = vars
@@ -88,11 +88,11 @@ impl<'a> HeaderValue<'a> {
                     } else {
                         value.to_string()
                     };
-                    result.push_str(value.as_str());
+                    result.extend(value.as_bytes());
                 }
             }
         }
-        Ok(result)
+        http::HeaderValue::from_bytes(&result).map_err(|e| e.to_string())
     }
 
     pub(crate) fn from_str(s: &'a str) -> Result<Self, HeaderValueError> {
@@ -145,12 +145,18 @@ impl From<VariableParseError<Span<'_>>> for HeaderValueError {
                 namespace,
                 location,
             },
+            VariableParseError::InvalidHeaderValue { value, location } => {
+                HeaderValueError::ParseError {
+                    message: format!("Invalid HTTP header value `{value}`"),
+                    location,
+                }
+            }
         }
     }
 }
 #[derive(Debug, PartialEq, Clone)]
 enum HeaderValuePart<'a> {
-    Text(String),
+    Constant(http::HeaderValue),
     Variable(VariableReference<'a, Namespace>),
 }
 
@@ -158,15 +164,23 @@ impl<'a> HeaderValuePart<'a> {
     fn parse(input: Span<'a>) -> IResult<Span<'a>, Self, VariableParseError<Span>> {
         alt((
             map(variable_reference, Self::Variable),
-            map(map(text, |s| s.fragment().to_string()), Self::Text),
+            map(parse_header_value, Self::Constant),
         ))(input)
     }
 }
 
 type Span<'a> = LocatedSpan<&'a str>;
 
-fn text(input: Span) -> IResult<Span, Span, VariableParseError<Span>> {
-    recognize(many1(none_of("{}")))(input)
+fn parse_header_value(input: Span) -> IResult<Span, http::HeaderValue, VariableParseError<Span>> {
+    let (rest, str_value) = recognize(many1(none_of("{}")))(input)?;
+    match http::HeaderValue::from_str(str_value.fragment()) {
+        Ok(value) => Ok((rest, value)),
+        Err(_) => Err(nom::Err::Error(VariableParseError::InvalidHeaderValue {
+            value: str_value.fragment().to_string(),
+            location: str_value.location_offset()
+                ..str_value.location_offset() + str_value.fragment().len(),
+        })),
+    }
 }
 
 fn variable_reference(
@@ -193,20 +207,21 @@ mod tests {
     use crate::sources::connect::variable::VariablePathPart;
 
     #[test]
-    fn test_text() {
-        let remove_spans =
-            |(a, b): (Span, Span)| (a.fragment().to_string(), b.fragment().to_string());
+    fn test_parse_header_value() {
+        let remove_spans = |(a, b): (Span, http::HeaderValue)| {
+            (a.fragment().to_string(), b.to_str().unwrap().to_string())
+        };
         assert_eq!(
-            text(Span::new("text")).map(remove_spans),
+            parse_header_value(Span::new("text")).map(remove_spans),
             Ok(("".into(), "text".into()))
         );
-        assert!(text(Span::new("{$config.one}")).is_err());
+        assert!(parse_header_value(Span::new("{$config.one}")).is_err());
         assert_eq!(
-            text(Span::new("text{$config.one}")).map(remove_spans),
+            parse_header_value(Span::new("text{$config.one}")).map(remove_spans),
             Ok(("{$config.one}".into(), "text".into()))
         );
         assert_eq!(
-            text(Span::new("text}")).map(remove_spans),
+            parse_header_value(Span::new("text}")).map(remove_spans),
             Ok(("}".into(), "text".into()))
         )
     }
@@ -215,7 +230,7 @@ mod tests {
     fn test_header_value_part_parse() {
         assert_eq!(
             HeaderValuePart::parse(Span::new("text")).map(|(a, b)| (*a.fragment(), b)),
-            Ok(("", HeaderValuePart::Text("text".to_string())))
+            Ok(("", HeaderValuePart::Constant("text".parse().unwrap())))
         );
         assert_eq!(
             HeaderValuePart::parse(Span::new("{$config.one}")).map(|(a, b)| (*a.fragment(), b)),
@@ -236,7 +251,10 @@ mod tests {
         );
         assert_eq!(
             HeaderValuePart::parse(Span::new("text{$config.one}")).map(|(a, b)| (*a.fragment(), b)),
-            Ok(("{$config.one}", HeaderValuePart::Text("text".to_string())))
+            Ok((
+                "{$config.one}",
+                HeaderValuePart::Constant("text".parse().unwrap())
+            ))
         );
     }
 
@@ -245,7 +263,7 @@ mod tests {
         assert_eq!(
             HeaderValue::from_str("text"),
             Ok(HeaderValue {
-                parts: vec![HeaderValuePart::Text("text".to_string())]
+                parts: vec![HeaderValuePart::Constant("text".parse().unwrap())]
             })
         );
         assert_eq!(
@@ -268,7 +286,7 @@ mod tests {
             HeaderValue::from_str("text{$config.one}text"),
             Ok(HeaderValue {
                 parts: vec![
-                    HeaderValuePart::Text("text".to_string()),
+                    HeaderValuePart::Constant("text".parse().unwrap()),
                     HeaderValuePart::Variable(VariableReference {
                         namespace: VariableNamespace {
                             namespace: Namespace::Config,
@@ -280,7 +298,7 @@ mod tests {
                         }],
                         location: 5..16
                     }),
-                    HeaderValuePart::Text("text".to_string())
+                    HeaderValuePart::Constant("text".parse().unwrap())
                 ]
             })
         );
@@ -288,7 +306,7 @@ mod tests {
             HeaderValue::from_str("    {$config.one}    "),
             Ok(HeaderValue {
                 parts: vec![
-                    HeaderValuePart::Text("    ".to_string()),
+                    HeaderValuePart::Constant("    ".parse().unwrap()),
                     HeaderValuePart::Variable(VariableReference {
                         namespace: VariableNamespace {
                             namespace: Namespace::Config,
@@ -300,7 +318,7 @@ mod tests {
                         }],
                         location: 5..16
                     }),
-                    HeaderValuePart::Text("    ".to_string())
+                    HeaderValuePart::Constant("    ".parse().unwrap())
                 ]
             })
         );
@@ -325,7 +343,10 @@ mod tests {
         let value = HeaderValue::from_str("before {$config.one} after").unwrap();
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::String("foo".into()));
-        assert_eq!(value.interpolate(&vars), Ok("before foo after".into()));
+        assert_eq!(
+            value.interpolate(&vars),
+            Ok(http::HeaderValue::from_static("before foo after"))
+        );
     }
 
     #[test]
@@ -344,7 +365,7 @@ mod tests {
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::Array(vec!["one".into(), "two".into()]));
         assert_eq!(
-            Ok("[\"one\",\"two\"]".into()),
+            Ok(http::HeaderValue::from_static("[\"one\",\"two\"]")),
             header_value.interpolate(&vars)
         );
     }
@@ -354,7 +375,10 @@ mod tests {
         let header_value = HeaderValue::from_str("{$config.one}").unwrap();
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::Bool(true));
-        assert_eq!(Ok("true".into()), header_value.interpolate(&vars));
+        assert_eq!(
+            Ok(http::HeaderValue::from_static("true")),
+            header_value.interpolate(&vars)
+        );
     }
 
     #[test]
@@ -362,7 +386,10 @@ mod tests {
         let header_value = HeaderValue::from_str("{$config.one}").unwrap();
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::Null);
-        assert_eq!(Ok("null".into()), header_value.interpolate(&vars));
+        assert_eq!(
+            Ok(http::HeaderValue::from_static("null")),
+            header_value.interpolate(&vars)
+        );
     }
 
     #[test]
@@ -370,7 +397,10 @@ mod tests {
         let header_value = HeaderValue::from_str("{$config.one}").unwrap();
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::Number(1.into()));
-        assert_eq!(Ok("1".into()), header_value.interpolate(&vars));
+        assert_eq!(
+            Ok(http::HeaderValue::from_static("1")),
+            header_value.interpolate(&vars)
+        );
     }
 
     #[test]
@@ -378,7 +408,10 @@ mod tests {
         let header_value = HeaderValue::from_str("{$config.one}").unwrap();
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::Object(Map::new()));
-        assert_eq!(Ok("{}".into()), header_value.interpolate(&vars));
+        assert_eq!(
+            Ok(http::HeaderValue::from_static("{}")),
+            header_value.interpolate(&vars)
+        );
     }
 
     #[test]
@@ -386,7 +419,10 @@ mod tests {
         let header_value = HeaderValue::from_str("{$config.one}").unwrap();
         let mut vars = Map::new();
         vars.insert("$config.one", JSON::String("string".into()));
-        assert_eq!(Ok("string".into()), header_value.interpolate(&vars));
+        assert_eq!(
+            Ok(http::HeaderValue::from_static("string")),
+            header_value.interpolate(&vars)
+        );
     }
 
     #[test]
