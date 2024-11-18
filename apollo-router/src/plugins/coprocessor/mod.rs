@@ -49,13 +49,13 @@ use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
+use crate::services::hickory_dns_connector::new_async_http_connector;
+use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::router::body::RouterBodyConverter;
 use crate::services::subgraph;
-use crate::services::trust_dns_connector::new_async_http_connector;
-use crate::services::trust_dns_connector::AsyncHyperResolver;
 
 #[cfg(test)]
 mod test;
@@ -79,7 +79,9 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let mut http_connector = new_async_http_connector()?;
+        let client_config = init.config.client.clone().unwrap_or_default();
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -94,9 +96,8 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             .https_or_http()
             .enable_http1();
 
-        let connector = if init.config.client.is_none()
-            || init.config.client.as_ref().unwrap().experimental_http2 != Some(Http2Config::Disable)
-        {
+        let experimental_http2 = client_config.experimental_http2.unwrap_or_default();
+        let connector = if experimental_http2 != Http2Config::Disable {
             builder.enable_http2().wrap_connector(http_connector)
         } else {
             builder.wrap_connector(http_connector)
@@ -107,11 +108,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
                 .layer(TimeoutLayer::new(init.config.timeout))
                 .service(
                     hyper::Client::builder()
-                        .http2_only(
-                            init.config.client.is_some()
-                                && init.config.client.as_ref().unwrap().experimental_http2
-                                    == Some(Http2Config::Http2Only),
-                        )
+                        .http2_only(experimental_http2 == Http2Config::Http2Only)
                         .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                         .build(connector),
                 ),
@@ -302,6 +299,8 @@ pub(super) struct SubgraphRequestConf {
     /// The url you'd like to offload processing to
     #[schemars(with = "String")]
     pub(super) url: Option<Url>,
+    /// Send the subgraph request id
+    pub(super) subgraph_request_id: bool,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -324,6 +323,8 @@ pub(super) struct SubgraphResponseConf {
     /// The url you'd like to offload processing to
     #[schemars(with = "String")]
     pub(super) url: Option<Url>,
+    /// Send the subgraph request id
+    pub(super) subgraph_request_id: bool,
 }
 
 /// Configures the externalization plugin
@@ -1039,6 +1040,9 @@ where
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
+    let subgraph_request_id = request_config
+        .subgraph_request_id
+        .then_some(request.id.clone());
 
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphRequest)
@@ -1050,6 +1054,7 @@ where
         .method(parts.method.to_string())
         .and_service_name(service_name)
         .and_uri(uri)
+        .and_subgraph_request_id(subgraph_request_id)
         .build();
 
     tracing::debug!(?payload, "externalized output");
@@ -1108,6 +1113,7 @@ where
                 response: http_response,
                 context: request.context,
                 subgraph_name: Some(subgraph_name),
+                id: request.id,
             };
 
             if let Some(context) = co_processor_output.context {
@@ -1195,6 +1201,9 @@ where
         .transpose()?;
     let context_to_send = response_config.context.then(|| response.context.clone());
     let service_name = response_config.service_name.then_some(service_name);
+    let subgraph_request_id = response_config
+        .subgraph_request_id
+        .then_some(response.id.clone());
 
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphResponse)
@@ -1204,6 +1213,7 @@ where
         .and_context(context_to_send)
         .and_status_code(status_to_send)
         .and_service_name(service_name)
+        .and_subgraph_request_id(subgraph_request_id)
         .build();
 
     tracing::debug!(?payload, "externalized output");

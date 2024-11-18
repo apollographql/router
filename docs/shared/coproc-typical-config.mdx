@@ -59,6 +59,7 @@ coprocessor:
         method: false
         service_name: false
         url: "http://example.com/subgraph-request-coprocessor-url"
+        subgraph_request_id: false
       response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
         headers: true
         body: false
@@ -66,5 +67,5 @@ coprocessor:
         service_name: false
         status_code: false
         url: "http://example.com/subgraph-response-coprocessor-url"
-
+        subgraph_request_id: false
 ```

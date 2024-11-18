@@ -13,6 +13,82 @@ use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
 
+/// Create an internal error.
+///
+/// # Example
+/// ```rust
+/// use apollo_federation::internal_error;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// const NAME: &str = "the thing";
+/// let result: Result<(), FederationError> = may_be_none()
+///     .ok_or_else(|| internal_error!("Expected {NAME} to be Some"));
+/// ```
+#[macro_export]
+macro_rules! internal_error {
+    ( $( $arg:tt )+ ) => {
+        $crate::error::FederationError::internal(format!( $( $arg )+ ))
+    }
+}
+
+/// Break out of the current function, returning an internal error.
+///
+/// # Example
+/// ```rust
+/// use apollo_federation::bail;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// fn example() -> Result<(), FederationError> {
+///     bail!("Something went horribly wrong");
+///     unreachable!()
+/// }
+/// #
+/// # _ = example();
+/// ```
+#[macro_export]
+macro_rules! bail {
+    ( $( $arg:tt )+ ) => {
+        return Err($crate::internal_error!( $( $arg )+ ).into());
+    }
+}
+
+/// A safe assertion: in debug mode, it panicks on failure, and in production, it returns an
+/// internal error.
+///
+/// Treat this as an assertion. It must only be used for conditions that *should never happen*
+/// in normal operation.
+///
+/// # Example
+/// ```rust,no_run
+/// use apollo_federation::ensure;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// fn example() -> Result<(), FederationError> {
+///     ensure!(1 == 0, "Something went horribly wrong");
+///     unreachable!()
+/// }
+/// ```
+#[macro_export]
+macro_rules! ensure {
+    ( $expr:expr, $( $arg:tt )+ ) => {
+        #[cfg(debug_assertions)]
+        {
+            if false {
+                return Err($crate::error::FederationError::internal("ensure!() must be used in a function that returns a Result").into());
+            }
+            assert!($expr, $( $arg )+);
+        }
+
+        #[cfg(not(debug_assertions))]
+        if !$expr {
+            $crate::internal_error!( $( $arg )+ );
+        }
+    }
+}
+
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.
 #[derive(Clone, Debug, strum_macros::Display)]
@@ -33,8 +109,6 @@ impl From<SchemaRootKind> for String {
 
 #[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
 pub enum UnsupportedFeatureKind {
-    #[strum(to_string = "progressive overrides")]
-    ProgressiveOverrides,
     #[strum(to_string = "defer")]
     Defer,
     #[strum(to_string = "context")]

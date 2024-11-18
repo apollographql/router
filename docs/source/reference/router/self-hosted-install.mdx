@@ -1,0 +1,274 @@
+---
+title: Router Quickstart
+subtitle: Run the router with GraphOS and Apollo-hosted subgraphs
+description: This quickstart tutorial walks you through installing the Apollo GraphOS Router or Apollo Router Core and running it with GraphOS and some example Apollo-hosted subgraphs.
+---
+
+import ElasticNotice from "../../../shared/elastic-notice.mdx";
+
+Hello! This tutorial walks you through installing the router (GraphOS Router or Apollo Router Core) and running it in with GraphOS and some example Apollo-hosted subgraphs.
+
+> **This quickstart helps you run a _self-hosted_ instance of the router.** If you [create a cloud supergraph](/graphos/quickstart/cloud/) with Apollo GraphOS, Apollo provisions and hosts your supergraph's GraphOS
+> Router for you.
+>
+> Cloud supergraphs are recommended for organizations that don't need to host their router in their own infrastructure.
+
+## 1. Download and extract the router binary
+
+<ElasticNotice />
+
+### Download options
+
+#### Automatic download (Linux, OSX, WSL)
+
+If you have a bash-compatible terminal, you can download the latest version of the Apollo Router Core directly to your current directory with the following command:
+
+```bash
+curl -sSL https://router.apollo.dev/download/nix/latest | sh
+```
+
+#### Manual download
+
+Go to the Apollo Router Core's [GitHub Releases page](https://github.com/apollographql/router/releases) and download the latest `.tar.gz` file that matches your system. Currently, tarballs are available for the following:
+
+- Linux (x86_64)
+- Linux (aarch64)
+- macOS (Apple Silicon)
+- Windows (x86_64)
+
+If a tarball for your system or architecture isn't available, you can [build and run the router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1). You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) to request the addition of new architectures.
+
+After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
+
+```bash
+tar -xf path/to/file.tar.gz --strip-components=1
+```
+
+If you omit the `--strip-components=1` option, the `router` executable is installed in a `dist` subdirectory.
+
+### Running the binary
+
+You can now run the router from your project's root directory with the following command:
+
+```bash
+./router
+```
+
+If you do, you'll get output similar to the following:
+
+```
+Apollo Router <version> // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
+
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
+
+👉 DO ONE:
+
+  * Pass a local schema file with the '--supergraph' option:
+
+      $ ./router --supergraph <file_path>
+
+  * Fetch a registered schema from GraphOS by setting
+    these environment variables:
+
+      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/federation/managed-federation/setup
+
+🔬 TESTING THINGS OUT?
+
+  1. Download an example supergraph schema with Apollo-hosted subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+  2. Run the router in development mode with the supergraph schema:
+
+    $ ./router --dev --supergraph starstuff.graphql
+```
+
+This is because router requires a supergraph schema and we aren't providing it one! Let's fix that.
+
+## 2. Download the example supergraph schema
+
+For this quickstart, we're using example Apollo-hosted subgraphs, along with an example supergraph schema that's composed from those subgraph schemas.
+
+From your project's root directory, run the following:
+
+```bash
+curl -sSL https://supergraph.demo.starstuff.dev/ > supergraph-schema.graphql
+```
+
+This saves a `supergraph-schema.graphql` file with the following contents:
+
+<ExpansionPanel title="Click to expand">
+
+```graphql title="supergraph-schema.graphql"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+  mutation: Mutation
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  ACCOUNTS
+    @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev/")
+  INVENTORY
+    @join__graph(
+      name: "inventory"
+      url: "https://inventory.demo.starstuff.dev/"
+    )
+  PRODUCTS
+    @join__graph(name: "products", url: "https://products.demo.starstuff.dev/")
+  REVIEWS
+    @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev/")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Mutation @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
+  createProduct(upc: ID!, name: String): Product @join__field(graph: PRODUCTS)
+  createReview(upc: ID!, id: ID!, body: String): Review
+    @join__field(graph: REVIEWS)
+}
+
+type Product
+  @join__type(graph: ACCOUNTS, key: "upc", extension: true)
+  @join__type(graph: INVENTORY, key: "upc")
+  @join__type(graph: PRODUCTS, key: "upc")
+  @join__type(graph: REVIEWS, key: "upc") {
+  upc: String!
+  weight: Int
+    @join__field(graph: INVENTORY, external: true)
+    @join__field(graph: PRODUCTS)
+  price: Int
+    @join__field(graph: INVENTORY, external: true)
+    @join__field(graph: PRODUCTS)
+  inStock: Boolean @join__field(graph: INVENTORY)
+  shippingEstimate: Int @join__field(graph: INVENTORY, requires: "price weight")
+  name: String @join__field(graph: PRODUCTS)
+  reviews: [Review] @join__field(graph: REVIEWS)
+  reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
+}
+
+type Query
+  @join__type(graph: ACCOUNTS)
+  @join__type(graph: INVENTORY)
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS) {
+  me: User @join__field(graph: ACCOUNTS)
+  recommendedProducts: [Product] @join__field(graph: ACCOUNTS)
+  topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
+}
+
+type Review @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  body: String
+  author: User @join__field(graph: REVIEWS, provides: "username")
+  product: Product
+}
+
+type User
+  @join__type(graph: ACCOUNTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  name: String @join__field(graph: ACCOUNTS)
+  username: String
+    @join__field(graph: ACCOUNTS)
+    @join__field(graph: REVIEWS, external: true)
+  reviews: [Review] @join__field(graph: REVIEWS)
+}
+```
+
+</ExpansionPanel>
+
+This file is all that the router needs to communicate with our subgraphs!
+
+## 3. Run the router in development mode with the default configuration
+
+Now from your project root, run the following:
+
+```sh
+./router --dev --supergraph supergraph-schema.graphql
+```
+
+The console output should look like the following:
+
+```sh
+2022-06-29T22:23:24.266542Z  INFO apollo_router::executable: Apollo Router v0.9.5 // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
+2022-06-29T22:23:24.488286Z  INFO apollo_router::router: starting Apollo Router
+2022-06-29T22:23:25.774334Z  INFO apollo_router::axum_http_server_factory: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
+```
+
+That's it! Running the router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/graphos/explorer/sandbox/) so you can run queries against the router.
+
+<Caution>
+
+**Do not use the `--dev` flag in a non-development environment.** It relaxes certain default configuration options to provide an improved local development experience (e.g., it exposes subgraph error messages to clients).
+
+[Learn more about dev mode defaults.](/router/configuration/overview#dev-mode-defaults)
+
+</Caution>
+
+Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect your entire supergraph, and run your first queries!
+
+## Next steps
+
+Now that you know how to run the router with a supergraph schema, you can:
+
+- Set up [managed federation](/federation/managed-federation/overview)
+- Learn about [additional configuration options](/router/configuration/overview)
+- [Estimate the system resources needed to deploy the router](/technotes/TN0045-router_resource_estimator/).

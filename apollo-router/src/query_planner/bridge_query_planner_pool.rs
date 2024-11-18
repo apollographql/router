@@ -23,6 +23,7 @@ use super::bridge_query_planner::BridgeQueryPlanner;
 use super::QueryPlanResult;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
+use crate::introspection::IntrospectionCache;
 use crate::metrics::meter_provider;
 use crate::query_planner::PlannerMode;
 use crate::services::QueryPlannerRequest;
@@ -46,6 +47,7 @@ pub(crate) struct BridgeQueryPlannerPool {
     v8_heap_used_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_total: Arc<AtomicU64>,
     v8_heap_total_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
+    introspection_cache: Arc<IntrospectionCache>,
 }
 
 impl BridgeQueryPlannerPool {
@@ -66,16 +68,28 @@ impl BridgeQueryPlannerPool {
 
         let mut old_js_planners_iterator = old_js_planners.into_iter();
 
-        (0..size.into()).for_each(|_| {
+        // All query planners in the pool now share the same introspection cache.
+        // This allows meaningful gauges, and it makes sense that queries should be cached across all planners.
+        let introspection_cache = Arc::new(IntrospectionCache::new(&configuration));
+
+        for _ in 0..size.into() {
             let schema = schema.clone();
             let configuration = configuration.clone();
             let rust_planner = rust_planner.clone();
+            let introspection_cache = introspection_cache.clone();
 
             let old_planner = old_js_planners_iterator.next();
             join_set.spawn(async move {
-                BridgeQueryPlanner::new(schema, configuration, old_planner, rust_planner).await
+                BridgeQueryPlanner::new(
+                    schema,
+                    configuration,
+                    old_planner,
+                    rust_planner,
+                    introspection_cache,
+                )
+                .await
             });
-        });
+        }
 
         let mut bridge_query_planners = Vec::new();
 
@@ -142,6 +156,7 @@ impl BridgeQueryPlannerPool {
             v8_heap_used_gauge: Default::default(),
             v8_heap_total,
             v8_heap_total_gauge: Default::default(),
+            introspection_cache,
         })
     }
 
@@ -218,6 +233,7 @@ impl BridgeQueryPlannerPool {
             Some(self.create_heap_used_gauge());
         *self.v8_heap_total_gauge.lock().expect("lock poisoned") =
             Some(self.create_heap_total_gauge());
+        self.introspection_cache.activate();
     }
 }
 
@@ -284,9 +300,11 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 
 mod tests {
     use opentelemetry_sdk::metrics::data::Gauge;
+    use router_bridge::planner::PlanOptions;
 
     use super::*;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::authorization::CacheKeyMetadata;
     use crate::spec::Query;
     use crate::Context;
 
@@ -310,11 +328,19 @@ mod tests {
 
             let doc = Query::parse_document(&query, None, &schema, &config).unwrap();
             let context = Context::new();
-            context.extensions().with_lock(|mut lock| lock.insert(doc));
+            context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(doc.clone()));
 
-            pool.call(QueryPlannerRequest::new(query, None, context))
-                .await
-                .unwrap();
+            pool.call(QueryPlannerRequest::new(
+                query,
+                None,
+                doc,
+                CacheKeyMetadata::default(),
+                PlanOptions::default(),
+            ))
+            .await
+            .unwrap();
 
             let metrics = crate::metrics::collect_metrics();
             let heap_used = metrics.find("apollo.router.v8.heap.used").unwrap();

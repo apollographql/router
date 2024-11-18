@@ -21,6 +21,7 @@ use tower::BoxError;
 use tower::Service;
 use url::Url;
 
+use super::subgraph::SubgraphRequestId;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
@@ -103,6 +104,8 @@ pub(crate) struct Externalizable<T> {
     pub(crate) has_next: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     query_plan: Option<Arc<QueryPlan>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) subgraph_request_id: Option<SubgraphRequestId>,
 }
 
 #[buildstructor::buildstructor]
@@ -146,6 +149,7 @@ where
             service_name: None,
             has_next: None,
             query_plan: None,
+            subgraph_request_id: None,
         }
     }
 
@@ -185,6 +189,7 @@ where
             service_name: None,
             has_next,
             query_plan: None,
+            subgraph_request_id: None,
         }
     }
 
@@ -225,6 +230,7 @@ where
             service_name: None,
             has_next,
             query_plan,
+            subgraph_request_id: None,
         }
     }
 
@@ -243,6 +249,7 @@ where
         method: Option<String>,
         service_name: Option<String>,
         uri: Option<String>,
+        subgraph_request_id: Option<SubgraphRequestId>,
     ) -> Self {
         assert!(matches!(
             stage,
@@ -264,6 +271,7 @@ where
             service_name,
             has_next: None,
             query_plan: None,
+            subgraph_request_id,
         }
     }
 
