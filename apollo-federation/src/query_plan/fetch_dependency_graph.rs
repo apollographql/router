@@ -2925,28 +2925,9 @@ impl FetchDependencyGraphNode {
         if !self
             .context_inputs
             .iter()
-            .any(|c| same_data_rewrite(c, &rewrite))
+            .any(|c| *c == rewrite)
         {
             self.context_inputs.push(rewrite);
-        }
-    }
-}
-
-fn same_data_rewrite(r1: &FetchDataRewrite, r2: &FetchDataRewrite) -> bool {
-    match (r1, r2) {
-        (FetchDataRewrite::KeyRenamer(k1), FetchDataRewrite::KeyRenamer(k2)) => {
-            if k1.rename_key_to != k2.rename_key_to || k1.path.len() != k2.path.len() {
-                return false;
-            }
-
-            return k1.path.iter().zip(k2.path.iter()).all(|(p1, p2)| p1 == p2);
-        }
-        (FetchDataRewrite::ValueSetter(v1), FetchDataRewrite::ValueSetter(v2)) => {
-            return v1.path.iter().zip(v2.path.iter()).all(|(p1, p2)| p1 == p2)
-                && v1.set_value_to == v2.set_value_to;
-        }
-        _ => {
-            return false;
         }
     }
 }
