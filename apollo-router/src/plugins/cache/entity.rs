@@ -876,9 +876,9 @@ async fn cache_lookup_root(
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
                     let cache_control_header = value.0.control.to_cache_control_header()?;
-                    request
-                        .context
-                        .upsert::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS, |mut val| {
+                    request.context.upsert::<_, CacheKeysContext>(
+                        CONTEXT_CACHE_KEYS,
+                        |mut val| {
                             match val.get_mut(&request_id) {
                                 Some(v) => {
                                     v.push(CacheKeyContext {
@@ -900,8 +900,8 @@ async fn cache_lookup_root(
                             }
 
                             val
-                        })
-                        .expect("update context cache keys for subgraph should not panic");
+                        },
+                    )?;
                 }
 
                 let mut response = subgraph::Response::builder()
@@ -1115,8 +1115,7 @@ async fn cache_store_root_from_response(
                         }
 
                         val
-                    })
-                    .expect("update context cache keys for subgraph should not panic");
+                    })?;
             }
 
             tokio::spawn(async move {
