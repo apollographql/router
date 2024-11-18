@@ -1,6 +1,9 @@
+use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
+use shape::Shape;
+use shape::ShapeCase;
 
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
@@ -17,7 +20,7 @@ use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
-impl_arrow_method!(EchoMethod, echo_method);
+impl_arrow_method!(EchoMethod, echo_method, echo_shape);
 fn echo_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -42,8 +45,23 @@ fn echo_method(
         )],
     )
 }
+fn echo_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
+        return first_arg.compute_output_shape(input_shape, dollar_shape, named_var_shapes);
+    }
+    Shape::error_with_range(
+        &format!("Method ->{} requires one argument", method_name.as_ref()),
+        method_name.range(),
+    )
+}
 
-impl_arrow_method!(MapMethod, map_method);
+impl_arrow_method!(MapMethod, map_method, map_shape);
 fn map_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -99,8 +117,43 @@ fn map_method(
         )],
     )
 }
+fn map_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
+        if let ShapeCase::Array(prefix, tail) = input_shape.case() {
+            let new_prefix = prefix
+                .iter()
+                .map(|shape| {
+                    first_arg.compute_output_shape(
+                        shape.clone(),
+                        dollar_shape.clone(),
+                        named_var_shapes,
+                    )
+                })
+                .collect();
+            let new_tail = first_arg.compute_output_shape(
+                tail.clone(),
+                dollar_shape.clone(),
+                named_var_shapes,
+            );
+            ShapeCase::Array(new_prefix, new_tail).simplify()
+        } else {
+            first_arg.compute_output_shape(input_shape, dollar_shape.clone(), named_var_shapes)
+        }
+    } else {
+        Shape::error_with_range(
+            &format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.range(),
+        )
+    }
+}
 
-impl_arrow_method!(MatchMethod, match_method);
+impl_arrow_method!(MatchMethod, match_method, match_shape);
 fn match_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -156,8 +209,55 @@ fn match_method(
         ),
     )
 }
+pub(super) fn match_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        let mut result_union = Vec::new();
 
-impl_arrow_method!(FirstMethod, first_method);
+        for pair in args {
+            if let LitExpr::Array(pair) = pair.as_ref() {
+                if pair.len() == 2 {
+                    let value_shape = pair[1].compute_output_shape(
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                        named_var_shapes,
+                    );
+                    result_union.push(value_shape);
+                }
+            }
+        }
+
+        if result_union.is_empty() {
+            Shape::error_with_range(
+                &format!(
+                    "Method ->{} requires at least one [candidate, value] pair",
+                    method_name.as_ref(),
+                ),
+                merge_ranges(
+                    method_name.range(),
+                    method_args.and_then(|args| args.range()),
+                ),
+            )
+        } else {
+            Shape::one(&result_union)
+        }
+    } else {
+        Shape::error_with_range(
+            &format!(
+                "Method ->{} requires at least one [candidate, value] pair",
+                method_name.as_ref(),
+            ),
+            method_name.range(),
+        )
+    }
+}
+
+impl_arrow_method!(FirstMethod, first_method, first_shape);
 fn first_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -200,8 +300,44 @@ fn first_method(
         _ => tail.apply_to_path(data, vars, input_path),
     }
 }
+fn first_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    _dollar_shape: Shape,
+    _named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if method_args.is_some() {
+        return Shape::error_with_range(
+            &format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
+            method_name.range(),
+        );
+    }
 
-impl_arrow_method!(LastMethod, last_method);
+    match input_shape.case() {
+        ShapeCase::String(Some(value)) => {
+            ShapeCase::String(Some(value.chars().take(1).collect())).simplify()
+        }
+        ShapeCase::String(None) => ShapeCase::String(None).simplify(),
+        ShapeCase::Array(prefix, tail) => {
+            if let Some(first) = prefix.first() {
+                first.clone()
+            } else if tail.is_none() {
+                Shape::none()
+            } else {
+                Shape::one(&[tail.clone(), Shape::none()])
+            }
+        }
+        // When there is no obvious first element, ->first gives us the input
+        // value itself, which has input_shape.
+        _ => input_shape.clone(),
+    }
+}
+
+impl_arrow_method!(LastMethod, last_method, last_shape);
 fn last_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -244,8 +380,52 @@ fn last_method(
         _ => tail.apply_to_path(data, vars, input_path),
     }
 }
+fn last_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    _dollar_shape: Shape,
+    _named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if method_args.is_some() {
+        return Shape::error_with_range(
+            &format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
+            method_name.range(),
+        );
+    }
 
-impl_arrow_method!(SliceMethod, slice_method);
+    match input_shape.case() {
+        ShapeCase::String(Some(value)) => {
+            if let Some(last_char) = value.chars().last() {
+                ShapeCase::String(Some(last_char.to_string())).simplify()
+            } else {
+                Shape::none()
+            }
+        }
+        ShapeCase::String(None) => Shape::one(&[ShapeCase::String(None).simplify(), Shape::none()]),
+        ShapeCase::Array(prefix, tail) => {
+            if tail.is_none() {
+                if let Some(last) = prefix.last() {
+                    last.clone()
+                } else {
+                    Shape::none()
+                }
+            } else if let Some(last) = prefix.last() {
+                Shape::one(&[last.clone(), tail.clone(), Shape::none()])
+            } else {
+                Shape::one(&[tail.clone(), Shape::none()])
+            }
+        }
+        // When there is no obvious last element, ->last gives us the input
+        // value itself, which has input_shape.
+        _ => input_shape.clone(),
+    }
+}
+
+impl_arrow_method!(SliceMethod, slice_method, slice_shape);
 fn slice_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -335,8 +515,38 @@ fn slice_method(
         (Some(data.clone()), vec![])
     }
 }
+fn slice_shape(
+    method_name: &WithRange<String>,
+    _method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    _dollar_shape: Shape,
+    _named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    // There are more clever shapes we could compute here (when start and end
+    // are statically known integers and input_shape is an array or string with
+    // statically known prefix elements, for example) but for now we play it
+    // safe (and honest) by returning a new variable-length array whose element
+    // shape is a union of the original element (prefix and tail) shapes.
+    match input_shape.case() {
+        ShapeCase::Array(prefix, tail) => {
+            let mut one_shapes = prefix.clone();
+            if !tail.is_none() {
+                one_shapes.push(tail.clone());
+            }
+            Shape::array(vec![], Shape::one(&one_shapes))
+        }
+        ShapeCase::String(_) => Shape::string(),
+        _ => Shape::error_with_range(
+            &format!(
+                "Method ->{} requires an array or string input",
+                method_name.as_ref()
+            ),
+            method_name.range(),
+        ),
+    }
+}
 
-impl_arrow_method!(SizeMethod, size_method);
+impl_arrow_method!(SizeMethod, size_method, size_shape);
 fn size_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -388,8 +598,52 @@ fn size_method(
         ),
     }
 }
+fn size_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    _dollar_shape: Shape,
+    _named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if method_args.is_some() {
+        return Shape::error_with_range(
+            &format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
+            method_name.range(),
+        );
+    }
 
-impl_arrow_method!(EntriesMethod, entries_method);
+    match input_shape.case() {
+        ShapeCase::String(Some(value)) => ShapeCase::Int(Some(value.len() as i64)),
+        ShapeCase::String(None) => ShapeCase::Int(None),
+        ShapeCase::Array(prefix, tail) => {
+            if tail.is_none() {
+                ShapeCase::Int(Some(prefix.len() as i64))
+            } else {
+                ShapeCase::Int(None)
+            }
+        }
+        ShapeCase::Object(fields, tail) => {
+            if tail.is_none() {
+                ShapeCase::Int(Some(fields.len() as i64))
+            } else {
+                ShapeCase::Int(None)
+            }
+        }
+        _ => ShapeCase::error_with_range(
+            &format!(
+                "Method ->{} requires an array, string, or object input",
+                method_name.as_ref()
+            ),
+            method_name.range(),
+        ),
+    }
+    .simplify()
+}
+
+impl_arrow_method!(EntriesMethod, entries_method, entries_shape);
 fn entries_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -436,6 +690,57 @@ fn entries_method(
                 input_path.to_vec(),
                 method_name.range(),
             )],
+        ),
+    }
+}
+fn entries_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    _dollar_shape: Shape,
+    _named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if method_args.is_some() {
+        return Shape::error_with_range(
+            &format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
+            method_name.range(),
+        );
+    }
+
+    match input_shape.case() {
+        ShapeCase::Object(fields, tail) => {
+            let entry_shapes = fields
+                .iter()
+                .map(|(key, value)| {
+                    let mut key_value_pair = Shape::empty_map();
+                    key_value_pair.insert(
+                        "key".to_string(),
+                        ShapeCase::String(Some(key.clone())).simplify(),
+                    );
+                    key_value_pair.insert("value".to_string(), value.clone());
+                    ShapeCase::Object(key_value_pair, Shape::none()).simplify()
+                })
+                .collect();
+
+            if tail.is_none() {
+                ShapeCase::Array(entry_shapes, tail.clone()).simplify()
+            } else {
+                let mut tail_key_value_pair = Shape::empty_map();
+                tail_key_value_pair.insert("key".to_string(), ShapeCase::String(None).simplify());
+                tail_key_value_pair.insert("value".to_string(), tail.clone());
+                ShapeCase::Array(
+                    entry_shapes,
+                    ShapeCase::Object(tail_key_value_pair, Shape::none()).simplify(),
+                )
+                .simplify()
+            }
+        }
+        _ => Shape::error_with_range(
+            &format!("Method ->{} requires an object input", method_name.as_ref()),
+            method_name.range(),
         ),
     }
 }
