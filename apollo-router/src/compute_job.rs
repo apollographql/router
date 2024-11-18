@@ -76,3 +76,41 @@ pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
         .with_callback(move |m| m.observe(queue().queued_count() as u64, &[]))
         .init()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_executes_on_different_thread() {
+        let test_thread = std::thread::current().id();
+        let job_thread = execute(Priority::P4, || std::thread::current().id())
+            .await
+            .unwrap();
+        assert_ne!(job_thread, test_thread)
+    }
+
+    #[tokio::test]
+    async fn test_parallelism() {
+        if thread_pool_size().get() < 2 {
+            return;
+        }
+        let start = Instant::now();
+        let one = execute(Priority::P8, || {
+            std::thread::sleep(Duration::from_millis(1_000));
+            1
+        });
+        let two = execute(Priority::P8, || {
+            std::thread::sleep(Duration::from_millis(1_000));
+            1 + 1
+        });
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(one.await.unwrap(), 1);
+        assert_eq!(two.await.unwrap(), 2);
+        // Evidence of fearless parallel sleep:
+        assert!(start.elapsed() < Duration::from_millis(1_400));
+    }
+}

@@ -122,3 +122,26 @@ where
         }
     }
 }
+
+#[test]
+fn test_priorities() {
+    let queue = AgeingPriorityQueue::soft_bounded(3);
+    assert_eq!(queue.queued_count(), 0);
+    assert!(!queue.is_full());
+    queue.send(Priority::P1, "p1");
+    assert!(!queue.is_full());
+    queue.send(Priority::P2, "p2");
+    assert!(!queue.is_full());
+    queue.send(Priority::P3, "p3");
+    // The queue is now "full" but sending still works, it’s up to the caller to stop sending
+    assert!(queue.is_full());
+    queue.send(Priority::P2, "p2 again");
+    assert_eq!(queue.queued_count(), 4);
+
+    let mut receiver = queue.receiver();
+    assert_eq!(receiver.blocking_recv(), "p3");
+    assert_eq!(receiver.blocking_recv(), "p2");
+    assert_eq!(receiver.blocking_recv(), "p2 again");
+    assert_eq!(receiver.blocking_recv(), "p1");
+    assert_eq!(queue.queued_count(), 0);
+}
