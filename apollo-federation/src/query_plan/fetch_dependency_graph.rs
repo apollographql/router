@@ -29,6 +29,7 @@ use serde::Serialize;
 
 use super::query_planner::SubgraphOperationCompression;
 use super::FetchDataKeyRenamer;
+use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -4170,10 +4171,10 @@ fn handle_conditions_tree(
                 let fetch_node = dependency_graph.node_weight(fetch_node_id)?;
                 let subgraph_name = fetch_node.subgraph_name.clone();
                 let Some(merge_at) = fetch_node.merge_at.clone() else {
-                    return Err(FederationError::internal(format!(
+                    bail!(
                         "Fetch node {} merge_at_path is required but was missing",
                         fetch_node_id.index()
-                    )));
+                    );
                 };
                 let defer_ref = fetch_node.defer_ref.clone();
                 let copied_node_id =
@@ -4231,11 +4232,11 @@ fn handle_conditions_tree(
         // but we leave this optimization for later.
         if let Some((copied_node_id, _)) = copied_node_id_and_parent {
             if !dependency_graph.can_merge_sibling_in(fetch_node_id, copied_node_id)? {
-                return Err(FederationError::internal(format!(
+                bail!(
                     "We should be able to merge {} into {} by construction",
                     copied_node_id.index(),
                     fetch_node_id.index()
-                )));
+                );
             }
             dependency_graph.merge_sibling_in(fetch_node_id, copied_node_id)?;
         }
@@ -4308,10 +4309,10 @@ fn handle_conditions_tree(
                             .parents_relations_of(current_parent.parent_node_id)
                             .collect();
                         if grand_parents.is_empty() {
-                            return Err(FederationError::internal(format!(
+                            bail!(
                                 "Fetch node {} is not top-level, so it should have parents",
                                 current_parent.parent_node_id.index()
-                            )));
+                            );
                         }
                         for grand_parent_relation in &grand_parents {
                             dependency_graph.add_parent(
@@ -4341,11 +4342,11 @@ fn handle_conditions_tree(
             // fields that can't be fetched from the parent. We bail on this specific optimization,
             // and accordingly merge the copied node back to the original current node.
             if !dependency_graph.can_merge_sibling_in(fetch_node_id, copied_node_id)? {
-                return Err(FederationError::internal(format!(
+                bail!(
                     "We should be able to merge {} into {} by construction",
                     copied_node_id.index(),
                     fetch_node_id.index()
-                )));
+                );
             };
             dependency_graph.merge_sibling_in(fetch_node_id, copied_node_id)?;
 
@@ -4425,9 +4426,7 @@ fn create_post_requires_node(
     let QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(entity_type_position)) =
         head.type_.clone()
     else {
-        return Err(FederationError::internal(
-            "@requires applied on non-entity object type",
-        ));
+        bail!("@requires applied on non-entity object type");
     };
 
     // If all required fields could be fetched locally, we "continue" with the current node.
@@ -4507,12 +4506,12 @@ fn create_post_requires_node(
         // we need the path here, so this will have to do for now, and if this ever breaks in
         // practice, we'll at least have an example to guide us toward improving/fixing the code.
         let Some(parent_path) = &parent.path_in_parent else {
-            return Err(FederationError::internal(format!(
+            bail!(
                 "Missing path_in_parent for @require on {} with group {} and parent {}",
                 query_graph_edge_id.index(),
                 fetch_node_id.index(),
                 parent.parent_node_id.index()
-            )));
+            );
         };
         let path_for_parent = path_for_parent(
             dependency_graph,
