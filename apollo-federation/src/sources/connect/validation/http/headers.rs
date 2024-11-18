@@ -69,8 +69,7 @@ pub(crate) fn validate_arg<'a>(
                         from_location
                             .iter()
                             .chain(value_location.iter())
-                            .map(|span| span.line_column_range(&schema.sources))
-                            .flatten()
+                            .flat_map(|span| span.line_column_range(&schema.sources))
                             .collect(),
                     ),
                     HeaderParseError::ValueError { err, node } => {
