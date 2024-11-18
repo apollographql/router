@@ -420,6 +420,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }))
         .unwrap()
@@ -535,6 +539,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }))
         .unwrap()
@@ -751,6 +759,10 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }))
         .unwrap()
@@ -963,6 +975,7 @@ async fn connection_failure_blocks_startup() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
+        // This configuration turns the fragment generation option *off*.
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
         "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734",
     )
