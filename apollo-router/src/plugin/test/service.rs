@@ -49,7 +49,7 @@ macro_rules! mock_service {
                     std::task::Poll::Ready(Ok(()))
                 }
                 fn call(&mut self, req: $request_type) -> Self::Future {
-                    let r  = self.call(req);
+                    let r = self.call(req);
                     Box::pin(async move { r })
                 }
             }
