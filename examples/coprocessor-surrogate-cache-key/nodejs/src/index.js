@@ -51,7 +51,7 @@ app.post("/", (req, res) => {
           .split(",")
           .map((k) => k.trim());
 
-        surrogateKeys[request.subgraphRequestId] = keys;
+        surrogateKeys[`${request.subgraphRequestId}`] = keys;
         console.log("surrogateKeys", surrogateKeys);
       }
       break;
@@ -65,8 +65,8 @@ app.post("/", (req, res) => {
           request.context.entries["apollo::entity_cache::cached_keys_status"];
         let mapping = {};
         Object.keys(contextEntry).forEach((request_id) => {
-          let cache_keys = contextEntry[request_id];
-          let surrogateCachekeys = surrogateKeys[request_id];
+          let cache_keys = contextEntry[`${request_id}`];
+          let surrogateCachekeys = surrogateKeys[`${request_id}`];
           if (surrogateCachekeys) {
             // Create the mapping between surrogate cache keys and effective cache keys
             // Example:
@@ -80,10 +80,10 @@ app.post("/", (req, res) => {
             // }
 
             surrogateCachekeys.reduce((acc, current) => {
-              if (acc[current]) {
-                acc[current] = acc[current].concat(cache_keys);
+              if (acc[`${current}`]) {
+                acc[`${current}`] = acc[`${current}`].concat(cache_keys);
               } else {
-                acc[current] = cache_keys;
+                acc[`${current}`] = cache_keys;
               }
 
               return acc;
@@ -97,7 +97,6 @@ app.post("/", (req, res) => {
     default:
       return res.json(request);
   }
-
   res.json(request);
 });
 
