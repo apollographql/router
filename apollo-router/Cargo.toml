@@ -109,7 +109,7 @@ http-body = "0.4.6"
 heck = "0.5.0"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
-hyper = { version = "0.14.31", features = ["server", "client", "stream"] }
+hyper = { version = "1.0.0", features = ["server", "client", "stream"] }
 hyper-rustls = { version = "0.24.2", features = ["http1", "http2"] }
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
