@@ -1515,7 +1515,10 @@ impl FederatedQueryGraphBuilder {
             > = Default::default();
             for object_def_pos in &context_refs.object_types {
                 let object = object_def_pos.get(subgraph.schema())?;
-                for dir in object.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                for dir in object
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
                     let application = FederationSpecDefinition::context_directive_arguments(dir)?;
                     context_name_to_types
                         .entry(application.name)
@@ -1525,7 +1528,10 @@ impl FederatedQueryGraphBuilder {
             }
             for interface_def_pos in &context_refs.interface_types {
                 let interface = interface_def_pos.get(subgraph.schema())?;
-                for dir in interface.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                for dir in interface
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
                     let application = FederationSpecDefinition::context_directive_arguments(dir)?;
                     context_name_to_types
                         .entry(application.name)
@@ -1535,7 +1541,10 @@ impl FederatedQueryGraphBuilder {
             }
             for union_def_pos in &context_refs.union_types {
                 let union = union_def_pos.get(subgraph.schema())?;
-                for dir in union.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
+                for dir in union
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
                     let application = FederationSpecDefinition::context_directive_arguments(dir)?;
                     context_name_to_types
                         .entry(application.name)
@@ -1553,7 +1562,11 @@ impl FederatedQueryGraphBuilder {
                     .or_default()
                     .push(object_field_arg.clone());
                 let field_coordinate = object_field_arg.parent();
-                for dir in input_value.directives.get_all(&FROM_CONTEXT_DIRECTIVE_NAME) {
+                if let Some(dir) = input_value.directives.get(
+                    subgraph_data
+                        .from_context_directive_definition_name
+                        .as_str(),
+                ) {
                     let application = subgraph_data
                         .federation_spec_definition
                         .from_context_directive_arguments(dir)?;
