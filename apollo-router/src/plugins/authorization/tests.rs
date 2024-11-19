@@ -256,7 +256,7 @@ async fn authenticated_directive() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
+        "experimental_query_planner_mode": "both_best_effort",
         "authorization": {
             "directives": {
                 "enabled": true
@@ -609,7 +609,7 @@ async fn scopes_directive() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
+        "experimental_query_planner_mode": "both_best_effort",
         "authorization": {
             "directives": {
                 "enabled": true
@@ -1063,7 +1063,7 @@ async fn cache_key_metadata() {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_query_planner_mode": "new",
+            "experimental_query_planner_mode": "both_best_effort",
             "authorization": {
                 "directives": {
                     "enabled": true
