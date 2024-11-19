@@ -8,6 +8,7 @@ const LEGACY_QP: &str = "experimental_query_planner_mode: legacy";
 const NEW_QP: &str = "experimental_query_planner_mode: new";
 const BOTH_QP: &str = "experimental_query_planner_mode: both";
 const BOTH_BEST_EFFORT_QP: &str = "experimental_query_planner_mode: both_best_effort";
+const NEW_BEST_EFFORT_QP: &str = "experimental_query_planner_mode: new_best_effort";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fed1_schema_with_legacy_qp() {
@@ -62,6 +63,27 @@ async fn fed1_schema_with_both_qp() {
 async fn fed1_schema_with_both_best_effort_qp() {
     let mut router = IntegrationTest::builder()
         .config(BOTH_BEST_EFFORT_QP)
+        .supergraph("../examples/graphql/supergraph-fed1.graphql")
+        .build()
+        .await;
+    router.start().await;
+    router
+        .assert_log_contains(
+            "Falling back to the legacy query planner: \
+             failed to initialize the query planner: \
+             Supergraphs composed with federation version 1 are not supported. \
+             Please recompose your supergraph with federation version 2 or greater",
+        )
+        .await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fed1_schema_with_new_best_effort_qp() {
+    let mut router = IntegrationTest::builder()
+        .config(NEW_BEST_EFFORT_QP)
         .supergraph("../examples/graphql/supergraph-fed1.graphql")
         .build()
         .await;

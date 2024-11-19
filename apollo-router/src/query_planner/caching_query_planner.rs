@@ -147,6 +147,12 @@ where
                 ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
                     .hash(&mut hasher);
             }
+            crate::configuration::QueryPlannerMode::NewBestEffort => {
+                "PLANNER-NEW-BEST-EFFORT".hash(&mut hasher);
+                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
+                    .hash(&mut hasher);
+            }
         };
         let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
 

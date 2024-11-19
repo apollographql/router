@@ -563,6 +563,7 @@ impl InstrumentData {
             super::QueryPlannerMode::Both => "both",
             super::QueryPlannerMode::BothBestEffort => "both_best_effort",
             super::QueryPlannerMode::New => "new",
+            super::QueryPlannerMode::NewBestEffort => "new_best_effort",
         };
 
         self.data.insert(

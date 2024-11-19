@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -4474,6 +4473,13 @@ snapshot_kind: text
           "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "both_best_effort"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the new Rust-based implementation but fall back to the legacy one for supergraph schemas using legacy Apollo Federation 1.",
+          "enum": [
+            "new_best_effort"
           ],
           "type": "string"
         }

@@ -225,6 +225,9 @@ pub(crate) enum QueryPlannerMode {
     /// (such as using legacy Apollo Federation 1)
     #[default]
     BothBestEffort,
+    /// Use the new Rust-based implementation but fall back to the legacy one
+    /// for supergraph schemas using legacy Apollo Federation 1.
+    NewBestEffort,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
