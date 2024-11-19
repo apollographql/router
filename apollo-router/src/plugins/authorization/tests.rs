@@ -51,7 +51,6 @@ async fn authenticated_request() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
         "authorization": {
             "require_authentication": true
         }}))
@@ -124,7 +123,6 @@ async fn unauthenticated_request() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
         "authorization": {
             "require_authentication": true
         }}))
@@ -256,7 +254,6 @@ async fn authenticated_directive() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "both_best_effort",
         "authorization": {
             "directives": {
                 "enabled": true
@@ -374,7 +371,6 @@ async fn authenticated_directive_reject_unauthorized() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
         "authorization": {
             "directives": {
                 "enabled": true,
@@ -460,7 +456,6 @@ async fn authenticated_directive_dry_run() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
         "authorization": {
             "directives": {
                 "enabled": true,
@@ -609,7 +604,6 @@ async fn scopes_directive() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "both_best_effort",
         "authorization": {
             "directives": {
                 "enabled": true
@@ -781,7 +775,6 @@ async fn scopes_directive_reject_unauthorized() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
         "authorization": {
             "directives": {
                 "enabled": true,
@@ -862,7 +855,6 @@ async fn scopes_directive_dry_run() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
         "authorization": {
             "directives": {
                 "enabled": true,
@@ -943,7 +935,6 @@ async fn errors_in_extensions() {
         "include_subgraph_errors": {
             "all": true
         },
-        "experimental_query_planner_mode": "new",
         "authorization": {
             "directives": {
                 "enabled": true,
@@ -1063,7 +1054,6 @@ async fn cache_key_metadata() {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_query_planner_mode": "both_best_effort",
             "authorization": {
                 "directives": {
                     "enabled": true
