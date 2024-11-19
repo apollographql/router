@@ -131,6 +131,8 @@ impl GaugeStore {
                     .with_description("Details about the current in-use schema")
                     .with_callback(|i| {
                         // TODO: get launch_id & schema_hash.
+                        // NOTE: this is a fixed gauge. We only care about observing the included
+                        // attributes.
                         i.observe(
                             1,
                             &[
@@ -149,6 +151,8 @@ impl GaugeStore {
                     .with_description("Details about the current persisted queries")
                     .with_callback(|i| {
                         // TODO: get persisted_queries_version.
+                        // NOTE: this is a fixed gauge. We only care about observing the included
+                        // attributes.
                         i.observe(1, &[KeyValue::new("persisted_queries_version", "")])
                     })
                     .init(),
@@ -162,6 +166,7 @@ impl GaugeStore {
 struct FleetDetector {
     gauge_store: Mutex<GaugeStore>,
 }
+
 #[async_trait::async_trait]
 impl PluginPrivate for FleetDetector {
     type Config = Conf;
