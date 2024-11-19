@@ -42,14 +42,12 @@ impl SystemGetter {
     }
 
     fn get_system(&mut self) -> &System {
-        if self.start.elapsed() < REFRESH_INTERVAL {
-            &self.system
-        } else {
+        if self.start.elapsed() >= REFRESH_INTERVAL {
             self.start = Instant::now();
             self.system.refresh_cpu_all();
             self.system.refresh_memory();
-            &self.system
         }
+        &self.system
     }
 }
 
@@ -125,6 +123,36 @@ impl GaugeStore {
                     .with_unit(Unit::new("bytes"))
                     .init(),
             );
+        }
+        {
+            gauges.push(
+                meter
+                    .u64_observable_gauge("apollo.router.schema")
+                    .with_description("Details about the current in-use schema")
+                    .with_callback(|i| {
+                        // TODO: get launch_id & schema_hash.
+                        i.observe(
+                            1,
+                            &[
+                                KeyValue::new("launch_id", ""),
+                                KeyValue::new("schema_hash", ""),
+                            ],
+                        )
+                    })
+                    .init(),
+            )
+        }
+        {
+            gauges.push(
+                meter
+                    .u64_observable_gauge("apollo.router.persisted_queries")
+                    .with_description("Details about the current persisted queries")
+                    .with_callback(|i| {
+                        // TODO: get persisted_queries_version.
+                        i.observe(1, &[KeyValue::new("persisted_queries_version", "")])
+                    })
+                    .init(),
+            )
         }
         GaugeStore::Active(gauges)
     }
