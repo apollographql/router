@@ -7,7 +7,7 @@ This is an example that involves a nodejs coprocessor alongside a router.
 - Start the coprocessor:
 
 ```bash
-$ npm install && npm run start
+$ npm ci && npm run start
 ```
 
 - Start the router 
