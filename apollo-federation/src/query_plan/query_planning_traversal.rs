@@ -1169,6 +1169,7 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
 impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
+    #[track_caller]
     fn resolve(
         &mut self,
         edge: EdgeIndex,
