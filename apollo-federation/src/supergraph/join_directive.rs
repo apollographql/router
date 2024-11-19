@@ -16,7 +16,7 @@ use crate::link::DEFAULT_LINK_NAME;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::FederationSchema;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 
 static JOIN_DIRECTIVE: &str = "join__directive";
 
@@ -73,8 +73,8 @@ pub(super) fn extract(
                     Component::new(link_directive.clone()),
                 )?;
 
-                if ConnectSpecDefinition::from_directive(&link_directive)?.is_some() {
-                    ConnectSpecDefinition::check_or_add(&mut subgraph.schema)?;
+                if ConnectSpec::from_directive(&link_directive)?.is_some() {
+                    ConnectSpec::check_or_add(&mut subgraph.schema)?;
                 }
             }
         }

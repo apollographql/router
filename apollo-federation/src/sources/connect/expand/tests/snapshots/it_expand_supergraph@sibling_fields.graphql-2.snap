@@ -94,6 +94,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         config: None,
         max_requests: None,
         entity_resolver: None,
+        spec: V0_1,
     },
     "connectors_T_b_0": Connector {
         id: ConnectId {
@@ -190,5 +191,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         entity_resolver: Some(
             Implicit,
         ),
+        spec: V0_1,
     },
 }
