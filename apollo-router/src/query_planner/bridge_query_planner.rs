@@ -140,6 +140,13 @@ impl PlannerMode {
                     Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
                 }
             }
+            QueryPlannerMode::NewBestEffort => {
+                if let Some(rust) = rust_planner {
+                    Self::Rust(rust)
+                } else {
+                    Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
+                }
+            }
         })
     }
 
@@ -152,13 +159,15 @@ impl PlannerMode {
             QueryPlannerMode::New | QueryPlannerMode::Both => {
                 Ok(Some(Self::rust(schema, configuration)?))
             }
-            QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
-                Ok(planner) => Ok(Some(planner)),
-                Err(error) => {
-                    tracing::info!("Falling back to the legacy query planner: {error}");
-                    Ok(None)
+            QueryPlannerMode::BothBestEffort | QueryPlannerMode::NewBestEffort => {
+                match Self::rust(schema, configuration) {
+                    Ok(planner) => Ok(Some(planner)),
+                    Err(error) => {
+                        tracing::info!("Falling back to the legacy query planner: {error}");
+                        Ok(None)
+                    }
                 }
-            },
+            }
         }
     }
 
