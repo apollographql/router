@@ -1553,10 +1553,10 @@ impl FederatedQueryGraphBuilder {
                     .or_default()
                     .push(object_field_arg.clone());
                 let field_coordinate = object_field_arg.parent();
-                for dir in input_value.directives.get_all(&FROM_CONTEXT_DIRECTIVE_NAME) {
+                if let Some(dir) = input_value.directives.get(subgraph_data.from_context_directive_definition_name.as_str()) {
                     let application = subgraph_data
-                        .federation_spec_definition
-                        .from_context_directive_arguments(dir)?;
+                    .federation_spec_definition
+                    .from_context_directive_arguments(dir)?;
                     let (context, selection) = parse_context(application.field)?;
 
                     let types_with_context_set = context_name_to_types
