@@ -55,6 +55,10 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         return Ok(ExpansionResult::Unchanged);
     }
 
+    always_expand_connectors(supergraph_str)
+}
+
+pub fn always_expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, FederationError> {
     let supergraph = Supergraph::new(supergraph_str)?;
     let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
         // TODO: Get these options from the router?

@@ -353,11 +353,45 @@ pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> Result<
     opt_plan_node_matches(js_root_node, &rust_root_node)
 }
 
+pub fn rust_plan_matches(
+    rust_plan_1: &QueryPlan,
+    rust_plan_2: &QueryPlan,
+) -> Result<(), MatchFailure> {
+    let rust_root_node_1 = convert_root_query_plan_node(rust_plan_1);
+    let rust_root_node_2 = convert_root_query_plan_node(rust_plan_2);
+    opt_plan_node_matches(&rust_root_node_1, &rust_root_node_2)
+}
+
 pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
     let js_root_node = &js_plan.query_plan.node;
     let rust_root_node = convert_root_query_plan_node(rust_plan);
 
     match (js_root_node, rust_root_node) {
+        (None, None) => String::from(""),
+        (None, Some(rust)) => {
+            let rust = &format!("{rust:#?}");
+            let differences = diff::lines("", rust);
+            render_diff(&differences)
+        }
+        (Some(js), None) => {
+            let js = &format!("{js:#?}");
+            let differences = diff::lines(js, "");
+            render_diff(&differences)
+        }
+        (Some(js), Some(rust)) => {
+            let rust = &format!("{rust:#?}");
+            let js = &format!("{js:#?}");
+            let differences = diff::lines(js, rust);
+            render_diff(&differences)
+        }
+    }
+}
+
+pub fn rust_diff_plan(rust_plan_1: &QueryPlan, rust_plan_2: &QueryPlan) -> String {
+    let rust_root_node_1 = convert_root_query_plan_node(rust_plan_1);
+    let rust_root_node_2 = convert_root_query_plan_node(rust_plan_2);
+
+    match (rust_root_node_1, rust_root_node_2) {
         (None, None) => String::from(""),
         (None, Some(rust)) => {
             let rust = &format!("{rust:#?}");
