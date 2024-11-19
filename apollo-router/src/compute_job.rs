@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::num::NonZeroUsize;
 use std::panic::UnwindSafe;
 use std::sync::OnceLock;
 
@@ -11,13 +10,35 @@ use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::metrics::meter_provider;
 
-/// We generate backpressure in tower `poll_ready` when reaching this many queued items
-// TODO: what’s a good number? should it be configurable?
-const QUEUE_SOFT_CAPACITY: usize = 100;
+/// We generate backpressure in tower `poll_ready` when the number of queued jobs
+/// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
+const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
 
-// TODO: should this be configurable?
-fn thread_pool_size() -> NonZeroUsize {
-    std::thread::available_parallelism().expect("available_parallelism() failed")
+/// Leave a fraction of CPU cores free to run Tokio threads even if this thread pool is very busy:
+///
+/// available: 1     pool size: 1
+/// available: 2     pool size: 1
+/// available: 3     pool size: 2
+/// available: 4     pool size: 3
+/// available: 5     pool size: 4
+/// ...
+/// available: 8     pool size: 7
+/// available: 9     pool size: 7
+/// ...
+/// available: 16    pool size: 14
+/// available: 17    pool size: 14
+/// ...
+/// available: 32    pool size: 28
+fn thread_pool_size() -> usize {
+    let available = std::thread::available_parallelism()
+        .expect("available_parallelism() failed")
+        .get();
+    thread_poll_size_for_available_parallelism(available)
+}
+
+fn thread_poll_size_for_available_parallelism(available: usize) -> usize {
+    let reserved = available.div_ceil(8);
+    (available - reserved).max(1)
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
@@ -25,7 +46,8 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
     QUEUE.get_or_init(|| {
-        for _ in 0..thread_pool_size().get() {
+        let pool_size = thread_pool_size();
+        for _ in 0..pool_size {
             std::thread::spawn(|| {
                 // This looks like we need the queue before creating the queue,
                 // but it happens in a child thread where OnceLock will block
@@ -40,7 +62,7 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
                 }
             });
         }
-        AgeingPriorityQueue::soft_bounded(QUEUE_SOFT_CAPACITY)
+        AgeingPriorityQueue::soft_bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
 }
 
@@ -95,7 +117,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parallelism() {
-        if thread_pool_size().get() < 2 {
+        if thread_pool_size() < 2 {
             return;
         }
         let start = Instant::now();
@@ -112,5 +134,15 @@ mod tests {
         assert_eq!(two.await.unwrap(), 2);
         // Evidence of fearless parallel sleep:
         assert!(start.elapsed() < Duration::from_millis(1_400));
+    }
+
+    #[test]
+    fn pool_size() {
+        assert_eq!(thread_poll_size_for_available_parallelism(1), 1);
+        assert_eq!(thread_poll_size_for_available_parallelism(2), 1);
+        assert_eq!(thread_poll_size_for_available_parallelism(3), 2);
+        assert_eq!(thread_poll_size_for_available_parallelism(4), 3);
+        assert_eq!(thread_poll_size_for_available_parallelism(31), 27);
+        assert_eq!(thread_poll_size_for_available_parallelism(32), 28);
     }
 }
