@@ -1300,7 +1300,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
               {
                 ... on Customer {
                   accounts {
-                    foo(ctx_id5: $contextualArgument__Subgraph3_0, ctx_mid: $contextualArgument_3_1) {
+                    foo(ctx_id5: $contextualArgument__Subgraph3_0, ctx_mid: $contextualArgument__Subgraph3_1) {
                       id
                     }
                   }
