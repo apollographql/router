@@ -1335,7 +1335,9 @@ where
                     bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                 };
                 let field_def = field_def.deref_mut().make_mut();
-                for (param_name, usage_entry) in last_parameter_to_context.iter() {
+                let mut updated_field_arguments = vec![];
+                let mut updated_field_def_arguments = vec![];
+                for (param_name, usage_entry) in last_parameter_to_context {
                     if !field_def
                         .arguments
                         .iter()
@@ -1360,38 +1362,28 @@ where
                         else {
                             bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                         };
-                        let field_def = field_def.deref_mut().make_mut();
-                        let mut updated_arguments = vec![];
-                        for (param_name, usage_entry) in last_parameter_to_context.iter() {
-                            if !field_def
-                                .arguments
-                                .iter()
-                                .any(|arg| arg.name.as_str() == param_name.as_str())
-                            {
-                                field_def.arguments.push(Node::new(InputValueDefinition {
-                                    name: Name::new(usage_entry.context_id.as_str())?,
-                                    ty: usage_entry.subgraph_arg_type.clone(),
-                                    default_value: None,
-                                    description: None,
-                                    directives: Default::default(),
-                                }));
-                                let push = updated_arguments.push(Node::new(Argument {
-                                    name: param_name.clone(),
-                                    value: Node::new(Value::Variable(
-                                        usage_entry.context_id.clone(),
-                                    )),
-                                }));
-                            }
-                        }
-                        field.schema = ValidFederationSchema::new(schema.validate()?)?;
-                        field.arguments = field
-                            .arguments
-                            .iter()
-                            .cloned()
-                            .chain(updated_arguments)
-                            .collect();
+
+                        updated_field_def_arguments.push(Node::new(InputValueDefinition {
+                            name: usage_entry.context_id.clone(),
+                            ty: usage_entry.subgraph_arg_type.clone(),
+                            default_value: None,
+                            description: None,
+                            directives: Default::default(),
+                        }));
+                        let push = updated_field_arguments.push(Node::new(Argument {
+                            name: param_name.clone(),
+                            value: Node::new(Value::Variable(usage_entry.context_id.clone())),
+                        }));
                     }
                 }
+                field_def.arguments.extend(updated_field_def_arguments);
+                field.schema = ValidFederationSchema::new(schema.validate()?)?;
+                field.arguments = field
+                    .arguments
+                    .iter()
+                    .cloned()
+                    .chain(updated_field_arguments)
+                    .collect();
             }
         }
 
