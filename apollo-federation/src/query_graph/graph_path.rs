@@ -1706,7 +1706,34 @@ where
                     if !was_unsatisfied && !context_map.contains_key(&ctx.named_parameter) {
                         if let Some(parent_type) = parent_type {
                             let parent_type = parent_type.parent();
-                            let matches = ctx.types_with_context_set.iter().all(|ty| todo!());
+                            let matches = ctx.types_with_context_set.iter().any(|pos| {
+                                if (pos.type_name() == parent_type.type_name()) {
+                                    return true;
+                                }
+                                match &parent_type {
+                                    CompositeTypeDefinitionPosition::Object(obj_pos) => {
+                                        if let Ok(obj) = obj_pos.get(schema.schema()) {
+                                            if let Some(_) = obj.implements_interfaces.get(pos.type_name()) {
+                                                return true;
+                                            }
+                                        }
+                                    },
+                                    CompositeTypeDefinitionPosition::Interface(iface_pos) => {
+                                        if let Ok(iface) = iface_pos.get(schema.schema()) {
+                                            if let Some(_) = iface.implements_interfaces.get(pos.type_name()) {
+                                                return true;
+                                            }
+                                        }                                    },
+                                    CompositeTypeDefinitionPosition::Union(union_pos) => {
+                                        if let Ok(un) = union_pos.get(schema.schema()) {
+                                            if let Some(_) = un.members.get(pos.type_name()) {
+                                                return true;
+                                            }
+                                        }
+                                    },
+                                }
+                                false
+                            });
                             if matches {
                                 let selection_set = parse_field_set(
                                     schema,
