@@ -324,6 +324,7 @@ impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
                 })
             }
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
+            next::FetchDataPathElement::Parent => Self::Key("..".to_owned(), None),
         }
     }
 }

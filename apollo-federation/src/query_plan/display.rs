@@ -377,6 +377,7 @@ impl fmt::Display for FetchDataPathElement {
                 write_conditions(conditions, f)
             }
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
+            Self::Parent => write!(f, ".."),
         }
     }
 }

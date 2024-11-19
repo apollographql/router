@@ -20,7 +20,6 @@ use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -2982,7 +2981,7 @@ pub(crate) struct NormalizedDefer {
 }
 
 struct DeferNormalizer {
-    used_labels: HashSet<String>,
+    used_labels: IndexSet<String>,
     assigned_labels: IndexSet<String>,
     conditions: IndexMap<Name, IndexSet<String>>,
     label_offset: usize,
@@ -2991,7 +2990,7 @@ struct DeferNormalizer {
 impl DeferNormalizer {
     fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
         let mut digest = Self {
-            used_labels: HashSet::default(),
+            used_labels: IndexSet::default(),
             label_offset: 0,
             assigned_labels: IndexSet::default(),
             conditions: IndexMap::default(),

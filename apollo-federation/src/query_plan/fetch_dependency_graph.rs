@@ -9,7 +9,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Type;
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -88,7 +87,7 @@ type DeferRef = String;
 /// Like a multimap with a Set instead of a Vec for value storage.
 #[derive(Debug, Clone, Default)]
 struct DeferredNodes {
-    inner: HashMap<DeferRef, IndexSet<NodeIndex<u32>>>,
+    inner: IndexMap<DeferRef, IndexSet<NodeIndex<u32>>>,
 }
 impl DeferredNodes {
     fn new() -> Self {
@@ -170,7 +169,7 @@ pub(crate) struct FetchDependencyGraphNode {
     /// Input rewrites for query plan execution to perform prior to executing the fetch.
     input_rewrites: Arc<Vec<Arc<FetchDataRewrite>>>,
     /// Rewrites that will need to occur to store contextual data for future use
-    context_inputs: Vec<FetchDataRewrite>,
+    context_inputs: Vec<FetchDataKeyRenamer>,
     /// As query plan execution runs, it accumulates fetch data into a response object. This is the
     /// path at which to merge in the data for this particular fetch.
     merge_at: Option<Vec<FetchDataPathElement>>,
@@ -230,7 +229,7 @@ pub(crate) struct FetchInputs {
     #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
     /// Contexts used as inputs
-    used_contexts: IndexMap<String, CompositeTypeDefinitionPosition>,
+    used_contexts: IndexMap<Name, Node<Type>>,
 }
 
 /// Represents a dependency between two subgraph fetches, namely that the tail/child depends on the
@@ -2517,6 +2516,14 @@ impl FetchDependencyGraphNode {
         Ok(())
     }
 
+    fn add_input_context(&mut self, context: Name, ty: Node<Type>) -> Result<(), FederationError> {
+        let Some(inputs) = &mut self.inputs else {
+            bail!("Shouldn't try to add inputs to a root fetch node")
+        };
+        Arc::make_mut(inputs).add_context(context, ty);
+        Ok(())
+    }
+
     fn copy_inputs(&mut self, other: &FetchDependencyGraphNode) -> Result<(), FederationError> {
         if let Some(other_inputs) = other.inputs.clone() {
             let inputs = self.inputs.get_or_insert_with(|| {
@@ -2530,8 +2537,9 @@ impl FetchDependencyGraphNode {
                 input_rewrites.push(rewrite.clone());
             }
 
-            self.context_inputs
-                .extend(other.context_inputs.iter().cloned());
+            for context_input in &other.context_inputs {
+                self.add_context_renamer(context_input.clone());
+            }
         }
         Ok(())
     }
@@ -2591,14 +2599,33 @@ impl FetchDependencyGraphNode {
         if self.selection_set.selection_set.selections.is_empty() {
             return Ok(None);
         }
+        let mut context_variable_definitions = self
+            .inputs
+            .iter()
+            .map(|inputs| {
+                inputs.used_contexts.iter().map(|(context, ty)| {
+                    Node::new(VariableDefinition {
+                        name: context.clone(),
+                        ty: ty.clone(),
+                        default_value: None,
+                        directives: Default::default(),
+                    })
+                })
+            })
+            .flatten();
+        let variable_definitions = variable_definitions
+            .iter()
+            .cloned()
+            .chain(context_variable_definitions)
+            .collect::<Vec<_>>();
         let (selection, output_rewrites) =
-            self.finalize_selection(variable_definitions, handled_conditions)?;
+            self.finalize_selection(&variable_definitions, handled_conditions)?;
         let input_nodes = self
             .inputs
             .as_ref()
             .map(|inputs| {
                 inputs.to_selection_set_nodes(
-                    variable_definitions,
+                    &variable_definitions,
                     handled_conditions,
                     &self.parent_type,
                 )
@@ -2704,7 +2731,12 @@ impl FetchDependencyGraphNode {
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
             output_rewrites,
-            context_rewrites: self.context_inputs.clone(),
+            context_rewrites: self
+                .context_inputs
+                .iter()
+                .cloned()
+                .map(|r| Arc::new(r.into()))
+                .collect(),
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {
@@ -2921,14 +2953,83 @@ impl FetchDependencyGraphNode {
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
-        let rewrite = FetchDataRewrite::KeyRenamer(renamer);
-        if !self
-            .context_inputs
-            .iter()
-            .any(|c| *c == rewrite)
-        {
-            self.context_inputs.push(rewrite);
+        if !self.context_inputs.iter().any(|c| *c == renamer) {
+            self.context_inputs.push(renamer);
         }
+    }
+
+    fn add_context_renamers_for_selection_set(
+        &mut self,
+        selection_set: Option<&SelectionSet>,
+        relative_path: Vec<FetchDataPathElement>,
+        alias: Name,
+    ) -> Result<(), FederationError> {
+        let selection_set = match selection_set {
+            Some(selection_set) if !selection_set.is_empty() => selection_set,
+            _ => {
+                self.add_context_renamer(FetchDataKeyRenamer {
+                    path: relative_path,
+                    rename_key_to: alias,
+                });
+                return Ok(());
+            }
+        };
+
+        for selection in selection_set {
+            match selection {
+                Selection::Field(field_selection) => {
+                    if matches!(relative_path.last(), Some(FetchDataPathElement::Parent))
+                        && selection_set.type_position.type_name() != "Query"
+                    {
+                        for possible_runtime_type in selection_set
+                            .schema
+                            .possible_runtime_types(selection_set.type_position.clone())?
+                        {
+                            let mut new_relative_path = relative_path.clone();
+                            new_relative_path.push(FetchDataPathElement::TypenameEquals(
+                                possible_runtime_type.type_name.clone(),
+                            ));
+                            self.add_context_renamers_for_selection_set(
+                                Some(selection_set),
+                                new_relative_path,
+                                alias.clone(),
+                            )?;
+                        }
+                    } else {
+                        let mut new_relative_path = relative_path.clone();
+                        new_relative_path.push(FetchDataPathElement::Key(
+                            field_selection.field.field_position.field_name().clone(),
+                            Default::default(),
+                        ));
+                        self.add_context_renamers_for_selection_set(
+                            field_selection.selection_set.as_ref(),
+                            new_relative_path,
+                            alias.clone(),
+                        )?;
+                    }
+                }
+                Selection::FragmentSpread(_) => {
+                    bail!("Contexts shouldn't contain named fragment spreads");
+                }
+                Selection::InlineFragment(inline_fragment_selection) => {
+                    if let Some(type_condition) = &inline_fragment_selection
+                        .inline_fragment
+                        .type_condition_position
+                    {
+                        let mut new_relative_path = relative_path.clone();
+                        new_relative_path.push(FetchDataPathElement::TypenameEquals(
+                            type_condition.type_name().clone(),
+                        ));
+                        self.add_context_renamers_for_selection_set(
+                            Some(&inline_fragment_selection.selection_set),
+                            new_relative_path,
+                            alias.clone(),
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -3157,7 +3258,7 @@ impl FetchInputs {
                 return false;
             }
         }
-        if self.used_contexts.len() != other.used_contexts.len() {
+        if self.used_contexts.len() < other.used_contexts.len() {
             return false;
         }
         other
@@ -3216,7 +3317,7 @@ impl FetchInputs {
         })
     }
 
-    fn add_context(&mut self, context: String, ty: CompositeTypeDefinitionPosition) {
+    fn add_context(&mut self, context: Name, ty: Node<Type>) {
         self.used_contexts.insert(context, ty);
     }
 }
@@ -3377,6 +3478,7 @@ struct ComputeNodesStackItem<'a> {
     node_path: FetchDependencyGraphNodePath,
     context: &'a OpGraphPathContext,
     defer_context: DeferContext,
+    context_to_condition_nodes: Arc<IndexMap<Name, Vec<NodeIndex>>>,
 }
 
 #[cfg_attr(
@@ -3398,6 +3500,7 @@ pub(crate) fn compute_nodes_for_tree(
         node_path: initial_node_path,
         context: initial_conditions,
         defer_context: initial_defer_context,
+        context_to_condition_nodes: Arc::new(Default::default()),
     }];
     let mut created_nodes = IndexSet::default();
     while let Some(stack_item) = stack.pop() {
@@ -3637,6 +3740,7 @@ fn compute_nodes_for_key_resolution<'a>(
             )?),
         context: new_context,
         defer_context: updated_defer_context,
+        context_to_condition_nodes: stack_item.context_to_condition_nodes.clone(),
     })
 }
 
@@ -3738,6 +3842,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
 
         context: new_context,
         defer_context: updated_defer_context,
+        context_to_condition_nodes: stack_item.context_to_condition_nodes.clone(),
     })
 }
 
@@ -3777,11 +3882,13 @@ fn compute_nodes_for_op_path_element<'a>(
             },
             context: stack_item.context,
             defer_context: updated_defer_context,
+            context_to_condition_nodes: stack_item.context_to_condition_nodes.clone(),
         });
     };
     let (source_id, dest_id) = stack_item.tree.graph.edge_endpoints(edge_id)?;
     let source = stack_item.tree.graph.node_weight(source_id)?;
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
+    let edge = stack_item.tree.graph.edge_weight(edge_id)?;
     if source.source != dest.source {
         return Err(FederationError::internal(format!(
             "Collecting edge {edge_id:?} for {operation_element:?} \
@@ -3835,6 +3942,7 @@ fn compute_nodes_for_op_path_element<'a>(
         node_path: stack_item.node_path.clone(),
         context: stack_item.context,
         defer_context: updated_defer_context,
+        context_to_condition_nodes: stack_item.context_to_condition_nodes.clone(),
     };
     if let Some(conditions) = &child.conditions {
         // We have @requires or some other dependency to create nodes for.
@@ -3842,21 +3950,224 @@ fn compute_nodes_for_op_path_element<'a>(
             dependency_graph,
             conditions,
             (stack_item.node_id, &stack_item.node_path),
-            None,
+            // If setting a context, add __typename to the site where we are retrieving context from
+            // since the context rewrites path will start with a type condition.
+            if child.context_to_selection.is_some() {
+                Some(edge_id)
+            } else {
+                None
+            },
             &updated.defer_context,
             created_nodes,
         )?;
-        let (required_node_id, require_path) = create_post_requires_node(
-            dependency_graph,
-            edge_id,
-            (stack_item.node_id, &stack_item.node_path),
-            stack_item.context,
-            conditions_node_data,
-            created_nodes,
-        )?;
-        updated.node_id = required_node_id;
-        updated.node_path = require_path;
+
+        if let Some(context_to_selection) = &child.context_to_selection {
+            let mut condition_nodes = vec![conditions_node_data.conditions_merge_node_id];
+            condition_nodes.extend(&conditions_node_data.created_node_ids);
+            let mut context_to_condition_nodes =
+                stack_item.context_to_condition_nodes.deref().clone();
+            for context in context_to_selection {
+                context_to_condition_nodes[context] = condition_nodes.clone();
+            }
+            updated.context_to_condition_nodes = Arc::new(context_to_condition_nodes);
+        }
+
+        if edge.conditions.is_some() {
+            // This edge needs the conditions just fetched, to be provided via _entities (@requires
+            // or fake interface object downcast). So we create the post-@requires group, adding the
+            // subgraph jump (if it isn't optimized away).
+            let (required_node_id, require_path) = create_post_requires_node(
+                dependency_graph,
+                edge_id,
+                (stack_item.node_id, &stack_item.node_path),
+                stack_item.context,
+                conditions_node_data,
+                created_nodes,
+            )?;
+            updated.node_id = required_node_id;
+            updated.node_path = require_path;
+        }
     }
+
+    // If the edge uses context variables, every context used must be set in a different parent
+    // node or else we need to create a new one.
+    if let Some(parameter_to_context) = &child.parameter_to_context {
+        let mut conditions_nodes: IndexSet<NodeIndex> = Default::default();
+        let mut is_subgraph_jump_needed = false;
+        for context_entry in parameter_to_context.values() {
+            let Some(context_nodes) = updated
+                .context_to_condition_nodes
+                .get(&context_entry.context_id)
+            else {
+                bail!(
+                    "Could not find condition nodes for context {}",
+                    context_entry.context_id
+                );
+            };
+            conditions_nodes.extend(context_nodes);
+            if context_nodes
+                .first()
+                .is_some_and(|node_id| *node_id == updated.node_id)
+            {
+                is_subgraph_jump_needed = true;
+            }
+        }
+        if is_subgraph_jump_needed {
+            if updated.node_id != stack_item.node_id {
+                bail!("Node created by post-@requires handling shouldn't have set context already");
+            }
+
+            let source_type: CompositeTypeDefinitionPosition = source.type_.clone().try_into()?;
+            let source_schema: ValidFederationSchema = dependency_graph
+                .federated_query_graph
+                .schema_by_source(&source.source)?
+                .clone();
+            let path_in_parent = &stack_item.node_path.path_in_node;
+            let updated_defer_context = updated.defer_context.after_subgraph_jump();
+            // NOTE: We should re-examine defer-handling for path elements in this function in the
+            // future to ensure they're working as intended.
+            let new_node_id = dependency_graph.get_or_create_key_node(
+                &source.source,
+                &stack_item.node_path.response_path,
+                &source_type,
+                ParentRelation {
+                    parent_node_id: stack_item.node_id,
+                    path_in_parent: Some(Arc::clone(path_in_parent)),
+                },
+                &conditions_nodes,
+                None,
+            )?;
+            created_nodes.insert(new_node_id);
+            updated.node_id = new_node_id;
+            updated.node_path = stack_item
+                .node_path
+                .for_new_key_fetch(create_fetch_initial_path(
+                    &dependency_graph.supergraph_schema,
+                    &source_type,
+                    &stack_item.context,
+                )?);
+
+            let Some(key_condition) = stack_item
+                .tree
+                .graph
+                .get_locally_satisfiable_key(source_id)?
+            else {
+                bail!(
+                    "can_satisfy_conditions() validation should have required a key to be present for edge {}",
+                    edge,
+                )
+            };
+            let mut key_inputs =
+                SelectionSet::for_composite_type(source_schema.clone(), source_type.clone());
+            key_inputs.add_selection_set(&key_condition)?;
+            let node = FetchDependencyGraph::node_weight_mut(
+                &mut dependency_graph.graph,
+                stack_item.node_id,
+            )?;
+            node.selection_set
+                .add_at_path(&path_in_parent, Some(&Arc::new(key_inputs)))?;
+
+            let Ok(input_type): Result<CompositeTypeDefinitionPosition, _> = dependency_graph
+                .supergraph_schema
+                .get_type(source_type.type_name().clone())?
+                .try_into()
+            else {
+                bail!(
+                    "Type {} should exist in the supergraph and be a composite type",
+                    source_type.type_name()
+                );
+            };
+            let mut input_selection_set = SelectionSet::for_composite_type(
+                dependency_graph.supergraph_schema.clone(),
+                input_type.clone(),
+            );
+            input_selection_set.add_selection_set(&key_condition)?;
+            let inputs = wrap_input_selections(
+                &dependency_graph.supergraph_schema,
+                &input_type,
+                input_selection_set,
+                &stack_item.context,
+            );
+            let updated_node = FetchDependencyGraph::node_weight_mut(
+                &mut dependency_graph.graph,
+                updated.node_id,
+            )?;
+            let input_rewrites = compute_input_rewrites_on_key_fetch(
+                &source_type.type_name(),
+                &source_type,
+                &source_schema,
+            )?;
+            let updated_node = FetchDependencyGraph::node_weight_mut(
+                &mut dependency_graph.graph,
+                updated.node_id,
+            )?;
+            updated_node.add_inputs(&inputs, input_rewrites.into_iter().flatten())?;
+
+            // Add the condition nodes as parent nodes.
+            for parent_node_id in conditions_nodes {
+                dependency_graph.add_parent(
+                    updated.node_id,
+                    ParentRelation {
+                        parent_node_id,
+                        path_in_parent: None,
+                    },
+                );
+            }
+
+            // Add context renamers.
+            for context_entry in parameter_to_context.values() {
+                let updated_node = FetchDependencyGraph::node_weight_mut(
+                    &mut dependency_graph.graph,
+                    updated.node_id,
+                )?;
+                updated_node.add_input_context(
+                    context_entry.context_id.clone(),
+                    context_entry.subgraph_arg_type.clone(),
+                );
+                updated_node.add_context_renamers_for_selection_set(
+                    Some(&context_entry.selection_set),
+                    context_entry.relative_path.clone(),
+                    context_entry.context_id.clone(),
+                )?;
+            }
+        } else {
+            // In this case we can just continue with the current node, but we need to add the
+            // condition nodes as parents and the context renamers.
+            for parent_node_id in conditions_nodes {
+                dependency_graph.add_parent(
+                    updated.node_id,
+                    ParentRelation {
+                        parent_node_id,
+                        path_in_parent: None,
+                    },
+                );
+            }
+            let num_fields = updated
+                .node_path
+                .path_in_node
+                .iter()
+                .filter(|e| matches!((**e).deref(), OpPathElement::Field(_)))
+                .count();
+            for context_entry in parameter_to_context.values() {
+                let new_relative_path = &context_entry.relative_path
+                    [..(context_entry.relative_path.len() - num_fields)];
+                let updated_node = FetchDependencyGraph::node_weight_mut(
+                    &mut dependency_graph.graph,
+                    updated.node_id,
+                )?;
+                updated_node.add_input_context(
+                    context_entry.context_id.clone(),
+                    context_entry.subgraph_arg_type.clone(),
+                );
+                updated_node.add_context_renamers_for_selection_set(
+                    Some(&context_entry.selection_set),
+                    new_relative_path.to_vec(),
+                    context_entry.context_id.clone(),
+                )?;
+            }
+        }
+    }
+
     if let OpPathElement::Field(field) = &updated_operation {
         if *field.name() == TYPENAME_FIELD {
             // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
@@ -3899,7 +4210,6 @@ fn compute_nodes_for_op_path_element<'a>(
             updated_node.must_preserve_selection_set = true
         }
     }
-    let edge = child.tree.graph.edge_weight(edge_id)?;
     if let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } = &edge.transition {
         // We shouldn't add the operation "as is" as it's a down-cast but we're "faking it".
         // However, if the operation has directives, we should preserve that.
@@ -4965,6 +5275,9 @@ mod tests {
                         format!("{}{}", cond_to_string(conditions), "@")
                     }
                     FetchDataPathElement::TypenameEquals(_) => {
+                        unimplemented!()
+                    }
+                    FetchDataPathElement::Parent => {
                         unimplemented!()
                     }
                 })
