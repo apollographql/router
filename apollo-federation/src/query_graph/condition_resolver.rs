@@ -37,6 +37,7 @@ pub(crate) trait ConditionResolver {
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
     ) -> Result<ConditionResolution, FederationError>;
 }
 
@@ -110,6 +111,7 @@ impl ConditionResolverCache {
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        // extra_conditions: Option<&SelectionSet>,
     ) -> ConditionResolutionCacheResult {
         // We don't cache if there is a context or excluded conditions because those would impact the resolution and
         // we don't want to cache a value per-context and per-excluded-conditions (we also don't cache per-excluded-edges though

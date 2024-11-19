@@ -1742,20 +1742,10 @@ where
                                 false
                             });
                             if matches {
-                                println!("Looking for {} in subgraph {}", ctx.arg_type, ctx.subgraph_name);
                                 let schema = self.graph.schema_by_source(&ctx.subgraph_name)?;
                                 let selection_set = parse_field_set(
                                     schema,
                                     parent_type.type_name().clone(),
-                                    /*
-                                    ctx.argument_coordinate
-                                        .parent()
-                                        .get(schema.schema())
-                                        .unwrap()
-                                        .ty
-                                        .inner_named_type()
-                                        .clone(),
-                                    */
                                     &ctx.selection,
                                 )?
                                 .lazy_map(
@@ -1784,6 +1774,7 @@ where
                                     context,
                                     excluded_destinations,
                                     excluded_conditions,
+                                    Some(&selection_set),
                                 )?;
                                 let Some(arg_indices) =
                                     self.graph.subgraph_to_arg_indices.get(&ctx.subgraph_name)
@@ -1831,6 +1822,7 @@ where
             context,
             excluded_destinations,
             excluded_conditions,
+            None,
         )?;
         if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
             if matches!(
