@@ -54,10 +54,16 @@ impl IntrospectionCache {
     ) -> ControlFlow<graphql::Response, ()> {
         Self::maybe_lone_root_typename(schema, doc)?;
         if doc.operation.is_query() {
-            if doc.has_explicit_root_fields && doc.has_schema_introspection {
-                ControlFlow::Break(Self::mixed_fields_error())?;
+            if doc.has_schema_introspection {
+                if doc.has_explicit_root_fields {
+                    ControlFlow::Break(Self::mixed_fields_error())?;
+                } else {
+                    ControlFlow::Break(self.cached_introspection(schema, key, doc).await)?
+                }
             } else if !doc.has_explicit_root_fields {
-                ControlFlow::Break(self.cached_introspection(schema, key, doc).await)?
+                // root __typename only, probably a small query
+                // Execute it without caching:
+                ControlFlow::Break(Self::execute_introspection(schema, doc))?
             }
         }
         ControlFlow::Continue(())
