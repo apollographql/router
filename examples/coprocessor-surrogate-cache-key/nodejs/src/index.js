@@ -6,7 +6,7 @@ app.use(express.json());
 
 // This is for demo purpose and will keep growing over the time
 // It saves the value of surrogate cache keys returned by a subgraph request
-let surrogateKeys = {};
+let surrogateKeys = new Map();
 // Example:
 // {
 //   "​​0e67db40-e98d-4ad7-bb60-2012fb5db504": [
@@ -28,7 +28,6 @@ let surrogateKeys = {};
 //     "version:1.0:subgraph:reviews:type:Product:entity:4e48855987eae27208b466b941ecda5fb9b88abc03301afef6e4099a981889e9:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
 //   ]
 // }
-let surrogateKeysMapping = {};
 
 app.post("/", (req, res) => {
   const request = req.body;
@@ -51,7 +50,7 @@ app.post("/", (req, res) => {
           .split(",")
           .map((k) => k.trim());
 
-        surrogateKeys[`${request.subgraphRequestId}`] = keys;
+        surrogateKeys.set(request.subgraphRequestId, keys);
         console.log("surrogateKeys", surrogateKeys);
       }
       break;
@@ -66,7 +65,7 @@ app.post("/", (req, res) => {
         let mapping = {};
         Object.keys(contextEntry).forEach((request_id) => {
           let cache_keys = contextEntry[`${request_id}`];
-          let surrogateCachekeys = surrogateKeys[`${request_id}`];
+          let surrogateCachekeys = surrogateKeys.get(request_id);
           if (surrogateCachekeys) {
             // Create the mapping between surrogate cache keys and effective cache keys
             // Example:
