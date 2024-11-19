@@ -74,12 +74,13 @@ pub(crate) fn validate_arg<'a>(
                     ),
                     HeaderParseError::ValueError { err, node } => {
                         let (message, location) = match err {
-                            HeaderValueError::ParseError{ message, location} => (message, location),
+                            HeaderValueError::ParseError{ message, location} |
+                                HeaderValueError::InvalidHeaderValue { message, location } => (message, location),
                             HeaderValueError::InvalidVariableNamespace{ namespace, location } => (
                                 format!(
                                     "invalid variable namespace `{namespace}`, must be one of {available}",
                                     available = expression_context.namespaces_joined(),
-                                ),location)
+                                ),location),
                         };
                         (
                             message,

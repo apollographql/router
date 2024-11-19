@@ -11,6 +11,8 @@ use nom::character::complete::none_of;
 use nom::combinator::all_consuming;
 use nom::combinator::map;
 use nom::combinator::recognize;
+use nom::error::ErrorKind;
+use nom::error::ParseError;
 use nom::multi::many1;
 use nom::sequence::delimited;
 use nom::IResult;
@@ -42,7 +44,7 @@ impl<'a> HeaderValue<'a> {
         Self { parts }
     }
 
-    fn parse(input: Span<'a>) -> IResult<Span, Self, VariableParseError<Span>> {
+    fn parse(input: Span<'a>) -> IResult<Span, Self, HeaderValueError> {
         all_consuming(map(many1(HeaderValuePart::parse), Self::new))(input)
     }
 
@@ -101,7 +103,7 @@ impl<'a> HeaderValue<'a> {
         Self::parse(Span::new(s))
             .map(|(_, value)| value)
             .map_err(|e| match e {
-                nom::Err::Error(e) | nom::Err::Failure(e) => e.into(),
+                nom::Err::Error(e) | nom::Err::Failure(e) => e,
                 nom::Err::Incomplete(_) => HeaderValueError::ParseError {
                     message: "Invalid header value".into(),
                     location: 0..s.len(),
@@ -120,6 +122,10 @@ pub enum HeaderValueError {
         message: String,
         location: Range<usize>,
     },
+    InvalidHeaderValue {
+        message: String,
+        location: Range<usize>,
+    },
 }
 
 impl Display for HeaderValueError {
@@ -128,12 +134,26 @@ impl Display for HeaderValueError {
             HeaderValueError::InvalidVariableNamespace { namespace, .. } => {
                 write!(f, "invalid variable namespace: {namespace}")
             }
-            HeaderValueError::ParseError { message, .. } => write!(f, "{message}"),
+            HeaderValueError::ParseError { message, .. }
+            | HeaderValueError::InvalidHeaderValue { message, .. } => write!(f, "{message}"),
         }
     }
 }
 
 impl Error for HeaderValueError {}
+
+impl ParseError<Span<'_>> for HeaderValueError {
+    fn from_error_kind(span: Span, _kind: ErrorKind) -> Self {
+        HeaderValueError::ParseError {
+            message: format!("invalid variable reference `{s}`", s = span.fragment()),
+            location: span.location_offset()..span.location_offset() + span.fragment().len(),
+        }
+    }
+
+    fn append(_input: Span, _kind: ErrorKind, other: Self) -> Self {
+        other
+    }
+}
 
 impl From<VariableParseError<Span<'_>>> for HeaderValueError {
     fn from(error: VariableParseError<Span<'_>>) -> Self {
@@ -149,12 +169,6 @@ impl From<VariableParseError<Span<'_>>> for HeaderValueError {
                 namespace,
                 location,
             },
-            VariableParseError::InvalidHeaderValue { value, location } => {
-                HeaderValueError::ParseError {
-                    message: format!("invalid HTTP header value `{value}`"),
-                    location,
-                }
-            }
         }
     }
 }
@@ -165,7 +179,7 @@ enum HeaderValuePart<'a> {
 }
 
 impl<'a> HeaderValuePart<'a> {
-    fn parse(input: Span<'a>) -> IResult<Span<'a>, Self, VariableParseError<Span>> {
+    fn parse(input: Span<'a>) -> IResult<Span<'a>, Self, HeaderValueError> {
         alt((
             map(variable_reference, Self::Variable),
             map(parse_header_value, Self::Constant),
@@ -175,12 +189,15 @@ impl<'a> HeaderValuePart<'a> {
 
 type Span<'a> = LocatedSpan<&'a str>;
 
-fn parse_header_value(input: Span) -> IResult<Span, http::HeaderValue, VariableParseError<Span>> {
+fn parse_header_value(input: Span) -> IResult<Span, http::HeaderValue, HeaderValueError> {
     let (rest, str_value) = recognize(many1(none_of("{}")))(input)?;
     match http::HeaderValue::from_str(str_value.fragment()) {
         Ok(value) => Ok((rest, value)),
-        Err(_) => Err(nom::Err::Error(VariableParseError::InvalidHeaderValue {
-            value: str_value.fragment().to_string(),
+        Err(_) => Err(nom::Err::Error(HeaderValueError::InvalidHeaderValue {
+            message: format!(
+                "invalid HTTP header value `{value}`",
+                value = str_value.fragment()
+            ),
             location: str_value.location_offset()
                 ..str_value.location_offset() + str_value.fragment().len(),
         })),
@@ -189,12 +206,12 @@ fn parse_header_value(input: Span) -> IResult<Span, http::HeaderValue, VariableP
 
 fn variable_reference(
     input: Span,
-) -> IResult<Span, VariableReference<Namespace>, VariableParseError<Span>> {
+) -> IResult<Span, VariableReference<Namespace>, HeaderValueError> {
     delimited(
         char('{'),
         |input| {
             super::variable::variable_reference(input).map_err(|e| match e {
-                nom::Err::Error(e) | nom::Err::Failure(e) => nom::Err::Failure(e),
+                nom::Err::Error(e) | nom::Err::Failure(e) => nom::Err::Failure(e.into()),
                 nom::Err::Incomplete(e) => nom::Err::Incomplete(e),
             })
         },

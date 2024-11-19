@@ -302,10 +302,10 @@ impl<'a> Header<'a> {
 
         let from = mappings
             .iter()
-            .find(|(name, value)| *name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME);
+            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME);
         let value = mappings
             .iter()
-            .find(|(name, value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
+            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
 
         match (from, value) {
             (Some(_), None) if Self::is_static(&name) => {
