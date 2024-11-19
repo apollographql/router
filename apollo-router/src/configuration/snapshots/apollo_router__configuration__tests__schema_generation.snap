@@ -3545,68 +3545,6 @@ expression: "&schema"
       ],
       "description": "Configuration to forward header values in metric labels"
     },
-    "HeaderLoggingCondition": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "description": "Match header value given a regex to display logs",
-          "properties": {
-            "body": {
-              "default": false,
-              "description": "Display request/response body (default: false)",
-              "type": "boolean"
-            },
-            "headers": {
-              "default": false,
-              "description": "Display request/response headers (default: false)",
-              "type": "boolean"
-            },
-            "match": {
-              "description": "Regex to match the header value",
-              "type": "string"
-            },
-            "name": {
-              "description": "Header name",
-              "type": "string"
-            }
-          },
-          "required": [
-            "match",
-            "name"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Match header value given a value to display logs",
-          "properties": {
-            "body": {
-              "default": false,
-              "description": "Display request/response body (default: false)",
-              "type": "boolean"
-            },
-            "headers": {
-              "default": false,
-              "description": "Display request/response headers (default: false)",
-              "type": "boolean"
-            },
-            "name": {
-              "description": "Header name",
-              "type": "string"
-            },
-            "value": {
-              "description": "Header value",
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "value"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "HeadersLocation": {
       "additionalProperties": false,
       "properties": {
@@ -4265,14 +4203,6 @@ expression: "&schema"
         "common": {
           "$ref": "#/definitions/LoggingCommon",
           "description": "#/definitions/LoggingCommon"
-        },
-        "experimental_when_header": {
-          "description": "Log configuration to log request and response for subgraphs and supergraph Note that this will be removed when events are implemented.",
-          "items": {
-            "$ref": "#/definitions/HeaderLoggingCondition",
-            "description": "#/definitions/HeaderLoggingCondition"
-          },
-          "type": "array"
         },
         "stdout": {
           "$ref": "#/definitions/StdOut",

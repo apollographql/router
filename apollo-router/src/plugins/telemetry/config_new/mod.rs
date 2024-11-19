@@ -23,7 +23,6 @@ mod conditional;
 pub(crate) mod connector;
 pub(crate) mod cost;
 pub(crate) mod events;
-mod experimental_when_header;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
 pub(crate) mod instruments;

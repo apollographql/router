@@ -225,30 +225,6 @@ async fn test_cli_config_preview() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_experimental_notice() {
-    let mut router = IntegrationTest::builder()
-        .config(
-            "
-            telemetry:
-                logging:
-                    experimental_when_header:
-                    - name: apollo-router-log-request
-                      value: test
-                      headers: true
-                      body: true
-            ",
-        )
-        .build()
-        .await;
-    router.start().await;
-    router.assert_started().await;
-    router
-        .assert_log_contains("You're using some \\\"experimental\\\" features of the Apollo Router")
-        .await;
-    router.graceful_shutdown().await;
-}
-
 const TEST_PLUGIN_ORDERING_CONTEXT_KEY: &str = "ordering-trace";
 
 /// <https://github.com/apollographql/router/issues/3207>

@@ -180,8 +180,6 @@ const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
-pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
-pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
@@ -591,14 +589,20 @@ impl PluginPrivate for Telemetry {
         let static_supergraph_instruments = self.supergraph_custom_instruments.read().clone();
         let static_graphql_instruments = self.graphql_custom_instruments.read().clone();
         ServiceBuilder::new()
-            .instrument(move |supergraph_req: &SupergraphRequest| span_mode.create_supergraph(
-                &config_instrument.apollo,
-                supergraph_req,
-                field_level_instrumentation_ratio,
-            ))
+            .instrument(move |supergraph_req: &SupergraphRequest| {
+                span_mode.create_supergraph(
+                    &config_instrument.apollo,
+                    supergraph_req,
+                    field_level_instrumentation_ratio,
+                )
+            })
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) = resp.context.extensions().with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned()) {
+                if let Some(usage_reporting) = resp
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+                {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
@@ -606,51 +610,48 @@ impl PluginPrivate for Telemetry {
                     );
                 }
                 // To expose trace_id or not
-                let expose_trace_id_header = config.exporters.tracing.response_trace_id.enabled.then(|| {
-                    config.exporters.tracing.response_trace_id
-                        .header_name
-                        .clone()
-                        .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
-                });
+                let expose_trace_id_header =
+                    config.exporters.tracing.response_trace_id.enabled.then(|| {
+                        config
+                            .exporters
+                            .tracing
+                            .response_trace_id
+                            .header_name
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
+                    });
 
                 // Append the trace ID with the right format, based on the config
                 let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
-                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => format!("{:032x}", trace_id),
-                        TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
+                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
+                            format!("{:032x}", trace_id)
+                        }
+                        TraceIdFormat::Decimal => {
+                            format!("{}", u128::from_be_bytes(trace_id.to_bytes()))
+                        }
                         TraceIdFormat::Datadog => trace_id.to_datadog(),
                         TraceIdFormat::Uuid => Uuid::from_bytes(trace_id.to_bytes()).to_string(),
                     };
 
                     HeaderValue::from_str(&id).ok()
                 };
-                if let (Some(header_name), Some(trace_id)) = (
-                    expose_trace_id_header,
-                    trace_id().and_then(format_id),
-                ) {
+                if let (Some(header_name), Some(trace_id)) =
+                    (expose_trace_id_header, trace_id().and_then(format_id))
+                {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }
 
-                if resp.context.contains_key(LOGGING_DISPLAY_HEADERS) {
-                    let sorted_headers = resp
-                        .response
-                        .headers()
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v))
-                        .collect::<BTreeMap<_, _>>();
-                    ::tracing::info!(http.response.headers = ?sorted_headers, "Supergraph response headers");
-                }
-                let display_body = resp.context.contains_key(LOGGING_DISPLAY_BODY);
-                resp.map_stream(move |gql_response| {
-                    if display_body {
-                        ::tracing::info!(http.response.body = ?gql_response, "Supergraph GraphQL response");
-                    }
-                    gql_response
-                })
+                resp
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
-                    let custom_attributes = config.instrumentation.spans.supergraph.attributes.on_request(req);
+                    let custom_attributes = config
+                        .instrumentation
+                        .spans
+                        .supergraph
+                        .attributes
+                        .on_request(req);
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     let custom_instruments = config
                         .instrumentation
@@ -659,15 +660,35 @@ impl PluginPrivate for Telemetry {
                     custom_instruments.on_request(req);
                     let custom_graphql_instruments: GraphQLInstruments = config
                         .instrumentation
-                        .instruments.new_graphql_instruments(static_graphql_instruments.clone());
+                        .instruments
+                        .new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
-                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments)
+                    (
+                        req.context.clone(),
+                        custom_instruments,
+                        custom_attributes,
+                        supergraph_events,
+                        custom_graphql_instruments,
+                    )
                 },
-                move |(ctx, custom_instruments, mut custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
+                move |(
+                    ctx,
+                    custom_instruments,
+                    mut custom_attributes,
+                    supergraph_events,
+                    custom_graphql_instruments,
+                ): (
+                    Context,
+                    SupergraphInstruments,
+                    Vec<KeyValue>,
+                    SupergraphEvents,
+                    GraphQLInstruments,
+                ),
+                      fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -680,17 +701,31 @@ impl PluginPrivate for Telemetry {
                         span.set_span_dyn_attributes(custom_attributes);
                         match &result {
                             Ok(resp) => {
-                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
+                                span.set_span_dyn_attributes(
+                                    config
+                                        .instrumentation
+                                        .spans
+                                        .supergraph
+                                        .attributes
+                                        .on_response(resp),
+                                );
                                 custom_instruments.on_response(resp);
                                 supergraph_events.on_response(resp);
                                 custom_graphql_instruments.on_response(resp);
-                            },
+                            }
                             Err(err) => {
-                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err, &ctx));
+                                span.set_span_dyn_attributes(
+                                    config
+                                        .instrumentation
+                                        .spans
+                                        .supergraph
+                                        .attributes
+                                        .on_error(err, &ctx),
+                                );
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
                                 custom_graphql_instruments.on_error(err, &ctx);
-                            },
+                            }
                         }
                         result = Self::update_otel_metrics(
                             config.clone(),
@@ -703,7 +738,12 @@ impl PluginPrivate for Telemetry {
                         )
                         .await;
                         Self::update_metrics_on_response_events(
-                            &ctx, config, field_level_instrumentation_ratio, sender, start, result,
+                            &ctx,
+                            config,
+                            field_level_instrumentation_ratio,
+                            sender,
+                            start,
+                            result,
                         )
                     }
                 },
@@ -1243,24 +1283,6 @@ impl Telemetry {
         let context = &req.context;
         let http_request = &req.supergraph_request;
         let headers = http_request.headers();
-
-        let (should_log_headers, should_log_body) = config.exporters.logging.should_log(req);
-        if should_log_headers {
-            let sorted_headers = req
-                .supergraph_request
-                .headers()
-                .iter()
-                .map(|(k, v)| (k.as_str(), v))
-                .collect::<BTreeMap<_, _>>();
-            ::tracing::info!(http.request.headers = ?sorted_headers, "Supergraph request headers");
-
-            let _ = req.context.insert(LOGGING_DISPLAY_HEADERS, true);
-        }
-        if should_log_body {
-            ::tracing::info!(http.request.body = ?req.supergraph_request.body(), "Supergraph request body");
-
-            let _ = req.context.insert(LOGGING_DISPLAY_BODY, true);
-        }
 
         // List of custom attributes for metrics
         let mut attributes: HashMap<String, AttributeValue> = HashMap::new();

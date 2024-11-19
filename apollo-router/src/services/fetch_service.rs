@@ -399,7 +399,6 @@ impl FetchService {
                         subscription_handle: subscription_handle.clone(),
                         subscription_config: subscription_config.clone(),
                         stream_rx: rx_handle.into(),
-                        service_name: service_name.to_string(),
                     };
 
                     let subscription_conf_tx =

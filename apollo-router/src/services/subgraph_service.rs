@@ -68,8 +68,6 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::events::SubgraphEventResponse;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
-use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
-use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
@@ -547,9 +545,6 @@ async fn call_websocket(
 
     let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
 
-    let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-
     let signing_params = context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
@@ -596,14 +591,6 @@ async fn call_websocket(
         );
     }
 
-    if display_headers {
-        tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Websocket request headers to subgraph {service_name:?}");
-    }
-
-    if display_body {
-        tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Websocket request body to subgraph {service_name:?}");
-    }
-
     let uri = request.uri();
     let path = uri.path();
     let host = uri.host().unwrap_or_default();
@@ -629,7 +616,7 @@ async fn call_websocket(
         "graphql.operation.name" = %operation_name,
     );
 
-    let (ws_stream, mut resp) = match request.uri().scheme_str() {
+    let (ws_stream, resp) = match request.uri().scheme_str() {
         Some("wss") => {
             connect_async_tls_with_config(request, None, false, None)
                 .instrument(subgraph_req_span)
@@ -637,26 +624,10 @@ async fn call_websocket(
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
-    .map_err(|err| {
-        if display_body || display_headers {
-            tracing::info!(
-                http.response.error = format!("{:?}", &err), apollo.subgraph.name = %service_name, "Websocket connection error from subgraph {service_name:?} received"
-            );
-        }
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: format!("cannot connect websocket to subgraph: {err}"),
-        }
+    .map_err(|err| FetchError::SubrequestWsError {
+        service: service_name.clone(),
+        reason: format!("cannot connect websocket to subgraph: {err}"),
     })?;
-
-    if display_headers {
-        tracing::info!(response.headers = ?resp.headers(), apollo.subgraph.name = %service_name, "Websocket response headers to subgraph {service_name:?}");
-    }
-    if display_body {
-        tracing::info!(
-            response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Websocket response body from subgraph {service_name:?} received"
-        );
-    }
 
     let gql_socket = GraphqlWebSocket::new(
         convert_websocket_stream(ws_stream, subscription_hash.clone()),
@@ -859,7 +830,6 @@ pub(crate) async fn process_batch(
         .expect("we have at least one context in the batch")
         .0
         .clone();
-    let display_body = batch_context.contains_key(LOGGING_DISPLAY_BODY);
     let client = client_factory.create(&service);
 
     // Update our batching metrics (just before we fetch)
@@ -875,35 +845,34 @@ pub(crate) async fn process_batch(
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) =
-        match do_fetch(client, &batch_context, &service, request, display_body)
-            .instrument(subgraph_req_span)
-            .await
-        {
-            Ok(res) => res,
-            Err(err) => {
-                let resp = http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(err.to_graphql_error(None))
-                    .map_err(|err| FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service.clone(),
-                        reason: format!("cannot create the http response from error: {err:?}"),
-                    })?;
-                let (parts, body) = resp.into_parts();
-                let body =
-                    serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service.clone(),
-                        reason: format!("cannot serialize the error: {err:?}"),
-                    })?;
-                (
-                    parts,
-                    Ok(ContentType::ApplicationJson),
-                    Some(Ok(body.into())),
-                )
-            }
-        };
+    let (parts, content_type, body) = match do_fetch(client, &batch_context, &service, request)
+        .instrument(subgraph_req_span)
+        .await
+    {
+        Ok(res) => res,
+        Err(err) => {
+            let resp = http::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(err.to_graphql_error(None))
+                .map_err(|err| FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service.clone(),
+                    reason: format!("cannot create the http response from error: {err:?}"),
+                })?;
+            let (parts, body) = resp.into_parts();
+            let body =
+                serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service.clone(),
+                    reason: format!("cannot serialize the error: {err:?}"),
+                })?;
+            (
+                parts,
+                Ok(ContentType::ApplicationJson),
+                Some(Ok(body.into())),
+            )
+        }
+    };
 
     let subgraph_response_event = batch_context
         .extensions()
@@ -938,14 +907,6 @@ pub(crate) async fn process_batch(
             attrs,
             &format!("Raw response from subgraph {service:?} received"),
         );
-    }
-
-    if display_body {
-        if let Some(Ok(b)) = &body {
-            tracing::info!(
-            response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %&service, "Raw response body from subgraph {service:?} received"
-            );
-        }
     }
 
     tracing::debug!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
@@ -1287,8 +1248,6 @@ pub(crate) async fn call_single_http(
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-
     // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
     let request = file_uploads::http_request_wrapper(request).await;
 
@@ -1324,34 +1283,25 @@ pub(crate) async fn call_single_http(
     }
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
-    let (parts, content_type, body) =
-        match do_fetch(client, &context, service_name, request, display_body)
-            .instrument(subgraph_req_span)
-            .await
-        {
-            Ok(resp) => resp,
-            Err(err) => {
-                return Ok(SubgraphResponse::builder()
-                    .subgraph_name(service_name.to_string())
-                    .error(err.to_graphql_error(None))
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context)
-                    .extensions(Object::default())
-                    .build());
-            }
-        };
+    let (parts, content_type, body) = match do_fetch(client, &context, service_name, request)
+        .instrument(subgraph_req_span)
+        .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            return Ok(SubgraphResponse::builder()
+                .subgraph_name(service_name.to_string())
+                .error(err.to_graphql_error(None))
+                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .context(context)
+                .extensions(Object::default())
+                .build());
+        }
+    };
 
     let subgraph_response_event = context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
-
-    if display_body {
-        if let Some(Ok(b)) = &body {
-            tracing::info!(
-                response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-            );
-        }
-    }
 
     if let Some(subgraph_response_event) = subgraph_response_event {
         let mut should_log = true;
@@ -1471,7 +1421,6 @@ async fn do_fetch(
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
-    display_body: bool,
 ) -> Result<
     (
         Parts,
@@ -1513,34 +1462,8 @@ async fn do_fetch(
                     reason: err.to_string(),
                 }
             });
-        if let Ok(body) = &body {
-            if display_body {
-                tracing::info!(
-                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-                );
-            }
-        }
         Some(body)
     } else {
-        if display_body {
-            let body = body
-                .to_bytes()
-                .instrument(tracing::debug_span!("aggregate_response_data"))
-                .await
-                .map_err(|err| {
-                    tracing::error!(fetch_error = ?err);
-                    FetchError::SubrequestHttpError {
-                        status_code: Some(parts.status.as_u16()),
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    }
-                });
-            if let Ok(body) = &body {
-                tracing::info!(
-                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-                );
-            }
-        }
         None
     };
     Ok((parts, content_type, body))

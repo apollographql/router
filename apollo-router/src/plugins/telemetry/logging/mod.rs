@@ -100,41 +100,4 @@ mod test {
         .with_subscriber(assert_snapshot_subscriber!())
         .await
     }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_when_header() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .config(include_str!(
-                "testdata/experimental_when_header.router.yaml"
-            ))
-            .build()
-            .await;
-
-        async {
-            let mut response = test_harness
-                .call_supergraph(
-                    supergraph::Request::fake_builder()
-                        .header("custom-header1", "val1")
-                        .header("custom-header2", "val2")
-                        .query("query { foo }")
-                        .build()
-                        .expect("expecting valid request"),
-                    |_r| {
-                        tracing::info!("response");
-                        supergraph::Response::fake_builder()
-                            .header("custom-header1", "val1")
-                            .header("custom-header2", "val2")
-                            .data(serde_json::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
-                )
-                .await
-                .expect("expecting successful response");
-
-            response.next_response().await;
-        }
-        .with_subscriber(assert_snapshot_subscriber!())
-        .await
-    }
 }
