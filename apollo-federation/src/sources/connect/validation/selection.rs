@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::iter::once;
 use std::ops::Range;
 
@@ -9,7 +10,6 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::coordinates::ConnectDirectiveCoordinate;
@@ -21,12 +21,18 @@ use super::Name;
 use super::Value;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
+use crate::sources::connect::json_selection::ExternalVarPaths;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::variable::ConnectorsContext;
+use crate::sources::connect::variable::ExpressionContext;
+use crate::sources::connect::variable::Namespace;
+use crate::sources::connect::variable::Phase;
+use crate::sources::connect::variable::Target;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
@@ -35,7 +41,18 @@ pub(super) fn validate_selection(
     schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Result<(), Message> {
-    let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
+    let (selection_arg, json_selection, selection_node) = get_json_selection(coordinate, schema)?;
+
+    if let Some(value) = validate_selection_variables(
+        ConnectorsContext::new(coordinate.into(), Phase::Response, Target::Body),
+        schema,
+        selection_node,
+        selection_arg.coordinate.to_string(),
+        &json_selection,
+    ) {
+        return value;
+    }
+
     let field = coordinate.field_coordinate.field;
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
@@ -65,9 +82,10 @@ pub(super) fn validate_selection(
 
 pub(super) fn validate_body_selection(
     connect_directive: &Node<Directive>,
+    connect_coordinate: ConnectDirectiveCoordinate,
     parent_type: &Node<ObjectType>,
     field: &Component<FieldDefinition>,
-    schema: &Schema,
+    schema: &SchemaInfo,
     selection_node: &Node<Value>,
 ) -> Result<(), Message> {
     let coordinate =
@@ -96,13 +114,59 @@ pub(super) fn validate_body_selection(
     }
 
     // TODO: validate JSONSelection
+
+    if let Some(value) = validate_selection_variables(
+        ConnectorsContext::new(connect_coordinate.into(), Phase::Request, Target::Body),
+        schema,
+        selection_node,
+        coordinate,
+        &selection,
+    ) {
+        return value;
+    }
+
     Ok(())
+}
+
+/// Validate variable references in a JSON Selection
+fn validate_selection_variables(
+    expression_context: ConnectorsContext,
+    schema: &SchemaInfo,
+    selection_node: &Node<Value>,
+    coordinate: String,
+    selection: &JSONSelection,
+) -> Option<Result<(), Message>> {
+    let namespaces: HashSet<Namespace> = expression_context.available_namespaces().collect();
+    for reference in selection
+        .external_var_paths()
+        .into_iter()
+        .flat_map(|var_path| var_path.variable_reference())
+    {
+        if !namespaces.contains(&reference.namespace.namespace) {
+            return Some(Err(Message {
+                code: Code::InvalidJsonSelection,
+                message: format!(
+                    "{coordinate} contains an invalid variable namespace `{namespace}`, must be one of {available}",
+                    namespace = reference.namespace.namespace,
+                    available = expression_context.namespaces_joined(),
+                ),
+                locations: GraphQLString::new(selection_node, &schema.sources)
+                    .ok()
+                    .and_then(|expression| {
+                        expression.line_col_for_subslice(reference.location, schema)
+                    })
+                    .into_iter()
+                    .collect(),
+            }));
+        }
+    }
+    None
 }
 
 fn get_json_selection<'a>(
     connect_directive: ConnectDirectiveCoordinate<'a>,
     schema: &'a SchemaInfo<'a>,
-) -> Result<(SelectionArg<'a>, JSONSelection), Message> {
+) -> Result<(SelectionArg<'a>, JSONSelection, &'a Node<Value>), Message> {
     let coordinate = SelectionCoordinate::from(connect_directive);
     let selection_arg = connect_directive
         .directive
@@ -155,6 +219,7 @@ fn get_json_selection<'a>(
             coordinate,
         },
         selection,
+        &selection_arg.value,
     ))
 }
 

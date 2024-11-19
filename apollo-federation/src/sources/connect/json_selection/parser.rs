@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Display;
 
 use apollo_compiler::collections::IndexSet;
@@ -28,6 +29,10 @@ use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
+use crate::sources::connect::variable::Namespace;
+use crate::sources::connect::variable::VariableNamespace;
+use crate::sources::connect::variable::VariablePathPart;
+use crate::sources::connect::variable::VariableReference;
 
 // ParseResult is the internal type returned by most ::parse methods, as it is
 // convenient to use with nom's combinators. The top-level JSONSelection::parse
@@ -430,9 +435,29 @@ impl PathSelection {
         PathList::parse(input).map(|(input, path)| (input, Self { path }))
     }
 
-    pub(crate) fn var_name_and_nested_keys(&self) -> Option<(&KnownVariable, Vec<&str>)> {
+    pub(crate) fn variable_reference(&self) -> Option<VariableReference<Namespace>> {
         match self.path.as_ref() {
-            PathList::Var(var_name, tail) => Some((var_name, tail.prefix_of_keys())),
+            PathList::Var(var, tail) => match var.as_ref() {
+                KnownVariable::Identifier(namespace) => {
+                    let parts = tail.as_ref().variable_path_parts();
+                    let location = parts
+                        .last()
+                        .map(|part| part.location.clone())
+                        .or(var.range())
+                        .map(|location| location.end)
+                        .and_then(|end| var.range().map(|location| location.start..end))
+                        .unwrap_or_default();
+                    Some(VariableReference {
+                        namespace: VariableNamespace {
+                            namespace: *namespace,
+                            location: var.range().unwrap_or_default(),
+                        },
+                        path: parts,
+                        location,
+                    })
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -468,10 +493,7 @@ impl ExternalVarPaths for PathSelection {
         let mut paths = vec![];
         match self.path.as_ref() {
             PathList::Var(var_name, tail) => {
-                // The $ and @ variables refer to parts of the current JSON
-                // data, so they do not need to be surfaced as external variable
-                // references.
-                if var_name != &KnownVariable::Dollar && var_name != &KnownVariable::AtSign {
+                if matches!(var_name.as_ref(), KnownVariable::Identifier(_)) {
                     paths.push(self);
                 }
                 paths.extend(tail.external_var_paths());
@@ -759,12 +781,15 @@ impl PathList {
         }
     }
 
-    fn prefix_of_keys(&self) -> Vec<&str> {
+    fn variable_path_parts(&self) -> Vec<VariablePathPart> {
         match self {
             Self::Key(key, rest) => {
-                let mut keys = vec![key.as_str()];
-                keys.extend(rest.prefix_of_keys());
-                keys
+                let mut parts = vec![VariablePathPart {
+                    part: Cow::from(key.as_str()),
+                    location: key.range().unwrap_or_default(),
+                }];
+                parts.extend(rest.variable_path_parts());
+                parts
             }
             _ => vec![],
         }
@@ -1876,7 +1901,7 @@ mod tests {
             "$this",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::This.into_with_range(),
+                    KnownVariable::from(Namespace::This).into_with_range(),
                     PathList::Empty.into_with_range(),
                 )
                 .into_with_range(),
@@ -1898,7 +1923,7 @@ mod tests {
             "$this { hello }",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::This.into_with_range(),
+                    KnownVariable::from(Namespace::This).into_with_range(),
                     PathList::Selection(SubSelection {
                         selections: vec![NamedSelection::Field(
                             None,
@@ -1935,7 +1960,7 @@ mod tests {
         check_path_selection(
             "$this { before alias: $args.arg after }",
             PathList::Var(
-                KnownVariable::This.into_with_range(),
+                KnownVariable::from(Namespace::This).into_with_range(),
                 PathList::Selection(SubSelection {
                     selections: vec![
                         NamedSelection::Field(None, Key::field("before").into_with_range(), None),
@@ -1943,7 +1968,7 @@ mod tests {
                             Some(Alias::new("alias")),
                             PathSelection {
                                 path: PathList::Var(
-                                    KnownVariable::Args.into_with_range(),
+                                    KnownVariable::from(Namespace::Args).into_with_range(),
                                     PathList::Key(
                                         Key::field("arg").into_with_range(),
                                         PathList::Empty.into_with_range(),
@@ -1980,7 +2005,7 @@ mod tests {
                                     Some(Alias::new("injected")),
                                     PathSelection {
                                         path: PathList::Var(
-                                            KnownVariable::Args.into_with_range(),
+                                            KnownVariable::from(Namespace::Args).into_with_range(),
                                             PathList::Key(
                                                 Key::field("arg").into_with_range(),
                                                 PathList::Empty.into_with_range(),
@@ -2005,7 +2030,7 @@ mod tests {
             "$args.a.b.c",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::Args.into_with_range(),
+                    KnownVariable::from(Namespace::Args).into_with_range(),
                     PathList::from_slice(
                         &[
                             Key::Field("a".to_string()),
@@ -2147,7 +2172,7 @@ mod tests {
             selection!("$this").strip_ranges(),
             JSONSelection::Path(PathSelection {
                 path: PathList::Var(
-                    KnownVariable::This.into_with_range(),
+                    KnownVariable::from(Namespace::This).into_with_range(),
                     PathList::Empty.into_with_range()
                 )
                 .into_with_range(),
@@ -2198,7 +2223,7 @@ mod tests {
                     Some(Alias::new("value")),
                     PathSelection {
                         path: PathList::Var(
-                            KnownVariable::This.into_with_range(),
+                            KnownVariable::from(Namespace::This).into_with_range(),
                             PathList::Selection(SubSelection {
                                 selections: vec![
                                     NamedSelection::Field(
@@ -2872,7 +2897,7 @@ mod tests {
             JSONSelection::Path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
-                        WithRange::new(KnownVariable::Args, Some(0..5)),
+                        WithRange::new(KnownVariable::from(Namespace::Args), Some(0..5)),
                         WithRange::new(
                             PathList::Key(
                                 WithRange::new(Key::field("product"), Some(6..13)),
@@ -2897,7 +2922,7 @@ mod tests {
             JSONSelection::Path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
-                        WithRange::new(KnownVariable::Args, Some(1..6)),
+                        WithRange::new(KnownVariable::from(Namespace::Args), Some(1..6)),
                         WithRange::new(
                             PathList::Key(
                                 WithRange::new(Key::field("product"), Some(9..16)),
@@ -2934,7 +2959,10 @@ mod tests {
                         PathSelection {
                             path: WithRange::new(
                                 PathList::Var(
-                                    WithRange::new(KnownVariable::Args, Some(15..20)),
+                                    WithRange::new(
+                                        KnownVariable::from(Namespace::Args),
+                                        Some(15..20),
+                                    ),
                                     WithRange::new(
                                         PathList::Key(
                                             WithRange::new(Key::field("product"), Some(21..28)),
@@ -2978,6 +3006,105 @@ mod tests {
                 ],
                 range: Some(0..42),
             }),
+        );
+    }
+
+    #[test]
+    fn test_variable_reference_no_path() {
+        let selection = JSONSelection::parse("$this").unwrap();
+        let var_paths = selection.external_var_paths();
+        assert_eq!(var_paths.len(), 1);
+        assert_eq!(
+            var_paths[0].variable_reference(),
+            Some(VariableReference {
+                namespace: VariableNamespace {
+                    namespace: Namespace::This,
+                    location: 0..5
+                },
+                path: vec![],
+                location: 0..5,
+            })
+        );
+    }
+
+    #[test]
+    fn test_variable_reference_with_path() {
+        let selection = JSONSelection::parse("$this.a.b.c").unwrap();
+        let var_paths = selection.external_var_paths();
+        assert_eq!(var_paths.len(), 1);
+        assert_eq!(
+            var_paths[0].variable_reference(),
+            Some(VariableReference {
+                namespace: VariableNamespace {
+                    namespace: Namespace::This,
+                    location: 0..5
+                },
+                path: vec![
+                    VariablePathPart {
+                        part: Cow::from("a"),
+                        location: 6..7,
+                    },
+                    VariablePathPart {
+                        part: Cow::from("b"),
+                        location: 8..9,
+                    },
+                    VariablePathPart {
+                        part: Cow::from("c"),
+                        location: 10..11,
+                    },
+                ],
+                location: 0..11,
+            })
+        );
+    }
+
+    #[test]
+    fn test_variable_reference_nested() {
+        let selection = JSONSelection::parse("a b { c: $this.x.y.z { d } }").unwrap();
+        let var_paths = selection.external_var_paths();
+        assert_eq!(var_paths.len(), 1);
+        assert_eq!(
+            var_paths[0].variable_reference(),
+            Some(VariableReference {
+                namespace: VariableNamespace {
+                    namespace: Namespace::This,
+                    location: 9..14
+                },
+                path: vec![
+                    VariablePathPart {
+                        part: Cow::from("x"),
+                        location: 15..16,
+                    },
+                    VariablePathPart {
+                        part: Cow::from("y"),
+                        location: 17..18,
+                    },
+                    VariablePathPart {
+                        part: Cow::from("z"),
+                        location: 19..20,
+                    },
+                ],
+                location: 9..20,
+            })
+        );
+    }
+
+    #[test]
+    fn test_external_var_paths_no_variable() {
+        let selection = JSONSelection::parse("a.b.c").unwrap();
+        let var_paths = selection.external_var_paths();
+        assert_eq!(var_paths.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_unknown_variable() {
+        assert_eq!(
+            JSONSelection::parse("a b { c: $foobar.x.y.z { d } }"),
+            Err(JSONSelectionParseError {
+                message: "Unknown variable".to_string(),
+                fragment: "$foobar.x.y.z { d } }".to_string(),
+                offset: 9,
+            })
         );
     }
 }

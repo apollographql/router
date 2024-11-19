@@ -21,7 +21,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSON;
 
-use crate::sources::connect::variable::parser;
+use crate::sources::connect::variable;
 use crate::sources::connect::variable::parser::VariableParseError;
 use crate::sources::connect::variable::Namespace;
 use crate::sources::connect::variable::VariableReference;
@@ -211,7 +211,7 @@ fn variable_reference(
     delimited(
         char('{'),
         |input| {
-            parser::variable_reference(input).map_err(|e| match e {
+            variable::parser::variable_reference(input).map_err(|e| match e {
                 nom::Err::Error(e) | nom::Err::Failure(e) => nom::Err::Failure(e.into()),
                 nom::Err::Incomplete(e) => nom::Err::Incomplete(e),
             })

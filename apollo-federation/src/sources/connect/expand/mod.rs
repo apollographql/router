@@ -222,6 +222,7 @@ mod helpers {
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::PathSelection;
     use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
     use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
@@ -765,7 +766,7 @@ mod helpers {
         selection
             .external_var_paths()
             .into_iter()
-            .flat_map(|var_path| var_path.var_name_and_nested_keys()?.try_into().ok())
+            .flat_map(PathSelection::variable_reference)
     }
 
     // TODO: contribute some code to `position.rs` to make those types more flexible rather than adding it here
