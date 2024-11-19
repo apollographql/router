@@ -492,6 +492,14 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        #[cfg(not(feature = "hyper_header_limits"))]
+        if self.limits.http1_max_request_headers.is_some() {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "'limits.http1_max_request_headers' requires 'hyper_header_limits' feature",
+                error: "enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'".to_string(),
+            });
+        }
+
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
