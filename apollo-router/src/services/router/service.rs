@@ -214,6 +214,11 @@ impl Service<RouterRequest> for RouterService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // This service eventually calls `QueryAnalysisLayer::parse_document()`
+        // which calls `compute_job::execute()`
+        if crate::compute_job::is_full() {
+            return Poll::Pending;
+        }
         Poll::Ready(Ok(()))
     }
 
