@@ -13,6 +13,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::Argument;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -1360,6 +1361,7 @@ where
                             bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                         };
                         let field_def = field_def.deref_mut().make_mut();
+                        let mut updated_arguments = vec![];
                         for (param_name, usage_entry) in last_parameter_to_context.iter() {
                             if !field_def
                                 .arguments
@@ -1373,16 +1375,21 @@ where
                                     description: None,
                                     directives: Default::default(),
                                 }));
+                                let push = updated_arguments.push(Node::new(Argument {
+                                    name: param_name.clone(),
+                                    value: Node::new(Value::Variable(
+                                        usage_entry.context_id.clone(),
+                                    )),
+                                }));
                             }
                         }
-                        *field = Field {
-                            schema: ValidFederationSchema::new(schema.validate()?)?,
-                            field_position: field.field_position.clone(),
-                            alias: field.alias.clone(),
-                            arguments: field.arguments.clone(),
-                            directives: field.directives.clone(),
-                            sibling_typename: field.sibling_typename.clone(),
-                        };
+                        field.schema = ValidFederationSchema::new(schema.validate()?)?;
+                        field.arguments = field
+                            .arguments
+                            .iter()
+                            .cloned()
+                            .chain(updated_arguments)
+                            .collect();
                     }
                 }
             }
