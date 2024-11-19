@@ -1701,6 +1701,7 @@ where
                     .enumerate()
                 {
                     let parent_type = trigger.get_field_parent_type();
+                    levels_in_query_path += 1;
                     if parent_type.is_some() {
                         levels_in_data_path += 1;
                     }
