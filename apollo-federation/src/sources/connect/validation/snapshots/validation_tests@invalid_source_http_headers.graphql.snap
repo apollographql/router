@@ -64,7 +64,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)` header 'content-type' can't be set dynamically, only via `value`",
+        message: "In `@source(http.headers:)` header 'content-type' can't be set with `from`, only with `value`",
         locations: [
             25:17..25:31,
         ],

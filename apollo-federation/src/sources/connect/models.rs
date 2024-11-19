@@ -310,7 +310,7 @@ impl<'a> Header<'a> {
         match (from, value) {
             (Some(_), None) if Self::is_static(&name) => {
                 Err(HeaderParseError::Other{ message: format!(
-                    "header '{name}' can't be set dynamically, only via `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
+                    "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
                 ), node: name_node})
             }
             (Some((_, from_node)), None) => {
