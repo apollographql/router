@@ -39,11 +39,11 @@ expression: response
               "id": null,
               "inputRewrites": null,
               "kind": "Fetch",
-              "operation": "query Query_fetch_dependent_failure__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+              "operation": "query Query_fetch_dependent_failure__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
               "operationKind": "query",
               "operationName": "Query_fetch_dependent_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "6bcaa7a2d52a416d5278eaef6be102427f328b6916075f193c87459516a7fb6d",
+              "schemaAwareHash": "6b659295c8e5aff7b3d7146b878e848b43ad58fba3f4dfce2988530631c3448a",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -69,7 +69,7 @@ expression: response
                 "id": null,
                 "inputRewrites": null,
                 "kind": "Fetch",
-                "operation": "query Query_fetch_dependent_failure__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+                "operation": "query Query_fetch_dependent_failure__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
                 "operationKind": "query",
                 "operationName": "Query_fetch_dependent_failure__Subgraph1__1",
                 "outputRewrites": null,
@@ -89,14 +89,13 @@ expression: response
                     "typeCondition": "U"
                   }
                 ],
-                "schemaAwareHash": "0e56752501c8cbf53429c5aa2df95765ea2c7cba95db9213ce42918699232651",
+                "schemaAwareHash": "3bc84712c95d01c4e9118cc1f8179e071662862a04cef56d39a0ac6a621daf36",
                 "serviceName": "Subgraph1",
                 "variableUsages": [
                   "contextualArgument_1_0"
                 ]
               },
               "path": [
-                "",
                 "t",
                 "u"
               ]
@@ -104,7 +103,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     },
     "valueCompletion": [
       {

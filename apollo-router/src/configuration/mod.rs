@@ -223,10 +223,10 @@ pub(crate) enum QueryPlannerMode {
     /// Falls back to `legacy` with a warning
     /// if the the new planner does not support the schema
     /// (such as using legacy Apollo Federation 1)
-    #[default]
     BothBestEffort,
     /// Use the new Rust-based implementation but fall back to the legacy one
     /// for supergraph schemas using legacy Apollo Federation 1.
+    #[default]
     NewBestEffort,
 }
 

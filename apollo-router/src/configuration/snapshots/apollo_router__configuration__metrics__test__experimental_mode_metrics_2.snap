@@ -7,4 +7,4 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          mode: both_best_effort
+          mode: new_best_effort
