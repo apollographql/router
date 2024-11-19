@@ -9,7 +9,7 @@ As an example, a news website might want to invalidate all cached articles linke
 To support a surrogate key system with the entity caching in the router, we make the following assumptions:
 
 - The subgraph returns surrogate keys with the response. The router will not manipulate those surrogate keys directly. Instead, it leaves that task to a coprocessor
-- The coprocessor tasked with managing surrogate keys will handle data deletion from Redis. To that end, it needs to know the mapping from surrogate keys to cache keys
+- The coprocessor tasked with managing surrogate keys will store the mapping from surrogate keys to cache keys. It will be useful to invalidate all cache keys related to a surrogate cache key in Redis.
 - The router will expose a way to gather the cache keys used in a subgraph request
 
 ### Router side support
