@@ -106,11 +106,7 @@ async fn aliased() {
     "###);
 }
 
-// FIXME: bellow test panic because of bug in query planner, failing with:
-// "value retrieval failed: empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction."
-// See: https://github.com/apollographql/router/issues/6154
 #[tokio::test]
-#[should_panic]
 async fn inside_inline_fragment() {
     let request = Request::fake_builder()
         .query("{ ... { __typename } }")
@@ -120,14 +116,13 @@ async fn inside_inline_fragment() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "n": "MyQuery"
+        "__typename": "MyQuery"
       }
     }
     "###);
 }
 
 #[tokio::test]
-#[should_panic] // See above FIXME
 async fn inside_fragment() {
     let query = r#"
        { ...SomeFragment }
@@ -141,14 +136,13 @@ async fn inside_fragment() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "n": "MyQuery"
+        "__typename": "MyQuery"
       }
     }
     "###);
 }
 
 #[tokio::test]
-#[should_panic] // See above FIXME
 async fn deeply_nested_inside_fragments() {
     let query = r#"
        { ...SomeFragment }
@@ -168,7 +162,7 @@ async fn deeply_nested_inside_fragments() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "n": "MyQuery"
+        "__typename": "MyQuery"
       }
     }
     "###);
@@ -215,6 +209,9 @@ async fn two_named_operations() {
 async fn make_request(request: Request) -> apollo_router::graphql::Response {
     apollo_router::TestHarness::builder()
         .configuration_json(json!({
+            "supergraph": {
+                "introspection": true,
+            },
             "include_subgraph_errors": {
                 "all": true,
             },
