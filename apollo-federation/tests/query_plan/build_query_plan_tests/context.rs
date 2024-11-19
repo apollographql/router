@@ -27,6 +27,13 @@
 //
 // How this needs to be ported remains to be seen...
 
+use std::sync::Arc;
+
+use apollo_compiler::Name;
+use apollo_federation::query_plan::{
+    FetchDataKeyRenamer, FetchDataPathElement, FetchDataRewrite, PlanNode, TopLevelPlanNode,
+};
+
 #[test]
 fn set_context_test_variable_is_from_same_subgraph() {
     let planner = planner!(
@@ -55,7 +62,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
       "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           t {
@@ -101,16 +108,34 @@ fn set_context_test_variable_is_from_same_subgraph() {
       }
         "###
     );
-    /* TODO: How should these be ported??
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'prop'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above");
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                            FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                    .unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+                                    FetchDataPathElement::Key(
+                                        Name::new("prop").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            }
+                        )),]
+                    );
+                }
+                _ => assert!(false, "failed to get fetch node"),
+            },
+            _ => assert!(false, "failed to get flatten node"),
+        },
+        _ => assert!(false, "failed to get sequence node"),
+    }
 }
 
 #[test]
@@ -143,7 +168,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
         }
       "#,
       );
-    assert_plan!(
+    let plan = assert_plan!(
             planner,
             r#"
         {
@@ -204,16 +229,34 @@ fn set_context_test_variable_is_from_different_subgraph() {
       }
     "###);
 
-    /* TODO: Port
-    expect((plan as any).node.nodes[2].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'prop'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above");
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(2) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                            FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                    .unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+                                    FetchDataPathElement::Key(
+                                        Name::new("prop").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            }
+                        )),]
+                    );
+                }
+                _ => assert!(false, "failed to get fetch node"),
+            },
+            _ => assert!(false, "failed to get flatten node"),
+        },
+        _ => assert!(false, "failed to get sequence node"),
+    }
 }
 
 #[test]
@@ -706,7 +749,7 @@ fn set_context_test_accesses_a_different_top_level_query() {
         "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           product {
@@ -748,16 +791,37 @@ fn set_context_test_accesses_a_different_top_level_query() {
       }
         "###
     );
-    /* TODO: Port
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', 'me', 'locale'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above")
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                            FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                    .unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::Key(
+                                        Name::new("me").unwrap(),
+                                        Default::default()
+                                    ),
+                                    FetchDataPathElement::Key(
+                                        Name::new("locale").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            }
+                        )),]
+                    );
+                }
+                _ => assert!(false, "failed to get fetch node"),
+            },
+            _ => assert!(false, "failed to get flatten node"),
+        },
+        _ => assert!(false, "failed to get sequence node"),
+    }
 }
 
 #[test]
