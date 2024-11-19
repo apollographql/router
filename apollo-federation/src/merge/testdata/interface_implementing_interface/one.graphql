@@ -81,12 +81,34 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
-type Itf @federation__interfaceObject @federation__key(fields: "id") {
-  c: Int!
-  d: Int!
-  id: ID!
+scalar _Any
+
+type _Service {
+  sdl: String
 }
 
 type Query {
-  itf(id: ID!): Itf
+  _service: _Service!
+  i: I
+}
+
+interface Node {
+  id: ID!
+}
+
+interface I implements Node {
+  id: ID!
+  i: String
+}
+
+type A implements I & Node {
+  id: ID!
+  i: String
+  a: String
+}
+
+type B implements I & Node {
+  id: ID!
+  i: String
+  b: String
 }

@@ -40,22 +40,43 @@ scalar join__FieldSet
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  CONNECTOR_QUERY_USER_0 @join__graph(name: "connector_Query_user_0", url: "")
-  CONNECTOR_QUERY_USERS_0 @join__graph(name: "connector_Query_users_0", url: "")
-  CONNECTOR_USER_D_1 @join__graph(name: "connector_User_d_1", url: "")
-  GRAPHQL @join__graph(name: "graphql", url: "")
+  INACCESSIBLE @join__graph(name: "inaccessible", url: "")
+  INACCESSIBLE_2 @join__graph(name: "inaccessible_2", url: "")
 }
 
-type User @join__type(graph: CONNECTOR_QUERY_USER_0, key: "id") @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1, key: "__typename") @join__type(graph: GRAPHQL, key: "id") {
-  id: ID! @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0) @join__field(graph: GRAPHQL)
-  a: String @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0)
-  b: String @join__field(graph: CONNECTOR_QUERY_USER_0)
-  c: String @join__field(graph: CONNECTOR_USER_D_1, external: true) @join__field(graph: GRAPHQL)
-  d: String @join__field(graph: CONNECTOR_USER_D_1, requires: "c")
+type Query @join__type(graph: INACCESSIBLE) @join__type(graph: INACCESSIBLE_2) {
+  a(
+    input: Input @inaccessible,
+  ): A @join__field(graph: INACCESSIBLE, type: "A")
+  b: B @inaccessible @join__field(graph: INACCESSIBLE, type: "B")
+  as: [A] @inaccessible @join__field(graph: INACCESSIBLE_2, type: "[A]")
 }
 
-type Query @join__type(graph: CONNECTOR_QUERY_USER_0) @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1) @join__type(graph: GRAPHQL) {
-  user(id: ID!): User @join__field(graph: CONNECTOR_QUERY_USER_0)
-  users(limit: Int): [User] @join__field(graph: CONNECTOR_QUERY_USERS_0)
-  _: ID @inaccessible @join__field(graph: CONNECTOR_USER_D_1)
+type A @join__type(graph: INACCESSIBLE, key: "id") @join__type(graph: INACCESSIBLE_2, key: "id") {
+  id: ID! @join__field(graph: INACCESSIBLE, type: "ID!") @join__field(graph: INACCESSIBLE_2, type: "ID!")
+  c: Int @inaccessible @join__field(graph: INACCESSIBLE, type: "Int") @join__field(graph: INACCESSIBLE_2, type: "Int")
+  d: Enum @inaccessible @join__field(graph: INACCESSIBLE, type: "Enum")
 }
+
+type B implements Interface @join__type(graph: INACCESSIBLE) @inaccessible @join__implements(graph: INACCESSIBLE, interface: "Interface") {
+  b: Scalar @join__field(graph: INACCESSIBLE, type: "Scalar")
+}
+
+enum Enum @join__type(graph: INACCESSIBLE) @inaccessible {
+  A @join__enumValue(graph: INACCESSIBLE)
+  B @join__enumValue(graph: INACCESSIBLE)
+  C @inaccessible @join__enumValue(graph: INACCESSIBLE)
+}
+
+input Input @join__type(graph: INACCESSIBLE) @inaccessible {
+  a: Int @inaccessible @join__field(graph: INACCESSIBLE, type: "Int")
+  b: String @join__field(graph: INACCESSIBLE, type: "String")
+}
+
+scalar Scalar @join__type(graph: INACCESSIBLE) @inaccessible
+
+interface Interface @join__type(graph: INACCESSIBLE) @inaccessible {
+  b: Scalar @inaccessible @join__field(graph: INACCESSIBLE, type: "Scalar")
+}
+
+union Union @join__type(graph: INACCESSIBLE) @inaccessible @join__unionMember(graph: INACCESSIBLE, member: "A") @join__unionMember(graph: INACCESSIBLE, member: "B") = A | B
