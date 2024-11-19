@@ -1,8 +1,15 @@
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
+use http::header;
 use http::HeaderName;
 use serde_json::Value;
 use url::Url;
@@ -16,8 +23,13 @@ use super::URLTemplate;
 use crate::error::FederationError;
 use crate::schema::ValidFederationSchema;
 use crate::sources::connect::header::HeaderValue;
+use crate::sources::connect::header::HeaderValueError;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
+use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpec;
 // --- Connector ---------------------------------------------------------------
 
@@ -229,9 +241,193 @@ impl HTTPMethod {
 
 #[derive(Clone, Debug)]
 pub enum HeaderSource {
-    From(String),
+    From(HeaderName),
     Value(HeaderValue<'static>),
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct Header<'a> {
+    pub(crate) name: HeaderName,
+    pub(crate) name_node: &'a Node<ast::Value>,
+    pub(crate) source: HeaderSource,
+    pub(crate) source_node: &'a Node<ast::Value>,
+}
+
+impl<'a> Header<'a> {
+    /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
+    pub(crate) fn from_headers_arg(
+        node: &'a Node<ast::Value>,
+    ) -> Vec<Result<Self, HeaderParseError>> {
+        if let Some(values) = node.as_list() {
+            values.iter().map(Self::from_single).collect()
+        } else if node.as_object().is_some() {
+            vec![Self::from_single(node)]
+        } else {
+            vec![Err(HeaderParseError::Other {
+                message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
+                node,
+            })]
+        }
+    }
+
+    /// Build a single [`Self`] from a single entry in the `headers` arg.
+    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError> {
+        let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
+            message: "the HTTP header mapping is not an object".to_string(),
+            node,
+        })?;
+        let name_node = mappings
+            .iter()
+            .find_map(|(name, value)| {
+                (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
+            })
+            .ok_or_else(|| HeaderParseError::Other {
+                message: format!("missing `{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` field"),
+                node,
+            })?;
+        let name = name_node
+            .as_str()
+            .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` is not a string"))
+            .and_then(|name_str| {
+                HeaderName::try_from(name_str)
+                    .map_err(|_| format!("the value `{name_str}` is an invalid HTTP header name"))
+            })
+            .map_err(|message| HeaderParseError::Other {
+                message,
+                node: name_node,
+            })?;
+
+        if Self::is_reserved(&name) {
+            return Err(HeaderParseError::Other {
+                message: format!("header '{name}' is reserved and cannot be set by a connector"),
+                node: name_node,
+            });
+        }
+
+        let from = mappings
+            .iter()
+            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME);
+        let value = mappings
+            .iter()
+            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
+
+        match (from, value) {
+            (Some(_), None) if Self::is_static(&name) => {
+                Err(HeaderParseError::Other{ message: format!(
+                    "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
+                ), node: name_node})
+            }
+            (Some((_, from_node)), None) => {
+                from_node.as_str()
+                    .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` is not a string"))
+                    .and_then(|from_str| {
+                        HeaderName::try_from(from_str).map_err(|_| {
+                            format!("the value `{from_str}` is an invalid HTTP header name")
+                        })
+                    })
+                    .map(|from| Self {
+                        name,
+                        name_node,
+                        source: HeaderSource::From(from),
+                        source_node: from_node,
+                    })
+                    .map_err(|message| HeaderParseError::Other{ message, node: from_node})
+            }
+            (None, Some((_, value_node))) => {
+                value_node
+                    .as_str()
+                    .ok_or_else(|| HeaderParseError::Other{ message: format!("`{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` field in HTTP header mapping must be a string"), node: value_node})
+                    .and_then(|value_str| {
+                        value_str
+                            .parse::<HeaderValue>()
+                            .map_err(|err| HeaderParseError::ValueError {err, node: value_node})
+                    })
+                    .map(|value| Self {
+                        name,
+                        name_node,
+                        source: HeaderSource::Value(value),
+                        source_node: value_node,
+                    })
+            }
+            (None, None) => {
+                Err(HeaderParseError::Other {
+                    message: format!("either `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` or `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` must be set"),
+                    node,
+                })
+            },
+            (Some((from_name, _)), Some((value_name, _))) => {
+                Err(HeaderParseError::ConflictingArguments {
+                    message: format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` and `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` can't be set at the same time"),
+                    from_location: from_name.location(),
+                    value_location: value_name.location(),
+                })
+            }
+        }
+    }
+
+    /// These headers are not allowed to be defined by connect directives at all.
+    /// Copied from Router's plugins::headers
+    /// Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
+    /// These are not propagated by default using a regex match as they will not make sense for the
+    /// second hop.
+    /// In addition, because our requests are not regular proxy requests content-type, content-length
+    /// and host are also in the exclude list.
+    fn is_reserved(header_name: &HeaderName) -> bool {
+        static KEEP_ALIVE: HeaderName = HeaderName::from_static("keep-alive");
+        matches!(
+            *header_name,
+            header::CONNECTION
+                | header::PROXY_AUTHENTICATE
+                | header::PROXY_AUTHORIZATION
+                | header::TE
+                | header::TRAILER
+                | header::TRANSFER_ENCODING
+                | header::UPGRADE
+                | header::CONTENT_LENGTH
+                | header::CONTENT_ENCODING
+                | header::HOST
+                | header::ACCEPT
+                | header::ACCEPT_ENCODING
+        ) || header_name == KEEP_ALIVE
+    }
+
+    /// These headers can be defined as static values in connect directives, but can't be
+    /// forwarded by the user.
+    fn is_static(header_name: &HeaderName) -> bool {
+        header::CONTENT_TYPE == *header_name
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum HeaderParseError<'a> {
+    ValueError {
+        err: HeaderValueError,
+        node: &'a Node<ast::Value>,
+    },
+    /// Both `value` and `from` are set
+    ConflictingArguments {
+        message: String,
+        from_location: Option<SourceSpan>,
+        value_location: Option<SourceSpan>,
+    },
+    Other {
+        message: String,
+        node: &'a Node<ast::Value>,
+    },
+}
+
+impl Display for HeaderParseError<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConflictingArguments { message, .. } | Self::Other { message, .. } => {
+                write!(f, "{}", message)
+            }
+            Self::ValueError { err, .. } => write!(f, "{err}"),
+        }
+    }
+}
+
+impl Error for HeaderParseError<'_> {}
 
 #[cfg(test)]
 mod tests {
@@ -318,12 +514,12 @@ mod tests {
                     method: Get,
                     headers: {
                         "authtoken": From(
-                            "X-Auth-Token",
+                            "x-auth-token",
                         ),
                         "user-agent": Value(
                             HeaderValue {
                                 parts: [
-                                    Text(
+                                    Constant(
                                         "Firefox",
                                     ),
                                 ],
@@ -428,12 +624,12 @@ mod tests {
                     method: Get,
                     headers: {
                         "authtoken": From(
-                            "X-Auth-Token",
+                            "x-auth-token",
                         ),
                         "user-agent": Value(
                             HeaderValue {
                                 parts: [
-                                    Text(
+                                    Constant(
                                         "Firefox",
                                     ),
                                 ],
