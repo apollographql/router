@@ -1663,10 +1663,12 @@ where
             == Some(self.edges.len() - 2))
     }
 
+    /*
     #[cfg_attr(
         feature = "snapshot_tracing",
         tracing::instrument(skip_all, level = "trace", name = "GraphPath::can_satisfy_conditions")
     )]
+    */
     fn can_satisfy_conditions(
         &self,
         edge: EdgeIndex,
@@ -1713,31 +1715,47 @@ where
                                 match &parent_type {
                                     CompositeTypeDefinitionPosition::Object(obj_pos) => {
                                         if let Ok(obj) = obj_pos.get(schema.schema()) {
-                                            if let Some(_) = obj.implements_interfaces.get(pos.type_name()) {
+                                            if let Some(_) =
+                                                obj.implements_interfaces.get(pos.type_name())
+                                            {
                                                 return true;
                                             }
                                         }
-                                    },
+                                    }
                                     CompositeTypeDefinitionPosition::Interface(iface_pos) => {
                                         if let Ok(iface) = iface_pos.get(schema.schema()) {
-                                            if let Some(_) = iface.implements_interfaces.get(pos.type_name()) {
+                                            if let Some(_) =
+                                                iface.implements_interfaces.get(pos.type_name())
+                                            {
                                                 return true;
                                             }
-                                        }                                    },
+                                        }
+                                    }
                                     CompositeTypeDefinitionPosition::Union(union_pos) => {
                                         if let Ok(un) = union_pos.get(schema.schema()) {
                                             if let Some(_) = un.members.get(pos.type_name()) {
                                                 return true;
                                             }
                                         }
-                                    },
+                                    }
                                 }
                                 false
                             });
                             if matches {
+                                println!("Looking for {} in subgraph {}", ctx.arg_type, ctx.subgraph_name);
+                                let schema = self.graph.schema_by_source(&ctx.subgraph_name)?;
                                 let selection_set = parse_field_set(
                                     schema,
-                                    ctx.arg_type.inner_named_type().clone(),
+                                    parent_type.type_name().clone(),
+                                    /*
+                                    ctx.argument_coordinate
+                                        .parent()
+                                        .get(schema.schema())
+                                        .unwrap()
+                                        .ty
+                                        .inner_named_type()
+                                        .clone(),
+                                    */
                                     &ctx.selection,
                                 )?
                                 .lazy_map(
