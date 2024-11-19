@@ -3,7 +3,6 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use indexmap::map::Entry;
 use petgraph::graph::EdgeIndex;
@@ -294,7 +293,7 @@ where
                     if let Some(other) = context_to_selection {
                         existing
                             .context_to_selection
-                            .get_or_insert_with(HashSet::default)
+                            .get_or_insert_with(Default::default)
                             .extend(other);
                     }
                     if let Some(other) = parameter_to_context {

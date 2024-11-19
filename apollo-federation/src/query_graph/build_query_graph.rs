@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashMap;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
@@ -1394,7 +1392,7 @@ impl FederatedQueryGraphBuilder {
     /// override condition of `false`, whereas the "to" subgraph will have an
     /// override condition of `true`.
     fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
-        let mut edge_to_conditions: HashMap<EdgeIndex, OverrideCondition> = Default::default();
+        let mut edge_to_conditions: IndexMap<EdgeIndex, OverrideCondition> = Default::default();
 
         fn collect_edge_condition(
             query_graph: &QueryGraph,
@@ -1402,7 +1400,7 @@ impl FederatedQueryGraphBuilder {
             target_field: &ObjectFieldDefinitionPosition,
             label: &str,
             condition: bool,
-            edge_to_conditions: &mut HashMap<EdgeIndex, OverrideCondition>,
+            edge_to_conditions: &mut IndexMap<EdgeIndex, OverrideCondition>,
         ) -> Result<(), FederationError> {
             let target_field = FieldDefinitionPosition::Object(target_field.clone());
             let subgraph_nodes = query_graph
@@ -1511,8 +1509,10 @@ impl FederatedQueryGraphBuilder {
             };
 
             // Collect data for @context
-            let mut context_name_to_types: HashMap<&str, HashSet<CompositeTypeDefinitionPosition>> =
-                HashMap::default();
+            let mut context_name_to_types: IndexMap<
+                &str,
+                IndexSet<CompositeTypeDefinitionPosition>,
+            > = Default::default();
             for object_def_pos in &context_refs.object_types {
                 let object = object_def_pos.get(subgraph.schema())?;
                 for dir in object.directives.get_all(&CONTEXT_DIRECTIVE_NAME) {
@@ -1571,7 +1571,7 @@ impl FederatedQueryGraphBuilder {
                         subgraph_name: subgraph_name.clone(),
                         argument_coordinate: object_field_arg.clone(),
                         types_with_context_set,
-                        named_parameter: object_field_arg.argument_name.as_str().to_owned(),
+                        named_parameter: object_field_arg.argument_name.to_owned(),
                         arg_type: input_value.ty.clone(),
                     };
                     coordinate_map
@@ -1615,16 +1615,21 @@ impl FederatedQueryGraphBuilder {
             .subgraphs()
             .filter_map(|(source, _)| subgraph_to_args.get_key_value(source))
             .map(|(source, args)| {
-                (
+                Ok::<_, FederationError>((
                     source.clone(),
                     args.iter()
                         .sorted()
                         .enumerate()
-                        .map(|(i, arg)| (arg.clone(), format!("contextualArgument__{source}_{i}")))
-                        .collect(),
-                )
+                        .map(|(i, arg)| {
+                            Ok::<_, FederationError>((
+                                arg.clone(),
+                                format!("contextualArgument__{source}_{i}").try_into()?,
+                            ))
+                        })
+                        .process_results(|r| r.collect())?,
+                ))
             })
-            .collect();
+            .process_results(|r| r.collect())?;
         self.base.query_graph.subgraph_to_args = subgraph_to_args;
 
         Ok(())

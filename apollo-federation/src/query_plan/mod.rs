@@ -88,8 +88,9 @@ pub struct FetchNode {
     /// received from a fetch (and before it is applied to the current in-memory results).
     pub output_rewrites: Vec<Arc<FetchDataRewrite>>,
     /// Similar to the other kinds of rewrites. This is a mechanism to convert a contextual path into
-    /// an argument to a resolver
-    pub context_rewrites: Vec<FetchDataRewrite>,
+    /// an argument to a resolver. Note value setters are currently unused here, but may be used in
+    /// the future.
+    pub context_rewrites: Vec<Arc<FetchDataRewrite>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -193,7 +194,7 @@ pub struct ConditionNode {
 ///
 /// A rewrite usually identifies some sub-part of the data and some action to perform on that
 /// sub-part.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, derive_more::From)]
 pub enum FetchDataRewrite {
     ValueSetter(FetchDataValueSetter),
     KeyRenamer(FetchDataKeyRenamer),
@@ -219,9 +220,10 @@ pub struct FetchDataKeyRenamer {
 }
 
 /// Vectors of this element match path(s) to a value in fetch data. Each element is (1) a key in
-/// object data, (2) _any_ index in array data (often serialized as `@`), or (3) a typename
-/// constraint on the object data at that point in the path(s) (a path should only match for objects
-/// whose `__typename` is the provided type).
+/// object data, (2) _any_ index in array data (often serialized as `@`), (3) a typename constraint
+/// on the object data at that point in the path(s) (a path should only match for objects whose
+/// `__typename` is the provided type), or (4) a parent indicator to move upwards one level in the
+/// object.
 ///
 /// It's possible for vectors of this element to match no paths in fetch data, e.g. if an object key
 /// doesn't exist, or if an object's `__typename` doesn't equal the provided one. If this occurs,
@@ -238,6 +240,7 @@ pub enum FetchDataPathElement {
     Key(Name, Conditions),
     AnyIndex(Conditions),
     TypenameEquals(Name),
+    Parent,
 }
 
 pub type Conditions = Vec<Name>;
