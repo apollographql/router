@@ -1060,17 +1060,16 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
     ) -> Result<ConditionResolution, FederationError> {
         let graph = &self.parameters.federated_query_graph;
         let head = graph.edge_endpoints(edge)?.0;
         // Note: `QueryPlanningTraversal::resolve` method asserts that the edge has conditions before
         //       calling this method.
-        let edge_conditions = graph
-            .edge_weight(edge)?
-            .conditions
-            .as_ref()
-            .unwrap()
-            .as_ref();
+        let edge_conditions = match extra_conditions {
+            Some(set) => set,
+            None => graph.edge_weight(edge)?.conditions.as_ref().unwrap(),
+        };
         let parameters = QueryPlanningParameters {
             head,
             head_must_be_root: graph.node_weight(head)?.is_root_node(),
@@ -1170,31 +1169,42 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
 impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
+    #[track_caller]
     fn resolve(
         &mut self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
     ) -> Result<ConditionResolution, FederationError> {
         // Invariant check: The edge must have conditions.
         let graph = &self.parameters.federated_query_graph;
         let edge_data = graph.edge_weight(edge)?;
         assert!(
-            edge_data.conditions.is_some(),
+            edge_data.conditions.is_some() || extra_conditions.is_some(),
             "Should not have been called for edge without conditions"
         );
 
-        let cache_result =
-            self.resolver_cache
-                .contains(edge, context, excluded_destinations, excluded_conditions);
+        let cache_result = self.resolver_cache.contains(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            // extra_conditions,
+        );
 
         if let ConditionResolutionCacheResult::Hit(cached_resolution) = cache_result {
             return Ok(cached_resolution);
         }
 
-        let resolution =
-            self.resolve_condition_plan(edge, context, excluded_destinations, excluded_conditions)?;
+        let resolution = self.resolve_condition_plan(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            extra_conditions,
+        )?;
         // See if this resolution is eligible to be inserted into the cache.
         if cache_result.is_miss() {
             self.resolver_cache

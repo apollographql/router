@@ -3967,7 +3967,7 @@ fn compute_nodes_for_op_path_element<'a>(
             let mut context_to_condition_nodes =
                 stack_item.context_to_condition_nodes.deref().clone();
             for context in context_to_selection {
-                context_to_condition_nodes[context] = condition_nodes.clone();
+                context_to_condition_nodes.insert(context.clone(), condition_nodes.clone());
             }
             updated.context_to_condition_nodes = Arc::new(context_to_condition_nodes);
         }
