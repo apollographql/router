@@ -23,6 +23,124 @@ macro_rules! make_handler {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
+
+    const FILE: &str = "Hello, world!";
+    const FILE_NAME: &str = "example.txt";
+
+    let request = Form::new()
+        .part(
+            "operations",
+            Part::text(
+                serde_json::json!({
+                    "query": "mutation SomeMutation($file: Upload) {
+                        file: singleUpload(file: $file) { filename body }
+                    }",
+                    "variables": { "file": null },
+                })
+                .to_string(),
+            ),
+        )
+        .part(
+            "map",
+            Part::text(serde_json::json!({ "0": ["variables.file"] }).to_string()),
+        )
+        .part("0", Part::text(FILE).file_name(FILE_NAME));
+
+    async fn subgraph_handler(
+        mut request: http::Request<hyper::Body>,
+    ) -> impl axum::response::IntoResponse {
+        let boundary = request
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| multer::parse_boundary(v.to_str().ok()?).ok())
+            .expect("subgraph request should have valid Content-Type header");
+        let mut multipart = multer::Multipart::new(request.body_mut(), boundary);
+
+        let operations_field = multipart
+            .next_field()
+            .await
+            .ok()
+            .flatten()
+            .expect("subgraph request should have valid `operations` field");
+        assert_eq!(operations_field.name(), Some("operations"));
+        let operations: helper::Operation =
+            serde_json::from_slice(&operations_field.bytes().await.unwrap()).unwrap();
+        insta::assert_json_snapshot!(operations, @r#"
+        {
+          "query": "mutation SomeMutation__uploads__0($file:Upload){file:singleUpload(file:$file){filename body}}",
+          "variables": {
+            "file": null
+          }
+        }
+        "#);
+
+        let map_field = multipart
+            .next_field()
+            .await
+            .ok()
+            .flatten()
+            .expect("subgraph request should have valid `map` field");
+        assert_eq!(map_field.name(), Some("map"));
+        let map: BTreeMap<String, Vec<String>> =
+            serde_json::from_slice(&map_field.bytes().await.unwrap()).unwrap();
+        insta::assert_json_snapshot!(map, @r#"
+        {
+          "0": [
+            "variables.file"
+          ]
+        }
+        "#);
+
+        let file_field = multipart
+            .next_field()
+            .await
+            .ok()
+            .flatten()
+            .expect("subgraph request should have file field");
+
+        (
+            http::StatusCode::OK,
+            axum::Json(serde_json::json!({
+                "data": {
+                    "file": {
+                        "filename": file_field.file_name().unwrap(),
+                        "body": file_field.text().await.unwrap(),
+                    },
+                }
+            })),
+        )
+    }
+
+    // Run the test
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG)
+        .handler(make_handler!(subgraph_handler))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|response| {
+            // FIXME: workaround to not update bellow snapshot if one of snapshots inside 'subgraph_handler' fails
+            // This would be fixed if subgraph shapshots are moved out of 'subgraph_handler'
+            assert_eq!(response.errors.len(), 0);
+
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file": {
+                  "filename": "example.txt",
+                  "body": "Hello, world!"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn it_uploads_a_single_file() -> Result<(), BoxError> {
     const FILE: &str = "Hello, world!";
     const FILE_NAME: &str = "example.txt";
@@ -1043,7 +1161,7 @@ mod helper {
         pub body: Option<String>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct Operation {
         // TODO: Can we verify that this is a valid graphql query?
         query: String,
@@ -1168,10 +1286,8 @@ mod helper {
             return Err(FileUploadError::UnexpectedFile);
         }
 
-        let field_name: String = map
-            .into_keys()
-            .take(1)
-            .next()
+        let (field_name, _) = map
+            .first_key_value()
             .ok_or(FileUploadError::MissingMapping)?;
 
         // Extract the single expected file
@@ -1181,7 +1297,7 @@ mod helper {
                 .await?
                 .ok_or(FileUploadError::MissingFile(field_name.clone()))?;
 
-            let file_name = f.file_name().unwrap_or(&field_name).to_string();
+            let file_name = f.file_name().unwrap_or(field_name).to_string();
             let body = f.bytes().await?;
 
             Upload {
