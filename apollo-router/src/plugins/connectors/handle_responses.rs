@@ -7,15 +7,15 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tracing::Span;
 
-use super::plugin::ConnectorDebugHttpRequest;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
-use crate::plugins::connectors::plugin::ConnectorContext;
-use crate::plugins::connectors::plugin::SelectionData;
+use crate::plugins::connectors::plugin::debug::ConnectorContext;
+use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
+use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;

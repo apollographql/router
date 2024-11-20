@@ -30,7 +30,7 @@ use crate::plugins::connectors::http::Request;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
-use crate::plugins::connectors::plugin::ConnectorContext;
+use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
