@@ -1001,7 +1001,7 @@ fn extract_interface_type_content(
                 }
             }
         }
-        
+
         let context = supergraph_schema
             .metadata()
             .and_then(|metadata| metadata.for_identity(&Identity::context_identity()))
@@ -1708,15 +1708,15 @@ fn insert_directive(
         CompositeTypeDefinitionPosition::Union(pos) => {
             pos.insert_directive(schema, directive.into())?;
             return Ok(());
-        },
+        }
         CompositeTypeDefinitionPosition::Object(pos) => {
             pos.insert_directive(schema, directive.into())?;
             return Ok(());
-        },
+        }
         CompositeTypeDefinitionPosition::Interface(pos) => {
             pos.insert_directive(schema, directive.into())?;
             return Ok(());
-        },
+        }
     }
 }
 
