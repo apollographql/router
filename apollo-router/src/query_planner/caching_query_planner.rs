@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
@@ -36,7 +35,6 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
@@ -49,7 +47,6 @@ use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
-use crate::Context;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -274,7 +271,7 @@ where
         let mut count = 0usize;
         let mut reused = 0usize;
         for WarmUpCachingQueryKey {
-            mut query,
+            query,
             operation_name,
             hash,
             metadata,
@@ -282,7 +279,6 @@ where
             config_mode: _,
         } in all_cache_keys
         {
-            let context = Context::new();
             let doc = match query_analysis
                 .parse_document(&query, operation_name.as_deref())
                 .await
@@ -340,25 +336,12 @@ where
                     }
                 };
 
-                let schema = self.schema.api_schema();
-                if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
-                    query = modified_query.to_string();
-                }
-
-                context.extensions().with_lock(|mut lock| {
-                    lock.insert::<ParsedDocument>(doc);
-                    lock.insert(caching_key.metadata)
-                });
-
-                let _ = context.insert(
-                    LABELS_TO_OVERRIDE_KEY,
-                    caching_key.plan_options.override_conditions.clone(),
-                );
-
                 let request = QueryPlannerRequest {
                     query,
                     operation_name,
-                    context: context.clone(),
+                    document: doc,
+                    metadata: caching_key.metadata,
+                    plan_options: caching_key.plan_options,
                 };
 
                 let res = match service.ready().await {
@@ -429,16 +412,16 @@ where
         let qp = self.clone();
         Box::pin(async move {
             let context = request.context.clone();
-            qp.plan(request).await.inspect(|response| {
+            qp.plan(request).await.inspect(|_response| {
                 if let Some(usage_reporting) = context
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
-                    let _ = response.context.insert(
+                    let _ = context.insert(
                         APOLLO_OPERATION_ID,
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
-                    let _ = response.context.insert(
+                    let _ = context.insert(
                         "apollo_operation_signature",
                         usage_reporting.stats_report_key.clone(),
                     );
@@ -516,20 +499,17 @@ where
             .await;
         if entry.is_first() {
             let query_planner::CachingRequest {
-                mut query,
+                query,
                 operation_name,
                 context,
             } = request;
 
-            let schema = self.schema.api_schema();
-            if let Ok(modified_query) = add_defer_labels(schema, &doc.ast) {
-                query = modified_query.to_string();
-            }
-
             let request = QueryPlannerRequest::builder()
                 .query(query)
                 .and_operation_name(operation_name)
-                .context(context)
+                .document(doc)
+                .metadata(caching_key.metadata)
+                .plan_options(caching_key.plan_options)
                 .build();
 
             // some clients might timeout and cancel the request before query planning is finished,
@@ -538,14 +518,22 @@ where
             // of restarting the query planner until another timeout
             tokio::task::spawn(
                 async move {
-                    let res = self.delegate.ready().await?.call(request).await;
+                    let service = match self.delegate.ready().await {
+                        Ok(service) => service,
+                        Err(error) => {
+                            let e = Arc::new(error);
+                            let err = e.clone();
+                            tokio::spawn(async move {
+                                entry.insert(Err(err)).await;
+                            });
+                            return Err(CacheResolverError::RetrievalError(e));
+                        }
+                    };
+
+                    let res = service.call(request).await;
 
                     match res {
-                        Ok(QueryPlannerResponse {
-                            content,
-                            context,
-                            errors,
-                        }) => {
+                        Ok(QueryPlannerResponse { content, errors }) => {
                             if let Some(content) = content.clone() {
                                 let can_cache = match &content {
                                     // Already cached in an introspection-specific, small-size,
@@ -560,6 +548,10 @@ where
                                     tokio::spawn(async move {
                                         entry.insert(Ok(content)).await;
                                     });
+                                } else {
+                                    tokio::spawn(async move {
+                                        entry.send(Ok(content)).await;
+                                    });
                                 }
                             }
 
@@ -569,11 +561,7 @@ where
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                                 });
                             }
-                            Ok(QueryPlannerResponse {
-                                content,
-                                context,
-                                errors,
-                            })
+                            Ok(QueryPlannerResponse { content, errors })
                         }
                         Err(error) => {
                             let e = Arc::new(error);
@@ -581,6 +569,11 @@ where
                             tokio::spawn(async move {
                                 entry.insert(Err(err)).await;
                             });
+                            if let Some(usage_reporting) = e.usage_reporting() {
+                                context.extensions().with_lock(|mut lock| {
+                                    lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
+                                });
+                            }
                             Err(CacheResolverError::RetrievalError(e))
                         }
                     }
@@ -607,29 +600,13 @@ where
                         });
                     }
 
-                    Ok(QueryPlannerResponse::builder()
-                        .content(content)
-                        .context(context)
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(content).build())
                 }
                 Err(error) => {
-                    match error.deref() {
-                        QueryPlannerError::PlanningErrors(pe) => {
-                            request.context.extensions().with_lock(|mut lock| {
-                                lock.insert::<Arc<UsageReporting>>(Arc::new(
-                                    pe.usage_reporting.clone(),
-                                ))
-                            });
-                        }
-                        QueryPlannerError::SpecError(e) => {
-                            request.context.extensions().with_lock(|mut lock| {
-                                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
-                                    stats_report_key: e.get_error_key().to_string(),
-                                    referenced_fields_by_type: HashMap::new(),
-                                }))
-                            });
-                        }
-                        _ => {}
+                    if let Some(usage_reporting) = error.usage_reporting() {
+                        context.extensions().with_lock(|mut lock| {
+                            lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
+                        });
                     }
 
                     Err(CacheResolverError::RetrievalError(error))
@@ -750,6 +727,7 @@ mod tests {
     use crate::spec::Query;
     use crate::spec::Schema;
     use crate::Configuration;
+    use crate::Context;
 
     mock! {
         #[derive(Debug)]
@@ -892,10 +870,7 @@ mod tests {
                     plan: Arc::new(query_plan),
                 };
 
-                Ok(QueryPlannerResponse::builder()
-                    .content(qp_content)
-                    .context(Context::new())
-                    .build())
+                Ok(QueryPlannerResponse::builder().content(qp_content).build())
             });
             planner
         });
@@ -929,15 +904,15 @@ mod tests {
             .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
 
         for _ in 0..5 {
-            assert!(planner
+            let _ = planner
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
                     context.clone(),
                 ))
                 .await
-                .unwrap()
-                .context
+                .unwrap();
+            assert!(context
                 .extensions()
                 .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>()));
         }
@@ -970,10 +945,7 @@ mod tests {
                         ),
                     };
 
-                    Ok(QueryPlannerResponse::builder()
-                        .content(qp_content)
-                        .context(Context::new())
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
                 });
                 planner
             });

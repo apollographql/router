@@ -22,7 +22,7 @@ async fn authenticated_request() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {
                     "representations": [
                         { "__typename": "User", "id":0 }
