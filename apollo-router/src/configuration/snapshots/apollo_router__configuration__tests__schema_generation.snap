@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1317,6 +1318,20 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
+        "http1_max_request_buf_size": {
+          "default": null,
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
+          "nullable": true,
+          "type": "string"
+        },
+        "http1_max_request_headers": {
+          "default": null,
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
@@ -1684,6 +1699,11 @@ expression: "&schema"
         "enabled": {
           "default": false,
           "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
           "type": "boolean"
         },
         "invalidation": {

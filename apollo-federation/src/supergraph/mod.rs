@@ -339,6 +339,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         .schema()
         .directive_definitions
         .values()
+        .filter(|directive| !directive.is_built_in())
         .filter_map(|directive_definition| {
             let executable_locations = directive_definition
                 .locations
