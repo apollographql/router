@@ -111,8 +111,11 @@ impl ConditionResolverCache {
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
-        // extra_conditions: Option<&SelectionSet>,
+        extra_conditions: Option<&SelectionSet>,
     ) -> ConditionResolutionCacheResult {
+        if extra_conditions.is_some() {
+            return ConditionResolutionCacheResult::NotApplicable
+        }
         // We don't cache if there is a context or excluded conditions because those would impact the resolution and
         // we don't want to cache a value per-context and per-excluded-conditions (we also don't cache per-excluded-edges though
         // instead we cache a value only for the first-see excluded edges; see above why that work in practice).
@@ -171,7 +174,8 @@ mod tests {
                 edge1,
                 &empty_context,
                 &empty_destinations,
-                &empty_conditions
+                &empty_conditions,
+                None
             )
             .is_miss());
 
@@ -186,7 +190,8 @@ mod tests {
                 edge1,
                 &empty_context,
                 &empty_destinations,
-                &empty_conditions
+                &empty_conditions,
+                None
             )
             .is_hit(),);
 
@@ -197,7 +202,8 @@ mod tests {
                 edge2,
                 &empty_context,
                 &empty_destinations,
-                &empty_conditions
+                &empty_conditions,
+                None
             )
             .is_miss());
     }

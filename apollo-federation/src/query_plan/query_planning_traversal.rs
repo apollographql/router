@@ -1191,7 +1191,7 @@ impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
             context,
             excluded_destinations,
             excluded_conditions,
-            // extra_conditions,
+            extra_conditions,
         );
 
         if let ConditionResolutionCacheResult::Hit(cached_resolution) = cache_result {
