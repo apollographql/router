@@ -36,6 +36,7 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 ## Removed features in GraphOS Router v2.x
 
 ### `--apollo-uplink-poll-interval`
+<!-- PR: https://github.com/apollographql/router/pull/6268 -->
 
 The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
 
