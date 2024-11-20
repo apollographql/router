@@ -9,11 +9,13 @@ use std::sync::atomic;
 use std::sync::Arc;
 
 use apollo_compiler::ast::InputValueDefinition;
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Argument;
+use apollo_compiler::schema::ComponentName;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -1708,47 +1710,69 @@ where
                     if !was_unsatisfied && !context_map.contains_key(&ctx.named_parameter) {
                         if let Some(parent_type) = parent_type {
                             let parent_type = parent_type.parent();
-                            let matches = ctx.types_with_context_set.iter().any(|pos| {
-                                if (pos.type_name() == parent_type.type_name()) {
-                                    return true;
+                            let subgraph_schema =
+                                self.graph.schema_by_source(&ctx.subgraph_name)?;
+                            let mut potential_matches: IndexSet<Name> = Default::default();
+                            ctx.types_with_context_set.iter().for_each(|pos| {
+                                if pos.type_name() == parent_type.type_name() {
+                                    potential_matches.insert(parent_type.type_name().clone());
+                                    ()
                                 }
-                                match &parent_type {
+                                match &pos {
                                     CompositeTypeDefinitionPosition::Object(obj_pos) => {
-                                        if let Ok(obj) = obj_pos.get(schema.schema()) {
-                                            if let Some(_) =
-                                                obj.implements_interfaces.get(pos.type_name())
-                                            {
-                                                return true;
-                                            }
+                                        if let Ok(obj) = obj_pos.get(subgraph_schema.schema()) {
+                                            obj.implements_interfaces
+                                                .iter()
+                                                .filter(|item| {
+                                                    &item.name == parent_type.type_name()
+                                                })
+                                                .for_each(|item| {
+                                                    potential_matches.insert(item.name.clone());
+                                                });
                                         }
                                     }
                                     CompositeTypeDefinitionPosition::Interface(iface_pos) => {
-                                        if let Ok(iface) = iface_pos.get(schema.schema()) {
-                                            if let Some(_) =
-                                                iface.implements_interfaces.get(pos.type_name())
-                                            {
-                                                return true;
-                                            }
+                                        if let Ok(iface) = iface_pos.get(subgraph_schema.schema()) {
+                                            iface
+                                                .implements_interfaces
+                                                .iter()
+                                                .filter(|item| {
+                                                    &item.name == parent_type.type_name()
+                                                })
+                                                .for_each(|item| {
+                                                    potential_matches.insert(iface.name.clone());
+                                                });
                                         }
                                     }
                                     CompositeTypeDefinitionPosition::Union(union_pos) => {
-                                        if let Ok(un) = union_pos.get(schema.schema()) {
-                                            if let Some(_) = un.members.get(pos.type_name()) {
-                                                return true;
-                                            }
+                                        if let Ok(un) = union_pos.get(subgraph_schema.schema()) {
+                                            un.members
+                                                .iter()
+                                                .filter(|item| {
+                                                    &item.name == parent_type.type_name()
+                                                })
+                                                .for_each(|item| {
+                                                    potential_matches.insert(un.name.clone());
+                                                });
                                         }
                                     }
                                 }
-                                false
+                                ()
                             });
-                            if matches {
-                                let schema = self.graph.schema_by_source(&ctx.subgraph_name)?;
-                                let selection_set = parse_field_set(
-                                    schema,
-                                    parent_type.type_name().clone(),
-                                    &ctx.selection,
-                                )?
-                                .lazy_map(
+                            
+                            // get the selection set for the first match that parses
+                            let selection_set =
+                                potential_matches.iter().find_map(|parent_type_name| {
+                                    parse_field_set(
+                                        subgraph_schema,
+                                        parent_type_name.clone(),
+                                        &ctx.selection,
+                                    )
+                                    .ok()
+                                });
+
+                            if let Some(selection_set) = selection_set {
+                                selection_set.lazy_map(
                                     &NamedFragments::default(),
                                     |selection| {
                                         if let OpPathElement::InlineFragment(fragment) =
@@ -1758,7 +1782,7 @@ where
                                                 obj,
                                             )) = &fragment.type_condition_position
                                             {
-                                                if !schema
+                                                if !subgraph_schema
                                                     .possible_runtime_types(parent_type.clone())?
                                                     .contains(obj)
                                                 {
@@ -1807,6 +1831,8 @@ where
                                         was_unsatisfied = true
                                     }
                                 }
+                            } else {
+                                internal_error!("Could not parse selection {} over any types {:?}", &ctx.selection, potential_matches);
                             }
                         }
                     }

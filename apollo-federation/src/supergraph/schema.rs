@@ -101,7 +101,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
     directive @federation__fromContext(field: String) on ARGUMENT_DEFINITION
 
-    directive @federation__context(name: String) repeatable on INTERFACE | OBJECT
+    directive @federation__context(name: String) repeatable on INTERFACE | OBJECT | UNION
     
     scalar federation__FieldSet
 
