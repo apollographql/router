@@ -326,14 +326,17 @@ impl NamedSelection {
         let (remainder, (alias_opt, path)) =
             tuple((opt(Alias::parse), PathSelection::parse))(input)?;
 
-        if alias_opt.is_none() && !path.has_subselection() {
-            Err(nom_fail_message(
-                input,
-                "Named path selection must either begin with alias or end with subselection",
-            ))
-        } else {
-            Ok((remainder, Self::Path(alias_opt, path)))
-        }
+        // TODO Make this check depend on the static output shape of the path
+        // (i.e. that it must be an object).
+        // if alias_opt.is_none() && !path.has_subselection() {
+        //     Err(nom_fail_message(
+        //         input,
+        //         "Named path selection must either begin with alias or end with subselection",
+        //     ))
+        // } else {
+        //     Ok((remainder, Self::Path(alias_opt, path)))
+        // }
+        Ok((remainder, Self::Path(alias_opt, path)))
     }
 
     fn parse_group(input: Span) -> ParseResult<Self> {
@@ -476,6 +479,7 @@ impl PathSelection {
         }
     }
 
+    #[allow(unused)]
     pub(super) fn has_subselection(&self) -> bool {
         self.path.has_subselection()
     }
