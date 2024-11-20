@@ -66,6 +66,14 @@ During upgrade, carefully monitor logs and resource consumption to ensure that y
 
 For example, you may decide that you wish to change the way in which you sample OTLP traces in this new release and not simply preserve your existing configuration.
 
+## Removed from Router v2.x
+
+### Support for Scaffold
+
+In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
+
+Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
+
 ## Reporting upgrade issues
 
 If you encounter an upgrade issue that isn't resolved by this article, please search for existing [GitHub discussions](https://github.com/apollographql/router/discussions/) and start a new discussion if you don't find what you're looking for.
