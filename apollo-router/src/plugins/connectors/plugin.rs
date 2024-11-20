@@ -119,20 +119,18 @@ impl Plugin for Connectors {
                                     })
                                 {
                                     let (parts, stream) = res.response.into_parts();
-                                    let (mut first, rest) = stream.into_future().await;
 
-                                    if let Some(first) = &mut first {
-                                        if let Some(inner) = Arc::into_inner(debug) {
-                                            first.extensions.insert(
+                                    let stream = stream.map(move |mut chunk| {
+                                        let serialized = { &debug.lock().clone().serialize() };
+                                        chunk.extensions.insert(
                                             CONNECTORS_DEBUG_KEY,
-                                                json!({"version": "1", "data": inner.into_inner().serialize() }),
+                                            json!({"version": "1", "data": serialized }),
                                         );
-                                        }
-                                    }
-                                    res.response = http::Response::from_parts(
-                                        parts,
-                                        once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-                                    );
+                                        chunk
+                                    });
+
+                                    res.response =
+                                        http::Response::from_parts(parts, Box::pin(stream));
                                 }
                             }
 
