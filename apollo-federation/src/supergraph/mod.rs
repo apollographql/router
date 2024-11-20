@@ -1001,7 +1001,7 @@ fn extract_interface_type_content(
                 }
             }
         }
-        
+
         let context = supergraph_schema
             .metadata()
             .and_then(|metadata| metadata.for_identity(&Identity::context_identity()))
@@ -1699,33 +1699,34 @@ lazy_static! {
     };
 }
 
+fn insert_directive(
+    schema: &mut FederationSchema,
+    pos: &CompositeTypeDefinitionPosition,
+    directive: Component<Directive>,
+) -> Result<(), FederationError> {
+    match pos {
+        CompositeTypeDefinitionPosition::Union(pos) => {
+            pos.insert_directive(schema, directive.into())?;
+            return Ok(());
+        }
+        CompositeTypeDefinitionPosition::Object(pos) => {
+            pos.insert_directive(schema, directive.into())?;
+            return Ok(());
+        }
+        CompositeTypeDefinitionPosition::Interface(pos) => {
+            pos.insert_directive(schema, directive.into())?;
+            return Ok(());
+        }
+    }
+}
+
 trait CompositeType {
     fn directives(&self) -> &DirectiveList;
-    fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        pos: &CompositeTypeDefinitionPosition,
-        directive: Component<Directive>,
-    ) -> Result<(), FederationError>;
 }
 
 impl CompositeType for UnionType {
     fn directives(&self) -> &DirectiveList {
         &self.directives
-    }
-    fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        pos: &CompositeTypeDefinitionPosition,
-        directive: Component<Directive>,
-    ) -> Result<(), FederationError> {
-        match pos {
-            CompositeTypeDefinitionPosition::Union(pos) => {
-                pos.insert_directive(schema, directive.into())?;
-                return Ok(());
-            }
-            _ => Err(internal_error!("an error")),
-        }
     }
 }
 
@@ -1733,39 +1734,11 @@ impl CompositeType for ObjectType {
     fn directives(&self) -> &DirectiveList {
         &self.directives
     }
-    fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        pos: &CompositeTypeDefinitionPosition,
-        directive: Component<Directive>,
-    ) -> Result<(), FederationError> {
-        match pos {
-            CompositeTypeDefinitionPosition::Object(pos) => {
-                pos.insert_directive(schema, directive.into())?;
-                Ok(())
-            }
-            _ => Err(internal_error!("an error")),
-        }
-    }
 }
 
 impl CompositeType for InterfaceType {
     fn directives(&self) -> &DirectiveList {
         &self.directives
-    }
-    fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        pos: &CompositeTypeDefinitionPosition,
-        directive: Component<Directive>,
-    ) -> Result<(), FederationError> {
-        match pos {
-            CompositeTypeDefinitionPosition::Interface(pos) => {
-                pos.insert_directive(schema, directive.into())?;
-                Ok(())
-            }
-            _ => Err(internal_error!("an error")),
-        }
     }
 }
 
@@ -1825,7 +1798,7 @@ where
                 })?;
                 let context_directive = federation_spec_definition
                     .context_directive(&subgraph.schema, context_in_subgraph.to_string())?;
-                ty.insert_directive(&mut subgraph.schema, pos, context_directive.into())?;
+                insert_directive(&mut subgraph.schema, pos, context_directive.into())?;
                 Ok(())
             },
         )?;
