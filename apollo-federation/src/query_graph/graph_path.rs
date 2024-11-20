@@ -13,6 +13,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::Argument;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -1334,7 +1335,9 @@ where
                     bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                 };
                 let field_def = field_def.deref_mut().make_mut();
-                for (param_name, usage_entry) in last_parameter_to_context.iter() {
+                let mut updated_field_arguments = vec![];
+                let mut updated_field_def_arguments = vec![];
+                for (param_name, usage_entry) in last_parameter_to_context {
                     if !field_def
                         .arguments
                         .iter()
@@ -1359,32 +1362,28 @@ where
                         else {
                             bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
                         };
-                        let field_def = field_def.deref_mut().make_mut();
-                        for (param_name, usage_entry) in last_parameter_to_context.iter() {
-                            if !field_def
-                                .arguments
-                                .iter()
-                                .any(|arg| arg.name.as_str() == param_name.as_str())
-                            {
-                                field_def.arguments.push(Node::new(InputValueDefinition {
-                                    name: Name::new(usage_entry.context_id.as_str())?,
-                                    ty: usage_entry.subgraph_arg_type.clone(),
-                                    default_value: None,
-                                    description: None,
-                                    directives: Default::default(),
-                                }));
-                            }
-                        }
-                        *field = Field {
-                            schema: ValidFederationSchema::new(schema.validate()?)?,
-                            field_position: field.field_position.clone(),
-                            alias: field.alias.clone(),
-                            arguments: field.arguments.clone(),
-                            directives: field.directives.clone(),
-                            sibling_typename: field.sibling_typename.clone(),
-                        };
+
+                        updated_field_def_arguments.push(Node::new(InputValueDefinition {
+                            name: usage_entry.context_id.clone(),
+                            ty: usage_entry.subgraph_arg_type.clone(),
+                            default_value: None,
+                            description: None,
+                            directives: Default::default(),
+                        }));
+                        let push = updated_field_arguments.push(Node::new(Argument {
+                            name: param_name.clone(),
+                            value: Node::new(Value::Variable(usage_entry.context_id.clone())),
+                        }));
                     }
                 }
+                field_def.arguments.extend(updated_field_def_arguments);
+                field.schema = ValidFederationSchema::new(schema.validate()?)?;
+                field.arguments = field
+                    .arguments
+                    .iter()
+                    .cloned()
+                    .chain(updated_field_arguments)
+                    .collect();
             }
         }
 
@@ -1663,10 +1662,12 @@ where
             == Some(self.edges.len() - 2))
     }
 
+    /*
     #[cfg_attr(
         feature = "snapshot_tracing",
         tracing::instrument(skip_all, level = "trace", name = "GraphPath::can_satisfy_conditions")
     )]
+    */
     fn can_satisfy_conditions(
         &self,
         edge: EdgeIndex,
@@ -1699,6 +1700,7 @@ where
                     .enumerate()
                 {
                     let parent_type = trigger.get_field_parent_type();
+                    levels_in_query_path += 1;
                     if parent_type.is_some() {
                         levels_in_data_path += 1;
                     }
@@ -1706,11 +1708,44 @@ where
                     if !was_unsatisfied && !context_map.contains_key(&ctx.named_parameter) {
                         if let Some(parent_type) = parent_type {
                             let parent_type = parent_type.parent();
-                            let matches = ctx.types_with_context_set.iter().all(|ty| todo!());
+                            let matches = ctx.types_with_context_set.iter().any(|pos| {
+                                if (pos.type_name() == parent_type.type_name()) {
+                                    return true;
+                                }
+                                match &parent_type {
+                                    CompositeTypeDefinitionPosition::Object(obj_pos) => {
+                                        if let Ok(obj) = obj_pos.get(schema.schema()) {
+                                            if let Some(_) =
+                                                obj.implements_interfaces.get(pos.type_name())
+                                            {
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                    CompositeTypeDefinitionPosition::Interface(iface_pos) => {
+                                        if let Ok(iface) = iface_pos.get(schema.schema()) {
+                                            if let Some(_) =
+                                                iface.implements_interfaces.get(pos.type_name())
+                                            {
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                    CompositeTypeDefinitionPosition::Union(union_pos) => {
+                                        if let Ok(un) = union_pos.get(schema.schema()) {
+                                            if let Some(_) = un.members.get(pos.type_name()) {
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                                false
+                            });
                             if matches {
+                                let schema = self.graph.schema_by_source(&ctx.subgraph_name)?;
                                 let selection_set = parse_field_set(
                                     schema,
-                                    ctx.arg_type.inner_named_type().clone(),
+                                    parent_type.type_name().clone(),
                                     &ctx.selection,
                                 )?
                                 .lazy_map(
@@ -1739,6 +1774,7 @@ where
                                     context,
                                     excluded_destinations,
                                     excluded_conditions,
+                                    Some(&selection_set),
                                 )?;
                                 let Some(arg_indices) =
                                     self.graph.subgraph_to_arg_indices.get(&ctx.subgraph_name)
@@ -1776,6 +1812,41 @@ where
                     }
                 }
             }
+
+            if edge_weight
+                .required_contexts
+                .iter()
+                .any(|ctx| !context_map.contains_key(&ctx.named_parameter))
+            {
+                debug!("@fromContext requires a context that is not set in graph path");
+                return Ok(ConditionResolution::Unsatisfied {
+                    reason: Some(UnsatisfiedConditionReason::NoSetContext),
+                });
+            }
+
+            if was_unsatisfied {
+                debug!("@fromContext selection set is unsatisfied");
+                return Ok(ConditionResolution::Unsatisfied { reason: None });
+            }
+
+            // it's possible that we will need to create a new fetch group at this point, in which
+            // case we'll need to collect the keys to jump back to this object as a precondition
+            // for satisfying it.
+            let (edge_head, _) = self.graph.edge_endpoints(edge)?;
+            if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
+                debug!("Post-context conditions cannot be satisfied");
+                return Ok(ConditionResolution::Unsatisfied {
+                    reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
+                });
+            }
+
+            if edge_weight.conditions.is_none() {
+                return Ok(ConditionResolution::Satisfied {
+                    cost: total_cost,
+                    path_tree: None,
+                    context_map: Some(context_map),
+                });
+            }
         }
 
         /* Resolve all other conditions */
@@ -1786,6 +1857,7 @@ where
             context,
             excluded_destinations,
             excluded_conditions,
+            None,
         )?;
         if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
             if matches!(

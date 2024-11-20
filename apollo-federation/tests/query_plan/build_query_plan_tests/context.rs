@@ -27,6 +27,13 @@
 //
 // How this needs to be ported remains to be seen...
 
+use std::sync::Arc;
+
+use apollo_compiler::Name;
+use apollo_federation::query_plan::{
+    FetchDataKeyRenamer, FetchDataPathElement, FetchDataRewrite, PlanNode, TopLevelPlanNode,
+};
+
 #[test]
 fn set_context_test_variable_is_from_same_subgraph() {
     let planner = planner!(
@@ -55,7 +62,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
       "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           t {
@@ -92,7 +99,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -101,16 +108,34 @@ fn set_context_test_variable_is_from_same_subgraph() {
       }
         "###
     );
-    /* TODO: How should these be ported??
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'prop'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above");
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                            FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                    .unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+                                    FetchDataPathElement::Key(
+                                        Name::new("prop").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            }
+                        )),]
+                    );
+                }
+                _ => assert!(false, "failed to get fetch node"),
+            },
+            _ => assert!(false, "failed to get flatten node"),
+        },
+        _ => assert!(false, "failed to get sequence node"),
+    }
 }
 
 #[test]
@@ -143,7 +168,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
         }
       "#,
       );
-    assert_plan!(
+    let plan = assert_plan!(
             planner,
             r#"
         {
@@ -195,7 +220,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -204,16 +229,34 @@ fn set_context_test_variable_is_from_different_subgraph() {
       }
     "###);
 
-    /* TODO: Port
-    expect((plan as any).node.nodes[2].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'prop'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above");
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(2) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                            FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                    .unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+                                    FetchDataPathElement::Key(
+                                        Name::new("prop").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            }
+                        )),]
+                    );
+                }
+                _ => assert!(false, "failed to get fetch node"),
+            },
+            _ => assert!(false, "failed to get flatten node"),
+        },
+        _ => assert!(false, "failed to get sequence node"),
+    }
 }
 
 #[test]
@@ -231,7 +274,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
         type U @key(fields: "id") {
           id: ID!
         }
-      '#,
+      "#,
       Subgraph2: r#"
         type Query {
           a: Int!
@@ -249,7 +292,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
       "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           t {
@@ -285,7 +328,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_2_0)
+                  field(a: $contextualArgument__Subgraph2_0)
                 }
               }
             },
@@ -294,17 +337,34 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
       }
         "###
     );
-
-    /* TODO: Port
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'prop'],
-        renameKeyTo: 'contextualArgument_2_0',
+    match plan.node {
+      Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+          Some(PlanNode::Flatten(node)) => match &*node.node {
+              PlanNode::Fetch(node) => {
+                  assert_eq!(
+                      node.context_rewrites,
+                      vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                          FetchDataKeyRenamer {
+                              rename_key_to: Name::new("contextualArgument__Subgraph2_0")
+                                  .unwrap(),
+                              path: vec![
+                                  FetchDataPathElement::Parent,
+                                  FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+                                  FetchDataPathElement::Key(
+                                      Name::new("prop").unwrap(),
+                                      Default::default()
+                                  ),
+                              ],
+                          }
+                      )),]
+                  );
+              }
+              _ => assert!(false, "failed to get fetch node"),
+          },
+          _ => assert!(false, "failed to get flatten node"),
       },
-    ]);
-    */
-    todo!("See the comment above");
+      _ => assert!(false, "failed to get sequence node"),
+  }
 }
 
 #[test]
@@ -321,7 +381,7 @@ fn set_context_test_variable_is_a_list() {
         }
         type U @key(fields: "id") {
           id: ID!
-          field(a: [String]! @fromContext(field: "$context { prop }")): Int!
+          field(a: [String] @fromContext(field: "$context { prop }")): Int!
         }
         "#,
       Subgraph2: r#"
@@ -384,7 +444,7 @@ fn set_context_test_fetched_as_a_list() {
         "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           t {
@@ -421,7 +481,7 @@ fn set_context_test_fetched_as_a_list() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -430,16 +490,34 @@ fn set_context_test_fetched_as_a_list() {
       }
         "###
     );
-    /* TODO: Port
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'prop'],
-        renameKeyTo: 'contextualArgument_1_0',
+    match plan.node {
+      Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+          Some(PlanNode::Flatten(node)) => match &*node.node {
+              PlanNode::Fetch(node) => {
+                  assert_eq!(
+                      node.context_rewrites,
+                      vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                          FetchDataKeyRenamer {
+                              rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                  .unwrap(),
+                              path: vec![
+                                  FetchDataPathElement::Parent,
+                                  FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+                                  FetchDataPathElement::Key(
+                                      Name::new("prop").unwrap(),
+                                      Default::default()
+                                  ),
+                              ],
+                          }
+                      )),]
+                  );
+              }
+              _ => assert!(false, "failed to get fetch node"),
+          },
+          _ => assert!(false, "failed to get flatten node"),
       },
-    ]);
-    */
-    todo!("See the comment above")
+      _ => assert!(false, "failed to get sequence node"),
+  }
 }
 
 #[test]
@@ -521,7 +599,7 @@ fn set_context_test_impacts_on_query_planning() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -647,7 +725,7 @@ fn set_context_test_with_type_conditions_for_union() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -706,7 +784,7 @@ fn set_context_test_accesses_a_different_top_level_query() {
         "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           product {
@@ -739,7 +817,7 @@ fn set_context_test_accesses_a_different_top_level_query() {
               } =>
               {
                 ... on Product {
-                  price(locale: $contextualArgument_1_0)
+                  price(locale: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -748,16 +826,37 @@ fn set_context_test_accesses_a_different_top_level_query() {
       }
         "###
     );
-    /* TODO: Port
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', 'me', 'locale'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above")
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                            FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                    .unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::Key(
+                                        Name::new("me").unwrap(),
+                                        Default::default()
+                                    ),
+                                    FetchDataPathElement::Key(
+                                        Name::new("locale").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            }
+                        )),]
+                    );
+                }
+                _ => assert!(false, "failed to get fetch node"),
+            },
+            _ => assert!(false, "failed to get flatten node"),
+        },
+        _ => assert!(false, "failed to get sequence node"),
+    }
 }
 
 #[test]
@@ -820,7 +919,7 @@ fn set_context_variable_is_a_list() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -966,7 +1065,7 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  field(a: $contextualArgument__Subgraph1_0)
                 }
               }
             },
@@ -1045,7 +1144,7 @@ fn set_context_test_before_key_resolution_transition() {
         @r###"
       QueryPlan {
         Sequence {
-          Fetch(service: "subgraph1") {
+          Fetch(service: "Subgraph1") {
             {
               customer {
                 __typename
@@ -1060,7 +1159,7 @@ fn set_context_test_before_key_resolution_transition() {
             }
           },
           Flatten(path: "customer.child") {
-            Fetch(service: "subgraph2") {
+            Fetch(service: "Subgraph2") {
               {
                 ... on Child {
                   __typename
@@ -1069,7 +1168,7 @@ fn set_context_test_before_key_resolution_transition() {
               } =>
               {
                 ... on Child {
-                  prop(legacyUserId: $contextualArgument_2_0)
+                  prop(legacyUserId: $contextualArgument__Subgraph2_0)
                 }
               }
             },
@@ -1178,7 +1277,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
         @r###"
       QueryPlan {
         Sequence {
-          Fetch(service: "sg2") {
+          Fetch(service: "Subgraph2") {
             {
               customer {
                 __typename
@@ -1191,7 +1290,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
             }
           },
           Flatten(path: "customer") {
-            Fetch(service: "sg3") {
+            Fetch(service: "Subgraph3") {
               {
                 ... on Customer {
                   __typename
@@ -1201,7 +1300,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
               {
                 ... on Customer {
                   accounts {
-                    foo(ctx_id5: $contextualArgument_3_0, ctx_mid: $contextualArgument_3_1) {
+                    foo(ctx_id5: $contextualArgument__Subgraph3_0, ctx_mid: $contextualArgument__Subgraph3_1) {
                       id
                     }
                   }
