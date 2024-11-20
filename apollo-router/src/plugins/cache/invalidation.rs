@@ -259,4 +259,12 @@ impl InvalidationRequest {
             | InvalidationRequest::Entity { subgraph, .. } => subgraph,
         }
     }
+
+    pub(super) fn kind(&self) -> &'static str {
+        match self {
+            InvalidationRequest::Subgraph { .. } => "subgraph",
+            InvalidationRequest::Type { .. } => "type",
+            InvalidationRequest::Entity { .. } => "entity",
+        }
+    }
 }

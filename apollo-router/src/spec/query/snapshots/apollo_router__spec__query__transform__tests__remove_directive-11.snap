@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/spec/query/transform.rs
+expression: "TestResult { query, result }"
+---
+query:
+
+            query Test($a: String, $b: String) {
+                ... @hasArg(arg: $a) {
+                  c @remove
+                }
+                ... @hasArg(arg: $b) {
+                  test: c
+                }
+                c
+            }
+            
+filtered:
+query Test($b: String) {
+  ... @hasArg(arg: $b) {
+    test: c
+  }
+  c
+}

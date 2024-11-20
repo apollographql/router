@@ -10,7 +10,10 @@ expression: response
       "path": [
         "t",
         "u"
-      ]
+      ],
+      "extensions": {
+        "service": "Subgraph2"
+      }
     }
   ],
   "extensions": {
@@ -160,7 +163,7 @@ expression: response
         ]
       },
       {
-        "message": "Cannot return null for non-nullable field T!.t",
+        "message": "Cannot return null for non-nullable field Query.t",
         "path": [
           "t"
         ]

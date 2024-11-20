@@ -16,7 +16,10 @@ expression: response
       "path": [
         "t",
         "u"
-      ]
+      ],
+      "extensions": {
+        "service": "Subgraph1"
+      }
     }
   ],
   "extensions": {

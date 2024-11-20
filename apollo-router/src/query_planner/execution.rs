@@ -139,7 +139,7 @@ impl PlanNode {
                                 )
                                 .in_current_span()
                                 .await;
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -167,7 +167,7 @@ impl PlanNode {
                             .collect();
 
                         while let Some((v, err)) = stream.next().in_current_span().await {
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -305,12 +305,14 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
 
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         } else {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
+                            // primary response should be an empty object
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -331,11 +333,6 @@ impl PlanNode {
                         let v = parameters
                             .query
                             .variable_value(
-                                parameters
-                                    .supergraph_request
-                                    .body()
-                                    .operation_name
-                                    .as_deref(),
                                 condition.as_str(),
                                 &parameters.supergraph_request.body().variables,
                             )
@@ -356,7 +353,7 @@ impl PlanNode {
                                         "otel.kind" = "INTERNAL"
                                     ))
                                     .await;
-                                value.deep_merge(v);
+                                value.type_aware_deep_merge(v, parameters.schema);
                                 errors.extend(err.into_iter());
                             } else if current_dir.is_empty() {
                                 // If the condition is on the root selection set and it's the only one
@@ -376,7 +373,7 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
                         } else if current_dir.is_empty() {
                             // If the condition is on the root selection set and it's the only one
@@ -454,7 +451,7 @@ impl DeferredNode {
             if is_depends_empty {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
-                value.deep_merge(primary_value);
+                value.type_aware_deep_merge(primary_value, &sc);
                 errors.extend(primary_errors)
             } else {
                 while let Some((v, _remaining)) = stream.next().await {
@@ -463,7 +460,7 @@ impl DeferredNode {
                     // or because it is lagging, but here we only send one message so it
                     // will not happen
                     if let Some(Ok((deferred_value, err))) = v {
-                        value.deep_merge(deferred_value);
+                        value.type_aware_deep_merge(deferred_value, &sc);
                         errors.extend(err.into_iter())
                     }
                 }
@@ -502,7 +499,7 @@ impl DeferredNode {
                 if !is_depends_empty {
                     let (primary_value, primary_errors) =
                         primary_receiver.recv().await.unwrap_or_default();
-                    v.deep_merge(primary_value);
+                    v.type_aware_deep_merge(primary_value, &sc);
                     errors.extend(primary_errors)
                 }
 
@@ -527,7 +524,7 @@ impl DeferredNode {
             } else {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
-                value.deep_merge(primary_value);
+                value.type_aware_deep_merge(primary_value, &sc);
                 errors.extend(primary_errors);
 
                 if let Err(e) = tx

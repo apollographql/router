@@ -165,10 +165,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_query_planner_mode: QueryPlannerMode,
 
-    /// Set the GraphQL schema introspection implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_introspection_mode: IntrospectionMode,
-
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -231,21 +227,6 @@ pub(crate) enum QueryPlannerMode {
     BothBestEffort,
 }
 
-/// Which implementation of GraphQL schema introspection to use, if enabled
-#[derive(Copy, Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum IntrospectionMode {
-    /// Use the new Rust-based implementation.
-    New,
-    /// Use the old JavaScript-based implementation.
-    #[default]
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side,
-    /// logging warnings if the implementations disagree.
-    Both,
-}
-
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -272,7 +253,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_query_planner_mode: QueryPlannerMode,
-            experimental_introspection_mode: IntrospectionMode,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -300,7 +280,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
-            experimental_introspection_mode: ad_hoc.experimental_introspection_mode,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -347,7 +326,6 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
-        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
@@ -363,7 +341,6 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
-            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -435,6 +412,22 @@ impl Configuration {
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
         }
     }
+
+    pub(crate) fn rust_query_planner_config(
+        &self,
+    ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+        apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+            reuse_query_fragments: self.supergraph.reuse_query_fragments.unwrap_or(true),
+            subgraph_graphql_validation: false,
+            generate_query_fragments: self.supergraph.generate_query_fragments,
+            incremental_delivery:
+                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
+                    enable_defer: self.supergraph.defer_support,
+                },
+            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+            debug: Default::default(),
+        }
+    }
 }
 
 impl Default for Configuration {
@@ -466,7 +459,6 @@ impl Configuration {
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
-        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -478,7 +470,6 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
-            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -501,6 +492,14 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        #[cfg(not(feature = "hyper_header_limits"))]
+        if self.limits.http1_max_request_headers.is_some() {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "'limits.http1_max_request_headers' requires 'hyper_header_limits' feature",
+                error: "enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'".to_string(),
+            });
+        }
+
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
@@ -690,7 +689,7 @@ pub(crate) struct Supergraph {
     pub(crate) reuse_query_fragments: Option<bool>,
 
     /// Enable QP generation of fragments for subgraph requests
-    /// Default: false
+    /// Default: true
     pub(crate) generate_query_fragments: bool,
 
     /// Set to false to disable defer support
@@ -708,6 +707,10 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+}
+
+const fn default_generate_query_fragments() -> bool {
+    true
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -762,7 +765,7 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -799,7 +802,7 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -884,7 +887,7 @@ impl Default for Apq {
 }
 
 /// Query planning cache configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -925,32 +928,6 @@ pub(crate) struct QueryPlanning {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
     pub(crate) experimental_parallelism: AvailableParallelism,
-
-    /// Activates introspection response caching
-    /// Historically, the Router has executed introspection queries in the query planner, and cached their
-    /// response in its cache because they were expensive. This will change soon as introspection will be
-    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
-    /// the cache, this option can be used to deactivate it.
-    /// Default: true
-    pub(crate) legacy_introspection_caching: bool,
-}
-
-impl Default for QueryPlanning {
-    fn default() -> Self {
-        Self {
-            cache: QueryPlanCache::default(),
-            warmed_up_queries: Default::default(),
-            experimental_plans_limit: Default::default(),
-            experimental_parallelism: Default::default(),
-            experimental_paths_limit: Default::default(),
-            experimental_reuse_query_plans: Default::default(),
-            legacy_introspection_caching: default_legacy_introspection_caching(),
-        }
-    }
-}
-
-const fn default_legacy_introspection_caching() -> bool {
-    true
 }
 
 impl QueryPlanning {

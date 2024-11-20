@@ -339,6 +339,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         .schema()
         .directive_definitions
         .values()
+        .filter(|directive| !directive.is_built_in())
         .filter_map(|directive_definition| {
             let executable_locations = directive_definition
                 .locations
@@ -2242,7 +2243,7 @@ fn extract_join_directives(
 
 fn join_directive_to_real_directive(directive: &Node<Directive>) -> (Directive, Vec<Name>) {
     let subgraph_enum_values = directive
-        .argument_by_name("graphs")
+        .specified_argument_by_name("graphs")
         .and_then(|arg| arg.as_list())
         .map(|list| {
             list.iter()
@@ -2259,13 +2260,13 @@ fn join_directive_to_real_directive(directive: &Node<Directive>) -> (Directive, 
         .expect("join__directive(graphs:) missing");
 
     let name = directive
-        .argument_by_name("name")
+        .specified_argument_by_name("name")
         .expect("join__directive(name:) is present")
         .as_str()
         .expect("join__directive(name:) is a string");
 
     let arguments = directive
-        .argument_by_name("args")
+        .specified_argument_by_name("args")
         .and_then(|a| a.as_object())
         .map(|args| {
             args.iter()

@@ -8,12 +8,32 @@ use apollo_compiler::Node;
 use indexmap::map::Entry;
 use serde::Serialize;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
+use crate::operation::NamedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
+use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::OpPathElement;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) enum ConditionKind {
+    /// A `@skip(if:)` condition.
+    Skip,
+    /// An `@include(if:)` condition.
+    Include,
+}
+
+impl ConditionKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::Include => "include",
+        }
+    }
+}
 
 /// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
 /// to be queried, based on the `@skip`/`@include` applications on the selections within.
@@ -26,64 +46,66 @@ pub(crate) enum Conditions {
     Boolean(bool),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Condition {
-    Variable(VariableCondition),
-    Boolean(bool),
-}
-
 /// A list of variable conditions, represented as a map from variable names to whether that variable
 /// is negated in the condition. We maintain the invariant that there's at least one condition (i.e.
 /// the map is non-empty), and that there's at most one condition per variable name.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct VariableConditions(Arc<IndexMap<Name, bool>>);
+pub(crate) struct VariableConditions(
+    // TODO(@goto-bus-stop): does it really make sense for this to be an indexmap? we normally only
+    // have 1 or 2. Can we ever get so many conditions on the same node that it makes sense to use
+    // a map over a vec?
+    Arc<IndexMap<Name, ConditionKind>>,
+);
 
 impl VariableConditions {
     /// Construct VariableConditions from a non-empty map of variable names.
     ///
     /// In release builds, this does not check if the map is empty.
-    fn new_unchecked(map: IndexMap<Name, bool>) -> Self {
+    fn new_unchecked(map: IndexMap<Name, ConditionKind>) -> Self {
         debug_assert!(!map.is_empty());
         Self(Arc::new(map))
     }
 
-    pub fn insert(&mut self, name: Name, negated: bool) {
-        Arc::make_mut(&mut self.0).insert(name, negated);
-    }
-
-    /// Returns true if there are no conditions.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Returns a variable condition by name.
-    pub fn get(&self, name: &str) -> Option<VariableCondition> {
-        self.0.get_key_value(name).map(|(variable, &negated)| {
-            let variable = variable.clone();
-            VariableCondition { variable, negated }
-        })
-    }
-
-    /// Returns whether a variable condition is negated, or None if there is no condition for the variable name.
-    pub fn is_negated(&self, name: &str) -> Option<bool> {
+    /// Returns the condition kind of a variable, or None if there is no condition for the variable name.
+    fn condition_kind(&self, name: &str) -> Option<ConditionKind> {
         self.0.get(name).copied()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&Name, bool)> {
-        self.0.iter().map(|(name, &negated)| (name, negated))
+    /// Iterate all variable conditions and their kinds.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Name, ConditionKind)> {
+        self.0.iter().map(|(name, &kind)| (name, kind))
+    }
+
+    /// Merge with another set of variable conditions. If the conditions conflict, returns `None`.
+    fn merge(mut self, other: Self) -> Option<Self> {
+        let vars = Arc::make_mut(&mut self.0);
+        for (name, other_kind) in other.0.iter() {
+            match vars.entry(name.clone()) {
+                // `@skip(if: $var)` and `@include(if: $var)` on the same selection always means
+                // it's not included.
+                Entry::Occupied(self_kind) if self_kind.get() != other_kind => {
+                    return None;
+                }
+                Entry::Occupied(_entry) => {}
+                Entry::Vacant(entry) => {
+                    entry.insert(*other_kind);
+                }
+            }
+        }
+        Some(self)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct VariableCondition {
     variable: Name,
-    negated: bool,
+    kind: ConditionKind,
 }
 
 impl Conditions {
     /// Create conditions from a map of variable conditions. If empty, instead returns a
     /// condition that always evaluates to true.
-    fn from_variables(map: IndexMap<Name, bool>) -> Self {
+    fn from_variables(map: IndexMap<Name, ConditionKind>) -> Self {
         if map.is_empty() {
             Self::Boolean(true)
         } else {
@@ -91,53 +113,69 @@ impl Conditions {
         }
     }
 
+    /// Parse @skip and @include conditions from a directive list.
+    ///
+    /// # Errors
+    /// Returns an error if a @skip/@include directive is invalid (per GraphQL validation rules).
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
         let mut variables = IndexMap::default();
-        for directive in directives.iter_sorted() {
-            let negated = match directive.name.as_str() {
-                "include" => false,
-                "skip" => true,
-                _ => continue,
+
+        if let Some(skip) = directives.get("skip") {
+            let Some(value) = skip.specified_argument_by_name("if") else {
+                bail!("missing @skip(if:) argument");
             };
-            let value = directive.argument_by_name("if").ok_or_else(|| {
-                FederationError::internal(format!(
-                    "missing if argument on @{}",
-                    if negated { "skip" } else { "include" },
-                ))
-            })?;
-            match &**value {
-                Value::Boolean(false) if !negated => return Ok(Self::Boolean(false)),
-                Value::Boolean(true) if negated => return Ok(Self::Boolean(false)),
+
+            match value.as_ref() {
+                // Constant @skip(if: true) can never match
+                Value::Boolean(true) => return Ok(Self::Boolean(false)),
+                // Constant @skip(if: false) always matches
                 Value::Boolean(_) => {}
-                Value::Variable(name) => match variables.entry(name.clone()) {
-                    Entry::Occupied(entry) => {
-                        let previous_negated = *entry.get();
-                        if previous_negated != negated {
-                            return Ok(Self::Boolean(false));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(negated);
-                    }
-                },
+                Value::Variable(name) => {
+                    variables.insert(name.clone(), ConditionKind::Skip);
+                }
                 _ => {
-                    return Err(FederationError::internal(format!(
-                        "expected boolean or variable `if` argument, got {value}",
-                    )))
+                    bail!("expected boolean or variable `if` argument, got {value}");
                 }
             }
         }
+
+        if let Some(include) = directives.get("include") {
+            let Some(value) = include.specified_argument_by_name("if") else {
+                bail!("missing @include(if:) argument");
+            };
+
+            match value.as_ref() {
+                // Constant @include(if: false) can never match
+                Value::Boolean(false) => return Ok(Self::Boolean(false)),
+                // Constant @include(if: true) always matches
+                Value::Boolean(true) => {}
+                // If both @skip(if: $var) and @include(if: $var) exist, the condition can also
+                // never match
+                Value::Variable(name) => {
+                    if variables.insert(name.clone(), ConditionKind::Include)
+                        == Some(ConditionKind::Skip)
+                    {
+                        return Ok(Self::Boolean(false));
+                    }
+                }
+                _ => {
+                    bail!("expected boolean or variable `if` argument, got {value}");
+                }
+            }
+        }
+
         Ok(Self::from_variables(variables))
     }
 
+    // TODO(@goto-bus-stop): what exactly is the difference between this and `Self::merge`?
     pub(crate) fn update_with(&self, new_conditions: &Self) -> Self {
         match (new_conditions, self) {
             (Conditions::Boolean(_), _) | (_, Conditions::Boolean(_)) => new_conditions.clone(),
             (Conditions::Variables(new_conditions), Conditions::Variables(handled_conditions)) => {
                 let mut filtered = IndexMap::default();
-                for (cond_name, &cond_negated) in new_conditions.0.iter() {
-                    match handled_conditions.is_negated(cond_name) {
-                        Some(handled_cond) if cond_negated != handled_cond => {
+                for (cond_name, &cond_kind) in new_conditions.0.iter() {
+                    match handled_conditions.condition_kind(cond_name) {
+                        Some(handled_cond_kind) if cond_kind != handled_cond_kind => {
                             // If we've already handled that exact condition, we can skip it.
                             // But if we've already handled the _negation_ of this condition, then this mean the overall conditions
                             // are unreachable and we can just return `false` directly.
@@ -145,7 +183,7 @@ impl Conditions {
                         }
                         Some(_) => {}
                         None => {
-                            filtered.insert(cond_name.clone(), cond_negated);
+                            filtered.insert(cond_name.clone(), cond_kind);
                         }
                     }
                 }
@@ -154,6 +192,8 @@ impl Conditions {
         }
     }
 
+    /// Merge two sets of conditions. The new conditions evaluate to true only if both input
+    /// conditions evaluate to true.
     pub(crate) fn merge(self, other: Self) -> Self {
         match (self, other) {
             // Absorbing element
@@ -164,31 +204,13 @@ impl Conditions {
             // Neutral element
             (Conditions::Boolean(true), x) | (x, Conditions::Boolean(true)) => x,
 
-            (Conditions::Variables(mut self_vars), Conditions::Variables(other_vars)) => {
-                let vars = Arc::make_mut(&mut self_vars.0);
-                for (name, other_negated) in other_vars.0.iter() {
-                    match vars.entry(name.clone()) {
-                        Entry::Occupied(entry) => {
-                            let self_negated = entry.get();
-                            if self_negated != other_negated {
-                                return Conditions::Boolean(false);
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(*other_negated);
-                        }
-                    }
+            (Conditions::Variables(self_vars), Conditions::Variables(other_vars)) => {
+                match self_vars.merge(other_vars) {
+                    Some(vars) => Conditions::Variables(vars),
+                    None => Conditions::Boolean(false),
                 }
-                Conditions::Variables(self_vars)
             }
         }
-    }
-}
-
-fn is_constant_condition(condition: &Conditions) -> bool {
-    match condition {
-        Conditions::Variables(_) => false,
-        Conditions::Boolean(_) => true,
     }
 }
 
@@ -206,37 +228,37 @@ pub(crate) fn remove_conditions_from_selection_set(
             Ok(selection_set.clone())
         }
         Conditions::Variables(variable_conditions) => {
-            let mut selection_map = SelectionMap::new();
-
-            for selection in selection_set.selections.values() {
+            selection_set.lazy_map(&NamedFragments::default(), |selection| {
                 let element = selection.element()?;
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
                     remove_conditions_of_element(element.clone(), variable_conditions);
-                let new_selection = if let Some(selection_set) = selection.selection_set() {
+                if let Some(selection_set) = selection.selection_set() {
                     let updated_selection_set =
                         remove_conditions_from_selection_set(selection_set, conditions)?;
                     if updated_element == element {
                         if *selection_set == updated_selection_set {
-                            selection.clone()
+                            Ok(SelectionMapperReturn::Selection(selection.clone()))
                         } else {
-                            selection.with_updated_selection_set(Some(updated_selection_set))?
+                            Ok(SelectionMapperReturn::Selection(
+                                selection
+                                    .with_updated_selection_set(Some(updated_selection_set))?,
+                            ))
                         }
                     } else {
-                        Selection::from_element(updated_element, Some(updated_selection_set), None)?
+                        Ok(SelectionMapperReturn::Selection(Selection::from_element(
+                            updated_element,
+                            Some(updated_selection_set),
+                        )?))
                     }
                 } else if updated_element == element {
-                    selection.clone()
+                    Ok(SelectionMapperReturn::Selection(selection.clone()))
                 } else {
-                    Selection::from_element(updated_element, None, None)?
-                };
-                selection_map.insert(new_selection);
-            }
-
-            Ok(SelectionSet {
-                schema: selection_set.schema.clone(),
-                type_position: selection_set.type_position.clone(),
-                selections: Arc::new(selection_map),
+                    Ok(SelectionMapperReturn::Selection(Selection::from_element(
+                        updated_element,
+                        None,
+                    )?))
+                }
             })
         }
     }
@@ -247,7 +269,7 @@ pub(crate) fn remove_conditions_from_selection_set(
 /// "starting" fragments having the unneeded condition/directives removed.
 pub(crate) fn remove_unneeded_top_level_fragment_directives(
     selection_set: &SelectionSet,
-    unneded_directives: &DirectiveList,
+    unneeded_directives: &DirectiveList,
 ) -> Result<SelectionSet, FederationError> {
     let mut selection_map = SelectionMap::new();
 
@@ -265,7 +287,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     let needed_directives: Vec<Node<Directive>> = fragment
                         .directives
                         .iter()
-                        .filter(|directive| !unneded_directives.contains(directive))
+                        .filter(|directive| !unneeded_directives.contains(directive))
                         .cloned()
                         .collect();
 
@@ -273,7 +295,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     // at the "top-level" of the set.
                     let updated_selections = remove_unneeded_top_level_fragment_directives(
                         &inline_fragment.selection_set,
-                        unneded_directives,
+                        unneeded_directives,
                     )?;
                     if needed_directives.len() == fragment.directives.len() {
                         // We need all the directives that the fragment has. Return it unchanged.
@@ -326,39 +348,21 @@ fn remove_conditions_of_element(
     }
 }
 
-#[derive(PartialEq)]
-enum ConditionKind {
-    Include,
-    Skip,
-}
-
 fn matches_condition_for_kind(
     directive: &Directive,
     conditions: &VariableConditions,
     kind: ConditionKind,
 ) -> bool {
-    let kind_str = match kind {
-        ConditionKind::Include => "include",
-        ConditionKind::Skip => "skip",
-    };
-
-    if directive.name != kind_str {
+    if directive.name != kind.as_str() {
         return false;
     }
 
-    let value = directive.argument_by_name("if");
-
-    let matches_if_negated = match kind {
-        ConditionKind::Include => false,
-        ConditionKind::Skip => true,
-    };
-    match value {
-        None => false,
+    match directive.specified_argument_by_name("if") {
         Some(v) => match v.as_variable() {
-            Some(directive_var) => conditions.0.iter().any(|(cond_name, cond_is_negated)| {
-                cond_name == directive_var && *cond_is_negated == matches_if_negated
-            }),
+            Some(directive_var) => conditions.condition_kind(directive_var) == Some(kind),
             None => true,
         },
+        // Directive without argument: unreachable in a valid document.
+        None => false,
     }
 }
