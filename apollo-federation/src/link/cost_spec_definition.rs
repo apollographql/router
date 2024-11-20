@@ -1,6 +1,5 @@
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
@@ -21,6 +20,8 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
+use super::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+
 pub(crate) const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
 pub(crate) const COST_DIRECTIVE_NAME_DEFAULT: Name = name!("federation__cost");
 
@@ -28,7 +29,7 @@ pub(crate) const LIST_SIZE_DIRECTIVE_NAME_IN_SPEC: Name = name!("listSize");
 pub(crate) const LIST_SIZE_DIRECTIVE_NAME_DEFAULT: Name = name!("federation__listSize");
 
 #[derive(Clone)]
-pub(crate) struct CostSpecDefinition {
+pub struct CostSpecDefinition {
     url: Url,
     minimum_federation_version: Option<Version>,
 }
@@ -40,10 +41,10 @@ macro_rules! propagate_demand_control_directives {
             subgraph_schema: &FederationSchema,
             source: &$directives_ty,
             dest: &mut $directives_ty,
-            original_directive_names: &IndexMap<Name, Name>,
         ) -> Result<(), FederationError> {
-            let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);
-            let cost_directive = cost_directive_name.and_then(|name| source.get(name.as_str()));
+            let cost_directive = self
+                .directive_name_in_schema(subgraph_schema, &COST_DIRECTIVE_NAME_IN_SPEC)?
+                .and_then(|name| source.get(name.as_str()));
             if let Some(cost_directive) = cost_directive {
                 dest.push($wrap_ty(self.cost_directive(
                     subgraph_schema,
@@ -51,10 +52,9 @@ macro_rules! propagate_demand_control_directives {
                 )?));
             }
 
-            let list_size_directive_name =
-                original_directive_names.get(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
-            let list_size_directive =
-                list_size_directive_name.and_then(|name| source.get(name.as_str()));
+            let list_size_directive = self
+                .directive_name_in_schema(subgraph_schema, &LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)?
+                .and_then(|name| source.get(name.as_str()));
             if let Some(list_size_directive) = list_size_directive {
                 dest.push($wrap_ty(self.list_size_directive(
                     subgraph_schema,
@@ -74,11 +74,10 @@ macro_rules! propagate_demand_control_directives_to_position {
             subgraph_schema: &mut FederationSchema,
             source: &Node<$source_ty>,
             dest: &$dest_ty,
-            original_directive_names: &IndexMap<Name, Name>,
         ) -> Result<(), FederationError> {
-            let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);
-            let cost_directive =
-                cost_directive_name.and_then(|name| source.directives.get(name.as_str()));
+            let cost_directive = self
+                .directive_name_in_schema(subgraph_schema, &COST_DIRECTIVE_NAME_IN_SPEC)?
+                .and_then(|name| source.directives.get(name.as_str()));
             if let Some(cost_directive) = cost_directive {
                 dest.insert_directive(
                     subgraph_schema,
@@ -88,10 +87,9 @@ macro_rules! propagate_demand_control_directives_to_position {
                 )?;
             }
 
-            let list_size_directive_name =
-                original_directive_names.get(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
-            let list_size_directive =
-                list_size_directive_name.and_then(|name| source.directives.get(name.as_str()));
+            let list_size_directive = self
+                .directive_name_in_schema(subgraph_schema, &LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)?
+                .and_then(|name| source.directives.get(name.as_str()));
             if let Some(list_size_directive) = list_size_directive {
                 dest.insert_directive(
                     subgraph_schema,
@@ -147,7 +145,6 @@ impl CostSpecDefinition {
         apollo_compiler::ast::DirectiveList,
         Node::new
     );
-
     propagate_demand_control_directives_to_position!(
         propagate_demand_control_directives_for_enum,
         EnumType,
@@ -163,6 +160,35 @@ impl CostSpecDefinition {
         ScalarType,
         ScalarTypeDefinitionPosition
     );
+
+    pub fn for_schema(
+        schema: &apollo_compiler::Schema,
+    ) -> Result<Option<&'static Self>, FederationError> {
+        let schema = FederationSchema::new(schema.clone())?;
+        let cost_link = schema
+            .metadata()
+            .as_ref()
+            .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()));
+        tracing::debug!("Schema has cost link? {}", cost_link.is_some());
+        let cost_spec = cost_link.and_then(|link| COST_VERSIONS.find(&link.url.version));
+        Ok(cost_spec)
+    }
+
+    pub fn cost_directive_name_in_schema(
+        &self,
+        schema: &apollo_compiler::Schema,
+    ) -> Result<Option<Name>, FederationError> {
+        let schema = FederationSchema::new(schema.clone())?;
+        self.directive_name_in_schema(&schema, &COST_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub fn listsize_directive_name_in_schema(
+        &self,
+        schema: &apollo_compiler::Schema,
+    ) -> Result<Option<Name>, FederationError> {
+        let schema = FederationSchema::new(schema.clone())?;
+        self.directive_name_in_schema(&schema, &LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)
+    }
 }
 
 impl SpecDefinition for CostSpecDefinition {

@@ -22,7 +22,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
-pub(crate) mod cost_spec_definition;
+pub mod cost_spec_definition;
 pub mod database;
 pub(crate) mod federation_spec_definition;
 pub(crate) mod graphql_definition;

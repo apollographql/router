@@ -3,20 +3,21 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashMapExt;
+use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_federation::link::cost_spec_definition::CostSpecDefinition;
 
-use super::directives::get_apollo_directive_names;
 use super::directives::CostDirective;
 use super::directives::DefinitionListSizeDirective as ListSizeDirective;
 use super::directives::RequiresDirective;
 use crate::plugins::demand_control::DemandControlError;
 
 pub(crate) struct DemandControlledSchema {
-    directive_name_map: HashMap<Name, Name>,
     inner: Arc<Valid<Schema>>,
+    cost_directive_name: Option<Name>,
     type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>>,
     type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>>,
     type_field_requires_directives: HashMap<Name, HashMap<Name, RequiresDirective>>,
@@ -24,7 +25,17 @@ pub(crate) struct DemandControlledSchema {
 
 impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
-        let directive_name_map = get_apollo_directive_names(&schema);
+        let cost_spec = CostSpecDefinition::for_schema(&schema)?;
+        let cost_directive_name = if let Some(spec) = cost_spec {
+            spec.cost_directive_name_in_schema(&schema)?
+        } else {
+            None
+        };
+        let listsize_directive_name = if let Some(spec) = cost_spec {
+            spec.listsize_directive_name_in_schema(&schema)?
+        } else {
+            None
+        };
 
         let mut type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>> =
             HashMap::new();
@@ -55,21 +66,28 @@ impl DemandControlledSchema {
                             ))
                         })?;
 
-                        if let Some(cost_directive) =
-                            CostDirective::from_field(&directive_name_map, field_definition)
-                                .or(CostDirective::from_type(&directive_name_map, field_type))
-                        {
-                            field_cost_directives.insert(field_name.clone(), cost_directive);
+                        if let Some(cost_directive_name) = cost_directive_name.as_ref() {
+                            if let Some(cost_directive) =
+                                CostDirective::from_field(cost_directive_name, field_definition)
+                                    .or(CostDirective::from_type(cost_directive_name, field_type))
+                            {
+                                field_cost_directives.insert(field_name.clone(), cost_directive);
+                            }
                         }
 
-                        if let Some(list_size_directive) = ListSizeDirective::from_field_definition(
-                            &directive_name_map,
-                            field_definition,
-                        )? {
-                            field_list_size_directives
-                                .insert(field_name.clone(), list_size_directive);
+                        if let Some(listsize_directive_name) = listsize_directive_name.as_ref() {
+                            if let Some(list_size_directive) =
+                                ListSizeDirective::from_field_definition(
+                                    listsize_directive_name,
+                                    field_definition,
+                                )?
+                            {
+                                field_list_size_directives
+                                    .insert(field_name.clone(), list_size_directive);
+                            }
                         }
 
+                        // TODO: Need to handle renaming for @requires also
                         if let Some(requires_directive) = RequiresDirective::from_field_definition(
                             field_definition,
                             type_name,
@@ -90,21 +108,28 @@ impl DemandControlledSchema {
                             ))
                         })?;
 
-                        if let Some(cost_directive) =
-                            CostDirective::from_field(&directive_name_map, field_definition)
-                                .or(CostDirective::from_type(&directive_name_map, field_type))
-                        {
-                            field_cost_directives.insert(field_name.clone(), cost_directive);
+                        if let Some(cost_directive_name) = cost_directive_name.as_ref() {
+                            if let Some(cost_directive) =
+                                CostDirective::from_field(cost_directive_name, field_definition)
+                                    .or(CostDirective::from_type(cost_directive_name, field_type))
+                            {
+                                field_cost_directives.insert(field_name.clone(), cost_directive);
+                            }
                         }
 
-                        if let Some(list_size_directive) = ListSizeDirective::from_field_definition(
-                            &directive_name_map,
-                            field_definition,
-                        )? {
-                            field_list_size_directives
-                                .insert(field_name.clone(), list_size_directive);
+                        if let Some(listsize_directive_name) = listsize_directive_name.as_ref() {
+                            if let Some(list_size_directive) =
+                                ListSizeDirective::from_field_definition(
+                                    listsize_directive_name,
+                                    field_definition,
+                                )?
+                            {
+                                field_list_size_directives
+                                    .insert(field_name.clone(), list_size_directive);
+                            }
                         }
 
+                        // TODO: Need to handle renaming for @requires also
                         if let Some(requires_directive) = RequiresDirective::from_field_definition(
                             field_definition,
                             type_name,
@@ -122,16 +147,12 @@ impl DemandControlledSchema {
         }
 
         Ok(Self {
-            directive_name_map,
             inner: schema,
+            cost_directive_name,
             type_field_cost_directives,
             type_field_list_size_directives,
             type_field_requires_directives,
         })
-    }
-
-    pub(in crate::plugins::demand_control) fn directive_name_map(&self) -> &HashMap<Name, Name> {
-        &self.directive_name_map
     }
 
     pub(in crate::plugins::demand_control) fn type_field_cost_directive(
@@ -162,6 +183,19 @@ impl DemandControlledSchema {
         self.type_field_requires_directives
             .get(type_name)?
             .get(field_name)
+    }
+
+    pub(in crate::plugins::demand_control) fn argument_cost_directive(
+        &self,
+        definition: &InputValueDefinition,
+        ty: &ExtendedType,
+    ) -> Option<CostDirective> {
+        if let Some(cost_directive_name) = &self.cost_directive_name {
+            CostDirective::from_argument(cost_directive_name, definition)
+                .or(CostDirective::from_type(cost_directive_name, ty))
+        } else {
+            None
+        }
     }
 }
 

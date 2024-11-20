@@ -1,23 +1,13 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-  @link(
-    url: "https://specs.apollo.dev/cost/v0.1"
-    import: ["@cost", "@listSize"]
-  ) {
+  @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"]) {
   query: Query
 }
 
 directive @cost(
   weight: Int!
 ) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-directive @cost__listSize(
-  assumedSize: Int
-  slicingArguments: [String!]
-  sizedFields: [String!]
-  requireOneSlicingArgument: Boolean = true
-) on FIELD_DEFINITION
 
 directive @join__directive(
   graphs: [join__Graph!]

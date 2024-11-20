@@ -13,8 +13,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use apollo_federation::link::spec::APOLLO_SPEC_DOMAIN;
-use apollo_federation::link::Link;
 use tower::BoxError;
 
 use crate::json_ext::Object;
@@ -33,25 +31,6 @@ const LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME: Name = name!("sizedFields"
 const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
     name!("requireOneSlicingArgument");
 
-pub(in crate::plugins::demand_control) fn get_apollo_directive_names(
-    schema: &Schema,
-) -> HashMap<Name, Name> {
-    let mut hm: HashMap<Name, Name> = HashMap::new();
-    for directive in &schema.schema_definition.directives {
-        if directive.name.as_str() == "link" {
-            if let Ok(link) = Link::from_directive_application(directive) {
-                if link.url.identity.domain != APOLLO_SPEC_DOMAIN {
-                    continue;
-                }
-                for import in link.imports {
-                    hm.insert(import.element.clone(), import.imported_name().clone());
-                }
-            }
-        }
-    }
-    hm
-}
-
 pub(in crate::plugins::demand_control) struct CostDirective {
     weight: i32,
 }
@@ -62,47 +41,40 @@ impl CostDirective {
     }
 
     pub(in crate::plugins::demand_control) fn from_argument(
-        directive_name_map: &HashMap<Name, Name>,
+        directive_name: &Name,
         argument: &InputValueDefinition,
     ) -> Option<Self> {
-        Self::from_directives(directive_name_map, &argument.directives)
+        Self::from_directives(directive_name, &argument.directives)
     }
 
     pub(in crate::plugins::demand_control) fn from_field(
-        directive_name_map: &HashMap<Name, Name>,
+        directive_name: &Name,
         field: &FieldDefinition,
     ) -> Option<Self> {
-        Self::from_directives(directive_name_map, &field.directives)
+        Self::from_directives(directive_name, &field.directives)
     }
 
     pub(in crate::plugins::demand_control) fn from_type(
-        directive_name_map: &HashMap<Name, Name>,
+        directive_name: &Name,
         ty: &ExtendedType,
     ) -> Option<Self> {
-        Self::from_schema_directives(directive_name_map, ty.directives())
+        Self::from_schema_directives(directive_name, ty.directives())
     }
 
-    fn from_directives(
-        directive_name_map: &HashMap<Name, Name>,
-        directives: &DirectiveList,
-    ) -> Option<Self> {
-        directive_name_map
-            .get(&COST_DIRECTIVE_NAME)
-            .and_then(|name| directives.get(name))
-            .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
+    fn from_directives(directive_name: &Name, directives: &DirectiveList) -> Option<Self> {
+        directives
+            .get(directive_name)
             .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
     }
 
     pub(in crate::plugins::demand_control) fn from_schema_directives(
-        directive_name_map: &HashMap<Name, Name>,
+        directive_name: &Name,
         directives: &apollo_compiler::schema::DirectiveList,
     ) -> Option<Self> {
-        directive_name_map
-            .get(&COST_DIRECTIVE_NAME)
-            .and_then(|name| directives.get(name))
-            .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
+        directives
+            .get(directive_name)
             .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
@@ -158,13 +130,10 @@ pub(in crate::plugins::demand_control) struct DefinitionListSizeDirective {
 
 impl DefinitionListSizeDirective {
     pub(in crate::plugins::demand_control) fn from_field_definition(
-        directive_name_map: &HashMap<Name, Name>,
+        directive_name: &Name,
         definition: &FieldDefinition,
     ) -> Result<Option<Self>, DemandControlError> {
-        let directive = directive_name_map
-            .get(&LIST_SIZE_DIRECTIVE_NAME)
-            .and_then(|name| definition.directives.get(name))
-            .or(definition.directives.get(&LIST_SIZE_DIRECTIVE_DEFAULT_NAME));
+        let directive = definition.directives.get(&directive_name);
         if let Some(directive) = directive {
             let assumed_size = directive
                 .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
