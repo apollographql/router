@@ -33,6 +33,15 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 - `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
 - `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
 
+## Removed features in GraphOS Router v2.x
+
+### Support for Scaffold
+<!-- PR: https://github.com/apollographql/router/pull/6274 -->
+
+In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
+
+Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
+
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
@@ -65,14 +74,6 @@ Make sure that you are referencing the correct router release: **v2.0.0-preview.
 During upgrade, carefully monitor logs and resource consumption to ensure that your router has successfully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the steps above and decide if you want to change your configuration. 
 
 For example, you may decide that you wish to change the way in which you sample OTLP traces in this new release and not simply preserve your existing configuration.
-
-## Removed from Router v2.x
-
-### Support for Scaffold
-
-In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
-
-Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
 
 ## Reporting upgrade issues
 
