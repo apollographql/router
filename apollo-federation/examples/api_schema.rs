@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     let schema = Schema::parse_and_validate(source, name).unwrap();
     let supergraph = Supergraph::from_schema(schema).unwrap();
 
-    match supergraph.to_api_schema(Default::default()) {
+    match supergraph.to_api_schema() {
         Ok(result) => println!("{}", result.schema()),
         Err(error) => {
             eprintln!("{error}");

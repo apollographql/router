@@ -1,7 +1,11 @@
 ---
 source: apollo-federation/tests/composition_tests.rs
-expression: "print_sdl(supergraph.to_api_schema(Default::default()).unwrap().schema())"
+expression: print_sdl(supergraph.to_api_schema().unwrap().schema())
 ---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
+
 scalar Import
 
 type Product {

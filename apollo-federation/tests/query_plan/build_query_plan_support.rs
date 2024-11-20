@@ -94,11 +94,7 @@ pub(crate) fn api_schema_and_planner(
     let supergraph = compose(function_path, subgraph_names_and_schemas);
     let supergraph = apollo_federation::Supergraph::new(&supergraph).unwrap();
     let planner = QueryPlanner::new(&supergraph, config).unwrap();
-    let api_schema_config = apollo_federation::ApiSchemaOptions {
-        include_defer: true,
-        include_stream: false,
-    };
-    let api_schema = supergraph.to_api_schema(api_schema_config).unwrap();
+    let api_schema = supergraph.to_api_schema().unwrap();
     (api_schema, planner)
 }
 

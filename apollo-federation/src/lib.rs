@@ -45,7 +45,6 @@ use apollo_compiler::Schema;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
 
-pub use crate::api_schema::ApiSchemaOptions;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -128,11 +127,8 @@ impl Supergraph {
 
     /// Generates an API Schema from this supergraph schema. The API Schema represents the combined
     /// API of the supergraph that's visible to end users.
-    pub fn to_api_schema(
-        &self,
-        options: ApiSchemaOptions,
-    ) -> Result<ValidFederationSchema, FederationError> {
-        api_schema::to_api_schema(self.schema.clone(), options)
+    pub fn to_api_schema(&self) -> Result<ValidFederationSchema, FederationError> {
+        api_schema::to_api_schema(self.schema.clone())
     }
 
     pub fn extract_subgraphs(&self) -> Result<ValidFederationSubgraphs, FederationError> {

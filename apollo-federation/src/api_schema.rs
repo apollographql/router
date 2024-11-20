@@ -104,15 +104,8 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
     Ok(())
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct ApiSchemaOptions {
-    pub include_defer: bool,
-    pub include_stream: bool,
-}
-
 pub(crate) fn to_api_schema(
     schema: ValidFederationSchema,
-    options: ApiSchemaOptions,
 ) -> Result<ValidFederationSchema, FederationError> {
     // Create a whole new federation schema that we can mutate.
     let mut api_schema = FederationSchema::new(schema.schema().clone().into_inner())?;
@@ -136,17 +129,16 @@ pub(crate) fn to_api_schema(
 
     let mut schema = api_schema.into_inner();
 
-    if options.include_defer {
-        schema
-            .directive_definitions
-            .insert(name!("defer"), defer_definition());
-    }
+    // api schema should contain all built-in directive definitions
+    // QP will normalize applications of @defer based on whether
+    // incremental delivery is enabled/disabled
+    schema
+        .directive_definitions
+        .insert(name!("defer"), defer_definition());
 
-    if options.include_stream {
-        schema
-            .directive_definitions
-            .insert(name!("stream"), stream_definition());
-    }
+    schema
+        .directive_definitions
+        .insert(name!("stream"), stream_definition());
 
     crate::compat::make_print_schema_compatible(&mut schema);
 

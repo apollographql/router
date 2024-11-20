@@ -9,7 +9,6 @@ use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::schema::ValidFederationSchema;
-use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use http::Uri;
 use semver::Version;
@@ -112,16 +111,11 @@ impl Schema {
 
         let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
 
-        let api_schema = supergraph
-            .to_api_schema(ApiSchemaOptions {
-                include_defer: config.supergraph.defer_support,
-                ..Default::default()
-            })
-            .map_err(|e| {
-                SchemaError::Api(format!(
-                    "The supergraph schema failed to produce a valid API schema: {e}"
-                ))
-            })?;
+        let api_schema = supergraph.to_api_schema().map_err(|e| {
+            SchemaError::Api(format!(
+                "The supergraph schema failed to produce a valid API schema: {e}"
+            ))
+        })?;
 
         Ok(Schema {
             raw_sdl,

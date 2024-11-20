@@ -3,7 +3,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use apollo_federation::error::FederationError;
-use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 
 // TODO(@goto-bus-stop): inaccessible is in theory a standalone spec,
@@ -36,7 +35,7 @@ const INACCESSIBLE_V02_HEADER: &str = r#"
 fn inaccessible_to_api_schema(input: &str) -> Result<Valid<Schema>, FederationError> {
     let sdl = format!("{INACCESSIBLE_V02_HEADER}{input}");
     let graph = Supergraph::new(&sdl)?;
-    Ok(graph.to_api_schema(Default::default())?.schema().clone())
+    Ok(graph.to_api_schema()?.schema().clone())
 }
 
 #[test]
@@ -2141,7 +2140,7 @@ fn inaccessible_on_imported_elements() {
     .unwrap();
 
     let errors = graph
-        .to_api_schema(Default::default())
+        .to_api_schema()
         .expect_err("should return validation errors");
 
     insta::assert_snapshot!(errors, @r###"
@@ -2193,6 +2192,10 @@ fn propagates_default_input_values() {
     .expect("should succeed");
 
     insta::assert_snapshot!(api_schema, @r###"
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+    directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
+
     type Query {
       field(input: Input = {one: 0, nested: {one: 2, two: 2, default: "default"}, two: 2, three: 3, object: {value: 2}, nestedWithDefault: {one: 1, two: 2, default: "default"}}): Int
     }
@@ -2240,12 +2243,16 @@ fn matches_graphql_js_directive_applications() {
     .expect("should succeed");
 
     insta::assert_snapshot!(api_schema, @r###"
-        type Query {
-          a: Int @deprecated
-          b: Int
-          c: Int @deprecated(reason: "Reason")
-          d: Int @deprecated
-        }
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+    directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
+
+    type Query {
+      a: Int @deprecated
+      b: Int
+      c: Int @deprecated(reason: "Reason")
+      d: Int @deprecated
+    }
     "###);
 }
 
@@ -2272,6 +2279,10 @@ fn matches_graphql_js_default_value_propagation() {
     .expect("should succeed");
 
     insta::assert_snapshot!(api_schema, @r###"
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+    directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
+
     type Query {
       defaultShouldBeRemoved(arg: OneRequiredOneDefault): Int
       defaultShouldHavePropagatedValues(arg: OneOptionalOneDefault = {defaulted: false}): Int
@@ -2320,6 +2331,10 @@ fn remove_referencing_directive_argument() {
     .expect("should succeed");
 
     insta::assert_snapshot!(api_schema, @r###"
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+    directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
+
     type Query {
       a: Int
     }
@@ -2337,10 +2352,7 @@ fn include_supergraph_directives() -> Result<(), FederationError> {
     "
     );
     let graph = Supergraph::new(&sdl)?;
-    let api_schema = graph.to_api_schema(ApiSchemaOptions {
-        include_defer: true,
-        include_stream: true,
-    })?;
+    let api_schema = graph.to_api_schema()?;
 
     insta::assert_snapshot!(api_schema.schema(), @r###"
     directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
@@ -2394,11 +2406,13 @@ type Query {
     "#;
 
     let graph = Supergraph::new(sdl).expect("should succeed");
-    let api_schema = graph
-        .to_api_schema(Default::default())
-        .expect("should succeed");
+    let api_schema = graph.to_api_schema().expect("should succeed");
 
     insta::assert_snapshot!(api_schema.schema(), @r###"
+    directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+    directive @stream(label: String, if: Boolean! = true, initialCount: Int) on FIELD
+
     type Query {
       me: String
     }

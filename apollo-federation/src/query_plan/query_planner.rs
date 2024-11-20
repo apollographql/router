@@ -49,7 +49,6 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
-use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
@@ -248,10 +247,7 @@ impl QueryPlanner {
         Self::check_unsupported_features(supergraph)?;
 
         let supergraph_schema = supergraph.schema.clone();
-        let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
-            include_defer: config.incremental_delivery.enable_defer,
-            ..Default::default()
-        })?;
+        let api_schema = supergraph.to_api_schema()?;
         let query_graph = build_federated_query_graph(
             supergraph_schema.clone(),
             api_schema.clone(),
@@ -1317,7 +1313,7 @@ type User
         .unwrap();
         let subgraphs = vec![&a];
         let supergraph = Supergraph::compose(subgraphs).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let api_schema = supergraph.to_api_schema().unwrap();
 
         let document = ExecutableDocument::parse_and_validate(
             api_schema.schema(),
@@ -1360,7 +1356,7 @@ type User
     #[test]
     fn test_optimize_basic() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let api_schema = supergraph.to_api_schema().unwrap();
         let document = ExecutableDocument::parse_and_validate(
             api_schema.schema(),
             r#"
@@ -1416,7 +1412,7 @@ type User
     #[test]
     fn test_optimize_inline_fragment() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let api_schema = supergraph.to_api_schema().unwrap();
         let document = ExecutableDocument::parse_and_validate(
             api_schema.schema(),
             r#"
@@ -1485,7 +1481,7 @@ type User
     #[test]
     fn test_optimize_fragment_definition() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let api_schema = supergraph.to_api_schema().unwrap();
         let document = ExecutableDocument::parse_and_validate(
             api_schema.schema(),
             r#"

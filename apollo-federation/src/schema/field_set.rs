@@ -210,7 +210,7 @@ mod tests {
 
         let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
         let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default())?;
+        let api_schema = supergraph.to_api_schema()?;
         // Testing via `build_federated_query_graph` function, which validates the @requires directive.
         let err = build_federated_query_graph(supergraph.schema, api_schema, None, None)
             .map(|_| "Unexpected success") // ignore the Ok value

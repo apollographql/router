@@ -1,14 +1,18 @@
 ---
 source: apollo-federation/tests/composition_tests.rs
-expression: "print_sdl(supergraph.to_api_schema(Default::default()).unwrap().schema())"
+expression: print_sdl(supergraph.to_api_schema().unwrap().schema())
 ---
 """A cool schema"""
 schema {
   query: Query
 }
 
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
 """The foo directive description"""
 directive @foo(url: String) on FIELD
+
+directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
 
 """An enum"""
 enum E {
