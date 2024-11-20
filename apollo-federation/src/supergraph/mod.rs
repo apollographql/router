@@ -1000,7 +1000,7 @@ fn extract_interface_type_content(
                 }
             }
         }
-                
+        
         let context = supergraph_schema
             .metadata()
             .and_then(|metadata| metadata.for_identity(&Identity::context_identity()))
