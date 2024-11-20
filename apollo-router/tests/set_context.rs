@@ -63,11 +63,14 @@ fn get_configuration(rust_qp: bool) -> serde_json::Value {
             // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
             "generate_query_fragments": false,
         }
-    }}
+    }};
 }
 
-
-async fn run_single_request(query: &str, rust_qp: bool, mocks: &[(&'static str, &'static str)]) -> Response {
+async fn run_single_request(
+    query: &str,
+    rust_qp: bool,
+    mocks: &[(&'static str, &'static str)],
+) -> Response {
     let configuration = get_configuration(rust_qp);
     let harness = setup_from_mocks(configuration, mocks);
     let supergraph_service = harness.build_supergraph().await.unwrap();
@@ -132,7 +135,10 @@ async fn test_set_context_rust_qp() {
         QUERY,
         true,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_rust_qp.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_rust_qp.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -182,7 +188,10 @@ async fn test_set_context_no_typenames_rust_qp() {
         QUERY_NO_TYPENAMES,
         true,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_rust_qp.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_rust_qp.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -232,7 +241,10 @@ async fn test_set_context_list_rust_qp() {
         QUERY_WITH_LIST,
         true,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_rust_qp.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_rust_qp.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -282,7 +294,10 @@ async fn test_set_context_list_of_lists_rust_qp() {
         QUERY_WITH_LIST_OF_LISTS,
         true,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_rust_qp.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_rust_qp.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -344,7 +359,10 @@ async fn test_set_context_union_rust_qp() {
         QUERY_WITH_UNION,
         true,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_rust_qp.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_rust_qp.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -454,7 +472,10 @@ async fn test_set_context_type_mismatch_rust_qp() {
         QUERY,
         true,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_rust_qp.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_rust_qp.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
