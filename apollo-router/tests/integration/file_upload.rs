@@ -1298,7 +1298,7 @@ mod helper {
                 .await?
                 .ok_or(FileUploadError::MissingFile(field_name.clone()))?;
 
-            let file_name = f.file_name().unwrap_or(&field_name).to_string();
+            let file_name = f.file_name().unwrap_or(field_name).to_string();
             let body = f.bytes().await?;
 
             Upload {
