@@ -9,4 +9,5 @@ expression: "&metrics.non_zero()"
         attributes:
           opt.enabled: true
           opt.subgraph.enabled: true
+          opt.subgraph.invalidation.enabled: true
           opt.subgraph.ttl: true

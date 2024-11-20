@@ -157,7 +157,24 @@ impl CacheControl {
         Ok(result)
     }
 
+    /// Fill the header map with cache-control header and age header
     pub(crate) fn to_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
+        headers.insert(
+            CACHE_CONTROL,
+            HeaderValue::from_str(&self.to_cache_control_header()?)?,
+        );
+
+        if let Some(age) = self.age {
+            if age != 0 {
+                headers.insert(AGE, age.into());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Only for cache control header and not age
+    pub(crate) fn to_cache_control_header(&self) -> Result<String, BoxError> {
         let mut s = String::new();
         let mut prev = false;
         let now = now_epoch_seconds();
@@ -228,15 +245,8 @@ impl CacheControl {
         if self.stale_if_error {
             write!(&mut s, "{}stale-if-error", if prev { "," } else { "" },)?;
         }
-        headers.insert(CACHE_CONTROL, HeaderValue::from_str(&s)?);
 
-        if let Some(age) = self.age {
-            if age != 0 {
-                headers.insert(AGE, age.into());
-            }
-        }
-
-        Ok(())
+        Ok(s)
     }
 
     pub(super) fn no_store() -> Self {

@@ -162,6 +162,7 @@ For example:
 # Enable entity caching globally
 preview_entity_cache:
   enabled: true
+  expose_keys_in_context: true # Optional, it will expose cache keys in the context in order to use it in coprocessors or Rhai
   subgraph:
     all:
       enabled: true
