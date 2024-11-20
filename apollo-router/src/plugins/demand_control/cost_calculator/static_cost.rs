@@ -13,7 +13,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Node;
-use apollo_federation::link::cost_spec_definition::CostSpecDefinition;
 use serde_json_bytes::Value;
 
 use super::directives::IncludeDirective;

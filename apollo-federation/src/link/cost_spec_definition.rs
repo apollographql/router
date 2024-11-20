@@ -20,13 +20,8 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
-use super::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-
-pub(crate) const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
-pub(crate) const COST_DIRECTIVE_NAME_DEFAULT: Name = name!("federation__cost");
-
-pub(crate) const LIST_SIZE_DIRECTIVE_NAME_IN_SPEC: Name = name!("listSize");
-pub(crate) const LIST_SIZE_DIRECTIVE_NAME_DEFAULT: Name = name!("federation__listSize");
+pub const COST_DIRECTIVE_NAME: Name = name!("cost");
+pub const LIST_SIZE_DIRECTIVE_NAME: Name = name!("listSize");
 
 #[derive(Clone)]
 pub struct CostSpecDefinition {
@@ -43,7 +38,7 @@ macro_rules! propagate_demand_control_directives {
             dest: &mut $directives_ty,
         ) -> Result<(), FederationError> {
             let cost_directive = self
-                .directive_name_in_schema(subgraph_schema, &COST_DIRECTIVE_NAME_IN_SPEC)?
+                .directive_name_in_schema(subgraph_schema, &COST_DIRECTIVE_NAME)?
                 .and_then(|name| source.get(name.as_str()));
             if let Some(cost_directive) = cost_directive {
                 dest.push($wrap_ty(self.cost_directive(
@@ -53,7 +48,7 @@ macro_rules! propagate_demand_control_directives {
             }
 
             let list_size_directive = self
-                .directive_name_in_schema(subgraph_schema, &LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)?
+                .directive_name_in_schema(subgraph_schema, &LIST_SIZE_DIRECTIVE_NAME)?
                 .and_then(|name| source.get(name.as_str()));
             if let Some(list_size_directive) = list_size_directive {
                 dest.push($wrap_ty(self.list_size_directive(
@@ -76,7 +71,7 @@ macro_rules! propagate_demand_control_directives_to_position {
             dest: &$dest_ty,
         ) -> Result<(), FederationError> {
             let cost_directive = self
-                .directive_name_in_schema(subgraph_schema, &COST_DIRECTIVE_NAME_IN_SPEC)?
+                .directive_name_in_schema(subgraph_schema, &COST_DIRECTIVE_NAME)?
                 .and_then(|name| source.directives.get(name.as_str()));
             if let Some(cost_directive) = cost_directive {
                 dest.insert_directive(
@@ -88,7 +83,7 @@ macro_rules! propagate_demand_control_directives_to_position {
             }
 
             let list_size_directive = self
-                .directive_name_in_schema(subgraph_schema, &LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)?
+                .directive_name_in_schema(subgraph_schema, &LIST_SIZE_DIRECTIVE_NAME)?
                 .and_then(|name| source.directives.get(name.as_str()));
             if let Some(list_size_directive) = list_size_directive {
                 dest.insert_directive(
@@ -121,9 +116,10 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
+        // TODO: We probably shouldn't default to cost here, maybe return an error?
         let name = self
-            .directive_name_in_schema(schema, &COST_DIRECTIVE_NAME_IN_SPEC)?
-            .unwrap_or(COST_DIRECTIVE_NAME_DEFAULT);
+            .directive_name_in_schema(schema, &COST_DIRECTIVE_NAME)?
+            .unwrap_or(COST_DIRECTIVE_NAME);
 
         Ok(Directive { name, arguments })
     }
@@ -133,9 +129,10 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
+        // TODO: We probably shouldn't default to listSize here, maybe return an error?
         let name = self
-            .directive_name_in_schema(schema, &LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)?
-            .unwrap_or(LIST_SIZE_DIRECTIVE_NAME_DEFAULT);
+            .directive_name_in_schema(schema, &LIST_SIZE_DIRECTIVE_NAME)?
+            .unwrap_or(LIST_SIZE_DIRECTIVE_NAME);
 
         Ok(Directive { name, arguments })
     }
@@ -161,33 +158,13 @@ impl CostSpecDefinition {
         ScalarTypeDefinitionPosition
     );
 
-    pub fn for_schema(
-        schema: &apollo_compiler::Schema,
-    ) -> Result<Option<&'static Self>, FederationError> {
-        let schema = FederationSchema::new(schema.clone())?;
+    pub fn for_schema(schema: &FederationSchema) -> Result<Option<&'static Self>, FederationError> {
         let cost_link = schema
             .metadata()
             .as_ref()
             .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()));
-        tracing::debug!("Schema has cost link? {}", cost_link.is_some());
         let cost_spec = cost_link.and_then(|link| COST_VERSIONS.find(&link.url.version));
         Ok(cost_spec)
-    }
-
-    pub fn cost_directive_name_in_schema(
-        &self,
-        schema: &apollo_compiler::Schema,
-    ) -> Result<Option<Name>, FederationError> {
-        let schema = FederationSchema::new(schema.clone())?;
-        self.directive_name_in_schema(&schema, &COST_DIRECTIVE_NAME_IN_SPEC)
-    }
-
-    pub fn listsize_directive_name_in_schema(
-        &self,
-        schema: &apollo_compiler::Schema,
-    ) -> Result<Option<Name>, FederationError> {
-        let schema = FederationSchema::new(schema.clone())?;
-        self.directive_name_in_schema(&schema, &LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)
     }
 }
 

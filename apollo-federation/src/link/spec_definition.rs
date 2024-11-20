@@ -15,7 +15,7 @@ use crate::link::spec::Version;
 use crate::link::Link;
 use crate::schema::FederationSchema;
 
-pub(crate) trait SpecDefinition {
+pub trait SpecDefinition {
     fn url(&self) -> &Url;
     fn minimum_federation_version(&self) -> Option<&Version>;
 

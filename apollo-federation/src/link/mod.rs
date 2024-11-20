@@ -24,13 +24,13 @@ use crate::link::spec::Url;
 pub(crate) mod argument;
 pub mod cost_spec_definition;
 pub mod database;
-pub(crate) mod federation_spec_definition;
+pub mod federation_spec_definition;
 pub(crate) mod graphql_definition;
 pub(crate) mod inaccessible_spec_definition;
 pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
 pub mod spec;
-pub(crate) mod spec_definition;
+pub mod spec_definition;
 
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");

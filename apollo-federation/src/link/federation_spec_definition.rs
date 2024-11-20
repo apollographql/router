@@ -58,7 +58,7 @@ pub(crate) struct OverrideDirectiveArguments<'doc> {
 }
 
 #[derive(Debug)]
-pub(crate) struct FederationSpecDefinition {
+pub struct FederationSpecDefinition {
     url: Url,
 }
 
@@ -491,7 +491,7 @@ lazy_static! {
     };
 }
 
-pub(crate) fn get_federation_spec_definition_from_subgraph(
+pub fn get_federation_spec_definition_from_subgraph(
     schema: &FederationSchema,
 ) -> Result<&'static FederationSpecDefinition, FederationError> {
     let federation_link = schema
