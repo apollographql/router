@@ -417,6 +417,7 @@ mod tests {
 
     use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::EntityResolver;
     use apollo_federation::sources::connect::HTTPMethod;
@@ -433,6 +434,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -527,6 +529,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_entities() {
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -633,6 +636,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_entity_field() {
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -741,6 +745,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_errors() {
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -941,6 +946,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_status() {
         let connector = Connector {
+            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,

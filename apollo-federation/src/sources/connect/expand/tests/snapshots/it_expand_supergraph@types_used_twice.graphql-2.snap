@@ -140,5 +140,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
         config: None,
         max_requests: None,
         entity_resolver: None,
+        spec: V0_1,
     },
 }

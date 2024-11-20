@@ -1,0 +1,77 @@
+---
+title: Upgrading from Versions 1.x
+subtitle: Upgrade from version 1.x to 2.x of GraphOS Router
+description: Learn how to upgrade from version 1.x to 2.x of the GraphOS Router.
+---
+
+Learn how to upgrade your GraphOS Router deployment from version 1.x to 2.x.
+
+<Note>
+
+The latest version of GraphOS Router v2.x is **v2.0.0-preview.0**.
+
+</Note>
+
+## New configuration in GraphOS Router v2.0.0-preview.x
+
+The router v2.x introduces some new features that can impact the configuration from v1.x.
+
+### Apollo operation usage reporting via OTLP
+
+The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
+
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's off by default. 
+
+Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default.
+
+Learn more about configuring [usage reporting via OTLP](/router/configuration/telemetry/apollo-telemetry#usage-reporting-via-opentelemetry-protocol-otlp).
+
+### Metrics reporting defaults
+
+Default values of some GraphOS reporting metrics have been changed from v1.x to the following in v2.x:
+
+- `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
+- `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
+
+## Removed features in GraphOS Router v2.x
+
+### `--apollo-uplink-poll-interval`
+
+The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
+
+## Upgrading to GraphOS Router v2.x
+
+Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
+
+### Configure your Apollo usage reporting protocol
+
+If your router v1.x is configured with `experimental_otlp_tracing_sampler`, rename it to `otlp_tracing_sampler`.
+
+To [report operation usage metrics to GraphOS via OTLP](#apollo-operation-usage-reporting-via-otlp), you can either remove your configuration of `otlp_tracing_sampler` and use its default value, or you can explicitly enable it by setting it to [`always_on` or a sampling ratio](/router/configuration/telemetry/apollo-telemetry#configuring-usage-reporting-via-otlp).
+
+Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`. 
+
+### Configure metrics reporting defaults
+
+If you plan to use the [new metrics reporting defaults](#metrics-reporting-defaults), then no changes are required. 
+
+Otherwise, to use the defaults from v1.x, set the following:
+
+```yaml
+telemetry:
+  apollo:
+    signature_normalization_algorithm: legacy
+    metrics_reference_mode: standard
+```
+
+### Deploy your router
+
+Make sure that you are referencing the correct router release: **v2.0.0-preview.0**
+
+During upgrade, carefully monitor logs and resource consumption to ensure that your router has successfully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the steps above and decide if you want to change your configuration. 
+
+For example, you may decide that you wish to change the way in which you sample OTLP traces in this new release and not simply preserve your existing configuration.
+
+## Reporting upgrade issues
+
+If you encounter an upgrade issue that isn't resolved by this article, please search for existing [GitHub discussions](https://github.com/apollographql/router/discussions/) and start a new discussion if you don't find what you're looking for.

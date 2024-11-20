@@ -279,23 +279,26 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFa
     Ok(())
 }
 
-fn subscription_primary_matches(this: &SubscriptionNode, other: &SubscriptionNode) -> bool {
+fn subscription_primary_matches(
+    this: &SubscriptionNode,
+    other: &SubscriptionNode,
+) -> Result<(), MatchFailure> {
     let SubscriptionNode {
         service_name,
         variable_usages,
         operation,
-        operation_name,
+        operation_name: _, // ignored (reordered parallel fetches may have different names)
         operation_kind,
         input_rewrites,
         output_rewrites,
     } = this;
-    *service_name == other.service_name
-        && *variable_usages == other.variable_usages
-        && *operation_name == other.operation_name
-        && *operation_kind == other.operation_kind
-        && *input_rewrites == other.input_rewrites
-        && *output_rewrites == other.output_rewrites
-        && operation_matches(operation, &other.operation).is_ok()
+    check_match_eq!(*service_name, other.service_name);
+    check_match_eq!(*operation_kind, other.operation_kind);
+    check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
+    check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
+    check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
+    operation_matches(operation, &other.operation)?;
+    Ok(())
 }
 
 fn operation_matches(
@@ -647,7 +650,7 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
                 rest: other_rest,
             },
         ) => {
-            check_match!(subscription_primary_matches(primary, other_primary));
+            subscription_primary_matches(primary, other_primary)?;
             opt_plan_node_matches(rest, other_rest)
                 .map_err(|err| err.add_description("under Subscription"))?;
         }

@@ -1,4 +1,4 @@
-# This config updates the query plan options so that we can see if there is a different redis cache entry generted for query plans
+# This config updates the query plan options so that we can see if there is a different redis cache entry generated for query plans
 supergraph:
   query_planning:
     cache:
@@ -7,5 +7,5 @@ supergraph:
         urls:
           - redis://localhost:6379
         ttl: 10s
-  generate_query_fragments: true
+  generate_query_fragments: false
 

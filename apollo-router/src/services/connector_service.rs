@@ -10,6 +10,7 @@ use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
+use opentelemetry_api::metrics::ObservableGauge;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -31,6 +32,7 @@ use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::request_limit::RequestLimits;
+use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
@@ -171,7 +173,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             );
             // TODO: I think we should get rid of these attributes by default and only add it from custom telemetry. We just need to double check it's not required for Studio.
 
-            // These additionnal attributes will be added to custom telemetry feature
+            // These additional attributes will be added to custom telemetry feature
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set
@@ -267,10 +269,18 @@ async fn execute(
                         },
                         Err(e) => e,
                     }
-                })?;
+                });
+
+                u64_counter!(
+                    "apollo.router.operations.connectors",
+                    "Total number of requests to connectors",
+                    1,
+                    "connector.type" = CONNECTOR_TYPE_HTTP,
+                    "subgraph.name" = original_subgraph_name
+                );
 
                 Ok::<_, BoxError>(ConnectorResponse {
-                    result: ConnectorResult::HttpResponse(res.http_response),
+                    result: ConnectorResult::HttpResponse(res?.http_response),
                     key,
                     debug_request,
                 })
@@ -294,6 +304,7 @@ pub(crate) struct ConnectorServiceFactory {
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
 }
 
 impl ConnectorServiceFactory {
@@ -307,9 +318,12 @@ impl ConnectorServiceFactory {
         Self {
             http_service_factory,
             subgraph_schemas,
-            schema,
+            schema: schema.clone(),
             subscription_config,
             connectors_by_service_name,
+            _connect_spec_version_instrument: connect_spec_version_instrument(
+                schema.connectors.as_ref(),
+            ),
         }
     }
 
@@ -321,6 +335,7 @@ impl ConnectorServiceFactory {
             subscription_config: Default::default(),
             connectors_by_service_name: Default::default(),
             schema,
+            _connect_spec_version_instrument: None,
         }
     }
 }

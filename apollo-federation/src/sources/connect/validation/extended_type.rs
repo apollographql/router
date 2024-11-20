@@ -297,19 +297,15 @@ fn validate_field(
             }
         }
 
-        errors.extend(
-            headers::validate_arg(
-                http_arg,
-                schema,
-                HttpHeadersCoordinate::Connect {
-                    connect: connect_coordinate,
-                    object: &object.name,
-                    field: &field.name,
-                },
-            )
-            .into_iter()
-            .flatten(),
-        );
+        errors.extend(headers::validate_arg(
+            http_arg,
+            schema,
+            HttpHeadersCoordinate::Connect {
+                connect: connect_coordinate,
+                object: &object.name,
+                field: &field.name,
+            },
+        ));
     }
     errors
 }

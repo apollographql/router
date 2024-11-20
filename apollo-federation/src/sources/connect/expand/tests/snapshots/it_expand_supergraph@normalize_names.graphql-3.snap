@@ -44,12 +44,12 @@ enum join__Graph {
 }
 
 type User @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0) {
-  a: String @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0) @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0)
-  b: String @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0)
-  id: ID! @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0) @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0)
+  a: String @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "String")
+  b: String @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "String")
+  id: ID! @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "ID!")
 }
 
 type Query @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0) @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0) {
-  user(id: ID!): User @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0)
-  users: [User] @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0)
+  user(id: ID!): User @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "User")
+  users: [User] @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "[User]")
 }

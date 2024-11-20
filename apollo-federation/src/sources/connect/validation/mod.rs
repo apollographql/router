@@ -64,7 +64,7 @@ use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -79,7 +79,7 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
     // TODO: Handle schema errors rather than relying on JavaScript to catch it later
     let schema = Schema::parse(source_text, file_name)
         .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
-    let connect_identity = ConnectSpecDefinition::identity();
+    let connect_identity = ConnectSpec::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
         return Vec::new(); // There are no connectors-related directives to validate
     };
@@ -91,8 +91,8 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
 
     let mut messages = check_conflicting_directives(&schema);
 
-    let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
-    let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
+    let source_directive_name = ConnectSpec::source_directive_name(&link);
+    let connect_directive_name = ConnectSpec::connect_directive_name(&link);
     let schema_info = SchemaInfo::new(
         &schema,
         source_text,
@@ -330,17 +330,13 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
             }
         }
 
-        errors.extend(
-            headers::validate_arg(
-                http_arg,
-                schema,
-                HttpHeadersCoordinate::Source {
-                    directive_name: &directive.name,
-                },
-            )
-            .into_iter()
-            .flatten(),
-        );
+        errors.extend(headers::validate_arg(
+            http_arg,
+            schema,
+            HttpHeadersCoordinate::Source {
+                directive_name: &directive.name,
+            },
+        ));
     } else {
         errors.push(Message {
             code: Code::GraphQLError,
@@ -515,21 +511,14 @@ pub enum Code {
     SelectedFieldNotFound,
     /// A group selection (`a { b }`) was used, but the field is not an object
     GroupSelectionIsNotObject,
-    /// Invalid header name
-    /// The `name` and `as` mappings should be valid, HTTP header names.
-    InvalidHttpHeaderName,
-    /// The `value` mapping should be either a valid HTTP header value or list of valid HTTP header values.
-    InvalidHttpHeaderValue,
     /// The `name` mapping must be unique for all headers.
     HttpHeaderNameCollision,
-    /// Header mappings cannot include both `as` and `value` properties.
-    InvalidHttpHeaderMapping,
+    /// A provided header in `@source` or `@connect` was not valid
+    InvalidHeader,
     /// Certain directives are not allowed when using connectors
     UnsupportedFederationDirective,
     /// Abstract types are not allowed when using connectors
     UnsupportedAbstractType,
-    /// Header does not define `from` or `value`
-    MissingHeaderSource,
     /// Fields that return an object type must use a group JSONSelection `{}`
     GroupSelectionRequiredForObject,
     /// Fields in the schema that aren't resolved by a connector

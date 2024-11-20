@@ -21,6 +21,8 @@ extend schema
           name: "x-invalid-value"
           value: "  Value with 😊 emoji and newline  \n "
         }
+        { name: "Content-Length", value: "Is a reserved header" }
+        { name: "Content-Type", from: "Cant-Be-Dynamic" }
       ]
     }
   )
