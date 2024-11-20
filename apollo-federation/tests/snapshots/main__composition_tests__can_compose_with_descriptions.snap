@@ -45,7 +45,7 @@ type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
   t(
     """An argument that is very important"""
     x: String!,
-  ): String @join__field(graph: SUBGRAPH1)
+  ): String @join__field(graph: SUBGRAPH1, type: "String")
 }
 
 scalar join__DirectiveArguments

@@ -5,25 +5,25 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
 ---
 [
     Message {
-        code: MissingHeaderSource,
-        message: "`@source(http.headers:)` must include either a `from` or `value` argument.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` either `from` or `value` must be set",
         locations: [
-            10:16..24:8,
+            13:9..13:37,
         ],
     },
     Message {
-        code: GraphQLError,
-        message: "`@source(http.headers:)` must include a `name` value.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` missing `name` field",
         locations: [
-            10:16..24:8,
+            14:9..14:35,
         ],
     },
     Message {
-        code: InvalidHttpHeaderMapping,
-        message: "`@source(http.headers:)` uses both `from` and `value` keys together. Please choose only one.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` `from` and `value` can't be set at the same time",
         locations: [
-            15:41..15:57,
-            15:66..15:77,
+            15:35..15:39,
+            15:59..15:64,
         ],
     },
     Message {
@@ -35,24 +35,38 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         ],
     },
     Message {
-        code: InvalidHttpHeaderName,
-        message: "The value `<Invalid-Header>` for `name` at `@source(http.headers:)` must be a valid HTTP header name.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` the value `<Invalid-Header>` is an invalid HTTP header name",
         locations: [
             18:17..18:35,
         ],
     },
     Message {
-        code: InvalidHttpHeaderName,
-        message: "The value `<Invalid-Header>` for `from` at `@source(http.headers:)` must be a valid HTTP header name.",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` the value `<Invalid-Header>` is an invalid HTTP header name",
         locations: [
             19:41..19:59,
         ],
     },
     Message {
-        code: InvalidHttpHeaderValue,
-        message: "The value `  Value with 😊 emoji and newline  \n ` at `@source(http.headers:)` is an invalid HTTP header",
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` invalid HTTP header value `  Value with 😊 emoji and newline  \n `",
         locations: [
-            22:18..22:60,
+            22:19..22:58,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-length' is reserved and cannot be set by a connector",
+        locations: [
+            24:17..24:33,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-type' can't be set with `from`, only with `value`",
+        locations: [
+            25:17..25:31,
         ],
     },
 ]

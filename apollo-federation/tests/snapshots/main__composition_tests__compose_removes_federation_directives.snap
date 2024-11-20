@@ -25,12 +25,12 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 scalar Import @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB)
 
 type Product @join__type(graph: SUBGRAPHA, key: "sku") @join__type(graph: SUBGRAPHB, key: "sku") {
-  sku: String! @join__field(graph: SUBGRAPHA) @join__field(graph: SUBGRAPHB)
-  name: String! @join__field(graph: SUBGRAPHA, external: true) @join__field(graph: SUBGRAPHB)
+  sku: String! @join__field(graph: SUBGRAPHA, type: "String!") @join__field(graph: SUBGRAPHB, type: "String!")
+  name: String! @join__field(graph: SUBGRAPHA, external: true, type: "String!") @join__field(graph: SUBGRAPHB, type: "String!")
 }
 
 type Query @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB) {
-  products: [Product!] @join__field(graph: SUBGRAPHA, provides: "name")
+  products: [Product!] @join__field(graph: SUBGRAPHA, provides: "name", type: "[Product!]")
 }
 
 scalar join__DirectiveArguments

@@ -43,14 +43,14 @@ enum join__Graph {
 }
 
 input QuuxInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  quaz: String
+  quaz: String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String")
 }
 
 input BazInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  buzz: String
-  quux: QuuxInput
+  buzz: String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String")
+  quux: QuuxInput @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "QuuxInput")
 }
 
 type Query @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0)
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String")
 }
