@@ -103,15 +103,14 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
 
         (
             http::StatusCode::OK,
-            serde_json::json!({
+            axum::Json(serde_json::json!({
                 "data": {
                     "file": {
-                        "file_name": file_field.file_name().unwrap(),
+                        "filename": file_field.file_name().unwrap(),
                         "body": file_field.text().await.unwrap(),
                     },
                 }
-            })
-            .to_string(),
+            })),
         )
     }
 
@@ -130,7 +129,7 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
             insta::assert_json_snapshot!(response, @r###"
             {
               "data": {
-                "file0": {
+                "file": {
                   "filename": "example.txt",
                   "body": "Hello, world!"
                 }
