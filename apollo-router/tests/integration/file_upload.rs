@@ -1287,7 +1287,7 @@ mod helper {
         }
 
         let (field_name, _) = map
-            .last_key_value()
+            .first_key_value()
             .ok_or(FileUploadError::MissingMapping)?;
 
         // Extract the single expected file
