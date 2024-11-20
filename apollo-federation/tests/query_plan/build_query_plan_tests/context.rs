@@ -36,6 +36,78 @@ use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::TopLevelPlanNode;
 
+fn parse_fetch_data_path_element(value: &str) -> FetchDataPathElement {
+    if value == ".." {
+        FetchDataPathElement::Parent
+    } else if let Some(("", ty)) = value.split_once("... on ") {
+        FetchDataPathElement::TypenameEquals(Name::new(ty).unwrap())
+    } else {
+        FetchDataPathElement::Key(
+            Name::new(value).unwrap(),
+            Default::default()
+        )
+    }
+}
+
+// TODO: This should check the whole renamer not just the name.
+macro_rules! node_assert {
+    ($plan: ident, $index: literal, $($rename_key_to: literal, $path: expr),+$(,)?) => {
+        let Some(TopLevelPlanNode::Sequence(node)) = $plan.node else {
+            panic!("failed to get sequence node");
+        };
+        let Some(PlanNode::Flatten(node)) = node.nodes.get($index) else {
+            panic!("failed to get fetch node");
+        };
+        let PlanNode::Fetch(node) = &*node.node else {
+            panic!("failed to get flatten node");
+        };
+        let expected_rewrites = &[ $( $rename_key_to ),+ ];
+        let expected_paths = &[ $( $path.iter().map(parse_fetch_data_path_element).collect::<Vec<_>>() ),+ ];
+        assert_eq!(node.context_rewrites.len(), expected_rewrite.len());
+        node
+            .context_rewrites
+            .iter()
+            .map(|rewriter| {
+                let FetchDataRewrite::KeyRenamer(renamer) = &**rewriter else {
+                    panic!("Expected KeyRenamer");
+                };
+                renamer
+            })
+            .zip(expected_rewrite.iter().zip(expected_paths))
+            .for_each(|(actual, (rename_key_to, path))|{
+                assert_eq!(&actual.rename_key_to.as_str(), rename_key_to);
+                assert_eq!(&actual.path, path);
+            });
+    };
+}
+/*
+vec![Arc::new(FetchDataRewrite::KeyRenamer(
+    FetchDataKeyRenamer {
+        rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
+        path: vec![
+            FetchDataPathElement::Parent,
+            FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+            FetchDataPathElement::Key(
+                Name::new("a").unwrap(),
+                Default::default()
+            ),
+            FetchDataPathElement::Key(
+                Name::new("b").unwrap(),
+                Default::default()
+            ),
+            FetchDataPathElement::Key(
+                Name::new("c").unwrap(),
+                Default::default()
+            ),
+            FetchDataPathElement::Key(
+                Name::new("prop").unwrap(),
+                Default::default()
+            ),
+        ],
+    }
+)),]
+*/
+
 #[test]
 fn set_context_test_variable_is_from_same_subgraph() {
     let planner = planner!(
@@ -137,6 +209,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
         },
         _ => panic!("failed to get sequence node"),
     }
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -257,6 +330,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
         },
         _ => panic!("failed to get sequence node"),
     }
+    node_assert!(plan, 2, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -364,6 +438,8 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
         },
         _ => panic!("failed to get sequence node"),
     }
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph2_0");
 }
 
 #[test]
@@ -567,6 +643,8 @@ fn set_context_test_fetched_as_a_list() {
         },
         _ => panic!("failed to get sequence node"),
     }
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -951,6 +1029,8 @@ fn set_context_test_accesses_a_different_top_level_query() {
         },
         _ => panic!("failed to get sequence node"),
     }
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -1049,6 +1129,8 @@ fn set_context_one_subgraph() {
         },
         _ => panic!("failed to get sequence node"),
     }
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
