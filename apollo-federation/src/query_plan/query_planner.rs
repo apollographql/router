@@ -54,7 +54,7 @@ use crate::Supergraph;
 
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
     /// Whether the query planner should try to reuse the named fragments of the planned query in
     /// subgraph fetches.
@@ -117,7 +117,7 @@ impl Default for QueryPlannerConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Hash)]
+#[derive(Debug, Clone, Default, Hash, Serialize)]
 pub struct QueryPlanIncrementalDeliveryConfig {
     /// Enables `@defer` support in the query planner, breaking up the query plan with [DeferNode]s
     /// as appropriate.
@@ -128,10 +128,11 @@ pub struct QueryPlanIncrementalDeliveryConfig {
     /// Defaults to false.
     ///
     /// [DeferNode]: crate::query_plan::DeferNode
+    #[serde(default)]
     pub enable_defer: bool,
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerDebugConfig {
     /// If used and the supergraph is built from a single subgraph, then user queries do not go
     /// through the normal query planning and instead a fetch to the one subgraph is built directly
