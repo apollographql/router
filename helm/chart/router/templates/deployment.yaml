@@ -48,6 +48,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "router.serviceAccountName" . }}
+      {{- if .Values.restartPolicy }}
+      restartPolicy: {{.Values.restartPolicy}}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -69,8 +72,10 @@ spec:
             - /app/configuration.yaml
             {{- end }}
           {{- end }}
-          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
           env:
+            - name: APOLLO_ROUTER_OFFICIAL_HELM_CHART
+              value: "true"
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
             {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
             - name: APOLLO_KEY
               valueFrom:
@@ -172,3 +177,13 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if .Values.rollingUpdate }}
+  strategy:
+    rollingUpdate:
+      {{- if  (hasKey .Values.rollingUpdate "maxUnavailable") }}
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      {{- end }}
+      {{- if (hasKey .Values.rollingUpdate "maxSurge") }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+      {{- end }}
+  {{- end }}

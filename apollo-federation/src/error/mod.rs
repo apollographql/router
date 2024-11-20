@@ -4,12 +4,90 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
+use apollo_compiler::executable::GetOperationError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
 use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
+
+/// Create an internal error.
+///
+/// # Example
+/// ```rust
+/// use apollo_federation::internal_error;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// const NAME: &str = "the thing";
+/// let result: Result<(), FederationError> = may_be_none()
+///     .ok_or_else(|| internal_error!("Expected {NAME} to be Some"));
+/// ```
+#[macro_export]
+macro_rules! internal_error {
+    ( $( $arg:tt )+ ) => {
+        $crate::error::FederationError::internal(format!( $( $arg )+ ))
+    }
+}
+
+/// Break out of the current function, returning an internal error.
+///
+/// # Example
+/// ```rust
+/// use apollo_federation::bail;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// fn example() -> Result<(), FederationError> {
+///     bail!("Something went horribly wrong");
+///     unreachable!()
+/// }
+/// #
+/// # _ = example();
+/// ```
+#[macro_export]
+macro_rules! bail {
+    ( $( $arg:tt )+ ) => {
+        return Err($crate::internal_error!( $( $arg )+ ).into());
+    }
+}
+
+/// A safe assertion: in debug mode, it panicks on failure, and in production, it returns an
+/// internal error.
+///
+/// Treat this as an assertion. It must only be used for conditions that *should never happen*
+/// in normal operation.
+///
+/// # Example
+/// ```rust,no_run
+/// use apollo_federation::ensure;
+/// use apollo_federation::error::FederationError;
+/// # fn may_be_none() -> Option<()> { None }
+///
+/// fn example() -> Result<(), FederationError> {
+///     ensure!(1 == 0, "Something went horribly wrong");
+///     unreachable!()
+/// }
+/// ```
+#[macro_export]
+macro_rules! ensure {
+    ( $expr:expr, $( $arg:tt )+ ) => {
+        #[cfg(debug_assertions)]
+        {
+            if false {
+                return Err($crate::error::FederationError::internal("ensure!() must be used in a function that returns a Result").into());
+            }
+            assert!($expr, $( $arg )+);
+        }
+
+        #[cfg(not(debug_assertions))]
+        if !$expr {
+            $crate::internal_error!( $( $arg )+ );
+        }
+    }
+}
 
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.
@@ -29,6 +107,16 @@ impl From<SchemaRootKind> for String {
     }
 }
 
+#[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
+pub enum UnsupportedFeatureKind {
+    #[strum(to_string = "defer")]
+    Defer,
+    #[strum(to_string = "context")]
+    Context,
+    #[strum(to_string = "alias")]
+    Alias,
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum SingleFederationError {
     #[error(
@@ -44,6 +132,10 @@ pub enum SingleFederationError {
     InvalidGraphQLName(#[from] InvalidNameError),
     #[error("Subgraph invalid: {message}")]
     InvalidSubgraph { message: String },
+    #[error("Operation name not found")]
+    UnknownOperation,
+    #[error("Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.")]
+    UnsupportedSpreadDirective { name: Name },
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
     #[error("{message}")]
@@ -185,7 +277,10 @@ pub enum SingleFederationError {
     #[error("{message}")]
     OverrideOnInterface { message: String },
     #[error("{message}")]
-    UnsupportedFeature { message: String },
+    UnsupportedFeature {
+        message: String,
+        kind: UnsupportedFeatureKind,
+    },
     #[error("{message}")]
     InvalidFederationSupergraph { message: String },
     #[error("{message}")]
@@ -210,6 +305,12 @@ impl SingleFederationError {
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
+            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
+            // that's invalid, but the operation name
+            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
+            // TODO(@goto-bus-stop): this should have a different error code: it's not invalid,
+            // just unsupported due to internal limitations.
+            SingleFederationError::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
@@ -388,6 +489,12 @@ impl SingleFederationError {
 impl From<InvalidNameError> for FederationError {
     fn from(err: InvalidNameError) -> Self {
         SingleFederationError::from(err).into()
+    }
+}
+
+impl From<GetOperationError> for FederationError {
+    fn from(_: GetOperationError) -> Self {
+        SingleFederationError::UnknownOperation.into()
     }
 }
 

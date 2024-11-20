@@ -13,6 +13,7 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
@@ -175,13 +176,13 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
+    state: TransformState,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
     // the point of application
-    fragments_unauthorized_paths: HashMap<&'a Name, Vec<Path>>,
+    fragments_unauthorized_paths: HashMap<String, Vec<Path>>,
     current_path: Path,
     authenticated_directive_name: String,
     dry_run: bool,
@@ -190,13 +191,12 @@ pub(crate) struct AuthenticatedVisitor<'a> {
 impl<'a> AuthenticatedVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
-        executable: &'a ast::Document,
         implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
-            fragments: transform::collect_fragments(executable),
+            state: TransformState::new(),
             implementers_map,
             dry_run,
             query_requires_authentication: false,
@@ -409,17 +409,11 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         };
 
         if self.unauthorized_paths.len() > current_unauthorized_paths_index {
-            if let Some((name, _)) = self.fragments.get_key_value(&node.name) {
-                self.fragments_unauthorized_paths.insert(
-                    name,
-                    self.unauthorized_paths
-                        .split_off(current_unauthorized_paths_index),
-                );
-            }
-        }
-
-        if let Ok(None) = res {
-            self.fragments.remove(&node.name);
+            self.fragments_unauthorized_paths.insert(
+                node.name.as_str().to_string(),
+                self.unauthorized_paths
+                    .split_off(current_unauthorized_paths_index),
+            );
         }
 
         res
@@ -430,28 +424,34 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
         // record the fragment errors at the point of application
-        if let Some(paths) = self.fragments_unauthorized_paths.get(&node.fragment_name) {
+        if let Some(paths) = self
+            .fragments_unauthorized_paths
+            .get(node.fragment_name.as_str())
+        {
             for path in paths {
                 let path = self.current_path.join(path);
                 self.unauthorized_paths.push(path);
             }
         }
 
-        let fragment = match self.fragments.get(&node.fragment_name) {
-            Some(fragment) => fragment,
+        let condition = match self
+            .state()
+            .fragments()
+            .get(node.fragment_name.as_str())
+            .map(|fragment| fragment.fragment.type_condition.clone())
+        {
+            Some(condition) => condition,
             None => return Ok(None),
         };
-
-        let condition = &fragment.type_condition;
-
-        self.current_path
-            .push(PathElement::Fragment(condition.as_str().into()));
 
         let fragment_requires_authentication = self
             .schema
             .types
-            .get(condition)
+            .get(condition.as_str())
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
+
+        self.current_path
+            .push(PathElement::Fragment(condition.as_str().into()));
 
         let res = if fragment_requires_authentication {
             self.query_requires_authentication = true;
@@ -515,6 +515,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
     }
+
+    fn state(&mut self) -> &mut TransformState {
+        &mut self.state
+    }
 }
 
 #[cfg(test)]
@@ -556,7 +560,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -609,7 +613,7 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map, false).unwrap();
+        let mut visitor = AuthenticatedVisitor::new(&schema, &map, false).unwrap();
 
         (
             transform::document(&mut visitor, &doc).unwrap(),
@@ -887,7 +891,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -974,7 +978,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1069,7 +1073,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1133,7 +1137,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1221,7 +1225,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1306,7 +1310,7 @@ mod tests {
       `SECURITY` features provide metadata necessary to securely resolve fields.
       """
       SECURITY
-    
+
       """
       `EXECUTION` features provide metadata necessary for operation execution.
       """
@@ -1315,18 +1319,18 @@ mod tests {
         type Query {
             post(id: ID!): Post
           }
-          
+
           interface Post {
             id: ID!
             author: String!
             title: String!
             content: String!
           }
-          
+
           type Stats {
             views: Int
           }
-          
+
           type PublicBlog implements Post {
             id: ID!
             author: String!
@@ -1334,7 +1338,7 @@ mod tests {
             content: String!
             stats: Stats @authenticated
           }
-          
+
           type PrivateBlog implements Post @authenticated {
             id: ID!
             author: String!
@@ -1406,14 +1410,14 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
 
-  
+
    scalar join__FieldSet
    enum join__Graph {
        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
@@ -1678,6 +1682,312 @@ mod tests {
                     .clone(),
             )
             .context(context)
+            .build()
+            .unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+
+        let first_response = response.next_response().await.unwrap();
+
+        insta::assert_json_snapshot!(first_response);
+
+        assert!(response.next_response().await.is_none());
+    }
+
+    static AUTHENTICATED_ROOT_TYPE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+    directive @join__field(
+        graph: join__Graph
+        requires: join__FieldSet
+        provides: join__FieldSet
+        type: String
+        external: Boolean
+        override: String
+        usedOverridden: Boolean
+        ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+    directive @join__implements(
+        graph: join__Graph!
+        interface: String!
+        ) repeatable on OBJECT | INTERFACE
+    directive @join__type(
+        graph: join__Graph!
+        key: join__FieldSet
+        extension: Boolean! = false
+        resolvable: Boolean! = true
+        isInterfaceObject: Boolean! = false
+        ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+    ) repeatable on UNION
+
+    scalar join__FieldSet
+    scalar link__Import
+    enum link__Purpose {
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+
+    enum join__Graph {
+      USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+      ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+    }
+
+    type Query @join__type(graph: USER) @authenticated {
+        t: T @join__field(graph: USER)
+    }
+
+    type T @join__type(graph: USER) {
+        f: String @join__field(graph: USER)
+    }
+    "#;
+
+    #[test]
+    fn named_fragment_nested_in_authenticated_type() {
+        static QUERY: &str = r#"
+        query {
+            t {
+                ... F
+            }
+        }
+
+        fragment F on T {
+            f
+        }
+        "#;
+
+        let (doc, paths) = filter(AUTHENTICATED_ROOT_TYPE_SCHEMA, QUERY);
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    static AUTHENTICATED_TYPE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+    directive @join__field(
+        graph: join__Graph
+        requires: join__FieldSet
+        provides: join__FieldSet
+        type: String
+        external: Boolean
+        override: String
+        usedOverridden: Boolean
+        ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+    directive @join__implements(
+        graph: join__Graph!
+        interface: String!
+        ) repeatable on OBJECT | INTERFACE
+    directive @join__type(
+        graph: join__Graph!
+        key: join__FieldSet
+        extension: Boolean! = false
+        resolvable: Boolean! = true
+        isInterfaceObject: Boolean! = false
+        ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+    ) repeatable on UNION
+
+    scalar join__FieldSet
+    scalar link__Import
+    enum link__Purpose {
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+
+    enum join__Graph {
+      USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+      ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+    }
+
+    type Query @join__type(graph: USER){
+        t: T @join__field(graph: USER)
+        u(u:Int): String @join__field(graph: USER)
+        v(v:Int): Int @join__field(graph: USER)
+    }
+
+    type T @join__type(graph: USER) @authenticated {
+        f(id: String): String @join__field(graph: USER)
+    }
+    "#;
+
+    #[test]
+    fn named_fragment_nested_in_named_fragment_in_authenticated_type() {
+        static QUERY: &str = r#"
+        query A($v: Int) {
+            ... F3
+        }
+
+        query B($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
+            ... F1
+            u(u:$u) @include(if: $include)
+        }
+
+        fragment F1 on Query {
+            ... F2
+        }
+
+        fragment F2 on Query {
+            t {
+                ... F3 @skip(if: $skip)
+            }
+        }
+
+        fragment F3 on T {
+            f(id: $id)
+        }
+
+        fragment F4 on Query {
+            ...F5
+        }
+
+        fragment F5 on Query {
+            v(v: $v)
+        }
+        "#;
+
+        let (doc, paths) = filter(AUTHENTICATED_TYPE_SCHEMA, QUERY);
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[tokio::test]
+    async fn introspection_fragment_with_authenticated_root_query() {
+        static QUERY: &str = r#"
+        query {
+            __schema {
+                types {
+                    ... TypeDef
+                }
+            }
+        }
+
+        fragment TypeDef on __Type {
+            name
+        }
+        "#;
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+            "supergraph": {
+                "introspection": true
+            },
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "authorization": {
+                "directives": {
+                    "enabled": true
+                }
+            }}))
+            .unwrap()
+            .schema(AUTHENTICATED_ROOT_TYPE_SCHEMA)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(QUERY)
+            .build()
+            .unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+
+        let first_response = response.next_response().await.unwrap();
+
+        insta::assert_json_snapshot!(first_response);
+
+        assert!(response.next_response().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn introspection_mixed_with_authenticated_fields() {
+        // Note: in https://github.com/apollographql/router/pull/5952/ we moved introspection handling
+        // before authorization filtering in bridge_query_planner.rs, relying on the fact that queries
+        // mixing introspection and concrete fields are not supported, so introspection answers right
+        // away. If this ever changes, we should make sure that unauthorized fields are still properly
+        // filtered out
+        static QUERY: &str = r#"
+        query {
+            __schema {
+                types {
+                    ... TypeDef
+                }
+            }
+
+            t {
+              f
+            }
+        }
+
+        fragment TypeDef on __Type {
+            name
+        }
+        "#;
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+            "supergraph": {
+                "introspection": true
+            },
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "authorization": {
+                "directives": {
+                    "enabled": true
+                }
+            }}))
+            .unwrap()
+            .schema(AUTHENTICATED_TYPE_SCHEMA)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(QUERY)
             .build()
             .unwrap();
 

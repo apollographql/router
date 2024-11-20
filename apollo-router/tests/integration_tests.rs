@@ -1386,3 +1386,37 @@ async fn test_telemetry_doesnt_hang_with_invalid_schema() {
     )
     .await;
 }
+
+// Ensure that, on unix, the router won't start with wrong file permissions
+#[cfg(unix)]
+#[test]
+fn it_will_not_start_with_loose_file_permissions() {
+    use std::os::fd::AsRawFd;
+    use std::process::Command;
+
+    use crate::integration::IntegrationTest;
+
+    let mut router = Command::new(IntegrationTest::router_location());
+
+    let tester = tempfile::NamedTempFile::new().expect("it created a temporary test file");
+    let fd = tester.as_file().as_raw_fd();
+    let path = tester.path().to_str().expect("got the tempfile path");
+
+    // Modify our temporary file permissions so that they are definitely too loose.
+    unsafe {
+        libc::fchmod(fd, 0o777);
+    }
+
+    let output = router
+        .args(["--apollo-key-path", path])
+        .output()
+        .expect("router could not start");
+
+    // Assert that our router executed unsuccessfully
+    assert!(!output.status.success());
+    // It may have been unsuccessful for a variety of reasons, is it the right reason?
+    assert_eq!(
+        std::str::from_utf8(&output.stderr).expect("output is a string"),
+        "Apollo key file permissions (0o777) are too permissive\n"
+    )
+}

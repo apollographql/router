@@ -10,41 +10,52 @@ use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::operation::NamedFragments;
+use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 
 // Federation spec does not allow the alias syntax in field set strings.
 // However, since `parse_field_set` uses the standard GraphQL parser, which allows aliases,
 // we need this secondary check to ensure that aliases are not used.
-fn check_absence_of_aliases(
-    selection_set: &SelectionSet,
-    code_str: &str,
-) -> Result<(), FederationError> {
-    let mut alias_errors = vec![];
-    selection_set.for_each_element(&mut |elem| {
-        let OpPathElement::Field(field) = elem else {
-            return Ok(());
-        };
-        let Some(alias) = &field.alias else {
-            return Ok(());
-        };
-        alias_errors.push(SingleFederationError::UnsupportedFeature {
-            // PORT_NOTE: The JS version also quotes the directive name in the error message.
-            //            For example, "aliases are not currently supported in @requires".
-            message: format!(
-                r#"Cannot use alias "{}" in "{}": aliases are not currently supported in the used directive"#,
-                alias, code_str)
-        });
+fn check_absence_of_aliases(selection_set: &SelectionSet) -> Result<(), FederationError> {
+    fn visit_selection_set(
+        errors: &mut MultipleFederationErrors,
+        selection_set: &SelectionSet,
+    ) -> Result<(), FederationError> {
+        for selection in selection_set.iter() {
+            match selection {
+                Selection::FragmentSpread(_) => {
+                    return Err(FederationError::internal(
+                        "check_absence_of_aliases(): unexpected fragment spread",
+                    ))
+                }
+                Selection::InlineFragment(frag) => check_absence_of_aliases(&frag.selection_set)?,
+                Selection::Field(field) => {
+                    if let Some(alias) = &field.field.alias {
+                        errors.push(SingleFederationError::UnsupportedFeature {
+                            // PORT_NOTE: The JS version also quotes the directive name in the error message.
+                            //            For example, "aliases are not currently supported in @requires".
+                            message: format!(r#"Cannot use alias "{alias}" in "{}": aliases are not currently supported in the used directive"#, field.field),
+                            kind: crate::error::UnsupportedFeatureKind::Alias
+                        }.into());
+                    }
+                    if let Some(selection_set) = &field.selection_set {
+                        visit_selection_set(errors, selection_set)?;
+                    }
+                }
+            }
+        }
         Ok(())
-    })?;
-    MultipleFederationErrors::from_iter(alias_errors).into_result()
+    }
+
+    let mut errors = MultipleFederationErrors { errors: vec![] };
+    visit_selection_set(&mut errors, selection_set)?;
+    errors.into_result()
 }
 
 // TODO: In the JS codebase, this has some error-rewriting to help give the user better hints around
@@ -69,7 +80,7 @@ pub(crate) fn parse_field_set(
         SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)?;
 
     // Validate the field set has no aliases.
-    check_absence_of_aliases(&selection_set, value)?;
+    check_absence_of_aliases(&selection_set)?;
 
     Ok(selection_set)
 }
@@ -155,37 +166,6 @@ pub(crate) fn collect_target_fields_from_field_set(
     Ok(fields)
 }
 
-// PORT_NOTE: This is meant as a companion function for collect_target_fields_from_field_set(), as
-// some callers will also want to include interface field implementations.
-pub(crate) fn add_interface_field_implementations(
-    fields: Vec<FieldDefinitionPosition>,
-    schema: &FederationSchema,
-) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
-    let mut new_fields = vec![];
-    for field in fields {
-        let interface_field = if let FieldDefinitionPosition::Interface(field) = &field {
-            Some(field.clone())
-        } else {
-            None
-        };
-        new_fields.push(field);
-        if let Some(interface_field) = interface_field {
-            for implementing_type in &schema
-                .referencers
-                .get_interface_type(&interface_field.type_name)?
-                .object_types
-            {
-                new_fields.push(
-                    implementing_type
-                        .field(interface_field.field_name.clone())
-                        .into(),
-                );
-            }
-        }
-    }
-    Ok(new_fields)
-}
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Name;
@@ -238,8 +218,8 @@ mod tests {
         assert_eq!(
             err.to_string(),
             r#"The following errors occurred:
-  - Cannot use alias "r1" in "r1: r s q1: q": aliases are not currently supported in the used directive
-  - Cannot use alias "q1" in "r1: r s q1: q": aliases are not currently supported in the used directive"#
+  - Cannot use alias "r1" in "r1: r": aliases are not currently supported in the used directive
+  - Cannot use alias "q1" in "q1: q": aliases are not currently supported in the used directive"#
         );
         Ok(())
     }

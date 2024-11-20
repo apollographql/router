@@ -9,11 +9,13 @@ use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tracing::info_span;
 use tracing::Span;
 
 use super::instruments::Instrumented;
 use super::Selector;
 use super::Selectors;
+use super::Stage;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
@@ -126,6 +128,54 @@ impl Events {
             error: self.subgraph.attributes.error.clone().into(),
             custom: custom_events,
         }
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if let StandardEventConfig::Conditional { condition, .. } = &self.router.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } = &self.router.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.supergraph.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.supergraph.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.subgraph.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.subgraph.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
+        for (name, custom_event) in &self.router.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for router custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.supergraph.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for supergraph custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.subgraph.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for subgraph custom event {name:?}: {err}")
+            })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -576,6 +626,21 @@ where
     condition: Condition<E>,
 }
 
+impl<A, E, Request, Response, EventResponse> Event<A, E>
+where
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse>
+        + Default
+        + Debug,
+    E: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
+{
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let stage = Some(self.on.into());
+        self.attributes.validate(stage)?;
+        self.condition.validate(stage)?;
+        Ok(())
+    }
+}
+
 /// When to trigger the event.
 #[derive(Deserialize, JsonSchema, Clone, Debug, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -674,8 +739,15 @@ where
             let mut new_attributes = selectors.on_response_event(response, ctx);
             attributes.append(&mut new_attributes);
         }
-
-        inner.send_event(attributes);
+        // Stub span to make sure the custom attributes are saved in current span extensions
+        // It won't be extracted or sampled at all
+        if Span::current().is_none() {
+            let span = info_span!("supergraph_event_send_event");
+            let _entered = span.enter();
+            inner.send_event(attributes);
+        } else {
+            inner.send_event(attributes);
+        }
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -736,6 +808,7 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::context::OPERATION_NAME;
     use crate::graphql;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
@@ -756,14 +829,14 @@ mod tests {
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .build()
                         .unwrap(),
-                    |_r| {
-                        router::Response::fake_builder()
+                    |_r|async  {
+                        Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header(CONTENT_LENGTH, "25")
                             .header("x-log-request", HeaderValue::from_static("log"))
                             .data(serde_json_bytes::json!({"data": "res"}))
                             .build()
-                            .expect("expecting valid response")
+                            .expect("expecting valid response"))
                     },
                 )
                 .await
@@ -790,17 +863,17 @@ mod tests {
                         .header("custom-header", "val1")
                         .build()
                         .unwrap(),
-                    |_r| {
+                    |_r| async {
                         let context_with_error = Context::new();
                         let _ = context_with_error
                             .insert(CONTAINS_GRAPHQL_ERROR, true)
                             .unwrap();
-                        router::Response::fake_builder()
+                        Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
                             .context(context_with_error)
                             .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                             .build()
-                            .expect("expecting valid response")
+                            .expect("expecting valid response"))
                     },
                 )
                 .await
@@ -827,14 +900,14 @@ mod tests {
                         .header("custom-header", "val1")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        router::Response::fake_builder()
+                    |_r| async {
+                        Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header(CONTENT_LENGTH, "25")
                             .header("x-log-response", HeaderValue::from_static("log"))
                             .data(serde_json_bytes::json!({"data": "res"}))
                             .build()
-                            .expect("expecting valid response")
+                            .expect("expecting valid response"))
                     },
                 )
                 .await
@@ -865,6 +938,54 @@ mod tests {
                         supergraph::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header("x-log-request", HeaderValue::from_static("log"))
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_supergraph_events_with_exists_condition() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!(
+                "../testdata/custom_events_exists_condition.router.yaml"
+            ))
+            .build()
+            .await;
+
+        async {
+            let ctx = Context::new();
+            ctx.insert(OPERATION_NAME, String::from("Test")).unwrap();
+            test_harness
+                .call_supergraph(
+                    supergraph::Request::fake_builder()
+                        .query("query Test { foo }")
+                        .context(ctx)
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        supergraph::Response::fake_builder()
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+            test_harness
+                .call_supergraph(
+                    supergraph::Request::fake_builder()
+                        .query("query { foo }")
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        supergraph::Response::fake_builder()
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
                             .expect("expecting valid response")

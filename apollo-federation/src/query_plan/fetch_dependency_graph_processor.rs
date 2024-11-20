@@ -1,12 +1,17 @@
-use std::collections::HashSet;
+use std::sync::Arc;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
+use super::conditions::ConditionKind;
+use super::query_planner::SubgraphOperationCompression;
+use super::QueryPathElement;
 use crate::error::FederationError;
-use crate::operation::RebasedFragments;
+use crate::operation::DirectiveList;
 use crate::operation::SelectionSet;
+use crate::query_graph::graph_path::OpPathElement;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
@@ -44,10 +49,11 @@ const FETCH_COST: QueryPlanCost = 1000.0;
 const PIPELINING_COST: QueryPlanCost = 100.0;
 
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
-    variable_definitions: Vec<Node<VariableDefinition>>,
-    fragments: Option<RebasedFragments>,
+    variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+    operation_directives: DirectiveList,
+    operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<HashSet<String>>,
+    assigned_defer_labels: Option<IndexSet<String>>,
     counter: u32,
 }
 
@@ -241,14 +247,16 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
 
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
-        variable_definitions: Vec<Node<VariableDefinition>>,
-        fragments: Option<RebasedFragments>,
+        variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+        operation_directives: DirectiveList,
+        operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<HashSet<String>>,
+        assigned_defer_labels: Option<IndexSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
-            fragments,
+            operation_directives,
+            operation_compression,
             operation_name,
             assigned_defer_labels,
             counter: 0,
@@ -276,7 +284,8 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             query_graph,
             handled_conditions,
             &self.variable_definitions,
-            self.fragments.as_mut(),
+            &self.operation_directives,
+            &mut self.operation_compression,
             op_name,
         )
     }
@@ -296,11 +305,10 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
-                for (name, negated) in variables.iter() {
-                    let (if_clause, else_clause) = if negated {
-                        (None, Some(Box::new(value)))
-                    } else {
-                        (Some(Box::new(value)), None)
+                for (name, kind) in variables.iter() {
+                    let (if_clause, else_clause) = match kind {
+                        ConditionKind::Skip => (None, Some(Box::new(value))),
+                        ConditionKind::Include => (Some(Box::new(value)), None),
                     };
                     value = PlanNode::from(ConditionNode {
                         condition_variable: name.clone(),
@@ -332,6 +340,32 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         defer_info: &DeferredInfo,
         node: Option<PlanNode>,
     ) -> Result<DeferredDeferBlock, FederationError> {
+        /// Produce a query path with only the relevant elements: fields and type conditions.
+        fn op_path_to_query_path(
+            path: &[Arc<OpPathElement>],
+        ) -> Result<Vec<QueryPathElement>, FederationError> {
+            path.iter()
+                .map(
+                    |element| -> Result<Option<QueryPathElement>, FederationError> {
+                        match &**element {
+                            OpPathElement::Field(field) => {
+                                Ok(Some(QueryPathElement::Field(field.try_into()?)))
+                            }
+                            OpPathElement::InlineFragment(inline) => {
+                                match &inline.type_condition_position {
+                                    Some(_) => Ok(Some(QueryPathElement::InlineFragment(
+                                        inline.try_into()?,
+                                    ))),
+                                    None => Ok(None),
+                                }
+                            }
+                        }
+                    },
+                )
+                .filter_map(|result| result.transpose())
+                .collect::<Result<Vec<_>, _>>()
+        }
+
         Ok(DeferredDeferBlock {
             depends: defer_info
                 .dependencies
@@ -348,7 +382,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             } else {
                 Some(defer_info.label.clone())
             },
-            query_path: defer_info.path.full_path.as_ref().try_into()?,
+            query_path: op_path_to_query_path(&defer_info.path.full_path)?,
             // Note that if the deferred block has nested @defer,
             // then the `value` is going to be a `DeferNode`
             // and we'll use it's own `subselection`, so we don't need it here.

@@ -100,22 +100,24 @@ mod test {
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
+    use crate::spec::Schema;
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(
-            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted"}]}"#
+            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted","path":[]}]}"#
                 .as_bytes(),
         )
     });
 
     static REDACTED_ACCOUNT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(
-            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted"}]}"#.as_bytes(),
+            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted","path":[]}]}"#
+                .as_bytes(),
         )
     });
 
@@ -125,7 +127,7 @@ mod test {
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    static ERROR_PRODUCT_QUERY: &str = r#"query ErrorTopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
+    static ERROR_PRODUCT_QUERY: &str = r#"query ErrorTopProducts($first: Int) { topProducts(first: $first) { upc reviews { id product { name } author { id name } } } }"#;
 
     static ERROR_ACCOUNT_QUERY: &str = r#"query Query { me { name }}"#;
 
@@ -189,11 +191,19 @@ mod test {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
+        let mut configuration = Configuration::default();
+        // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+        configuration.supergraph.generate_query_fragments = false;
+        let configuration = Arc::new(configuration);
+
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
+        let schema = Schema::parse(schema, &configuration).unwrap();
+
         let planner = BridgeQueryPlannerPool::new(
-            schema.to_string(),
-            Default::default(),
+            Vec::new(),
+            schema.into(),
+            Arc::clone(&configuration),
             NonZeroUsize::new(1).unwrap(),
         )
         .await
@@ -203,15 +213,9 @@ mod test {
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let mut plugins = create_plugins(
-            &Configuration::default(),
-            &schema,
-            subgraph_schemas,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let mut plugins = create_plugins(&configuration, &schema, subgraph_schemas, None, None)
+            .await
+            .unwrap();
 
         plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
@@ -224,10 +228,10 @@ mod test {
         let supergraph_creator = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+            Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
             Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
+            configuration,
         )
         .await
         .unwrap()

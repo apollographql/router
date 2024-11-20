@@ -11,17 +11,9 @@ use apollo_federation::Supergraph;
 pub(crate) fn run_bench(
     supergraph: Supergraph,
     queries_dir: &PathBuf,
+    config: QueryPlannerConfig,
 ) -> Result<Vec<BenchOutput>, FederationError> {
-    let planner = QueryPlanner::new(
-        &supergraph,
-        QueryPlannerConfig {
-            reuse_query_fragments: false,
-            subgraph_graphql_validation: false,
-            generate_query_fragments: true,
-            ..Default::default()
-        },
-    )
-    .expect("Invalid planner");
+    let planner = QueryPlanner::new(&supergraph, config.clone()).expect("Invalid planner");
 
     let mut entries = std::fs::read_dir(queries_dir)
         .unwrap()
@@ -62,7 +54,7 @@ pub(crate) fn run_bench(
             }
         };
         let now = Instant::now();
-        let plan = planner.build_query_plan(&document, None);
+        let plan = planner.build_query_plan(&document, None, Default::default());
         let elapsed = now.elapsed().as_secs_f64() * 1000.0;
         let mut eval_plans = None;
         let mut error = None;

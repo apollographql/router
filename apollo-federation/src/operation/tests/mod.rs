@@ -1,22 +1,24 @@
-use std::sync::Arc;
-
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
 
 use super::normalize_operation;
+use super::Field;
 use super::Name;
 use super::NamedFragments;
 use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
+use crate::error::FederationError;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::Subgraph;
+
+mod defer;
 
 pub(super) fn parse_schema_and_operation(
     schema_and_operation: &str,
@@ -40,27 +42,27 @@ pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
 }
 
 pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
-    let executable_document = apollo_compiler::ExecutableDocument::parse_and_validate(
+    Operation::parse(schema.clone(), query, "query.graphql", None).unwrap()
+}
+
+pub(super) fn parse_and_expand(
+    schema: &ValidFederationSchema,
+    query: &str,
+) -> Result<Operation, FederationError> {
+    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
         schema.schema(),
         query,
         "query.graphql",
-    )
-    .unwrap();
-    let operation = executable_document.operations.get(None).unwrap();
-    let named_fragments = NamedFragments::new(&executable_document.fragments, schema);
-    let selection_set =
-        SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
-            .unwrap();
+    )?;
 
-    Operation {
-        schema: schema.clone(),
-        root_kind: operation.operation_type.into(),
-        name: operation.name.clone(),
-        variables: Arc::new(operation.variables.clone()),
-        directives: Arc::new(operation.directives.clone()),
-        selection_set,
-        named_fragments,
-    }
+    let operation = doc
+        .operations
+        .anonymous
+        .as_ref()
+        .expect("must have anonymous operation");
+    let fragments = NamedFragments::new(&doc.fragments, schema);
+
+    normalize_operation(operation, fragments, schema, &Default::default())
 }
 
 /// Parse and validate the query similarly to `parse_operation`, but does not construct the
@@ -1119,13 +1121,13 @@ fn converting_operation_types() {
 }
 
 fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
-    ss.selections.contains_key(&SelectionKey::Field {
-        response_name: field_name,
-        directives: Default::default(),
+    ss.selections.contains_key(SelectionKey::Field {
+        response_name: &field_name,
+        directives: &Default::default(),
     })
 }
 
-fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
+fn is_named_field(sk: SelectionKey, name: Name) -> bool {
     matches!(sk,
             SelectionKey::Field { response_name, directives: _ }
                 if *response_name == name)
@@ -1136,14 +1138,7 @@ fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Sele
         // Error: empty path
         return None;
     };
-    let result = ss.selections.get(&SelectionKey::Field {
-        response_name: (*first).clone(),
-        directives: Default::default(),
-    });
-    let Some(value) = result else {
-        // Error: No matching field found.
-        return None;
-    };
+    let value = ss.selections.get(SelectionKey::field_name(first))?;
     if rest.is_empty() {
         // Base case => We are done.
         Some(value)
@@ -1304,14 +1299,14 @@ mod lazy_map_tests {
 
         // Remove `foo`
         let remove_foo =
-            filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("foo"))).unwrap();
+            filter_rec(&selection_set, &|s| !is_named_field(s.key(), name!("foo"))).unwrap();
         assert!(contains_field(&remove_foo, name!("some_int")));
         assert!(contains_field(&remove_foo, name!("foo2")));
         assert!(!contains_field(&remove_foo, name!("foo")));
 
         // Remove `bar`
         let remove_bar =
-            filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("bar"))).unwrap();
+            filter_rec(&selection_set, &|s| !is_named_field(s.key(), name!("bar"))).unwrap();
         // "foo2" should be removed, since it has no sub-selections left.
         assert!(!contains_field(&remove_bar, name!("foo2")));
     }
@@ -1354,7 +1349,7 @@ mod lazy_map_tests {
 
         // Add __typename next to any "id" field.
         let result =
-            add_typename_if(&selection_set, &|s| is_named_field(&s.key(), name!("id"))).unwrap();
+            add_typename_if(&selection_set, &|s| is_named_field(s.key(), name!("id"))).unwrap();
 
         // The top level won't have __typename, since it doesn't have "id".
         assert!(!contains_field(&result, name!("__typename")));
@@ -1365,12 +1360,8 @@ mod lazy_map_tests {
     }
 }
 
-fn field_element(
-    schema: &ValidFederationSchema,
-    object: apollo_compiler::Name,
-    field: apollo_compiler::Name,
-) -> OpPathElement {
-    OpPathElement::Field(super::Field::new(super::FieldData {
+fn field_element(schema: &ValidFederationSchema, object: Name, field: Name) -> OpPathElement {
+    OpPathElement::Field(Field {
         schema: schema.clone(),
         field_position: ObjectTypeDefinitionPosition::new(object)
             .field(field)
@@ -1379,7 +1370,7 @@ fn field_element(
         arguments: Default::default(),
         directives: Default::default(),
         sibling_typename: None,
-    }))
+    })
 }
 
 const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
@@ -1505,7 +1496,10 @@ fn add_at_path_collapses_unnecessary_fragments() {
             Some(
                 &SelectionSet::parse(
                     schema.clone(),
-                    InterfaceTypeDefinitionPosition::new(name!("X")).into(),
+                    InterfaceTypeDefinitionPosition {
+                        type_name: name!("X"),
+                    }
+                    .into(),
                     "... on C { d }",
                 )
                 .unwrap()
@@ -1622,7 +1616,7 @@ fn used_variables() {
     let Selection::Field(subquery) = operation
         .selection_set
         .selections
-        .get(&SelectionKey::field_name("subquery"))
+        .get(SelectionKey::field_name(&name!("subquery")))
         .unwrap()
     else {
         unreachable!();
@@ -1636,4 +1630,77 @@ fn used_variables() {
         .collect::<Vec<_>>();
     variables.sort();
     assert_eq!(variables, ["c", "d"], "works for a subset of the query");
+}
+
+#[test]
+fn directive_propagation() {
+    let schema_doc = r#"
+        type Query {
+          t1: T
+          t2: T
+          t3: T
+        }
+
+        type T {
+          a: Int
+          b: Int
+          c: Int
+          d: Int
+        }
+
+        directive @fragDefOnly on FRAGMENT_DEFINITION
+        directive @fragSpreadOnly on FRAGMENT_SPREAD
+        directive @fragInlineOnly on INLINE_FRAGMENT
+        directive @fragAll on FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
+    "#;
+
+    let schema = parse_schema(schema_doc);
+
+    let query = parse_and_expand(
+        &schema,
+        r#"
+        fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
+        query {
+          t2 {
+            ... on T @fragInlineOnly @fragAll { a }
+          }
+          t3 {
+            ...DirectiveOnDef @fragAll
+          }
+        }
+    "#,
+    )
+    .expect("directive applications to be valid");
+    insta::assert_snapshot!(query, @r###"
+    fragment DirectiveOnDef on T @fragDefOnly @fragAll {
+      a
+    }
+
+    {
+      t2 {
+        ... on T @fragInlineOnly @fragAll {
+          a
+        }
+      }
+      t3 {
+        ... on T @fragAll {
+          a
+        }
+      }
+    }
+    "###);
+
+    let err = parse_and_expand(
+        &schema,
+        r#"
+        fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
+        query {
+          t1 {
+            ...DirectiveOnDef @fragSpreadOnly @fragAll
+          }
+        }
+    "#,
+    )
+    .expect_err("directive @fragSpreadOnly to be rejected");
+    insta::assert_snapshot!(err, @"Unsupported custom directive @fragSpreadOnly on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.");
 }

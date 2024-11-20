@@ -5,9 +5,6 @@ include_subgraph_errors:
 
 preview_entity_cache:
   enabled: true
-  redis:
-    urls:
-      ["redis://localhost:6379",]
   invalidation:
     # FIXME: right now we cannot configure it to use the same port used for the GraphQL endpoint if it is chosen at random
     listen: 127.0.0.1:12345
@@ -15,6 +12,9 @@ preview_entity_cache:
   subgraph:
     all:
       enabled: true
+      redis:
+        urls:
+          ["redis://localhost:6379",]
       invalidation:
         enabled: true
         shared_key: "1234"
@@ -22,3 +22,9 @@ preview_entity_cache:
       reviews:
         ttl: 120s
         enabled: true
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text

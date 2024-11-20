@@ -1,8 +1,4 @@
-use std::collections::HashMap;
-
 use apollo_compiler::executable;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use super::FieldSelection;
 use super::FragmentSpreadSelection;
@@ -11,212 +7,17 @@ use super::InlineFragmentSelection;
 use super::Selection;
 use super::SelectionSet;
 
-/// Compare two input values, with two special cases for objects: assuming no duplicate keys,
-/// and order-independence.
-///
-/// This comes from apollo-rs: https://github.com/apollographql/apollo-rs/blob/6825be88fe13cd0d67b83b0e4eb6e03c8ab2555e/crates/apollo-compiler/src/validation/selection.rs#L160-L188
-/// Hopefully we can do this more easily in the future!
-fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
-    use apollo_compiler::executable::Value;
-    match (left, right) {
-        (Value::Null, Value::Null) => true,
-        (Value::Enum(left), Value::Enum(right)) => left == right,
-        (Value::Variable(left), Value::Variable(right)) => left == right,
-        (Value::String(left), Value::String(right)) => left == right,
-        (Value::Float(left), Value::Float(right)) => left == right,
-        (Value::Int(left), Value::Int(right)) => left == right,
-        (Value::Boolean(left), Value::Boolean(right)) => left == right,
-        (Value::List(left), Value::List(right)) if left.len() == right.len() => left
-            .iter()
-            .zip(right.iter())
-            .all(|(left, right)| same_value(left, right)),
-        (Value::Object(left), Value::Object(right)) if left.len() == right.len() => {
-            left.iter().all(|(key, value)| {
-                right
-                    .iter()
-                    .find(|(other_key, _)| key == other_key)
-                    .is_some_and(|(_, other_value)| same_value(value, other_value))
-            })
-        }
-        _ => false,
-    }
-}
-
-/// Sort an input value, which means specifically sorting their object values by keys (assuming no
-/// duplicates). This is used for hashing input values in a way consistent with [same_value()].
-fn sort_value(value: &mut executable::Value) {
-    use apollo_compiler::executable::Value;
-    match value {
-        Value::List(elems) => {
-            elems
-                .iter_mut()
-                .for_each(|value| sort_value(value.make_mut()));
-        }
-        Value::Object(pairs) => {
-            pairs
-                .iter_mut()
-                .for_each(|(_, value)| sort_value(value.make_mut()));
-            pairs.sort_by(|left, right| left.0.cmp(&right.0));
-        }
-        _ => {}
-    }
-}
-
-/// Compare sorted input values, which means specifically establishing an order between the variants
-/// of input values, and comparing values for the same variants accordingly. This is used for
-/// hashing directives in a way consistent with [same_directives()].
-///
-/// Note that Floats and Ints are compared textually and not parsed numerically. This is fine for
-/// the purposes of hashing. For object comparison semantics, see [compare_sorted_object_pairs()].
-fn compare_sorted_value(left: &executable::Value, right: &executable::Value) -> std::cmp::Ordering {
-    use apollo_compiler::executable::Value;
-    fn discriminant(value: &Value) -> u8 {
-        match value {
-            Value::Null => 0,
-            Value::Enum(_) => 1,
-            Value::Variable(_) => 2,
-            Value::String(_) => 3,
-            Value::Float(_) => 4,
-            Value::Int(_) => 5,
-            Value::Boolean(_) => 6,
-            Value::List(_) => 7,
-            Value::Object(_) => 8,
-        }
-    }
-    match (left, right) {
-        (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
-        (Value::Enum(left), Value::Enum(right)) => left.cmp(right),
-        (Value::Variable(left), Value::Variable(right)) => left.cmp(right),
-        (Value::String(left), Value::String(right)) => left.cmp(right),
-        (Value::Float(left), Value::Float(right)) => left.as_str().cmp(right.as_str()),
-        (Value::Int(left), Value::Int(right)) => left.as_str().cmp(right.as_str()),
-        (Value::Boolean(left), Value::Boolean(right)) => left.cmp(right),
-        (Value::List(left), Value::List(right)) => left.len().cmp(&right.len()).then_with(|| {
-            left.iter()
-                .zip(right)
-                .map(|(left, right)| compare_sorted_value(left, right))
-                .find(|o| o.is_ne())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        }),
-        (Value::Object(left), Value::Object(right)) => compare_sorted_name_value_pairs(
-            left.iter().map(|pair| &pair.0),
-            left.iter().map(|pair| &pair.1),
-            right.iter().map(|pair| &pair.0),
-            right.iter().map(|pair| &pair.1),
-        ),
-        _ => discriminant(left).cmp(&discriminant(right)),
-    }
-}
-
-/// Compare the (name, value) pair iterators, which are assumed to be sorted by name and have sorted
-/// values. This is used for hashing objects/arguments in a way consistent with [same_directives()].
-///
-/// Note that pair iterators are compared by length, then lexicographically by name, then finally
-/// recursively by value. This is intended to compute an ordering quickly for hashing.
-fn compare_sorted_name_value_pairs<'doc>(
-    left_names: impl ExactSizeIterator<Item = &'doc Name>,
-    left_values: impl ExactSizeIterator<Item = &'doc Node<executable::Value>>,
-    right_names: impl ExactSizeIterator<Item = &'doc Name>,
-    right_values: impl ExactSizeIterator<Item = &'doc Node<executable::Value>>,
-) -> std::cmp::Ordering {
-    left_names
-        .len()
-        .cmp(&right_names.len())
-        .then_with(|| left_names.cmp(right_names))
-        .then_with(|| {
-            left_values
-                .zip(right_values)
-                .map(|(left, right)| compare_sorted_value(left, right))
-                .find(|o| o.is_ne())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-}
-
-/// Returns true if two argument lists are equivalent.
-///
-/// The arguments and values must be the same, independent of order.
-fn same_arguments(
-    left: &[Node<executable::Argument>],
-    right: &[Node<executable::Argument>],
-) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    let right = right
-        .iter()
-        .map(|arg| (&arg.name, arg))
-        .collect::<HashMap<_, _>>();
-
-    left.iter().all(|arg| {
-        right
-            .get(&arg.name)
-            .is_some_and(|right_arg| same_value(&arg.value, &right_arg.value))
-    })
-}
-
-/// Sort arguments, which means specifically sorting arguments by names and object values by keys
-/// (assuming no duplicates). This is used for hashing arguments in a way consistent with
-/// [same_arguments()].
-pub(super) fn sort_arguments(arguments: &mut [Node<executable::Argument>]) {
-    arguments
-        .iter_mut()
-        .for_each(|arg| sort_value(arg.make_mut().value.make_mut()));
-    arguments.sort_by(|left, right| left.name.cmp(&right.name));
-}
-
-/// Compare sorted arguments; see [compare_sorted_name_value_pairs()] for semantics. This is used
-/// for hashing directives in a way consistent with [same_directives()].
-fn compare_sorted_arguments(
-    left: &[Node<executable::Argument>],
-    right: &[Node<executable::Argument>],
-) -> std::cmp::Ordering {
-    compare_sorted_name_value_pairs(
-        left.iter().map(|arg| &arg.name),
-        left.iter().map(|arg| &arg.value),
-        right.iter().map(|arg| &arg.name),
-        right.iter().map(|arg| &arg.value),
-    )
-}
-
-/// Returns true if two directive lists are equivalent, independent of order.
-fn same_directives(left: &executable::DirectiveList, right: &executable::DirectiveList) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    left.iter().all(|left_directive| {
-        right.iter().any(|right_directive| {
-            left_directive.name == right_directive.name
-                && same_arguments(&left_directive.arguments, &right_directive.arguments)
-        })
-    })
-}
-
-/// Sort directives, which means specifically sorting their arguments, sorting the directives by
-/// name, and then breaking directive-name ties by comparing sorted arguments. This is used for
-/// hashing arguments in a way consistent with [same_directives()].
-pub(super) fn sort_directives(directives: &mut executable::DirectiveList) {
-    directives
-        .iter_mut()
-        .for_each(|directive| sort_arguments(&mut directive.make_mut().arguments));
-    directives.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then_with(|| compare_sorted_arguments(&left.arguments, &right.arguments))
-    });
-}
-
 pub(super) fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
     directives.has("defer")
 }
 
 /// Options for the `.containment()` family of selection functions.
 #[derive(Debug, Clone, Copy)]
-pub struct ContainmentOptions {
-    /// If the right-hand side has a __typename selection but the left-hand side does not,
-    /// still consider the left-hand side to contain the right-hand side.
-    pub ignore_missing_typename: bool,
+pub(crate) struct ContainmentOptions {
+    /// During query planning, we may add `__typename` selections to sets that did not have it
+    /// initially. If the right-hand side has a `__typename` selection but the left-hand side
+    /// does not, this option still considers the left-hand side to contain the right-hand side.
+    pub(crate) ignore_missing_typename: bool,
 }
 
 // Currently Default *can* be derived, but if we add a new option
@@ -231,7 +32,7 @@ impl Default for ContainmentOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Containment {
+pub(crate) enum Containment {
     /// The left-hand selection does not fully contain right-hand selection.
     NotContained,
     /// The left-hand selection fully contains the right-hand selection, and more.
@@ -241,17 +42,21 @@ pub enum Containment {
 }
 impl Containment {
     /// Returns true if the right-hand selection set is strictly contained or equal.
-    pub fn is_contained(self) -> bool {
+    pub(crate) fn is_contained(self) -> bool {
         matches!(self, Containment::StrictlyContained | Containment::Equal)
     }
 
-    pub fn is_equal(self) -> bool {
+    pub(crate) fn is_equal(self) -> bool {
         matches!(self, Containment::Equal)
     }
 }
 
 impl Selection {
-    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match (self, other) {
             (Selection::Field(self_field), Selection::Field(other_field)) => {
                 self_field.containment(other_field, options)
@@ -269,17 +74,21 @@ impl Selection {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
+    pub(crate) fn contains(&self, other: &Selection) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }
 
 impl FieldSelection {
-    pub fn containment(&self, other: &FieldSelection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &FieldSelection,
+        options: ContainmentOptions,
+    ) -> Containment {
         if self.field.name() != other.field.name()
             || self.field.alias != other.field.alias
-            || !same_arguments(&self.field.arguments, &other.field.arguments)
-            || !same_directives(&self.field.directives, &other.field.directives)
+            || self.field.arguments != other.field.arguments
+            || self.field.directives != other.field.directives
         {
             return Containment::NotContained;
         }
@@ -295,15 +104,14 @@ impl FieldSelection {
             }
         }
     }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &FieldSelection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl FragmentSpreadSelection {
-    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not
@@ -314,15 +122,14 @@ impl FragmentSpreadSelection {
             _ => Containment::NotContained,
         }
     }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl InlineFragmentSelection {
-    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not
@@ -336,15 +143,10 @@ impl InlineFragmentSelection {
             _ => Containment::NotContained,
         }
     }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl SelectionSet {
-    pub fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
         if other.selections.len() > self.selections.len() {
             // If `other` has more selections but we're ignoring missing __typename, then in the case where
             // `other` has a __typename but `self` does not, then we need the length of `other` to be at
@@ -361,15 +163,15 @@ impl SelectionSet {
         let mut is_equal = true;
         let mut did_ignore_typename = false;
 
-        for (key, other_selection) in other.selections.iter() {
-            if key.is_typename_field() && options.ignore_missing_typename {
+        for other_selection in other.selections.values() {
+            if other_selection.is_typename_field() && options.ignore_missing_typename {
                 if !self.has_top_level_typename_field() {
                     did_ignore_typename = true;
                 }
                 continue;
             }
 
-            let Some(self_selection) = self.selections.get(key) else {
+            let Some(self_selection) = self.selections.get(other_selection.key()) else {
                 return Containment::NotContained;
             };
 
@@ -394,7 +196,7 @@ impl SelectionSet {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Self) -> bool {
+    pub(crate) fn contains(&self, other: &Self) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }

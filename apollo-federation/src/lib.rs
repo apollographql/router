@@ -13,10 +13,17 @@
 //! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
 //! for which Federation versions are supported by which Router versions.
 
-// TODO: This is fine while we're iterating, but should be removed later.
-#![allow(dead_code)]
-// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
-#![allow(clippy::mutable_key_type)]
+#![warn(
+    rustdoc::broken_intra_doc_links,
+    unreachable_pub,
+    unreachable_patterns,
+    unused,
+    unused_qualifications,
+    dead_code,
+    while_true,
+    unconditional_panic,
+    clippy::all
+)]
 
 mod api_schema;
 mod compat;
@@ -29,6 +36,7 @@ pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
 pub mod subgraph;
+pub(crate) mod supergraph;
 pub(crate) mod utils;
 
 use apollo_compiler::ast::NamedType;
@@ -46,10 +54,10 @@ use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::merge::merge_subgraphs;
 use crate::merge::MergeFailure;
-pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSubgraph;
-pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSubgraphs;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
+pub use crate::supergraph::ValidFederationSubgraph;
+pub use crate::supergraph::ValidFederationSubgraphs;
 
 pub(crate) type SupergraphSpecs = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
 
@@ -128,10 +136,7 @@ impl Supergraph {
     }
 
     pub fn extract_subgraphs(&self) -> Result<ValidFederationSubgraphs, FederationError> {
-        crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph(
-            &self.schema,
-            None,
-        )
+        supergraph::extract_subgraphs_from_supergraph(&self.schema, None)
     }
 }
 

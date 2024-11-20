@@ -1,0 +1,420 @@
+---
+title: Federation Version Support
+subtitle: Check router version compatibility with Apollo Federation versions
+description: This reference shows which version of Apollo Federation each GraphOS Router and Apollo Router Core release is compiled against. Ensure your router uses at least the listed federation version.
+---
+
+The GraphOS Router and Apollo Router Core support supergraph schemas that are generated via Apollo Federation 2.x [composition](/federation/federated-types/composition/). This composition algorithm is usually performed by one of the following:
+
+* Apollo GraphOS (for supergraphs that use [managed federation](/federation/managed-federation/overview/))
+* The Rover CLI (for _non_-managed supergraphs)
+
+Apollo Federation is an evolving project, and its composition algorithm regularly receives new features and bug fixes.
+
+<Tip>
+
+Update your router regularly to the latest stable version to ensure that it fully supports its supergraph schema.
+
+</Tip>
+
+## Support table
+
+The table below shows which version of federation each router release is compiled against. Make sure that your router's federation version is _at least_ as recent as the version used to compose your supergraph schema.
+
+<Caution>
+
+**Avoid router versions marked with ⚠️.** These versions include bugs described in the [changelog](https://github.com/apollographql/router/blob/main/CHANGELOG.md).
+
+</Caution>
+
+<table>
+    <thead>
+    <tr>
+        <th>Router version</th>
+        <th>Federation version</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td>
+            v1.57.0 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
+        </td>
+        <td>
+            2.9.3
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.56.0
+        </td>
+        <td>
+            2.9.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.55.0
+        </td>
+        <td>
+            2.9.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.52.1 - v1.53.0
+        </td>
+        <td>
+            2.9.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.52.1
+        </td>
+        <td>
+            2.8.5
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.49.0 - v1.52.0
+        </td>
+        <td>
+            2.8.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.48.0 - v1.49.0
+        </td>
+        <td>
+            2.8.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.46.0 - v1.47.0
+        </td>
+        <td>
+            2.7.5
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.45.1
+        </td>
+        <td>
+            2.7.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ⚠️ v1.45.0
+        </td>
+        <td>
+            2.7.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.39.0 - v1.44.0
+        </td>
+        <td>
+            2.7.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.38.0
+        </td>
+        <td>
+            2.6.3
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.36.0 - v1.37.0
+        </td>
+        <td>
+            2.6.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.35.0
+        </td>
+        <td>
+            2.6.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.34.1
+        </td>
+        <td>
+            2.5.7
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.33.0 - v1.34.0
+        </td>
+        <td>
+            2.5.5
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.30.0 - v1.32.0
+        </td>
+        <td>
+            2.5.4
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ️v1.29.1
+        </td>
+        <td>
+            2.5.3
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ⚠️ v1.29.0
+        </td>
+        <td>
+            2.5.3
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ⚠️ v1.28.0 - v1.28.1
+        </td>
+        <td>
+            2.5.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.25.0 - v1.27.0
+        </td>
+        <td>
+            2.4.10
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.24.0
+        </td>
+        <td>
+            2.4.9
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.21.0 - v1.23.0
+        </td>
+        <td>
+            2.4.8
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.20.0
+        </td>
+        <td>
+            2.4.7
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ️⚠️ v1.19.1
+        </td>
+        <td>
+            2.4.6
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ⚠️ v1.19.0
+        </td>
+        <td>
+            2.4.5
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.16.0 - v1.18.1
+        </td>
+        <td>
+            2.4.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.15.0 - v1.15.1
+        </td>
+        <td>
+            2.4.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.13.1 - v1.14.0
+        </td>
+        <td>
+            2.4.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.11.0 - v1.13.0
+        </td>
+        <td>
+            2.3.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.10.2 - v1.10.3
+        </td>
+        <td>
+            2.3.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ⚠️ v1.10.1
+        </td>
+        <td>
+            2.3.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ⚠️ v1.10.0
+        </td>
+        <td>
+            2.3.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.6.0 - v1.9.0
+        </td>
+        <td>
+            2.2.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.2.1 - v1.5.0
+        </td>
+        <td>
+            2.1.4
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.0.0 - v1.2.0
+        </td>
+        <td>
+            2.1.3
+        </td>
+    </tr>
+    </tbody>
+</table>
+
+<ExpansionPanel title="See pre-1.0 versions">
+
+<table>
+    <thead>
+    <tr>
+        <th>Router version</th>
+        <th>Federation version</th>
+    </tr>
+    </thead>
+    <tbody>
+          <tr>
+        <td>
+            v1.0.0-rc.1 and v1.0.0
+        </td>
+        <td>
+            2.1.2-alpha.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.0.0-rc.0
+        </td>
+        <td>
+            2.1.2-alpha.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.0.0-alpha.3
+        </td>
+        <td>
+            2.1.2-alpha.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.0.0-alpha.1 - v1.0.0-alpha.2
+        </td>
+        <td>
+            2.1.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v0.16.0 - v1.0.0-alpha.0
+        </td>
+        <td>
+            2.1.0-alpha.4
+        </td>
+    </tr>
+    <tr>
+        <td>
+        v0.9.0 – v0.15.1
+        </td>
+        <td>
+            2.0.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+        v0.1.0-preview.5 – v0.1.0-preview.7
+        </td>
+        <td>
+            2.0.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+        v0.1.0-preview.4
+        </td>
+        <td>
+            2.0.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+        v0.1.0-preview.3
+        </td>
+        <td>
+            2.0.0-preview.7
+        </td>
+    </tr>
+  </tbody>
+</table>
+
+</ExpansionPanel>
+
+## Federation 1 support
+
+Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the router with any valid Federation 1.x supergraph.
+
+If your Federation 1.x supergraph _doesn't_ work with the router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).

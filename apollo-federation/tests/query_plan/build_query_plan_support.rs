@@ -1,8 +1,8 @@
-use std::collections::HashSet;
 use std::io::Read;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::query_plan::FetchNode;
@@ -12,10 +12,9 @@ use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::schema::ValidFederationSchema;
 use sha1::Digest;
 
-const ROVER_FEDERATION_VERSION: &str = "2.7.4";
+const ROVER_FEDERATION_VERSION: &str = "2.9.0";
 
-// TODO: use 2.7 when join v0.4 is fully supported in this crate
-const IMPLICIT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.6", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+const DEFAULT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@context", "@fromContext", "@cost", "@listSize"])"#;
 
 /// Runs composition on the given subgraph schemas and return `(api_schema, query_planner)`
 ///
@@ -60,6 +59,18 @@ macro_rules! subgraph_name {
 /// formatted query plan string.
 /// Run `cargo insta review` to diff and accept changes to the generated query plan.
 macro_rules! assert_plan {
+    ($api_schema_and_planner: expr, $operation: expr, $options: expr, @$expected: literal) => {{
+        let (api_schema, planner) = $api_schema_and_planner;
+        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            $operation,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None, $options).unwrap();
+        insta::assert_snapshot!(plan, @$expected);
+        plan
+    }};
     ($api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
         let (api_schema, planner) = $api_schema_and_planner;
         let document = apollo_compiler::ExecutableDocument::parse_and_validate(
@@ -68,7 +79,7 @@ macro_rules! assert_plan {
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner.build_query_plan(&document, None, Default::default()).unwrap();
         insta::assert_snapshot!(plan, @$expected);
         plan
     }};
@@ -96,7 +107,7 @@ pub(crate) fn compose(
     function_path: &'static str,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> String {
-    let unique_names: std::collections::HashSet<_> = subgraph_names_and_schemas
+    let unique_names: IndexSet<_> = subgraph_names_and_schemas
         .iter()
         .map(|(name, _)| name)
         .collect();
@@ -110,7 +121,7 @@ pub(crate) fn compose(
         .map(|(name, schema)| {
             (
                 *name,
-                format!("extend schema {IMPLICIT_LINK_DIRECTIVE}\n\n{}", schema,),
+                format!("extend schema {DEFAULT_LINK_DIRECTIVE}\n\n{}", schema,),
             )
         })
         .collect();
@@ -127,7 +138,7 @@ pub(crate) fn compose(
     let prefix = "# Composed from subgraphs with hash: ";
 
     let test_name = function_path.rsplit("::").next().unwrap();
-    static SEEN_TEST_NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    static SEEN_TEST_NAMES: OnceLock<Mutex<IndexSet<&'static str>>> = OnceLock::new();
     let new = SEEN_TEST_NAMES
         .get_or_init(Default::default)
         .lock()

@@ -53,6 +53,26 @@ impl Spans {
             TelemetryDataKind::Traces,
         );
     }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        for (name, custom) in &self.router.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for router span attribute {name:?}: {err}"))?;
+        }
+        for (name, custom) in &self.supergraph.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for supergraph span attribute {name:?}: {err}"))?;
+        }
+        for (name, custom) in &self.subgraph.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for subgraph span attribute {name:?}: {err}"))?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
@@ -120,9 +140,11 @@ mod test {
     use serde_json_bytes::path::JsonPathInst;
 
     use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::context::OPERATION_KIND;
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -534,6 +556,24 @@ mod test {
     }
 
     #[test]
+    fn test_router_request_standard_attribute_aliased() {
+        let mut spans = RouterSpans::default();
+        spans.attributes.attributes.common.http_request_method = Some(StandardAttribute::Aliased {
+            alias: String::from("my.method"),
+        });
+        let values = spans.attributes.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header("my-header", "test_val")
+                .build()
+                .unwrap(),
+        );
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("my.method")));
+    }
+
+    #[test]
     fn test_router_response_custom_attribute() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
@@ -598,6 +638,28 @@ mod test {
         assert!(values
             .iter()
             .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+    }
+
+    #[test]
+    fn test_supergraph_standard_attribute_aliased() {
+        let mut spans = SupergraphSpans::default();
+        spans.attributes.attributes.graphql_operation_type = Some(StandardAttribute::Aliased {
+            alias: String::from("my_op"),
+        });
+        let context = Context::new();
+        context.insert(OPERATION_KIND, "Query".to_string()).unwrap();
+        let values = spans.attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .method(http::Method::POST)
+                .header("my-header", "test_val")
+                .query("Query { me { id } }")
+                .context(context)
+                .build()
+                .unwrap(),
+        );
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("my_op")));
     }
 
     #[test]

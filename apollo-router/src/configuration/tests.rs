@@ -35,28 +35,7 @@ fn schema_generation() {
 
 #[test]
 fn routing_url_in_schema() {
-    let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-
-        type Query {
-          me: String
-        }
-
-        directive @core(feature: String!) repeatable on SCHEMA
-
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
-        }
-        "#;
+    let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");
     let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
 
     let subgraphs: HashMap<&str, &Uri> = schema.subgraphs().map(|(k, v)| (k.as_str(), v)).collect();
@@ -87,28 +66,8 @@ fn routing_url_in_schema() {
 
 #[test]
 fn missing_subgraph_url() {
-    let schema_error = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-
-        type Query {
-          me: String
-        }
-
-        directive @core(feature: String!) repeatable on SCHEMA
-
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews" url: "")
-        }"#;
+    let schema_error =
+        include_str!("../testdata/invalid_minimal_supergraph_missing_subgraph_url.graphql");
     let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
@@ -454,6 +413,11 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
+                #[cfg(not(feature = "hyper_header_limits"))]
+                if yaml.contains("http1_max_request_headers") {
+                    continue;
+                }
+
                 if let Err(e) = validate_yaml_configuration(
                     &yaml,
                     Expansion::default().unwrap(),
@@ -1147,52 +1111,4 @@ fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
 
     assert!(conf.supergraph.generate_query_fragments);
     assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
-}
-
-#[test]
-fn it_requires_rust_apollo_metrics_generation_for_enhanced_signature_normalization() {
-    let mut plugins_config = serde_json::Map::new();
-    plugins_config.insert(
-        "telemetry".to_string(),
-        serde_json::json! {{
-            "apollo": {
-                "experimental_apollo_signature_normalization_algorithm": "enhanced"
-            }
-        }},
-    );
-
-    let error = Configuration::builder()
-        .experimental_apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
-        .apollo_plugins(plugins_config)
-        .build()
-        .expect_err("Must have an error because we have conflicting config options");
-
-    assert_eq!(
-        error.to_string(),
-        String::from("`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`: either change to the legacy signature normalization mode, or change to new metrics generation")
-    );
-}
-
-#[test]
-fn it_requires_rust_apollo_metrics_generation_for_extended_references() {
-    let mut plugins_config = serde_json::Map::new();
-    plugins_config.insert(
-        "telemetry".to_string(),
-        serde_json::json! {{
-            "apollo": {
-                "experimental_apollo_metrics_reference_mode": "extended"
-            }
-        }},
-    );
-
-    let error = Configuration::builder()
-        .experimental_apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
-        .apollo_plugins(plugins_config)
-        .build()
-        .expect_err("Must have an error because we have conflicting config options");
-
-    assert_eq!(
-        error.to_string(),
-        String::from("`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`: either change to the standard reference generation mode, or change to new metrics generation")
-    );
 }

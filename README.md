@@ -4,16 +4,11 @@
 
 ---
 
-**Announcement:**   
-Join 1000+ engineers at GraphQL Summit for talks, workshops, and office hours, Oct 8-10 in NYC. [Get your pass here ->](https://summit.graphql.com/?utm_campaign=github_federation_readme)
+# Apollo Router Core
 
----
+The **Apollo Router Core** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
 
-# Apollo Router
-
-The **Apollo Router** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
-
-Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads. Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes. Generally speaking, we expect most breaking changes to be on the plugin API and the configuration file format. We will clearly convey such changes in the release notes.
+Apollo Router Core is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads.
 
 New releases and their release notes (along with notes about any breaking changes) can be found on the [Releases](https://github.com/apollographql/router/releases) page, and the latest release can always be found [on the latest page](https://github.com/apollographql/router/releases/latest). The `CHANGELOG.md` at the root of this repository also contains _unreleased_ changes in addition to the full history of changes.
 
@@ -21,13 +16,13 @@ Currently, we're publishing new releases every 1-2 weeks.
 
 ## Getting started
 
-Follow the [quickstart tutorial](https://www.apollographql.com/docs/router/quickstart/) to get up and running with the Apollo Router.
+Follow the [quickstart tutorial](https://www.apollographql.com/docs/router/quickstart/) to get up and running with the router.
 
 See [the documentation](https://www.apollographql.com/docs/router) for more details.
 
 ## Usage
 
-Apollo Router requires [a supergraph file](https://www.apollographql.com/docs/rover/commands/supergraphs/) to be passed as the `--supergraph` argument and [an optional configuration file](https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file).
+Apollo Router Core requires [a supergraph file](https://www.apollographql.com/docs/rover/commands/supergraphs/) to be passed as the `--supergraph` argument and [an optional configuration file](https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file).
 to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
@@ -81,7 +76,7 @@ Check out the [Odyssey](https://odyssey.apollographql.com/) learning platform, t
 
 ## Design principles
 
-The development of the Apollo Router is driven by the following design principles that inform
+The development of the Apollo Router Core is driven by the following design principles that inform
 architecture decisions and implementation.
 
 **Correctness:** the router strives to be the most correct implementation of GraphQL and Federation, we care about testing and documenting everything implied by the specification, up to failure cases. The router’s behavior should follow the principle of least surprise for developers.
@@ -91,6 +86,7 @@ architecture decisions and implementation.
 **Safe experimentation:** the router will support all the future work around Federation, so it must allow new ideas and explorations without disturbing existing features. The project is still in movement, we cannot allow it to crystallize too early, while still following the principles of correctness and reliability.
 
 **Usability:** the router must be simple to operate. Prefer extensibility over configuration options, and ensure that the user has enough information to help themselves when things go wrong. For example:
+
 * Common environmental misconfiguration should be detected and surfaced to the user in the form of mitigation steps.
 * User supplied extensions should be observable and flagged when they cause performance issues. Tell the users how much time an extension is consuming per request and why.
 

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use axum::response::IntoResponse;
 use http::StatusCode;
@@ -52,9 +51,6 @@ use crate::spec::Schema;
 use crate::ListenAddr;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
-pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
-pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
-pub(crate) const JOIN_FIELD: &str = "join__field";
 
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
@@ -141,7 +137,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         &'a mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError>;
@@ -159,7 +155,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         &'a mut self,
         _is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
@@ -179,17 +175,14 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .get("telemetry")
                     .cloned();
                 if let Some(plugin_config) = &mut telemetry_config {
-                    inject_schema_id(Some(&Schema::schema_id(&schema)), plugin_config);
+                    inject_schema_id(Some(&schema.schema_id), plugin_config);
                     match factory
                         .create_instance(
                             PluginInit::builder()
                                 .config(plugin_config.clone())
-                                .supergraph_sdl(Arc::new(schema.clone()))
-                                .supergraph_schema(Arc::new(
-                                    apollo_compiler::validation::Valid::assume_valid(
-                                        apollo_compiler::Schema::new(),
-                                    ),
-                                ))
+                                .supergraph_sdl(schema.raw_sdl.clone())
+                                .supergraph_schema_id(schema.schema_id.clone())
+                                .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .build(),
                         )
@@ -227,7 +220,7 @@ impl YamlRouterFactory {
     async fn inner_create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a RouterCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
@@ -241,13 +234,6 @@ impl YamlRouterFactory {
                 extra_plugins,
             )
             .await?;
-
-        // Don't let the router start in experimental_query_planner_mode and
-        // unimplemented Rust QP features.
-        can_use_with_experimental_query_planner(
-            configuration.clone(),
-            supergraph_creator.schema(),
-        )?;
 
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_analysis_layer =
@@ -268,7 +254,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
@@ -284,7 +270,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
@@ -302,44 +288,30 @@ impl YamlRouterFactory {
     pub(crate) async fn inner_create_supergraph<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_supergraph: Option<&'a SupergraphCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            match previous_supergraph.as_ref().map(|router| router.planners()) {
-                None => {
-                    BridgeQueryPlannerPool::new(
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-                Some(planners) => {
-                    BridgeQueryPlannerPool::new_from_planners(
-                        planners,
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-            };
+        let bridge_query_planner = BridgeQueryPlannerPool::new(
+            previous_supergraph
+                .as_ref()
+                .map(|router| router.js_planners())
+                .unwrap_or_default(),
+            schema.clone(),
+            configuration.clone(),
+            configuration
+                .supergraph
+                .query_planning
+                .experimental_query_planner_parallelism()?,
+        )
+        .instrument(query_planner_span)
+        .await?;
 
         let schema_changed = previous_supergraph
-            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
             .unwrap_or_default();
 
         let config_changed = previous_supergraph
@@ -445,11 +417,10 @@ pub(crate) async fn create_subgraph_services(
             name,
             configuration,
             &tls_root_store,
-            shaping.enable_subgraph_http2(name),
+            shaping.subgraph_client_config(name),
         )?;
 
-        let http_service_factory =
-            HttpClientServiceFactory::new(Arc::new(http_service), plugins.clone());
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
 
         let subgraph_service = shaping.subgraph_service_internal(
             name,
@@ -519,27 +490,57 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 /// not meant to be used directly
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
+    let schema = Arc::new(Schema::parse(schema, &config).unwrap());
 
     let is_telemetry_disabled = false;
     let service = YamlRouterFactory
-        .create(
-            is_telemetry_disabled,
-            Arc::new(config),
-            schema.to_string(),
-            None,
-            None,
-        )
+        .create(is_telemetry_disabled, Arc::new(config), schema, None, None)
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
-Please try composing your subgraphs with federation 2: this should help precisely pinpoint the problems and, once fixed, generate a correct federation 2 supergraph.
+        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
 
 Details:
 Error: Cannot find type "Review" in subgraph "products"
 caused by
 "#
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn add_plugin(
+    name: String,
+    factory: &PluginFactory,
+    plugin_config: &Value,
+    schema: Arc<String>,
+    schema_id: Arc<String>,
+    supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    notify: &crate::notification::Notify<String, crate::graphql::Response>,
+    plugin_instances: &mut Plugins,
+    errors: &mut Vec<ConfigurationError>,
+) {
+    match factory
+        .create_instance(
+            PluginInit::builder()
+                .config(plugin_config.clone())
+                .supergraph_sdl(schema)
+                .supergraph_schema_id(schema_id)
+                .supergraph_schema(supergraph_schema)
+                .subgraph_schemas(subgraph_schemas)
+                .notify(notify.clone())
+                .build(),
+        )
+        .await
+    {
+        Ok(plugin) => {
+            let _ = plugin_instances.insert(name, plugin);
+        }
+        Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+            plugin: name,
+            error: err.to_string(),
+        }),
+    }
 }
 
 pub(crate) async fn create_plugins(
@@ -550,6 +551,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
+    let supergraph_schema_id = schema.schema_id.clone();
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -575,26 +577,19 @@ pub(crate) async fn create_plugins(
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
         ($name: expr, $factory: expr, $plugin_config: expr) => {{
-            match $factory
-                .create_instance(
-                    PluginInit::builder()
-                        .config($plugin_config)
-                        .supergraph_sdl(schema.as_string().clone())
-                        .supergraph_schema(supergraph_schema.clone())
-                        .subgraph_schemas(subgraph_schemas.clone())
-                        .notify(configuration.notify.clone())
-                        .build(),
-                )
-                .await
-            {
-                Ok(plugin) => {
-                    let _ = plugin_instances.insert($name, plugin);
-                }
-                Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                    plugin: $name,
-                    error: err.to_string(),
-                }),
-            }
+            add_plugin(
+                $name,
+                $factory,
+                &$plugin_config,
+                schema.as_string().clone(),
+                supergraph_schema_id.clone(),
+                supergraph_schema.clone(),
+                subgraph_schemas.clone(),
+                &configuration.notify.clone(),
+                &mut plugin_instances,
+                &mut errors,
+            )
+            .await;
         }};
     }
 
@@ -681,6 +676,7 @@ pub(crate) async fn create_plugins(
             }
         }
     }
+    add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -690,11 +686,11 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
+    add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
-    add_optional_apollo_plugin!("preview_demand_control");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
@@ -754,107 +750,6 @@ fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
     }
 }
 
-// The Rust QP has not yet implemented setContext
-// (`@context` directives), progressive overrides, and it
-// doesn't support fed v1 *supergraphs*.
-//
-// If users are using the Rust QP as standalone (`new`) or in comparison mode (`both`),
-// fail to start up the router emitting an error.
-fn can_use_with_experimental_query_planner(
-    configuration: Arc<Configuration>,
-    schema: Arc<Schema>,
-) -> Result<(), ConfigurationError> {
-    match configuration.experimental_query_planner_mode {
-        crate::configuration::QueryPlannerMode::New
-        | crate::configuration::QueryPlannerMode::Both => {
-            // We have a *progressive* override when `join__directive` has a
-            // non-null value for `overrideLabel` field.
-            //
-            // This looks at object types' fields and their directive
-            // applications, looking specifically for `@join__direcitve`
-            // arguments list.
-            let has_progressive_overrides = schema
-                .supergraph_schema()
-                .types
-                .values()
-                .filter_map(|extended_type| {
-                    // The override label args can be only on ObjectTypes
-                    if let ExtendedType::Object(object_type) = extended_type {
-                        Some(object_type)
-                    } else {
-                        None
-                    }
-                })
-                .flat_map(|object_type| &object_type.fields)
-                .filter_map(|(_, field)| {
-                    let join_field_directives = field
-                        .directives
-                        .iter()
-                        .filter(|d| d.name.as_str() == JOIN_FIELD)
-                        .collect::<Vec<_>>();
-                    if !join_field_directives.is_empty() {
-                        Some(join_field_directives)
-                    } else {
-                        None
-                    }
-                })
-                .flatten()
-                .any(|join_directive| {
-                    if let Some(override_label_arg) =
-                        join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
-                    {
-                        // Any argument value for `overrideLabel` that's not
-                        // null can be considered as progressive override usage
-                        if !override_label_arg.is_null() {
-                            return true;
-                        }
-                        return false;
-                    }
-                    false
-                });
-            if has_progressive_overrides {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_query_planner_mode` cannot be used with progressive overrides",
-                    error: "remove uses of progressive overrides to try the experimental_query_planner_mode in `both` or `new`, otherwise switch back to `legacy`.".to_string(),
-                });
-            }
-
-            // We will only check for `@context` direcive, since
-            // `@fromContext` can only be used if `@context` is already
-            // applied, and we assume a correctly composed supergraph.
-            //
-            // `@context` can only be applied on Object Types, Interface
-            // Types and Unions. For simplicity of this function, we just
-            // check all 'extended_type` directives.
-            let has_set_context = schema
-                .supergraph_schema()
-                .types
-                .values()
-                .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
-            if has_set_context {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_query_planner_mode` cannot be used with `@context`",
-                    error: "remove uses of `@context` to try the experimental_query_planner_mode in `both` or `new`, otherwise switch back to `legacy`.".to_string(),
-                });
-            }
-
-            // Fed1 supergraphs will not work with the rust query planner.
-            let is_fed1_supergraph = match schema.federation_version() {
-                Some(v) => v == 1,
-                None => false,
-            };
-            if is_fed1_supergraph {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_query_planner_mode` cannot be used with fed1 supergraph",
-                    error: "switch back to `experimental_query_planner_mode: legacy` to use the router with fed1 supergraph".to_string(),
-                });
-            }
-
-            Ok(())
-        }
-        crate::configuration::QueryPlannerMode::Legacy => Ok(()),
-    }
-}
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
@@ -865,11 +760,9 @@ mod test {
     use tower_http::BoxError;
 
     use crate::configuration::Configuration;
-    use crate::configuration::QueryPlannerMode;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
-    use crate::router_factory::can_use_with_experimental_query_planner;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
@@ -973,13 +866,14 @@ mod test {
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &config)?;
 
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(config),
-                schema.to_string(),
+                Arc::new(schema),
                 None,
                 None,
             )
@@ -999,127 +893,6 @@ mod test {
         assert_eq!(
             &config.apollo.schema_id,
             "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
-        );
-    }
-
-    #[test]
-    fn test_cannot_use_context_with_experimental_query_planner() {
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/supergraph_with_context.graphql");
-        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: both cannot be used with @context"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: new cannot be used with @context"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy should be able to be used with @context"
-        );
-    }
-
-    #[test]
-    fn test_cannot_use_progressive_overrides_with_experimental_query_planner() {
-        // PROGRESSIVE OVERRIDES
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/supergraph_with_override_label.graphql");
-        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: both cannot be used with progressive overrides"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: new cannot be used with progressive overrides"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy should be able to be used with progressive overrides"
-        );
-    }
-
-    #[test]
-    fn test_cannot_use_fed1_supergraphs_with_experimental_query_planner() {
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: both cannot be used with fed1 supergraph"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: new cannot be used with fed1 supergraph"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy should be able to be used with fed1 supergraph"
-        );
-    }
-
-    #[test]
-    fn test_can_use_fed2_supergraphs_with_experimental_query_planner() {
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/minimal_fed2_supergraph.graphql");
-        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: both can be used"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: new can be used"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy can be used"
         );
     }
 }

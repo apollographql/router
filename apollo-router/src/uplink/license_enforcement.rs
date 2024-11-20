@@ -11,9 +11,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use apollo_compiler::ast::Definition;
 use apollo_compiler::schema::Directive;
-use apollo_compiler::Node;
+use apollo_compiler::schema::ExtendedType;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
@@ -31,6 +30,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::plugins::authentication::convert_key_algorithm;
+use crate::spec::Schema;
 use crate::spec::LINK_AS_ARGUMENT;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::LINK_URL_ARGUMENT;
@@ -101,10 +101,10 @@ struct ParsedLinkSpec {
 
 impl ParsedLinkSpec {
     fn from_link_directive(
-        link_directive: &Node<Directive>,
+        link_directive: &Directive,
     ) -> Option<Result<ParsedLinkSpec, url::ParseError>> {
         link_directive
-            .argument_by_name(LINK_URL_ARGUMENT)
+            .specified_argument_by_name(LINK_URL_ARGUMENT)
             .and_then(|value| {
                 let url_string = value.as_str();
                 let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
@@ -122,7 +122,7 @@ impl ParsedLinkSpec {
                     semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
 
                 let imported_as = link_directive
-                    .argument_by_name(LINK_AS_ARGUMENT)
+                    .specified_argument_by_name(LINK_AS_ARGUMENT)
                     .map(|as_arg| as_arg.as_str().unwrap_or_default().to_string());
 
                 Some(Ok(ParsedLinkSpec {
@@ -157,7 +157,7 @@ impl LicenseEnforcementReport {
 
     pub(crate) fn build(
         configuration: &Configuration,
-        schema: &apollo_compiler::ast::Document,
+        schema: &Schema,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
@@ -197,14 +197,14 @@ impl LicenseEnforcementReport {
     }
 
     fn validate_schema(
-        schema: &apollo_compiler::ast::Document,
+        schema: &Schema,
         schema_restrictions: &Vec<SchemaRestriction>,
     ) -> Vec<SchemaViolation> {
         let link_specs = schema
-            .definitions
-            .iter()
-            .filter_map(|def| def.as_schema_definition())
-            .flat_map(|def| def.directives.get_all(LINK_DIRECTIVE_NAME))
+            .supergraph_schema()
+            .schema_definition
+            .directives
+            .get_all(LINK_DIRECTIVE_NAME)
             .filter_map(|link| {
                 ParsedLinkSpec::from_link_directive(link).map(|maybe_spec| {
                     maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
@@ -214,18 +214,8 @@ impl LicenseEnforcementReport {
 
         let mut schema_violations: Vec<SchemaViolation> = Vec::new();
 
-        for subgraph_url in schema
-            .definitions
-            .iter()
-            .filter_map(|def| def.as_enum_type_definition())
-            .filter(|def| def.name == "join__Graph")
-            .flat_map(|def| def.values.iter())
-            .flat_map(|val| val.directives.iter())
-            .filter(|d| d.name == "join__graph")
-            .filter_map(|dir| (dir.arguments.iter().find(|arg| arg.name == "url")))
-            .filter_map(|arg| arg.value.as_str())
-        {
-            if subgraph_url.starts_with("unix://") {
+        for (_subgraph_name, subgraph_url) in schema.subgraphs() {
+            if subgraph_url.scheme_str() == Some("unix") {
                 schema_violations.push(SchemaViolation::DirectiveArgument {
                     url: "https://specs.apollo.dev/join/v0.3".to_string(),
                     name: "join__Graph".to_string(),
@@ -262,16 +252,19 @@ impl LicenseEnforcementReport {
                         if version_req.matches(&link_spec.version) {
                             let directive_name = link_spec.directive_name(name);
                             if schema
-                                .definitions
-                                .iter()
+                                .supergraph_schema()
+                                .types
+                                .values()
                                 .flat_map(|def| match def {
                                     // To traverse additional directive locations, add match arms for the respective definition types required.
                                     // As of writing this, this is only implemented for finding usages of progressive override on object type fields, but it can be extended to other directive locations trivially.
-                                    Definition::ObjectTypeDefinition(object_type_def) => {
-                                        let directives_on_object =
-                                            object_type_def.directives.get_all(&directive_name);
+                                    ExtendedType::Object(object_type_def) => {
+                                        let directives_on_object = object_type_def
+                                            .directives
+                                            .get_all(&directive_name)
+                                            .map(|component| &component.node);
                                         let directives_on_fields =
-                                            object_type_def.fields.iter().flat_map(|field| {
+                                            object_type_def.fields.values().flat_map(|field| {
                                                 field.directives.get_all(&directive_name)
                                             });
 
@@ -281,7 +274,9 @@ impl LicenseEnforcementReport {
                                     }
                                     _ => vec![],
                                 })
-                                .any(|directive| directive.argument_by_name(argument).is_some())
+                                .any(|directive| {
+                                    directive.specified_argument_by_name(argument).is_some()
+                                })
                             {
                                 schema_violations.push(SchemaViolation::DirectiveArgument {
                                     url: link_spec.url.to_string(),
@@ -391,11 +386,11 @@ impl LicenseEnforcementReport {
                 .name("Batching support")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_demand_control")
+                .path("$.demand_control")
                 .name("Demand control plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.telemetry.apollo.experimental_apollo_metrics_reference_mode")
+                .path("$.telemetry.apollo.metrics_reference_mode")
                 .value("extended")
                 .name("Apollo metrics extended references")
                 .build(),
@@ -682,9 +677,11 @@ mod test {
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::Configuration;
 
+    #[track_caller]
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-        let schema = Schema::parse_ast(supergraph_schema).expect("supergraph schema must be valid");
+        let schema =
+            Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
         LicenseEnforcementReport::build(&config, &schema)
     }
 
@@ -730,6 +727,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
     fn test_restricted_unix_socket_via_schema() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),

@@ -12,7 +12,10 @@ use lazy_static::lazy_static;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
+use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
+use crate::link::cost_spec_definition::CostSpecDefinition;
+use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -47,6 +50,11 @@ pub(crate) struct RequiresDirectiveArguments<'doc> {
 
 pub(crate) struct ProvidesDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
+}
+
+pub(crate) struct OverrideDirectiveArguments<'doc> {
+    pub(crate) from: &'doc str,
+    pub(crate) label: Option<&'doc str>,
 }
 
 #[derive(Debug)]
@@ -359,6 +367,19 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn override_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC
+                ))
+            })
+    }
+
     pub(crate) fn override_directive(
         &self,
         schema: &FederationSchema,
@@ -386,6 +407,30 @@ impl FederationSpecDefinition {
             name: name_in_schema,
             arguments,
         })
+    }
+
+    pub(crate) fn override_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<OverrideDirectiveArguments<'doc>, FederationError> {
+        Ok(OverrideDirectiveArguments {
+            from: directive_required_string_argument(application, &FEDERATION_FROM_ARGUMENT_NAME)?,
+            label: directive_optional_string_argument(
+                application,
+                &FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
+    pub(crate) fn get_cost_spec_definition(
+        &self,
+        schema: &FederationSchema,
+    ) -> Option<&'static CostSpecDefinition> {
+        schema
+            .metadata()
+            .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()))
+            .and_then(|link| COST_VERSIONS.find(&link.url.version))
+            .or_else(|| COST_VERSIONS.find_for_federation_version(self.version()))
     }
 }
 
@@ -425,6 +470,22 @@ lazy_static! {
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 5,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 6,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 7,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 8,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 9,
         }));
         definitions
     };

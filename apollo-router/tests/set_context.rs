@@ -42,6 +42,10 @@ async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)])
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }},
         mocks,
@@ -206,7 +210,10 @@ async fn test_set_context_with_null() {
     let response = run_single_request(
         QUERY,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_null_param.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -259,7 +266,10 @@ async fn test_set_context_unrelated_fetch_failure() {
     let response = run_single_request(
         QUERY,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_fetch_failure.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -285,7 +295,10 @@ async fn test_set_context_dependent_fetch_failure() {
     let response = run_single_request(
         QUERY,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_dependent_fetch_failure.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )

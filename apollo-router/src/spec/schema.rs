@@ -5,7 +5,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -38,40 +37,40 @@ pub(crate) struct Schema {
 pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
 
 impl Schema {
-    pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
+    pub(crate) fn parse(raw_sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
+        Self::parse_arc(raw_sdl.to_owned().into(), config)
+    }
+
+    pub(crate) fn parse_arc(
+        raw_sdl: Arc<String>,
+        config: &Configuration,
+    ) -> Result<Self, SchemaError> {
+        let start = Instant::now();
         let mut parser = apollo_compiler::parser::Parser::new();
-        let result = parser.parse_ast(sdl, "schema.graphql");
+        let result = parser.parse_ast(raw_sdl.as_ref(), "schema.graphql");
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        result.map_err(|invalid| {
-            SchemaError::Parse(ParseErrors {
-                errors: invalid.errors,
-            })
-        })
-    }
-
-    pub(crate) fn parse_compiler_schema(
-        sdl: &str,
-    ) -> Result<Valid<apollo_compiler::Schema>, SchemaError> {
-        Self::parse_ast(sdl)?
+        let definitions = result
+            .map_err(|invalid| {
+                SchemaError::Parse(ParseErrors {
+                    errors: invalid.errors,
+                })
+            })?
             .to_schema_validate()
-            .map_err(|errors| SchemaError::Validate(errors.into()))
-    }
-
-    pub(crate) fn parse(sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
-        let start = Instant::now();
-        let definitions = Self::parse_compiler_schema(sdl)?;
+            .map_err(|errors| SchemaError::Validate(errors.into()))?;
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
             for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
                 let join_directive = value.directives.get("join__graph")?;
-                let name = join_directive.argument_by_name("name")?.as_str()?;
-                let url = join_directive.argument_by_name("url")?.as_str()?;
+                let name = join_directive
+                    .specified_argument_by_name("name")?
+                    .as_str()?;
+                let url = join_directive.specified_argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
                 if url.is_empty() {
@@ -111,7 +110,7 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(sdl));
+        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
 
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
@@ -125,7 +124,7 @@ impl Schema {
             })?;
 
         Ok(Schema {
-            raw_sdl: Arc::new(sdl.to_owned()),
+            raw_sdl,
             supergraph,
             subgraphs,
             implementers_map,
@@ -223,7 +222,7 @@ impl Schema {
         for directive in &self.supergraph_schema().schema_definition.directives {
             let join_url = if directive.name == "core" {
                 let Some(feature) = directive
-                    .argument_by_name("feature")
+                    .specified_argument_by_name("feature")
                     .and_then(|value| value.as_str())
                 else {
                     continue;
@@ -232,7 +231,7 @@ impl Schema {
                 feature
             } else if directive.name == "link" {
                 let Some(url) = directive
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 else {
                     continue;
@@ -260,7 +259,7 @@ impl Schema {
             .filter(|dir| dir.name.as_str() == "link")
             .any(|link| {
                 if let Some(url_in_link) = link
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 {
                     let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
@@ -298,7 +297,7 @@ impl Schema {
             .filter(|dir| dir.name.as_str() == "link")
             .find(|link| {
                 if let Some(url_in_link) = link
-                    .argument_by_name("url")
+                    .specified_argument_by_name("url")
                     .and_then(|value| value.as_str())
                 {
                     let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
@@ -322,7 +321,7 @@ impl Schema {
                 }
             })
             .map(|link| {
-                link.argument_by_name("as")
+                link.specified_argument_by_name("as")
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| default.to_string())
             })
@@ -364,12 +363,23 @@ mod tests {
             "{}\n{}",
             r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
             query: Query
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar link__Import
+        scalar join__FieldSet
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
@@ -460,27 +470,7 @@ mod tests {
 
     #[test]
     fn routing_urls() {
-        let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-        type Query {
-          me: String
-        }
-        directive @core(feature: String!) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-            INVENTORY
-              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-            PRODUCTS
-            @join__graph(name: "products" url: "http://localhost:4003/graphql")
-            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-        }"#;
+        let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");
         let schema = Schema::parse(schema, &Default::default()).unwrap();
 
         assert_eq!(schema.subgraphs.len(), 4);
@@ -500,7 +490,7 @@ mod tests {
                 .get("inventory")
                 .map(|s| s.to_string())
                 .as_deref(),
-            Some("http://localhost:4004/graphql"),
+            Some("http://localhost:4002/graphql"),
             "Incorrect url for inventory"
         );
 
@@ -520,7 +510,7 @@ mod tests {
                 .get("reviews")
                 .map(|s| s.to_string())
                 .as_deref(),
-            Some("http://localhost:4002/graphql"),
+            Some("http://localhost:4004/graphql"),
             "Incorrect url for reviews"
         );
 
@@ -546,7 +536,7 @@ mod tests {
     fn federation_version() {
         // @core directive
         let schema = Schema::parse(
-            include_str!("../testdata/minimal_supergraph.graphql"),
+            include_str!("../testdata/minimal_fed1_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
@@ -554,7 +544,7 @@ mod tests {
 
         // @link directive
         let schema = Schema::parse(
-            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+            include_str!("../testdata/minimal_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
@@ -570,7 +560,7 @@ mod tests {
 
             assert_eq!(
                 Schema::schema_id(&schema.raw_sdl),
-                "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
+                "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }
     }

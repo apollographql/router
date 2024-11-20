@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use axum::error_handling::HandleErrorLayer;
@@ -24,6 +25,7 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
 use http_body::combinators::UnsyncBoxBody;
+use hyper::server::conn::Http;
 use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
@@ -298,11 +300,25 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let actual_main_listen_address = main_listener
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
+            let mut http_config = Http::new();
+            http_config.http1_keep_alive(true);
+            http_config.http1_header_read_timeout(Duration::from_secs(10));
+
+            #[cfg(feature = "hyper_header_limits")]
+            if let Some(max_headers) = configuration.limits.http1_max_request_headers {
+                http_config.http1_max_headers(max_headers);
+            }
+
+            if let Some(max_buf_size) = configuration.limits.http1_max_request_buf_size {
+                http_config.max_buf_size(max_buf_size.as_u64() as usize);
+            }
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 main_listener,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
+                true,
+                http_config.clone(),
                 all_connections_stopped_sender.clone(),
             );
 
@@ -341,6 +357,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             listen_addr.clone(),
                             router,
+                            false,
+                            http_config.clone(),
                             all_connections_stopped_sender.clone(),
                         );
                         (

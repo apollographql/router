@@ -1,4 +1,5 @@
 //! Router errors.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::validation::DiagnosticList;
@@ -25,6 +26,11 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
+
+/// Return up to this many GraphQL parsing or validation errors.
+///
+/// Any remaining errors get silently dropped.
+const MAX_VALIDATION_ERRORS: usize = 100;
 
 /// Error types for execution.
 ///
@@ -233,8 +239,8 @@ pub(crate) enum ServiceBuildError {
     /// couldn't build Query Planner Service: {0}
     QueryPlannerError(QueryPlannerError),
 
-    /// The supergraph schema failed to produce a valid API schema: {0}
-    ApiSchemaError(FederationError),
+    /// failed to initialize the query planner: {0}
+    QpInitError(FederationError),
 
     /// schema error: {0}
     Schema(SchemaError),
@@ -246,12 +252,6 @@ pub(crate) enum ServiceBuildError {
 impl From<SchemaError> for ServiceBuildError {
     fn from(err: SchemaError) -> Self {
         ServiceBuildError::Schema(err)
-    }
-}
-
-impl From<FederationError> for ServiceBuildError {
-    fn from(err: FederationError) -> Self {
-        ServiceBuildError::ApiSchemaError(err)
     }
 }
 
@@ -339,6 +339,7 @@ impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect())
     }
 }
@@ -408,6 +409,19 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 Ok(errors)
             }
             err => Err(err),
+        }
+    }
+}
+
+impl QueryPlannerError {
+    pub(crate) fn usage_reporting(&self) -> Option<UsageReporting> {
+        match self {
+            QueryPlannerError::PlanningErrors(pe) => Some(pe.usage_reporting.clone()),
+            QueryPlannerError::SpecError(e) => Some(UsageReporting {
+                stats_report_key: e.get_error_key().to_string(),
+                referenced_fields_by_type: HashMap::new(),
+            }),
+            _ => None,
         }
     }
 }
@@ -611,6 +625,7 @@ impl IntoGraphQLErrors for ParseErrors {
                     .extension_code("GRAPHQL_PARSING_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect())
     }
 }
@@ -641,6 +656,7 @@ impl ValidationErrors {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect()
     }
 }
@@ -653,7 +669,11 @@ impl IntoGraphQLErrors for ValidationErrors {
 impl From<DiagnosticList> for ValidationErrors {
     fn from(errors: DiagnosticList) -> Self {
         Self {
-            errors: errors.iter().map(|e| e.unstable_to_json_compat()).collect(),
+            errors: errors
+                .iter()
+                .map(|e| e.unstable_to_json_compat())
+                .take(MAX_VALIDATION_ERRORS)
+                .collect(),
         }
     }
 }

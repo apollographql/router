@@ -5,16 +5,18 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::executable::Operation;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
-use tokio::task;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::compute_job;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
@@ -87,7 +89,8 @@ impl QueryAnalysisLayer {
         // parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
-        task::spawn_blocking(move || {
+        let priority = compute_job::Priority::P4; // Medium priority
+        let job = move || {
             span.in_scope(|| {
                 Query::parse_document(
                     &query,
@@ -96,9 +99,12 @@ impl QueryAnalysisLayer {
                     conf.as_ref(),
                 )
             })
-        })
-        .await
-        .expect("parse_document task panicked")
+        };
+        // TODO: is this correct?
+        let job = std::panic::AssertUnwindSafe(job);
+        compute_job::execute(priority, job)
+            .await
+            .expect("Query::parse_document panicked")
     }
 
     pub(crate) async fn supergraph_request(
@@ -146,70 +152,48 @@ impl QueryAnalysisLayer {
             .cloned();
 
         let res = match entry {
-            None => {
-                match self.parse_document(&query, op_name.as_deref()).await {
-                    Err(errors) => {
-                        (*self.cache.lock().await).put(
-                            QueryAnalysisKey {
-                                query,
-                                operation_name: op_name,
-                            },
-                            Err(errors.clone()),
-                        );
-                        let errors = match errors.into_graphql_errors() {
-                            Ok(v) => v,
-                            Err(errors) => vec![Error::builder()
-                                .message(errors.to_string())
-                                .extension_code(errors.extension_code())
-                                .build()],
-                        };
-
-                        return Err(SupergraphResponse::builder()
-                            .errors(errors)
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(request.context)
-                            .build()
-                            .expect("response is valid"));
-                    }
-                    Ok(doc) => {
-                        let context = Context::new();
-
-                        let operation = doc.executable.operations.get(op_name.as_deref()).ok();
-                        let operation_name = operation.as_ref().and_then(|operation| {
-                            operation.name.as_ref().map(|s| s.as_str().to_owned())
-                        });
-
-                        if self.enable_authorization_directives {
-                            AuthorizationPlugin::query_analysis(
-                                &doc,
-                                operation_name.as_deref(),
-                                &self.schema,
-                                &context,
-                            );
-                        }
-
-                        context
-                            .insert(OPERATION_NAME, operation_name)
-                            .expect("cannot insert operation name into context; this is a bug");
-                        let operation_kind =
-                            operation.map(|op| OperationKind::from(op.operation_type));
-                        // FIXME: I think we should not add an operation kind by default. If it's an invalid graphql operation for example it might be useful to detect there isn't operation_kind
-                        context
-                            .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
-                            .expect("cannot insert operation kind in the context; this is a bug");
-
-                        (*self.cache.lock().await).put(
-                            QueryAnalysisKey {
-                                query,
-                                operation_name: op_name.clone(),
-                            },
-                            Ok((context.clone(), doc.clone())),
-                        );
-
-                        Ok((context, doc))
-                    }
+            None => match self.parse_document(&query, op_name.as_deref()).await {
+                Err(errors) => {
+                    (*self.cache.lock().await).put(
+                        QueryAnalysisKey {
+                            query,
+                            operation_name: op_name.clone(),
+                        },
+                        Err(errors.clone()),
+                    );
+                    Err(errors)
                 }
-            }
+                Ok(doc) => {
+                    let context = Context::new();
+
+                    if self.enable_authorization_directives {
+                        AuthorizationPlugin::query_analysis(
+                            &doc,
+                            op_name.as_deref(),
+                            &self.schema,
+                            &context,
+                        );
+                    }
+
+                    context
+                        .insert(OPERATION_NAME, doc.operation.name.clone())
+                        .expect("cannot insert operation name into context; this is a bug");
+                    let operation_kind = OperationKind::from(doc.operation.operation_type);
+                    context
+                        .insert(OPERATION_KIND, operation_kind)
+                        .expect("cannot insert operation kind in the context; this is a bug");
+
+                    (*self.cache.lock().await).put(
+                        QueryAnalysisKey {
+                            query,
+                            operation_name: op_name.clone(),
+                        },
+                        Ok((context.clone(), doc.clone())),
+                    );
+
+                    Ok((context, doc))
+                }
+            },
             Some(c) => c,
         };
 
@@ -225,7 +209,7 @@ impl QueryAnalysisLayer {
                         doc.executable.clone(),
                         op_name,
                         self.schema.api_schema(),
-                        &request.supergraph_request.body().variables.clone(),
+                        &request.supergraph_request.body().variables,
                     ))
                 } else {
                     None
@@ -250,8 +234,15 @@ impl QueryAnalysisLayer {
                         referenced_fields_by_type: HashMap::new(),
                     }))
                 });
+                let errors = match errors.into_graphql_errors() {
+                    Ok(v) => v,
+                    Err(errors) => vec![Error::builder()
+                        .message(errors.to_string())
+                        .extension_code(errors.extension_code())
+                        .build()],
+                };
                 Err(SupergraphResponse::builder()
-                    .errors(errors.into_graphql_errors().unwrap_or_default())
+                    .errors(errors)
                     .status_code(StatusCode::BAD_REQUEST)
                     .context(request.context)
                     .build()
@@ -268,6 +259,60 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
+    pub(crate) operation: Node<Operation>,
+    /// `__schema` or `__type`
+    pub(crate) has_schema_introspection: bool,
+    /// Non-meta fields explicitly defined in the schema
+    pub(crate) has_explicit_root_fields: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct RootFieldKinds {}
+
+impl ParsedDocumentInner {
+    pub(crate) fn new(
+        ast: ast::Document,
+        executable: Arc<Valid<ExecutableDocument>>,
+        operation_name: Option<&str>,
+        hash: Arc<QueryHash>,
+    ) -> Result<Arc<Self>, SpecError> {
+        let operation = get_operation(&executable, operation_name)?;
+        let mut has_schema_introspection = false;
+        let mut has_explicit_root_fields = false;
+        for field in operation.root_fields(&executable) {
+            match field.name.as_str() {
+                "__typename" => {} // turns out we have no conditional on `has_root_typename`
+                "__schema" | "__type" if operation.is_query() => has_schema_introspection = true,
+                _ => has_explicit_root_fields = true,
+            }
+        }
+        Ok(Arc::new(Self {
+            ast,
+            executable,
+            hash,
+            operation,
+            has_schema_introspection,
+            has_explicit_root_fields,
+        }))
+    }
+}
+
+pub(crate) fn get_operation(
+    executable: &ExecutableDocument,
+    operation_name: Option<&str>,
+) -> Result<Node<Operation>, SpecError> {
+    if let Ok(operation) = executable.operations.get(operation_name) {
+        Ok(operation.clone())
+    } else if let Some(name) = operation_name {
+        Err(SpecError::UnknownOperation(name.to_owned()))
+    } else if executable.operations.is_empty() {
+        // Maybe not reachable?
+        // A valid document is non-empty and has no unused fragments
+        Err(SpecError::NoOperation)
+    } else {
+        debug_assert!(executable.operations.len() > 1);
+        Err(SpecError::MultipleOperationWithoutOperationName)
+    }
 }
 
 impl Display for ParsedDocumentInner {
