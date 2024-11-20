@@ -12,25 +12,27 @@ expression: response
         },
         {
           "id": "2",
-          "name": "Organization 2"
+          "name": null
         },
         {
           "id": "3",
-          "name": null
+          "name": "Organization 3"
         }
       ]
     }
   },
   "errors": [
     {
-      "message": "Organization not found",
+      "message": "HTTP fetch failed from 'orga': orga not found",
       "path": [
         "currentUser",
         "allOrganizations",
-        2
+        1
       ],
       "extensions": {
-        "service": "orga"
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "orga",
+        "reason": "orga not found"
       }
     }
   ]
