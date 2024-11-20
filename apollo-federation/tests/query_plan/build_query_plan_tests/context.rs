@@ -27,12 +27,36 @@
 //
 // How this needs to be ported remains to be seen...
 
-use std::sync::Arc;
+use apollo_federation::query_plan::{FetchDataRewrite, PlanNode, TopLevelPlanNode};
 
-use apollo_compiler::Name;
-use apollo_federation::query_plan::{
-    FetchDataKeyRenamer, FetchDataPathElement, FetchDataRewrite, PlanNode, TopLevelPlanNode,
-};
+// TODO: This should check the whole renamer not just the name.
+macro_rules! node_assert {
+    ($plan: ident, $index: literal, $($rename_key_to: literal),+$(,)?) => {
+
+        let Some(TopLevelPlanNode::Sequence(node)) = $plan.node else {
+            panic!("failed to get sequence node");
+        };
+        let Some(PlanNode::Flatten(node)) = node.nodes.get($index) else {
+            panic!("failed to get fetch node");
+        };
+        let PlanNode::Fetch(node) = &*node.node else {
+            panic!("failed to get flatten node");
+        };
+        let expected_rewrite = &[ $( $rename_key_to ),+ ];
+        assert_eq!(node.context_rewrites.len(), expected_rewrite.len());
+        node
+            .context_rewrites
+            .iter()
+            .map(|rewriter| {
+                let FetchDataRewrite::KeyRenamer(renamer) = &**rewriter else {
+                    panic!("Expected KeyRenamer");
+                };
+                renamer
+            })
+            .zip(expected_rewrite)
+            .for_each(|(actual, expected)| assert_eq!(&actual.rename_key_to.as_str(), expected));
+    };
+}
 
 #[test]
 fn set_context_test_variable_is_from_same_subgraph() {
@@ -108,34 +132,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
       }
         "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
-                                    .unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => assert!(false, "failed to get fetch node"),
-            },
-            _ => assert!(false, "failed to get flatten node"),
-        },
-        _ => assert!(false, "failed to get sequence node"),
-    }
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -229,34 +226,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
       }
     "###);
 
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(2) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
-                                    .unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => assert!(false, "failed to get fetch node"),
-            },
-            _ => assert!(false, "failed to get flatten node"),
-        },
-        _ => assert!(false, "failed to get sequence node"),
-    }
+    node_assert!(plan, 2, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -337,34 +307,8 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
       }
         "###
     );
-    match plan.node {
-      Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-          Some(PlanNode::Flatten(node)) => match &*node.node {
-              PlanNode::Fetch(node) => {
-                  assert_eq!(
-                      node.context_rewrites,
-                      vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                          FetchDataKeyRenamer {
-                              rename_key_to: Name::new("contextualArgument__Subgraph2_0")
-                                  .unwrap(),
-                              path: vec![
-                                  FetchDataPathElement::Parent,
-                                  FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                  FetchDataPathElement::Key(
-                                      Name::new("prop").unwrap(),
-                                      Default::default()
-                                  ),
-                              ],
-                          }
-                      )),]
-                  );
-              }
-              _ => assert!(false, "failed to get fetch node"),
-          },
-          _ => assert!(false, "failed to get flatten node"),
-      },
-      _ => assert!(false, "failed to get sequence node"),
-  }
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph2_0");
 }
 
 #[test]
@@ -490,34 +434,8 @@ fn set_context_test_fetched_as_a_list() {
       }
         "###
     );
-    match plan.node {
-      Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-          Some(PlanNode::Flatten(node)) => match &*node.node {
-              PlanNode::Fetch(node) => {
-                  assert_eq!(
-                      node.context_rewrites,
-                      vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                          FetchDataKeyRenamer {
-                              rename_key_to: Name::new("contextualArgument__Subgraph1_0")
-                                  .unwrap(),
-                              path: vec![
-                                  FetchDataPathElement::Parent,
-                                  FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                  FetchDataPathElement::Key(
-                                      Name::new("prop").unwrap(),
-                                      Default::default()
-                                  ),
-                              ],
-                          }
-                      )),]
-                  );
-              }
-              _ => assert!(false, "failed to get fetch node"),
-          },
-          _ => assert!(false, "failed to get flatten node"),
-      },
-      _ => assert!(false, "failed to get sequence node"),
-  }
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -826,37 +744,8 @@ fn set_context_test_accesses_a_different_top_level_query() {
       }
         "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
-                                    .unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::Key(
-                                        Name::new("me").unwrap(),
-                                        Default::default()
-                                    ),
-                                    FetchDataPathElement::Key(
-                                        Name::new("locale").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => assert!(false, "failed to get fetch node"),
-            },
-            _ => assert!(false, "failed to get flatten node"),
-        },
-        _ => assert!(false, "failed to get sequence node"),
-    }
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -884,7 +773,7 @@ fn set_context_variable_is_a_list() {
         "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           t {
@@ -928,16 +817,8 @@ fn set_context_variable_is_a_list() {
       }
         "###
     );
-    /* TODO: Port
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'prop'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above")
+
+    node_assert!(plan, 1, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -992,7 +873,7 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
         "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         {
           t {
@@ -1074,16 +955,8 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
       }
         "###
     );
-    /* TODO: Port
-    expect((plan as any).node.nodes[3].node.contextRewrites).toEqual([
-      {
-        kind: 'KeyRenamer',
-        path: ['..', '... on T', 'a', 'b', 'c', 'prop'],
-        renameKeyTo: 'contextualArgument_1_0',
-      },
-    ]);
-    */
-    todo!("See the comment above")
+
+    node_assert!(plan, 3, "contextualArgument__Subgraph1_0");
 }
 
 #[test]
@@ -1262,7 +1135,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
         "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         query {
           customer {
@@ -1322,9 +1195,14 @@ fn set_context_test_efficiently_merge_fetch_groups() {
       {
         kind: 'KeyRenamer',
         path: ['mid'],
-        renameKeyTo: 'contextualArgument_3_1',
+        renameKeyTo: '',
       },
     ]);
     */
-    todo!("See the comment above")
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument__Subgraph3_0",
+        "contextualArgument__Subgraph3_1"
+    );
 }
