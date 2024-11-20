@@ -369,13 +369,20 @@ impl ApplyToInternal for NamedSelection {
                             ));
                         }
                     };
+                } else if let Some(JSON::Object(map)) = value_opt {
+                    // TODO Handle collisions with existing values (merge logic)
+                    // TODO Gate this behavior on whether
+                    // path_selection.compute_output_shape() returns an object
+                    // with statically known fields, and potentially verify map
+                    // actually has those fields.
+                    output.extend(map);
                 } else {
                     // This error case should never happen if the selection was
                     // constructed by parsing, because the presence of the
                     // SubSelection (in the absence of an Alias) is enforced by
                     // NamedSelection::parse_path.
                     errors.push(ApplyToError::new(
-                        "Path without alias must have subselection".to_string(),
+                        "Path without alias must produce object".to_string(),
                         input_path.to_vec(),
                         path_selection.range(),
                     ));
@@ -2340,7 +2347,7 @@ mod tests {
             (
                 Some(json!({})),
                 vec![ApplyToError::new(
-                    "Path without alias must have subselection".to_string(),
+                    "Path without alias must produce object".to_string(),
                     vec![],
                     // No range because this is a manually constructed selection.
                     None,
@@ -2450,6 +2457,87 @@ mod tests {
         assert_eq!(
             selection!("id name").static_shape().pretty_print(),
             "{ id: $root.id, name: $root.name }",
+        );
+
+        assert_eq!(
+            selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
+                .static_shape()
+                .pretty_print(),
+            "{ thisOrThat: One<$root.data.maybe.this, $root.data.maybe.that> }",
+        );
+
+        assert_eq!(
+            selection!(r#"
+                id
+                name
+                friends: friend_ids { id: $ }
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
+            "#).static_shape().pretty_print(),
+            // TODO The friends: { id: $root.friend_ids } part needs to simplify
+            // to friends being an array when/once we know $root.friend_ids is
+            // an array.
+            "{ alias: { x: $root.arrayOfArrays.x, y: $root.arrayOfArrays.y }, friends: { id: $root.friend_ids }, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
+        );
+
+        assert_eq!(
+            selection!(r#"
+                upc
+                kind->match(
+                    ["book", ${ author title }],
+                    ["movie", ${ director title }],
+                    ["album", ${ artist title }],
+                )
+                price: cost
+            "#).static_shape().pretty_print(),
+            "One<{ author: $root.author, price: $root.cost, title: $root.title, upc: $root.upc }, { director: $root.director, price: $root.cost, title: $root.title, upc: $root.upc }, { artist: $root.artist, price: $root.cost, title: $root.title, upc: $root.upc }>"
+        );
+
+        assert_eq!(
+            selection!(r#"
+                upc
+                kind->match(
+                    ["book", ${ author title }],
+                    ["movie", ${ director title }],
+                )
+                price: $($.price, $.cost, "unknown")
+            "#).static_shape().pretty_print(),
+            "One<{ author: $root.author, price: One<$root.price, $root.cost, \"unknown\">, title: $root.title, upc: $root.upc }, { director: $root.director, price: One<$root.price, $root.cost, \"unknown\">, title: $root.title, upc: $root.upc }>"
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })")
+                .static_shape()
+                .pretty_print(),
+            "{ thrice: [$root, $root, $root] }",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries")
+                .static_shape()
+                .pretty_print(),
+            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.key")
+                .static_shape()
+                .pretty_print(),
+            "[\"thrice\"]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.value")
+                .static_shape()
+                .pretty_print(),
+            "[[$root, $root, $root]]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
+                .static_shape()
+                .pretty_print(),
+            "[{ k: \"wrapped\", v: $root }]",
         );
     }
 }
