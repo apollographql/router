@@ -1,0 +1,36 @@
+supergraph:
+  listen: 127.0.0.1:4000
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true # Propagate errors from all subraphs
+
+coprocessor:
+  url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
+  supergraph:
+    response: 
+      context: true
+  subgraph:
+    all:
+      response: 
+        subgraph_request_id: true
+        context: true
+preview_entity_cache:
+  enabled: true
+  expose_keys_in_context: true
+  metrics:
+    enabled: true
+  invalidation:
+    listen: 0.0.0.0:4000
+    path: /invalidation
+  # Configure entity caching per subgraph
+  subgraph:
+    all:
+      enabled: true
+      # Configure Redis
+      redis:
+        urls: ["redis://localhost:6379"]
+        ttl: 24h # Optional, by default no expiration
