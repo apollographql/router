@@ -2,9 +2,9 @@
 
 use hyper::body::HttpBody;
 
-use super::plugin::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::make_requests::ResponseKey;
+use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::services::router::body::RouterBody;
 
 /// A result of a connector

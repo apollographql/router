@@ -15,7 +15,7 @@ use serde_json_bytes::Value;
 use super::http::Request;
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
-use super::plugin::ConnectorContext;
+use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 
 const REPRESENTATIONS_VAR: &str = "representations";
