@@ -38,6 +38,26 @@
                 ]
               }
             }
+          },
+          {
+            "request": {
+              "query": "query Query_Null_Param__Subgraph1__1($representations:[_Any!]!$contextualArgument__Subgraph1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument__Subgraph1_0)}}}",
+              "operationName": "Query_Null_Param__Subgraph1__1",
+              "variables": {
+                "contextualArgument__Subgraph1_0": null,
+                "representations": [{ "__typename": "U", "id": "1" }]
+              }
+            },
+            "response": {
+              "data": {
+                "_entities": [
+                  {
+                    "id": "1",
+                    "field": 1234
+                  }
+                ]
+              }
+            }
           }
     ]
 }

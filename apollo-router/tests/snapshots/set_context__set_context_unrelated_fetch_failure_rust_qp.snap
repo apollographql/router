@@ -1,0 +1,168 @@
+---
+source: apollo-router/tests/set_context.rs
+expression: response
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Some error",
+      "path": [
+        "t",
+        "u"
+      ]
+    }
+  ],
+  "extensions": {
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "authorization": {
+                "is_authenticated": false,
+                "policies": [],
+                "scopes": []
+              },
+              "contextRewrites": null,
+              "id": null,
+              "inputRewrites": null,
+              "kind": "Fetch",
+              "operation": "query Query_fetch_failure__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
+              "operationKind": "query",
+              "operationName": "Query_fetch_failure__Subgraph1__0",
+              "outputRewrites": null,
+              "schemaAwareHash": "d3f1ad875170d008059583ca6074e732a178f74474ac31de3bb4397c5080020d",
+              "serviceName": "Subgraph1",
+              "variableUsages": []
+            },
+            {
+              "kind": "Parallel",
+              "nodes": [
+                {
+                  "kind": "Flatten",
+                  "node": {
+                    "authorization": {
+                      "is_authenticated": false,
+                      "policies": [],
+                      "scopes": []
+                    },
+                    "contextRewrites": [
+                      {
+                        "kind": "KeyRenamer",
+                        "path": [
+                          "..",
+                          "... on T",
+                          "prop"
+                        ],
+                        "renameKeyTo": "contextualArgument__Subgraph1_0"
+                      }
+                    ],
+                    "id": null,
+                    "inputRewrites": null,
+                    "kind": "Fetch",
+                    "operation": "query Query_fetch_failure__Subgraph1__1($representations: [_Any!]!, $contextualArgument__Subgraph1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument__Subgraph1_0) } } }",
+                    "operationKind": "query",
+                    "operationName": "Query_fetch_failure__Subgraph1__1",
+                    "outputRewrites": null,
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ],
+                        "typeCondition": "U"
+                      }
+                    ],
+                    "schemaAwareHash": "da9d08640136ecaa1e1816a99bba8f2db42b99f5abe7a61d9eb51e9fe8c071ae",
+                    "serviceName": "Subgraph1",
+                    "variableUsages": [
+                      "contextualArgument__Subgraph1_0"
+                    ]
+                  },
+                  "path": [
+                    "t",
+                    "u"
+                  ]
+                },
+                {
+                  "kind": "Flatten",
+                  "node": {
+                    "authorization": {
+                      "is_authenticated": false,
+                      "policies": [],
+                      "scopes": []
+                    },
+                    "contextRewrites": null,
+                    "id": null,
+                    "inputRewrites": null,
+                    "kind": "Fetch",
+                    "operation": "query Query_fetch_failure__Subgraph2__2($representations: [_Any!]!) { _entities(representations: $representations) { ... on U { b } } }",
+                    "operationKind": "query",
+                    "operationName": "Query_fetch_failure__Subgraph2__2",
+                    "outputRewrites": null,
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ],
+                        "typeCondition": "U"
+                      }
+                    ],
+                    "schemaAwareHash": "a3c7e6df6f9c93b228f16a937b7159ccf1294fec50a92f60ba004dbebbb64b50",
+                    "serviceName": "Subgraph2",
+                    "variableUsages": []
+                  },
+                  "path": [
+                    "t",
+                    "u"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Parallel {\n      Flatten(path: \"t.u\") {\n        Fetch(service: \"Subgraph1\") {\n          {\n            ... on U {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on U {\n              field(a: $contextualArgument__Subgraph1_0)\n            }\n          }\n        },\n      },\n      Flatten(path: \"t.u\") {\n        Fetch(service: \"Subgraph2\") {\n          {\n            ... on U {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on U {\n              b\n            }\n          }\n        },\n      },\n    },\n  },\n}"
+    },
+    "valueCompletion": [
+      {
+        "message": "Cannot return null for non-nullable field U.field",
+        "path": [
+          "t",
+          "u"
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field T.u",
+        "path": [
+          "t",
+          "u"
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field Query.t",
+        "path": [
+          "t"
+        ]
+      }
+    ]
+  }
+}
