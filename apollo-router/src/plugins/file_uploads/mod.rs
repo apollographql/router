@@ -254,7 +254,7 @@ fn replace_value_at_path<'a>(
 
 // Removes value at path.
 fn remove_value_at_path<'a>(variables: &'a mut json_ext::Object, path: &'a [String]) {
-    let _ = get_value_at_path(variables, path).take();
+    let _ = get_value_at_path(variables, path).map(|v| v.take());
 }
 
 fn get_value_at_path<'a>(
