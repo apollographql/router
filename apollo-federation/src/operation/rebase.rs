@@ -22,6 +22,7 @@ use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
@@ -265,19 +266,39 @@ impl Field {
             };
             return Ok(Some(schema.get_type(type_name.clone())?.try_into()?));
         }
-        if self.can_rebase_on(parent_type)? {
-            let Some(type_name) = parent_type
-                .field(data.field_position.field_name().clone())
-                .ok()
-                .and_then(|field_pos| field_pos.get(schema.schema()).ok())
-                .map(|field| field.ty.inner_named_type())
-            else {
-                return Ok(None);
-            };
-            Ok(Some(schema.get_type(type_name.clone())?.try_into()?))
-        } else {
-            Ok(None)
+        if !self.can_rebase_on(parent_type)? {
+            return Ok(None);
         }
+        let Some(field_definition) = parent_type
+            .field(data.field_position.field_name().clone())
+            .ok()
+            .and_then(|field_pos| field_pos.get(schema.schema()).ok())
+        else {
+            return Ok(None);
+        };
+        if let Some(federation_spec_definition) =
+            get_federation_spec_definition_from_subgraph(schema).ok()
+        {
+            let from_context_directive_definition_name = &federation_spec_definition
+                .from_context_directive_definition(schema)?
+                .name;
+            if field_definition.arguments.iter().any(|arg_definition| {
+                arg_definition
+                    .directives
+                    .has(from_context_directive_definition_name)
+                    && !data
+                        .arguments
+                        .iter()
+                        .any(|arg| arg.name == arg_definition.name)
+            }) {
+                return Ok(None);
+            }
+        }
+        Ok(Some(
+            schema
+                .get_type(field_definition.ty.inner_named_type().clone())?
+                .try_into()?,
+        ))
     }
 }
 
