@@ -21,6 +21,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::connect::Response;
 use crate::services::fetch::AddSubgraphNameExt;
+use crate::Context;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -44,7 +45,8 @@ enum RawResponse {
         key: ResponseKey,
     },
     /// Contains the response data directly from the HTTP response. We'll apply
-    /// a selection to
+    /// a selection to convert this into either `data` or `errors` based on
+    /// whether it's successful or not.
     Data {
         parts: http::response::Parts,
         data: Value,
@@ -61,6 +63,7 @@ impl RawResponse {
     fn map_response(
         self,
         connector: &Connector,
+        context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     ) -> MappedResponse {
         match self {
@@ -71,14 +74,14 @@ impl RawResponse {
                 parts,
                 debug_request,
             } => {
-                let (res, apply_to_errors) = key.selection().apply_with_vars(
-                    &data,
-                    &key.inputs().merge(
-                        connector.config.as_ref(),
-                        None,
-                        Some(parts.status.as_u16()),
-                    ),
+                let inputs = key.inputs().merge(
+                    &connector.response_variables,
+                    connector.config.as_ref(),
+                    context,
+                    Some(parts.status.as_u16()),
                 );
+
+                let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
                 if let Some(ref debug) = debug_context {
                     debug.lock().push_response(
@@ -111,6 +114,7 @@ impl RawResponse {
     fn map_error(
         self,
         connector: &Connector,
+        _context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     ) -> MappedResponse {
         match self {
@@ -262,6 +266,7 @@ impl MappedResponse {
 pub(crate) async fn handle_responses<T: HttpBody>(
     responses: Vec<ConnectorResponse<T>>,
     connector: &Connector,
+    context: &Context,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Response, HandleResponseError> {
     let futures_vec = responses
@@ -320,9 +325,9 @@ pub(crate) async fn handle_responses<T: HttpBody>(
         };
 
         let mapped = if is_success {
-            raw.map_response(connector, debug_context)
+            raw.map_response(connector, context, debug_context)
         } else {
-            raw.map_error(connector, debug_context)
+            raw.map_error(connector, context, debug_context)
         };
 
         mapped.add_to_data(&mut data, &mut errors, count)?;
@@ -430,6 +435,7 @@ mod tests {
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::make_requests::ResponseTypeName;
     use crate::services::router::body::RouterBody;
+    use crate::Context;
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
@@ -454,6 +460,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -490,6 +498,7 @@ mod tests {
                 },
             ],
             &connector,
+            &Context::default(),
             &None,
         )
         .await
@@ -549,6 +558,8 @@ mod tests {
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -585,6 +596,7 @@ mod tests {
                 },
             ],
             &connector,
+            &Context::default(),
             &None,
         )
         .await
@@ -656,6 +668,8 @@ mod tests {
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -694,6 +708,7 @@ mod tests {
                 },
             ],
             &connector,
+            &Context::default(),
             &None,
         )
         .await
@@ -765,6 +780,8 @@ mod tests {
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -833,6 +850,7 @@ mod tests {
                 },
             ],
             &connector,
+            &Context::default(),
             &None,
         )
         .await
@@ -966,6 +984,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -986,6 +1006,7 @@ mod tests {
                 debug_request: None,
             }],
             &connector,
+            &Context::default(),
             &None,
         )
         .await

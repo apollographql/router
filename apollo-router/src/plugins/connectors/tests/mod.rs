@@ -48,6 +48,7 @@ const SELECTION_SCHEMA: &str = include_str!("../testdata/selection.graphql");
 const NO_SOURCES_SCHEMA: &str = include_str!("../testdata/connector-without-source.graphql");
 const QUICKSTART_SCHEMA: &str = include_str!("../testdata/quickstart.graphql");
 const INTERFACE_OBJECT_SCHEMA: &str = include_str!("../testdata/interface-object.graphql");
+const VARIABLES_SCHEMA: &str = include_str!("../testdata/variables.graphql");
 
 #[tokio::test]
 async fn value_from_config() {
@@ -1309,6 +1310,116 @@ async fn test_sources_in_context() {
         &serde_json_bytes::json!([
           { "subgraph_name": "connectors", "source_name": "jsonPlaceholder" }
         ])
+    );
+}
+
+#[tokio::test]
+async fn test_variables() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/coprocessor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "control": "continue",
+          "version": 1,
+          "stage": "SupergraphRequest",
+          "context": {
+            "entries": {
+              "value": "B"
+            }
+          }
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/f"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .mount(&mock_server)
+        .await;
+    let uri = mock_server.uri();
+
+    let response = execute(
+        &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
+        &uri,
+        "{ f(arg: \"A\") { arg context config sibling status extra f(arg: \"A\") { arg context config sibling status } } }",
+        Default::default(),
+        Some(json!({
+          "preview_connectors": {
+            "subgraphs": {
+              "connectors": {
+                "$config": {
+                  "value": "C"
+                }
+              }
+            }
+          },
+          "coprocessor": {
+            "url": format!("{}/coprocessor", mock_server.uri()),
+            "supergraph": {
+              "request": {
+                "context": true
+              }
+            }
+          }
+        })),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "f": {
+          "arg": "A",
+          "context": "B",
+          "config": "C",
+          "sibling": "D",
+          "status": 200,
+          "extra": {
+            "arg": "A",
+            "context": "B",
+            "config": "C",
+            "status": 200
+          },
+          "f": {
+            "arg": "A",
+            "context": "B",
+            "config": "C",
+            "sibling": "D",
+            "status": 200
+          }
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("POST").path("/coprocessor"),
+            Matcher::new()
+                .method("POST")
+                .path("/f")
+                .query("arg=A&context=B&config=C")
+                .header("x-source-context".into(), "B".try_into().unwrap())
+                .header("x-source-config".into(), "C".try_into().unwrap())
+                .header("x-connect-arg".into(), "A".try_into().unwrap())
+                .header("x-connect-context".into(), "B".try_into().unwrap())
+                .header("x-connect-config".into(), "C".try_into().unwrap())
+                .body(serde_json::json!({ "arg": "A", "context": "B", "config": "C" }))
+                ,
+            Matcher::new()
+                .method("POST")
+                .path("/f")
+                .query("arg=A&context=B&config=C&sibling=D")
+                .header("x-source-context".into(), "B".try_into().unwrap())
+                .header("x-source-config".into(), "C".try_into().unwrap())
+                .header("x-connect-arg".into(), "A".try_into().unwrap())
+                .header("x-connect-context".into(), "B".try_into().unwrap())
+                .header("x-connect-config".into(), "C".try_into().unwrap())
+                .header("x-connect-sibling".into(), "D".try_into().unwrap())
+                .body(serde_json::json!({ "arg": "A", "context": "B", "config": "C", "sibling": "D" }))
+                ,
+        ],
     );
 }
 

@@ -5,6 +5,7 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::Name;
@@ -17,6 +18,7 @@ use url::Url;
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
 use super::url_template;
+use super::variable::Namespace;
 use super::ConnectId;
 use super::JSONSelection;
 use super::URLTemplate;
@@ -31,6 +33,7 @@ use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAM
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpec;
+
 // --- Connector ---------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -45,6 +48,9 @@ pub struct Connector {
     pub entity_resolver: Option<EntityResolver>,
     /// Which version of the connect spec is this connector using?
     pub spec: ConnectSpec,
+
+    pub request_variables: HashSet<Namespace>,
+    pub response_variables: HashSet<Namespace>,
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -128,6 +134,9 @@ impl Connector {
                     _ => None,
                 };
 
+                let request_variables = transport.variables().collect();
+                let response_variables = args.selection.external_variables().collect();
+
                 let connector = Connector {
                     id: id.clone(),
                     transport,
@@ -136,6 +145,8 @@ impl Connector {
                     config: None,
                     max_requests: None,
                     spec,
+                    request_variables,
+                    response_variables,
                 };
 
                 Ok((id, connector))
@@ -213,6 +224,25 @@ impl HttpJsonTransport {
 
     fn label(&self) -> String {
         format!("http: {} {}", self.method.as_str(), self.connect_template)
+    }
+
+    fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
+        let url_variables = self
+            .connect_template
+            .variables()
+            .map(|v| v.namespace.namespace);
+        let header_variables = self
+            .headers
+            .iter()
+            .filter_map(|(_, source)| match source {
+                HeaderSource::From(_) => None,
+                HeaderSource::Value(source) => {
+                    Some(source.variable_references().map(|v| v.namespace.namespace))
+                }
+            })
+            .flatten();
+        let body_variables = self.body.iter().flat_map(|b| b.external_variables());
+        url_variables.chain(header_variables).chain(body_variables)
     }
 }
 

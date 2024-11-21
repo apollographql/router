@@ -122,7 +122,7 @@ pub(crate) enum Target {
 
 /// The variable namespaces defined for Apollo Connectors
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
-pub(crate) enum Namespace {
+pub enum Namespace {
     Args,
     Config,
     Context,
