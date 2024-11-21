@@ -1767,7 +1767,7 @@ where
                         .to_owned(),
                     }
                 })?;
-                let subgraph_name = Name::new(subgraph_name)?;
+                let subgraph_name = Name::new_unchecked(subgraph_name);
                 let subgraph_index = get_index_from_subgraph_name(
                     graph_enum_value_name_to_subgraph_name,
                     &subgraph_name,
