@@ -697,7 +697,8 @@ fn extract_object_type_content(
             message: "@join__implements should exist for a fed2 supergraph".to_owned(),
         })?;
 
-    let supergraph_cost_spec_definition = CostSpecDefinition::for_schema(supergraph_schema)?;
+    let supergraph_cost_spec_definition =
+        CostSpecDefinition::for_federation_schema(supergraph_schema)?;
 
     for TypeInfo {
         name: type_name,
@@ -864,7 +865,8 @@ fn extract_interface_type_content(
             message: "@join__implements should exist for a fed2 supergraph".to_owned(),
         })?;
 
-    let supergraph_cost_spec_definition = CostSpecDefinition::for_schema(supergraph_schema)?;
+    let supergraph_cost_spec_definition =
+        CostSpecDefinition::for_federation_schema(supergraph_schema)?;
 
     for TypeInfo {
         name: type_name,
@@ -1152,7 +1154,9 @@ fn extract_enum_type_content(
         };
         let type_ = pos.get(supergraph_schema.schema())?;
 
-        if let Some(cost_spec_definition) = CostSpecDefinition::for_schema(supergraph_schema)? {
+        if let Some(cost_spec_definition) =
+            CostSpecDefinition::for_federation_schema(supergraph_schema)?
+        {
             for graph_enum_value in subgraph_info.keys() {
                 let subgraph = get_subgraph(
                     subgraphs,
@@ -1241,7 +1245,8 @@ fn extract_input_object_type_content(
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
-    let supergraph_cost_spec_definition = CostSpecDefinition::for_schema(supergraph_schema)?;
+    let supergraph_cost_spec_definition =
+        CostSpecDefinition::for_federation_schema(supergraph_schema)?;
 
     for TypeInfo {
         name: type_name,

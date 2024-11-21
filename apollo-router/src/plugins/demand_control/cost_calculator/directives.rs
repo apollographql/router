@@ -19,12 +19,8 @@ use crate::json_ext::Object;
 use crate::json_ext::ValueExt;
 use crate::plugins::demand_control::DemandControlError;
 
-const COST_DIRECTIVE_NAME: Name = name!("cost");
-const COST_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__cost");
 const COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
 
-const LIST_SIZE_DIRECTIVE_NAME: Name = name!("listSize");
-const LIST_SIZE_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__listSize");
 const LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME: Name = name!("assumedSize");
 const LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME: Name = name!("slicingArguments");
 const LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME: Name = name!("sizedFields");

@@ -5294,7 +5294,7 @@ impl FederationSchema {
     ///
     /// The input schema may be otherwise invalid GraphQL (e.g. it may not contain a Query type). If
     /// you want a ValidFederationSchema, use ValidFederationSchema::new() instead.
-    pub fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
+    pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
         let metadata = links_metadata(&schema)?;
         let mut referencers: Referencers = Default::default();
 

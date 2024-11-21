@@ -1052,10 +1052,10 @@ mod tests {
         let variables = "{}";
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
-        //assert_eq!(estimated_cost(schema, query, variables), 132.0);
-        //assert_eq!(planned_cost_js(schema, query, variables).await, 132.0);
+        assert_eq!(estimated_cost(schema, query, variables), 132.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 132.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 132.0);
-        //assert_eq!(actual_cost(schema, query, variables, response), 125.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
 
     #[test(tokio::test)]

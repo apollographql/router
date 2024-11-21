@@ -9,11 +9,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_federation::link::cost_spec_definition::CostSpecDefinition;
-use apollo_federation::link::cost_spec_definition::COST_DIRECTIVE_NAME;
-use apollo_federation::link::cost_spec_definition::LIST_SIZE_DIRECTIVE_NAME;
-use apollo_federation::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use apollo_federation::link::spec_definition::SpecDefinition;
-use apollo_federation::schema::FederationSchema;
 
 use super::directives::CostDirective;
 use super::directives::DefinitionListSizeDirective as ListSizeDirective;
@@ -30,32 +25,8 @@ pub(crate) struct DemandControlledSchema {
 
 impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
-        let fed_schema = FederationSchema::new((*schema).clone().into_inner())?;
-        let mut cost_directive_name = None;
-        let mut listsize_directive_name = None;
-
-        // Get the actual directive names from the cost spec, and fall back to the federation spec if the cost spec isn't present
-        if let Ok(Some(spec)) = CostSpecDefinition::for_schema(&fed_schema) {
-            cost_directive_name =
-                spec.directive_name_in_schema(&fed_schema, &COST_DIRECTIVE_NAME)?;
-            listsize_directive_name =
-                spec.directive_name_in_schema(&fed_schema, &LIST_SIZE_DIRECTIVE_NAME)?;
-            tracing::debug!(
-                "Cost directive names from cost spec: {:?}, {:?}",
-                cost_directive_name,
-                listsize_directive_name
-            );
-        } else if let Ok(spec) = get_federation_spec_definition_from_subgraph(&fed_schema) {
-            cost_directive_name =
-                spec.directive_name_in_schema(&fed_schema, &COST_DIRECTIVE_NAME)?;
-            listsize_directive_name =
-                spec.directive_name_in_schema(&fed_schema, &LIST_SIZE_DIRECTIVE_NAME)?;
-            tracing::debug!(
-                "Cost directive names from fed spec: {:?}, {:?}",
-                cost_directive_name,
-                listsize_directive_name
-            );
-        }
+        let cost_directive_name = CostSpecDefinition::cost_directive_name(&schema)?;
+        let listsize_directive_name = CostSpecDefinition::list_size_directive_name(&schema)?;
 
         let mut type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>> =
             HashMap::new();
