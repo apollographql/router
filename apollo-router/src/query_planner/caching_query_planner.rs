@@ -56,8 +56,6 @@ pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
 #[derive(Debug, Clone, Hash)]
 pub(crate) enum ConfigMode {
-    //FIXME: add the Rust planner structure once it is hashable and serializable,
-    // for now use the JS config as it expected to be identical to the Rust one
     Rust(Arc<apollo_federation::query_plan::query_planner::QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
     BothBestEffort(Arc<QueryPlannerConfig>),
