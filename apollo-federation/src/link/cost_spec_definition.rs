@@ -64,18 +64,19 @@ macro_rules! propagate_demand_control_directives {
 }
 
 macro_rules! propagate_demand_control_directives_to_position {
-    ($func_name:ident, $source_ty:ty, $dest_ty:ty) => {
+    ($func_name:ident, $source_ty:ty, $pos_ty:ty) => {
         pub(crate) fn $func_name(
             &self,
             supergraph_schema: &FederationSchema,
-            source: &Node<$source_ty>,
             subgraph_schema: &mut FederationSchema,
-            dest: &$dest_ty,
+            pos: &$pos_ty,
         ) -> Result<(), FederationError> {
-            let cost_directive = Self::cost_directive_name(supergraph_schema.schema())?
+            let schema = supergraph_schema.schema();
+            let source = pos.get(schema)?;
+            let cost_directive = Self::cost_directive_name(schema)?
                 .and_then(|name| source.directives.get(name.as_str()));
             if let Some(cost_directive) = cost_directive {
-                dest.insert_directive(
+                pos.insert_directive(
                     subgraph_schema,
                     Component::from(self.cost_directive(
                         subgraph_schema.schema(),
@@ -84,10 +85,10 @@ macro_rules! propagate_demand_control_directives_to_position {
                 )?;
             }
 
-            let list_size_directive = Self::list_size_directive_name(supergraph_schema.schema())?
+            let list_size_directive = Self::list_size_directive_name(schema)?
                 .and_then(|name| source.directives.get(name.as_str()));
             if let Some(list_size_directive) = list_size_directive {
-                dest.insert_directive(
+                pos.insert_directive(
                     subgraph_schema,
                     Component::from(self.list_size_directive(
                         subgraph_schema.schema(),

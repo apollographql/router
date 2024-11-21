@@ -436,7 +436,6 @@ fn add_all_empty_subgraph_types(
                     {
                         cost_spec_definition.propagate_demand_control_directives_for_scalar(
                             supergraph_schema,
-                            pos.get(supergraph_schema.schema())?,
                             &mut subgraph.schema,
                             pos,
                         )?;
@@ -748,7 +747,6 @@ fn extract_object_type_content(
 
                 cost_spec_definition.propagate_demand_control_directives_for_object(
                     supergraph_schema,
-                    type_,
                     &mut subgraph.schema,
                     &pos,
                 )?;
@@ -1166,7 +1164,6 @@ fn extract_enum_type_content(
 
                 cost_spec_definition.propagate_demand_control_directives_for_enum(
                     supergraph_schema,
-                    type_,
                     &mut subgraph.schema,
                     &pos,
                 )?;
