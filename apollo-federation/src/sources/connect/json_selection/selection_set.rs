@@ -163,6 +163,7 @@ impl SubSelection {
             // removal of selections, since it still indicates where the
             // original SubSelection came from.
             range: self.range.clone(),
+            output_shape: self.output_shape.clone(),
         }
     }
 }

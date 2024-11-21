@@ -635,7 +635,12 @@ fn get_shape(
             );
             return match index_shape.case() {
                 ShapeCase::String(value_opt) => match input_shape.case() {
-                    ShapeCase::Object { fields, rest, output_shape, .. } => {
+                    ShapeCase::Object {
+                        fields,
+                        rest,
+                        output_shape,
+                        ..
+                    } => {
                         if let Some(literal_name) = value_opt {
                             if let Some(shape) = fields.get(literal_name.as_str()) {
                                 return shape.clone();
@@ -645,7 +650,8 @@ fn get_shape(
                         if !rest.is_none() {
                             value_shapes.push(rest.clone());
                         }
-                        if let (Some(output_shape), Some(literal_name)) = (output_shape, value_opt) {
+                        if let (Some(output_shape), Some(literal_name)) = (output_shape, value_opt)
+                        {
                             // If we have an output shape like Book and a
                             // literal_name like "isbn", include Book.isbn in
                             // the Shape::one union.
