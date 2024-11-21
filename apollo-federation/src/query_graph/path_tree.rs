@@ -9,7 +9,6 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
 
-use super::graph_path::ContextAtUsageEntry;
 use super::graph_path::ContextToSelection;
 use super::graph_path::ParameterToContext;
 use crate::error::FederationError;

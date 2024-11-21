@@ -5,8 +5,6 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::executable::FieldSet;
-use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::Name;
@@ -29,7 +27,6 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
-use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
@@ -191,19 +188,6 @@ impl QueryGraphEdge {
             override_condition: None,
             required_contexts: Vec::new(),
         }
-    }
-
-    pub(crate) fn with_override_condition(mut self, override_condition: OverrideCondition) -> Self {
-        self.override_condition = Some(override_condition);
-        self
-    }
-
-    pub(crate) fn with_required_contexts(
-        mut self,
-        contexts: impl IntoIterator<Item = ContextCondition>,
-    ) -> Self {
-        self.required_contexts.extend(contexts);
-        self
     }
 
     fn satisfies_override_conditions(

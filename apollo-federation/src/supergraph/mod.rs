@@ -47,7 +47,6 @@ pub use self::subgraph::ValidFederationSubgraphs;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -767,13 +766,12 @@ fn extract_object_type_content(
         if let Some((_context_spec_def, name_in_supergraph)) = &context {
             apply_context_to_type(
                 type_,
-                supergraph_schema,
                 subgraphs,
                 graph_enum_value_name_to_subgraph_name,
                 federation_spec_definitions,
                 name_in_supergraph,
                 &CompositeTypeDefinitionPosition::Object(pos.clone()),
-            );
+            )?;
         }
 
         for graph_enum_value in subgraph_info.keys() {
@@ -1015,13 +1013,12 @@ fn extract_interface_type_content(
         if let Some((_context_spec_def, name_in_supergraph)) = &context {
             apply_context_to_type(
                 type_,
-                supergraph_schema,
                 subgraphs,
                 graph_enum_value_name_to_subgraph_name,
                 federation_spec_definitions,
                 name_in_supergraph,
                 &CompositeTypeDefinitionPosition::Interface(pos.clone()),
-            );
+            )?;
         }
 
         for (field_name, field) in type_.fields.iter() {
@@ -1216,13 +1213,12 @@ fn extract_union_type_content(
         if let Some((_context_spec_def, name_in_supergraph)) = &context {
             apply_context_to_type(
                 type_,
-                supergraph_schema,
                 subgraphs,
                 graph_enum_value_name_to_subgraph_name,
                 federation_spec_definitions,
                 name_in_supergraph,
                 &CompositeTypeDefinitionPosition::Union(pos.clone()),
-            );
+            )?;
         }
     }
 
@@ -1705,18 +1701,9 @@ fn insert_directive(
     directive: Component<Directive>,
 ) -> Result<(), FederationError> {
     match pos {
-        CompositeTypeDefinitionPosition::Union(pos) => {
-            pos.insert_directive(schema, directive.into())?;
-            return Ok(());
-        }
-        CompositeTypeDefinitionPosition::Object(pos) => {
-            pos.insert_directive(schema, directive.into())?;
-            return Ok(());
-        }
-        CompositeTypeDefinitionPosition::Interface(pos) => {
-            pos.insert_directive(schema, directive.into())?;
-            return Ok(());
-        }
+        CompositeTypeDefinitionPosition::Union(pos) => pos.insert_directive(schema, directive),
+        CompositeTypeDefinitionPosition::Object(pos) => pos.insert_directive(schema, directive),
+        CompositeTypeDefinitionPosition::Interface(pos) => pos.insert_directive(schema, directive),
     }
 }
 
@@ -1744,7 +1731,6 @@ impl CompositeType for InterfaceType {
 
 fn apply_context_to_type<T>(
     ty: &Node<T>,
-    supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
     graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,

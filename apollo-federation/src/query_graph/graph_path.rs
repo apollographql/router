@@ -9,24 +9,19 @@ use std::sync::atomic;
 use std::sync::Arc;
 
 use apollo_compiler::ast::InputValueDefinition;
-use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Argument;
-use apollo_compiler::schema::ComponentName;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use either::Either;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use strum_macros::EnumTryAs;
 use tracing::debug;
 use tracing::debug_span;
 
@@ -37,7 +32,6 @@ use crate::display_helpers::DisplayOption;
 use crate::display_helpers::DisplaySlice;
 use crate::display_helpers::State as IndentedFormatter;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -215,8 +209,8 @@ where
             runtime_types_of_tail,
             runtime_types_before_tail_if_last_is_cast,
             defer_on_tail,
-            context_to_selection,
-            parameter_to_context,
+            context_to_selection: _,
+            parameter_to_context: _,
         } = self;
 
         f.debug_struct("GraphPath")
@@ -902,7 +896,7 @@ impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
     fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
         match value {
             GraphPathTrigger::Op(op) => Ok(op),
-            GraphPathTrigger::Transition(transition) => {
+            GraphPathTrigger::Transition(_) => {
                 bail!("Failed to convert to GraphPathTrigger")
             }
         }
@@ -915,7 +909,7 @@ impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
     fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
         match value {
             GraphPathTrigger::Transition(transition) => Ok(transition),
-            GraphPathTrigger::Op(op) => Err(FederationError::internal(
+            GraphPathTrigger::Op(_) => Err(FederationError::internal(
                 "Failed to convert to GraphPathTrigger",
             )),
         }
@@ -1345,26 +1339,6 @@ where
                         .iter()
                         .any(|arg| arg.name.as_str() == param_name.as_str())
                     {
-                        let mut schema = field.schema.schema().clone().into_inner();
-                        let type_name = field.field_position.type_name();
-                        let field_name = field.field_position.field_name();
-                        let Some(field_def) =
-                            schema.types.get_mut(type_name).and_then(|t| match t {
-                                apollo_compiler::schema::ExtendedType::Scalar(_) => None,
-                                apollo_compiler::schema::ExtendedType::Object(obj) => {
-                                    obj.make_mut().fields.get_mut(field_name)
-                                }
-                                apollo_compiler::schema::ExtendedType::Interface(iface) => {
-                                    iface.make_mut().fields.get_mut(field_name)
-                                }
-                                apollo_compiler::schema::ExtendedType::Union(_) => None,
-                                apollo_compiler::schema::ExtendedType::Enum(_) => None,
-                                apollo_compiler::schema::ExtendedType::InputObject(_) => None,
-                            })
-                        else {
-                            bail!("Unexpectedly failed to lookup field {type_name}.{field_name}")
-                        };
-
                         updated_field_def_arguments.push(Node::new(InputValueDefinition {
                             name: usage_entry.context_id.clone(),
                             ty: usage_entry.subgraph_arg_type.clone(),
@@ -1372,7 +1346,7 @@ where
                             description: None,
                             directives: Default::default(),
                         }));
-                        let push = updated_field_arguments.push(Node::new(Argument {
+                        updated_field_arguments.push(Node::new(Argument {
                             name: param_name.clone(),
                             value: Node::new(Value::Variable(usage_entry.context_id.clone())),
                         }));
@@ -1440,6 +1414,7 @@ where
         })
     }
 
+    #[allow(clippy::type_complexity)]
     fn merge_edge_conditions_with_resolution(
         &self,
         condition_path_tree: &Option<Arc<OpPathTree>>,
@@ -1454,7 +1429,7 @@ where
         let mut parameter_to_context = self.parameter_to_context.clone();
 
         edge_conditions.push(condition_path_tree.clone());
-        if (context_map.is_none() || context_map.as_ref().is_some_and(|m| m.is_empty())) {
+        if context_map.is_none() || context_map.as_ref().is_some_and(|m| m.is_empty()) {
             context_to_selection.push(None);
             parameter_to_context.push(None);
             (edge_conditions, context_to_selection, parameter_to_context)
@@ -1689,12 +1664,10 @@ where
         let mut context_map: IndexMap<Name, ContextMapEntry> = IndexMap::default();
 
         if !edge_weight.required_contexts.is_empty() {
-            let schema = self.graph.schema()?;
             let mut was_unsatisfied = false;
             for ctx in &edge_weight.required_contexts {
-                let mut levels_in_query_path = 0;
                 let mut levels_in_data_path = 0;
-                for (levels_in_query_graph, (e, trigger)) in self
+                for (mut levels_in_query_path, (e, trigger)) in self
                     .edges
                     .iter()
                     .zip(self.edge_triggers.iter())
@@ -1716,7 +1689,6 @@ where
                             ctx.types_with_context_set.iter().for_each(|pos| {
                                 if pos.type_name() == parent_type.type_name() {
                                     potential_matches.insert(parent_type.type_name().clone());
-                                    ()
                                 }
                                 match &pos {
                                     CompositeTypeDefinitionPosition::Object(obj_pos) => {
@@ -1739,7 +1711,7 @@ where
                                                 .filter(|item| {
                                                     &item.name == parent_type.type_name()
                                                 })
-                                                .for_each(|item| {
+                                                .for_each(|_| {
                                                     potential_matches.insert(iface.name.clone());
                                                 });
                                         }
@@ -1751,15 +1723,14 @@ where
                                                 .filter(|item| {
                                                     &item.name == parent_type.type_name()
                                                 })
-                                                .for_each(|item| {
+                                                .for_each(|_| {
                                                     potential_matches.insert(un.name.clone());
                                                 });
                                         }
                                     }
                                 }
-                                ()
                             });
-                            
+
                             // get the selection set for the first match that parses
                             let selection_set =
                                 potential_matches.iter().find_map(|parent_type_name| {
@@ -1820,7 +1791,6 @@ where
                                             levels_in_query_path,
                                             path_tree: path_tree.clone(),
                                             selection_set,
-                                            inbound_edge: e,
                                             param_name: ctx.named_parameter.clone(),
                                             arg_type: ctx.arg_type.clone(),
                                             id,
@@ -1832,7 +1802,11 @@ where
                                     }
                                 }
                             } else {
-                                internal_error!("Could not parse selection {} over any types {:?}", &ctx.selection, potential_matches);
+                                internal_error!(
+                                    "Could not parse selection {} over any types {:?}",
+                                    &ctx.selection,
+                                    potential_matches
+                                );
                             }
                         }
                     }

@@ -8,7 +8,6 @@ use apollo_compiler::Node;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::graphql_definition::BooleanOrVariable;
 
 pub(crate) fn directive_optional_enum_argument(

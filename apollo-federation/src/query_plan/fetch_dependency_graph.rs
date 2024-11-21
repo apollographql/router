@@ -2599,20 +2599,16 @@ impl FetchDependencyGraphNode {
         if self.selection_set.selection_set.selections.is_empty() {
             return Ok(None);
         }
-        let mut context_variable_definitions = self
-            .inputs
-            .iter()
-            .map(|inputs| {
-                inputs.used_contexts.iter().map(|(context, ty)| {
-                    Node::new(VariableDefinition {
-                        name: context.clone(),
-                        ty: ty.clone(),
-                        default_value: None,
-                        directives: Default::default(),
-                    })
+        let context_variable_definitions = self.inputs.iter().flat_map(|inputs| {
+            inputs.used_contexts.iter().map(|(context, ty)| {
+                Node::new(VariableDefinition {
+                    name: context.clone(),
+                    ty: ty.clone(),
+                    default_value: None,
+                    directives: Default::default(),
                 })
             })
-            .flatten();
+        });
         let variable_definitions = variable_definitions
             .iter()
             .cloned()
@@ -4023,7 +4019,6 @@ fn compute_nodes_for_op_path_element<'a>(
                 .schema_by_source(&source.source)?
                 .clone();
             let path_in_parent = &stack_item.node_path.path_in_node;
-            let updated_defer_context = updated.defer_context.after_subgraph_jump();
             // NOTE: We should re-examine defer-handling for path elements in this function in the
             // future to ensure they're working as intended.
             let new_node_id = dependency_graph.get_or_create_key_node(
@@ -4044,7 +4039,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 .for_new_key_fetch(create_fetch_initial_path(
                     &dependency_graph.supergraph_schema,
                     &source_type,
-                    &stack_item.context,
+                    stack_item.context,
                 )?);
 
             let Some(key_condition) = stack_item
@@ -4065,7 +4060,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 stack_item.node_id,
             )?;
             node.selection_set
-                .add_at_path(&path_in_parent, Some(&Arc::new(key_inputs)))?;
+                .add_at_path(path_in_parent, Some(&Arc::new(key_inputs)))?;
 
             let Ok(input_type): Result<CompositeTypeDefinitionPosition, _> = dependency_graph
                 .supergraph_schema
@@ -4086,14 +4081,10 @@ fn compute_nodes_for_op_path_element<'a>(
                 &dependency_graph.supergraph_schema,
                 &input_type,
                 input_selection_set,
-                &stack_item.context,
+                stack_item.context,
             );
-            let updated_node = FetchDependencyGraph::node_weight_mut(
-                &mut dependency_graph.graph,
-                updated.node_id,
-            )?;
             let input_rewrites = compute_input_rewrites_on_key_fetch(
-                &source_type.type_name(),
+                source_type.type_name(),
                 &source_type,
                 &source_schema,
             )?;
@@ -4123,7 +4114,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
                     context_entry.subgraph_arg_type.clone(),
-                );
+                )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),
                     context_entry.relative_path.clone(),
@@ -4158,7 +4149,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
                     context_entry.subgraph_arg_type.clone(),
-                );
+                )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),
                     new_relative_path.to_vec(),
