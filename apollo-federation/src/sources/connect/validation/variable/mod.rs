@@ -56,7 +56,7 @@ impl<'a> VariableResolver<'a> {
             Err(Message {
                 code: self.error_code(),
                 message: format!(
-                    "Variable namespace `{namespace}` is not valid at this location, must be one of {available}",
+                    "Variable `{namespace}` is not valid at this location, must be one of {available}",
                     namespace = reference.namespace.namespace.as_str(),
                     available = self.expression_context.namespaces_joined(),
                 ),
