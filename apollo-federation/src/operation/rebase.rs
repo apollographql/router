@@ -276,8 +276,7 @@ impl Field {
         else {
             return Ok(None);
         };
-        if let Some(federation_spec_definition) =
-            get_federation_spec_definition_from_subgraph(schema).ok()
+        if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
         {
             let from_context_directive_definition_name = &federation_spec_definition
                 .from_context_directive_definition(schema)?

@@ -51,8 +51,6 @@ use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
-pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
-
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
     /// Whether the query planner should try to reuse the named fragments of the planned query in
@@ -244,7 +242,6 @@ impl QueryPlanner {
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
         config.assert_valid();
-        Self::check_unsupported_features(supergraph)?;
 
         let supergraph_schema = supergraph.schema.clone();
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
@@ -567,23 +564,6 @@ impl QueryPlanner {
     /// Get Query Planner's API Schema.
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
-    }
-
-    fn check_unsupported_features(supergraph: &Supergraph) -> Result<(), FederationError> {
-        // We will only check for `@context` direcive, since
-        // `@fromContext` can only be used if `@context` is already
-        // applied, and we assume a correctly composed supergraph.
-        //
-        // `@context` can only be applied on Object Types, Interface
-        // Types and Unions. For simplicity of this function, we just
-        // check all 'extended_type` directives.
-        let has_set_context = supergraph
-            .schema
-            .schema()
-            .types
-            .values()
-            .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
-        Ok(())
     }
 }
 

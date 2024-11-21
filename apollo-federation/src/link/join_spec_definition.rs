@@ -13,7 +13,6 @@ use super::argument::directive_optional_list_argument;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_enum_argument;
 use crate::link::argument::directive_optional_string_argument;
@@ -84,7 +83,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
             if let Some(first_value) = field {
                 bail!("Duplicate contextArgument for '{name}' field: {first_value} and {value}")
             }
-            field.insert(value);
+            let _ = field.insert(value);
             Ok(())
         }
 

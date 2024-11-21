@@ -8,7 +8,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use itertools::Itertools;
-use multimap::MultiMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -17,10 +16,8 @@ use regex::Regex;
 use strum::IntoEnumIterator;
 
 use crate::bail;
-use crate::display_helpers::DisplaySlice;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
@@ -49,8 +46,6 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
-use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::supergraph::extract_subgraphs_from_supergraph;
 use crate::utils::FallibleIterator;
 
@@ -2358,7 +2353,7 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
         // Ignore the first match because it is always the whole matching substring
         .skip(1)
         .flatten()
-        .fold(("", ""), |(a, b), group| (b, group.as_str()));
+        .fold(("", ""), |(_, b), group| (b, group.as_str()));
 
     if context.is_empty() {
         bail!("Expected to find the name of a context inside the field argument to `@fromContext`: {field:?}");

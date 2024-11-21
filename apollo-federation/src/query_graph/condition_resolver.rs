@@ -23,7 +23,6 @@ pub(crate) struct ContextMapEntry {
     pub(crate) levels_in_query_path: usize,
     pub(crate) path_tree: Option<Arc<OpPathTree>>,
     pub(crate) selection_set: SelectionSet,
-    pub(crate) inbound_edge: EdgeIndex,
     pub(crate) param_name: Name,
     pub(crate) arg_type: Node<Type>,
     pub(crate) id: Name,
