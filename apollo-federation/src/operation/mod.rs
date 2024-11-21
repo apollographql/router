@@ -2700,24 +2700,25 @@ impl InlineFragmentSelection {
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let schema = fragment_spread_selection.spread.schema.schema();
-        for directive in fragment_spread_selection.spread.directives.iter() {
-            let Some(definition) = schema.directive_definitions.get(&directive.name) else {
-                return Err(FederationError::internal(format!(
-                    "Undefined directive {}",
-                    directive.name
-                )));
-            };
-            if !definition
-                .locations
-                .contains(&apollo_compiler::schema::DirectiveLocation::InlineFragment)
-            {
-                return Err(SingleFederationError::UnsupportedSpreadDirective {
-                    name: directive.name.clone(),
-                }
-                .into());
-            }
-        }
 
+        // operation was already parsed into a valid document but directives may not be present in
+        // the API schema or may not be applied on an inline fragment
+        let filtered_directives: Vec<Node<Directive>> = fragment_spread_selection
+            .spread
+            .directives
+            .iter()
+            .filter(|directive| {
+                schema
+                    .directive_definitions
+                    .get(&directive.name)
+                    .is_some_and(|definition| {
+                        definition
+                            .locations
+                            .contains(&apollo_compiler::schema::DirectiveLocation::InlineFragment)
+                    })
+            })
+            .cloned()
+            .collect();
         // Note: We assume that fragment_spread_selection.spread.type_condition_position is the same as
         //       fragment_spread_selection.selection_set.type_position.
         Ok(InlineFragmentSelection::new(
@@ -2730,7 +2731,7 @@ impl InlineFragmentSelection {
                         .type_condition_position
                         .clone(),
                 ),
-                directives: fragment_spread_selection.spread.directives.clone(),
+                directives: DirectiveList::from_iter(filtered_directives),
                 selection_id: SelectionId::new(),
             },
             fragment_spread_selection
