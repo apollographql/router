@@ -2,9 +2,8 @@
 /.changesets/ @apollographql/docs
 /apollo-federation/ @dariuszkuc @sachindshinde @goto-bus-stop @SimonSapin @lrlna @TylerBloom @duckki
 /apollo-federation/src/sources/connect @apollographql/connectors
-/apollo-federation/src/sources/connect/json_selection @benjamn @apollographql/connectors
 /apollo-router/ @apollographql/polaris @apollographql/atlas
-/apollo-router/src/plugins/connectors @apollographql/connectors @nicholascioli
+/apollo-router/src/plugins/connectors @apollographql/connectors
 /apollo-router-benchmarks/ @apollographql/polaris @apollographql/atlas
 /apollo-router-scaffold/ @apollographql/polaris @apollographql/atlas
 /examples/ @apollographql/polaris @apollographql/atlas
