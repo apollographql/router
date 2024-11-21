@@ -44,7 +44,7 @@ directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], s
 
 directive @federation__fromContext(field: String) on ARGUMENT_DEFINITION
 
-directive @federation__context(name: String) repeatable on INTERFACE | OBJECT
+directive @federation__context(name: String) repeatable on INTERFACE | OBJECT | UNION
 
 scalar link__Import
 
@@ -132,7 +132,7 @@ directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], s
 
 directive @federation__fromContext(field: String) on ARGUMENT_DEFINITION
 
-directive @federation__context(name: String) repeatable on INTERFACE | OBJECT
+directive @federation__context(name: String) repeatable on INTERFACE | OBJECT | UNION
 
 scalar link__Import
 

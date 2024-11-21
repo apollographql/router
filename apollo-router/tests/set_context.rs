@@ -137,7 +137,7 @@ async fn test_set_context_rust_qp() {
         &[
             (
                 "Subgraph1",
-                include_str!("fixtures/set_context/one_rust_qp.json"),
+                include_str!("fixtures/set_context/one.json"),
             ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
@@ -190,7 +190,7 @@ async fn test_set_context_no_typenames_rust_qp() {
         &[
             (
                 "Subgraph1",
-                include_str!("fixtures/set_context/one_rust_qp.json"),
+                include_str!("fixtures/set_context/one.json"),
             ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
@@ -243,7 +243,7 @@ async fn test_set_context_list_rust_qp() {
         &[
             (
                 "Subgraph1",
-                include_str!("fixtures/set_context/one_rust_qp.json"),
+                include_str!("fixtures/set_context/one.json"),
             ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
@@ -296,7 +296,7 @@ async fn test_set_context_list_of_lists_rust_qp() {
         &[
             (
                 "Subgraph1",
-                include_str!("fixtures/set_context/one_rust_qp.json"),
+                include_str!("fixtures/set_context/one.json"),
             ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
@@ -361,7 +361,7 @@ async fn test_set_context_union_rust_qp() {
         &[
             (
                 "Subgraph1",
-                include_str!("fixtures/set_context/one_rust_qp.json"),
+                include_str!("fixtures/set_context/one.json"),
             ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
@@ -474,7 +474,7 @@ async fn test_set_context_type_mismatch_rust_qp() {
         &[
             (
                 "Subgraph1",
-                include_str!("fixtures/set_context/one_rust_qp.json"),
+                include_str!("fixtures/set_context/one.json"),
             ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
