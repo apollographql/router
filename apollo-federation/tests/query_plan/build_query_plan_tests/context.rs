@@ -118,8 +118,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
@@ -239,8 +238,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
@@ -347,8 +345,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
@@ -448,8 +445,7 @@ fn set_context_test_variable_is_a_list() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
@@ -552,8 +548,7 @@ fn set_context_test_fetched_as_a_list() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
@@ -670,8 +665,7 @@ fn set_context_test_impacts_on_query_planning() {
                         node.context_rewrites,
                         vec![
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("A").unwrap()),
@@ -682,8 +676,7 @@ fn set_context_test_impacts_on_query_planning() {
                                 ],
                             })),
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("B").unwrap()),
@@ -814,47 +807,43 @@ fn set_context_test_with_type_conditions_for_union() {
                "###
     );
     match plan.node {
-      Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-          Some(PlanNode::Flatten(node)) => match &*node.node {
-              PlanNode::Fetch(node) => {
-                  assert_eq!(
-                      node.context_rewrites,
-                      vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                          FetchDataKeyRenamer {
-                              rename_key_to: Name::new("contextualArgument_1_0")
-                                  .unwrap(),
-                              path: vec![
-                                  FetchDataPathElement::Parent,
-                                  FetchDataPathElement::TypenameEquals(Name::new("A").unwrap()),
-                                  FetchDataPathElement::Key(
-                                      Name::new("prop").unwrap(),
-                                      Default::default()
-                                  ),
-                              ],
-                          }
-                      )),
-                      Arc::new(FetchDataRewrite::KeyRenamer(
-                        FetchDataKeyRenamer {
-                            rename_key_to: Name::new("contextualArgument_1_0")
-                                .unwrap(),
-                            path: vec![
-                                FetchDataPathElement::Parent,
-                                FetchDataPathElement::TypenameEquals(Name::new("B").unwrap()),
-                                FetchDataPathElement::Key(
-                                    Name::new("prop").unwrap(),
-                                    Default::default()
-                                ),
-                            ],
-                        }
-                    )),]
-                  );
-              }
-              _ => panic!("failed to get fetch node"),
-          },
-          _ => panic!("failed to get flatten node"),
-      },
-      _ => panic!("failed to get sequence node"),
-  }
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![
+                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::TypenameEquals(Name::new("A").unwrap()),
+                                    FetchDataPathElement::Key(
+                                        Name::new("prop").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            })),
+                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::TypenameEquals(Name::new("B").unwrap()),
+                                    FetchDataPathElement::Key(
+                                        Name::new("prop").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            })),
+                        ]
+                    );
+                }
+                _ => panic!("failed to get fetch node"),
+            },
+            _ => panic!("failed to get flatten node"),
+        },
+        _ => panic!("failed to get sequence node"),
+    }
 }
 
 #[test]
@@ -940,8 +929,7 @@ fn set_context_test_accesses_a_different_top_level_query() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::Key(
@@ -1042,8 +1030,7 @@ fn set_context_one_subgraph() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
@@ -1206,8 +1193,7 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0")
-                                    .unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
