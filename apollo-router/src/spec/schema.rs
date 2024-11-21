@@ -42,7 +42,7 @@ impl Schema {
 
     pub(crate) fn parse_arc(
         raw_sdl: Arc<String>,
-        config: &Configuration,
+        _config: &Configuration,
     ) -> Result<Self, SchemaError> {
         let start = Instant::now();
         let mut parser = apollo_compiler::parser::Parser::new();

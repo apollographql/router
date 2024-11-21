@@ -57,9 +57,6 @@ enum Command {
     Api {
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
-        /// Enable @defer support.
-        #[arg(long, default_value_t = false)]
-        enable_defer: bool,
     },
     /// Outputs the query graph from a supergraph schema or subgraph schemas
     QueryGraph {
@@ -132,10 +129,7 @@ impl From<QueryPlannerArgs> for QueryPlannerConfig {
 fn main() -> ExitCode {
     let args = Args::parse();
     let result = match args.command {
-        Command::Api {
-            schemas,
-            enable_defer,
-        } => cmd_api_schema(&schemas, enable_defer),
+        Command::Api { schemas } => cmd_api_schema(&schemas),
         Command::QueryGraph { schemas } => cmd_query_graph(&schemas),
         Command::FederatedGraph { schemas } => cmd_federated_graph(&schemas),
         Command::Plan {
@@ -173,12 +167,9 @@ fn read_input(input_path: &Path) -> String {
     }
 }
 
-fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), FederationError> {
+fn cmd_api_schema(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
-    let api_schema = supergraph.to_api_schema(apollo_federation::ApiSchemaOptions {
-        include_defer: enable_defer,
-        include_stream: false,
-    })?;
+    let api_schema = supergraph.to_api_schema()?;
     println!("{}", api_schema.schema());
     Ok(())
 }
@@ -234,7 +225,7 @@ fn cmd_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
 
 fn cmd_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
-    let api_schema = supergraph.to_api_schema(Default::default())?;
+    let api_schema = supergraph.to_api_schema()?;
     let query_graph =
         query_graph::build_federated_query_graph(supergraph.schema, api_schema, None, None)?;
     println!("{}", query_graph::output::to_dot(&query_graph));
