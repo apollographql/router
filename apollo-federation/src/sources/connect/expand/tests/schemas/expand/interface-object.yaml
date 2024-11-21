@@ -1,5 +1,4 @@
-# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/interface-object.yaml > apollo-router/src/plugins/connectors/testdata/interface-object.graphql
-federation_version: =2.10.0-preview.3 # NOTE: unreleased at time of writing
+# requires federation_version: =2.10.0-preview.3 # NOTE: unreleased at time of writing
 subgraphs:
   connectors:
     routing_url: none

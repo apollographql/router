@@ -67,7 +67,6 @@ use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
-use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
@@ -271,11 +270,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
         .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
         .collect_vec();
 
-    let disallowed_imports = [
-        INTF_OBJECT_DIRECTIVE_NAME,
-        CONTEXT_DIRECTIVE_NAME,
-        FROM_CONTEXT_DIRECTIVE_NAME,
-    ];
+    let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];
     fed_link
         .imports
         .into_iter()
