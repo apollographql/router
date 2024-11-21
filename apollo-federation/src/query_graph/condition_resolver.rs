@@ -113,7 +113,7 @@ impl ConditionResolverCache {
         extra_conditions: Option<&SelectionSet>,
     ) -> ConditionResolutionCacheResult {
         if extra_conditions.is_some() {
-            return ConditionResolutionCacheResult::NotApplicable
+            return ConditionResolutionCacheResult::NotApplicable;
         }
         // We don't cache if there is a context or excluded conditions because those would impact the resolution and
         // we don't want to cache a value per-context and per-excluded-conditions (we also don't cache per-excluded-edges though

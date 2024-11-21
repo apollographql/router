@@ -30,9 +30,11 @@
 use std::sync::Arc;
 
 use apollo_compiler::Name;
-use apollo_federation::query_plan::{
-    FetchDataKeyRenamer, FetchDataPathElement, FetchDataRewrite, PlanNode, TopLevelPlanNode,
-};
+use apollo_federation::query_plan::FetchDataKeyRenamer;
+use apollo_federation::query_plan::FetchDataPathElement;
+use apollo_federation::query_plan::FetchDataRewrite;
+use apollo_federation::query_plan::PlanNode;
+use apollo_federation::query_plan::TopLevelPlanNode;
 
 #[test]
 fn set_context_test_variable_is_from_same_subgraph() {
@@ -130,11 +132,11 @@ fn set_context_test_variable_is_from_same_subgraph() {
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -251,11 +253,11 @@ fn set_context_test_variable_is_from_different_subgraph() {
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -359,11 +361,11 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -460,11 +462,11 @@ fn set_context_test_variable_is_a_list() {
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -564,11 +566,11 @@ fn set_context_test_fetched_as_a_list() {
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -694,11 +696,11 @@ fn set_context_test_impacts_on_query_planning() {
                         ]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -847,11 +849,11 @@ fn set_context_test_with_type_conditions_for_union() {
                     )),]
                   );
               }
-              _ => assert!(false, "failed to get fetch node"),
+              _ => panic!("failed to get fetch node"),
           },
-          _ => assert!(false, "failed to get flatten node"),
+          _ => panic!("failed to get flatten node"),
       },
-      _ => assert!(false, "failed to get sequence node"),
+      _ => panic!("failed to get sequence node"),
   }
 }
 
@@ -955,11 +957,11 @@ fn set_context_test_accesses_a_different_top_level_query() {
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -1054,11 +1056,11 @@ fn set_context_one_subgraph() {
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 
@@ -1230,11 +1232,11 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
                         )),]
                     );
                 }
-                _ => assert!(false, "failed to get fetch node"),
+                _ => panic!("failed to get fetch node"),
             },
-            _ => assert!(false, "failed to get flatten node"),
+            _ => panic!("failed to get flatten node"),
         },
-        _ => assert!(false, "failed to get sequence node"),
+        _ => panic!("failed to get sequence node"),
     }
 }
 

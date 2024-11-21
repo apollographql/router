@@ -2599,19 +2599,16 @@ impl FetchDependencyGraphNode {
         if self.selection_set.selection_set.selections.is_empty() {
             return Ok(None);
         }
-        let context_variable_definitions = self
-            .inputs
-            .iter()
-            .flat_map(|inputs| {
-                inputs.used_contexts.iter().map(|(context, ty)| {
-                    Node::new(VariableDefinition {
-                        name: context.clone(),
-                        ty: ty.clone(),
-                        default_value: None,
-                        directives: Default::default(),
-                    })
+        let context_variable_definitions = self.inputs.iter().flat_map(|inputs| {
+            inputs.used_contexts.iter().map(|(context, ty)| {
+                Node::new(VariableDefinition {
+                    name: context.clone(),
+                    ty: ty.clone(),
+                    default_value: None,
+                    directives: Default::default(),
                 })
-            });
+            })
+        });
         let variable_definitions = variable_definitions
             .iter()
             .cloned()

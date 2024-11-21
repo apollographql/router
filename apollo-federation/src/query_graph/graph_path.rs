@@ -1802,7 +1802,11 @@ where
                                     }
                                 }
                             } else {
-                                internal_error!("Could not parse selection {} over any types {:?}", &ctx.selection, potential_matches);
+                                internal_error!(
+                                    "Could not parse selection {} over any types {:?}",
+                                    &ctx.selection,
+                                    potential_matches
+                                );
                             }
                         }
                     }
