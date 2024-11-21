@@ -60,7 +60,7 @@ enum GaugeStore {
 }
 
 impl GaugeStore {
-    fn active() -> GaugeStore {
+    fn active(opts: &GaugeOptions) -> GaugeStore {
         let system_getter = Arc::new(Mutex::new(SystemGetter::new()));
         let meter = meter_provider().meter("apollo/router");
         let mut gauges = Vec::new();
@@ -130,15 +130,12 @@ impl GaugeStore {
                     .u64_observable_gauge("apollo.router.schema")
                     .with_description("Details about the current in-use schema")
                     .with_callback(|i| {
-                        // TODO: get launch_id & schema_hash.
+                        // TODO: get launch_id.
                         // NOTE: this is a fixed gauge. We only care about observing the included
                         // attributes.
                         i.observe(
                             1,
-                            &[
-                                KeyValue::new("launch_id", ""),
-                                KeyValue::new("schema_hash", ""),
-                            ],
+                            &[KeyValue::new("launch_id", ""), KeyValue::new("schema_hash" opts.supergraph_schema_hash)],
                         )
                     })
                     .init(),
@@ -162,31 +159,44 @@ impl GaugeStore {
     }
 }
 
+struct GaugeOptions {
+    // Router Supergraph Schema Hash (SHA256 of the SDL))
+    supergraph_schema_hash: String,
+}
+
 #[derive(Default)]
 struct FleetDetector {
     gauge_store: Mutex<GaugeStore>,
+
+    // Options passed to the gauge_store during activation.
+    gauge_options: GaugeOptions,
 }
 
 #[async_trait::async_trait]
 impl PluginPrivate for FleetDetector {
     type Config = Conf;
 
-    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(plugin: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
         if env::var(APOLLO_TELEMETRY_DISABLED).is_ok() {
             debug!("fleet detection disabled, no telemetry will be sent");
             return Ok(FleetDetector::default());
         }
 
+        let gauge_options = GaugeOptions {
+            supergraph_schema_hash: (*plugin).supergraph_schema_id.to_string(),
+        };
+
         Ok(FleetDetector {
             gauge_store: Mutex::new(GaugeStore::Pending),
+            gauge_options,
         })
     }
 
     fn activate(&self) {
         let mut store = self.gauge_store.lock().expect("lock poisoned");
         if matches!(*store, GaugeStore::Pending) {
-            *store = GaugeStore::active();
+            *store = GaugeStore::active(&self.gauge_options);
         }
     }
 }
