@@ -153,15 +153,34 @@ impl FormatTest {
             );
         }
 
-        if let Some(e) = self.expected_errors {
-            assert_eq_and_ordered_json!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
+        println!(
+            "self.expected_errors: {:?}, actual errors: {:?}",
+            self.expected_errors, response.errors
+        );
+        // If we don't expect any errors and we have some, then it's a mis-match
+        match self.expected_errors {
+            Some(e) => {
+                assert_eq_and_ordered_json!(
+                    serde_json_bytes::to_value(&response.errors).unwrap(),
+                    e
+                );
+            }
+            None => assert!(response.errors.is_empty()),
         }
 
-        if let Some(e) = self.expected_extensions {
-            assert_eq_and_ordered_json!(
-                serde_json_bytes::to_value(&response.extensions).unwrap(),
-                e
-            );
+        println!(
+            "self.expected_extensions: {:?}, actual extensions: {:?}",
+            self.expected_extensions, response.extensions
+        );
+        // If we don't expect any extensions and we have some, then it's a mis-match
+        match self.expected_extensions {
+            Some(e) => {
+                assert_eq_and_ordered_json!(
+                    serde_json_bytes::to_value(&response.extensions).unwrap(),
+                    e
+                );
+            }
+            None => assert!(response.extensions.is_empty()),
         }
     }
 }
@@ -2342,6 +2361,13 @@ fn filter_object_errors() {
                 "name": null,
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field User.name",
+                "path": ["me", "name"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // non null id expected a string, got an int
@@ -2357,6 +2383,21 @@ fn filter_object_errors() {
         .expected(json! {{
             "me": null,
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field User.id",
+                "path": ["me", "id"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.id",
+                    "path": ["me", "id"]
+                }
+            ]
+        }})
         .test();
 
     // non null id got a null
@@ -2370,6 +2411,14 @@ fn filter_object_errors() {
         }})
         .expected(json! {{
             "me": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.id",
+                    "path": ["me", "id"]
+                }
+            ]
         }})
         .test();
 
@@ -2478,6 +2527,23 @@ fn filter_list_errors() {
                 "l1": ["abc", null, null, null, "def"],
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for array element of type String at index 1",
+                "path": ["list", "l1", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for array element of type String at index 2",
+                "path": ["list", "l1", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for array element of type String at index 3",
+                "path": ["list", "l1", 3],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // l1 expected a list, got a string
@@ -2494,6 +2560,13 @@ fn filter_list_errors() {
                 "l1": null,
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid non-list value of type string for list type [String]",
+                "path": ["list", "l1"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // l2: nullable list of non nullable elements
@@ -2512,6 +2585,13 @@ fn filter_list_errors() {
                 "l2": null,
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for array element of type String at index 1",
+                "path": ["list", "l2", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
@@ -2554,9 +2634,26 @@ fn filter_list_errors() {
                 "l3": ["abc", null, null, null, "def"],
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for array element of type String at index 1",
+                "path": ["list", "l3", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for array element of type String at index 2",
+                "path": ["list", "l3", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for array element of type String at index 3",
+                "path": ["list", "l3", 3],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
-    // non null l3 expected a list, got an int, parrent element should be null
+    // non null l3 expected a list, got an int, parent element should be null
     FormatTest::builder()
         .schema(schema)
         .query("query { list { l3 } }")
@@ -2567,6 +2664,21 @@ fn filter_list_errors() {
         }})
         .expected(json! {{
             "list": null,
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid non-list value of type number for list type [String]",
+                "path": ["list", "l3"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field TestList.l3",
+                    "path": ["list", "l3"]
+                }
+            ]
         }})
         .test();
 
@@ -2583,6 +2695,25 @@ fn filter_list_errors() {
         }})
         .expected(json! {{
             "list": null,
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for array element of type String at index 1",
+                "path": ["list", "l4", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable array element of type String at index 1",
+                    "path": ["list", "l4", 1]
+                },
+                {
+                    "message": "Cannot return null for non-nullable field TestList.l4",
+                    "path": ["list", "l4"]
+                }
+            ]
         }})
         .test();
 
@@ -2611,6 +2742,21 @@ fn filter_list_errors() {
         }})
         .expected(json! {{
             "list": null,
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid non-list value of type number for list type [String!]",
+                "path": ["list", "l4"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field TestList.l4",
+                    "path": ["list", "l4"]
+                }
+            ]
         }})
         .test();
 }
@@ -2694,6 +2840,13 @@ fn filter_nested_object_errors() {
                 "reviews1": [ { "text1": null } ],
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Review.text1",
+                "path": ["me", "reviews1", 0, "text1"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // text2 is non null so errors should nullify reviews1 element
@@ -2742,6 +2895,14 @@ fn filter_nested_object_errors() {
                 "reviews1": [ null ],
             },
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews1", 0, "text2"]
+                }
+            ]
+        }})
         .test();
 
     // text2 expected a string, got an int, text2 is nullified, reviews1 element should be nullified
@@ -2760,6 +2921,21 @@ fn filter_nested_object_errors() {
                 "id": "a",
                 "reviews1": [ null ],
             },
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Review.text2",
+                "path": ["me", "reviews1", 0, "text2"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews1", 0, "text2"]
+                }
+            ]
         }})
         .test();
 
@@ -2823,6 +2999,13 @@ fn filter_nested_object_errors() {
                 "reviews2": [ { "text1": null } ],
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Review.text1",
+                "path": ["me", "reviews2", 0, "text1"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // text2 is non null
@@ -2844,6 +3027,18 @@ fn filter_nested_object_errors() {
                 "reviews2": null,
             },
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews2", 0]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type Review at index 0",
+                    "path": ["me", "reviews2", 0]
+                }
+            ]
+        }})
         .test();
 
     // text2 was null, so the reviews2 element is nullified, so reviews2 is nullified
@@ -2863,6 +3058,18 @@ fn filter_nested_object_errors() {
                 "reviews2": null,
             },
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews2", 0, "text2"]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type Review at index 0",
+                    "path": ["me", "reviews2", 0]
+                }
+            ]
+        }})
         .test();
 
     // text2 expected a string, got an int, so the reviews2 element is nullified, so reviews2 is nullified
@@ -2881,6 +3088,25 @@ fn filter_nested_object_errors() {
                 "id": "a",
                 "reviews2": null,
             },
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Review.text2",
+                "path": ["me", "reviews2", 0, "text2"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews2", 0, "text2"]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type Review at index 0",
+                    "path": ["me", "reviews2", 0]
+                }
+            ]
         }})
         .test();
 
@@ -2945,6 +3171,13 @@ fn filter_nested_object_errors() {
                 "reviews3": [ { "text1": null } ],
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Review.text1",
+                "path": ["me", "reviews3", 0, "text1"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // reviews3 is non null, and its elements are non null, text2 is non null
@@ -2965,6 +3198,22 @@ fn filter_nested_object_errors() {
             "me": null,
 
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews3", 0]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type Review at index 0",
+                    "path": ["me", "reviews3", 0]
+                },
+                {
+                    "message": "Cannot return null for non-nullable field User.reviews3",
+                    "path": ["me", "reviews3"]
+                }
+            ]
+        }})
         .test();
 
     // text2 was null, nulls should propagate up to the operation
@@ -2982,6 +3231,22 @@ fn filter_nested_object_errors() {
             "me": null,
 
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews3", 0, "text2"]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type Review at index 0",
+                    "path": ["me", "reviews3", 0]
+                },
+                {
+                    "message": "Cannot return null for non-nullable field User.reviews3",
+                    "path": ["me", "reviews3"]
+                }
+            ]
+        }})
         .test();
 
     // text2 expected a string, got an int, nulls should propagate up to the operation
@@ -2998,6 +3263,29 @@ fn filter_nested_object_errors() {
         .expected(json! {{
             "me": null,
 
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Review.text2",
+                "path": ["me", "reviews3", 0, "text2"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews3", 0, "text2"]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type Review at index 0",
+                    "path": ["me", "reviews3", 0]
+                },
+                {
+                    "message": "Cannot return null for non-nullable field User.reviews3",
+                    "path": ["me", "reviews3"]
+                }
+            ]
         }})
         .test();
 }
@@ -3045,6 +3333,21 @@ fn filter_alias_errors() {
         .expected(json! {{
            "me": null,
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field User.identifiant",
+                "path": ["me", "identifiant"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.identifiant",
+                    "path": ["me", "identifiant"]
+                }
+            ]
+        }})
         .test();
 
     // non null identifiant was null, the operation should be null
@@ -3060,6 +3363,14 @@ fn filter_alias_errors() {
         .expected(json! {{
            "me": null,
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.identifiant",
+                    "path": ["me", "identifiant"]
+                }
+            ]
+        }})
         .test();
 
     // non null identifiant was absent, the operation should be null
@@ -3073,6 +3384,14 @@ fn filter_alias_errors() {
         }})
         .expected(json! {{
            "me": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.identifiant",
+                    "path": ["me"]
+                }
+            ]
         }})
         .test();
 
@@ -3112,6 +3431,13 @@ fn filter_alias_errors() {
                 "name2": null,
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field User.name2",
+                "path": ["me", "name2"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // nullable name2 was null
@@ -3333,6 +3659,13 @@ fn filter_enum_errors() {
                 "a": null,
             },
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Expected a valid enum value for type A",
+                "path": ["me", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // nullable enum a was null
@@ -3386,6 +3719,21 @@ fn filter_enum_errors() {
         .expected(json! {{
             "me": null,
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Expected a valid enum value for type A",
+                "path": ["me", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.b",
+                    "path": ["me", "b"]
+                }
+            ]
+        }})
         .test();
 
     // non nullable enum b was null, the operation should be null
@@ -3400,6 +3748,14 @@ fn filter_enum_errors() {
         }})
         .expected(json! {{
             "me": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.b",
+                    "path": ["me", "b"]
+                }
+            ]
         }})
         .test();
 }
@@ -3488,6 +3844,13 @@ fn filter_interface_errors() {
                 "name": null,
             },
         }})
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field NamedEntity.name",
+                "path": ["me", "name"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]))
         .test();
 
     let query2 = "query  { me { name2 } }";
@@ -3518,6 +3881,14 @@ fn filter_interface_errors() {
         .expected(json! {{
             "me": null,
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field NamedEntity.name2",
+                    "path": ["me"]
+                }
+            ]
+        }})
         .test();
 
     // non nullable name2 field was null, the operation should be null
@@ -3532,6 +3903,14 @@ fn filter_interface_errors() {
         .expected(json! {{
             "me": null,
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field NamedEntity.name2",
+                    "path": ["me", "name2"]
+                }
+            ]
+        }})
         .test();
 
     // non nullable name2 field expected a string, got an int, name2 and the operation should be null
@@ -3545,6 +3924,21 @@ fn filter_interface_errors() {
         }})
         .expected(json! {{
             "me": null,
+        }})
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for field NamedEntity.name2",
+                "path": ["me", "name2"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field NamedEntity.name2",
+                    "path": ["me", "name2"]
+                }
+            ]
         }})
         .test();
 
@@ -3627,6 +4021,14 @@ fn filter_extended_interface_errors() {
         .expected(json! {{
             "me": null,
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field NamedEntity.name2",
+                    "path": ["me", "name2"]
+                }
+            ]
+        }})
         .test();
 
     // non nullable name2 was absent, the operation should be null
@@ -3638,6 +4040,14 @@ fn filter_extended_interface_errors() {
         }})
         .expected(json! {{
             "me": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field NamedEntity.name2",
+                    "path": ["me"]
+                }
+            ]
         }})
         .test();
 
@@ -3652,6 +4062,21 @@ fn filter_extended_interface_errors() {
         }})
         .expected(json! {{
             "me": null,
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field NamedEntity.name2",
+                "path": ["me", "name2"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field NamedEntity.name2",
+                    "path": ["me", "name2"]
+                }
+            ]
         }})
         .test();
 }
@@ -3734,6 +4159,14 @@ fn filter_errors_top_level_fragment() {
             "__typename": "Query",
             "get": null
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Thing.name2",
+                    "path": ["get", "name2"]
+                }
+            ]
+        }})
         .test();
 
     let query3 = "{ ... on Query { __typename get { name } } }";
@@ -3797,6 +4230,14 @@ fn filter_errors_top_level_fragment() {
         .expected(json! {{
             "__typename": "Query",
             "get": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Thing.name2",
+                    "path": ["get", "name2"]
+                }
+            ]
         }})
         .test();
 }
