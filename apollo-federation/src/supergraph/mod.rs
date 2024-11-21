@@ -414,12 +414,6 @@ fn add_all_empty_subgraph_types(
                         graph_enum_value_name_to_subgraph_name,
                         &type_directive_application.graph,
                     )?;
-                    let federation_spec_definition = federation_spec_definitions
-                        .get(&type_directive_application.graph)
-                        .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
-                            message: "Subgraph unexpectedly does not use federation spec"
-                                .to_owned(),
-                        })?;
 
                     pos.pre_insert(&mut subgraph.schema)?;
                     pos.insert(
@@ -431,15 +425,11 @@ fn add_all_empty_subgraph_types(
                         }),
                     )?;
 
-                    if let Some(cost_spec_definition) =
-                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema)
-                    {
-                        cost_spec_definition.propagate_demand_control_directives_for_scalar(
-                            supergraph_schema,
-                            &mut subgraph.schema,
-                            pos,
-                        )?;
-                    }
+                    CostSpecDefinition::propagate_demand_control_directives_for_scalar(
+                        supergraph_schema,
+                        &mut subgraph.schema,
+                        pos,
+                    )?;
                 }
                 None
             }
@@ -696,9 +686,6 @@ fn extract_object_type_content(
             message: "@join__implements should exist for a fed2 supergraph".to_owned(),
         })?;
 
-    let supergraph_cost_spec_definition =
-        CostSpecDefinition::for_federation_schema(supergraph_schema)?;
-
     for TypeInfo {
         name: type_name,
         subgraph_info,
@@ -737,20 +724,18 @@ fn extract_object_type_content(
             )?;
         }
 
-        if let Some(cost_spec_definition) = supergraph_cost_spec_definition {
-            for graph_enum_value in subgraph_info.keys() {
-                let subgraph = get_subgraph(
-                    subgraphs,
-                    graph_enum_value_name_to_subgraph_name,
-                    graph_enum_value,
-                )?;
+        for graph_enum_value in subgraph_info.keys() {
+            let subgraph = get_subgraph(
+                subgraphs,
+                graph_enum_value_name_to_subgraph_name,
+                graph_enum_value,
+            )?;
 
-                cost_spec_definition.propagate_demand_control_directives_for_object(
-                    supergraph_schema,
-                    &mut subgraph.schema,
-                    &pos,
-                )?;
-            }
+            CostSpecDefinition::propagate_demand_control_directives_for_object(
+                supergraph_schema,
+                &mut subgraph.schema,
+                &pos,
+            )?;
         }
 
         for (field_name, field) in type_.fields.iter() {
@@ -784,7 +769,6 @@ fn extract_object_type_content(
                         federation_spec_definition,
                         is_shareable,
                         None,
-                        supergraph_cost_spec_definition,
                     )?;
                 }
             } else {
@@ -835,7 +819,6 @@ fn extract_object_type_content(
                         federation_spec_definition,
                         is_shareable,
                         Some(field_directive_application),
-                        supergraph_cost_spec_definition,
                     )?;
                 }
             }
@@ -862,9 +845,6 @@ fn extract_interface_type_content(
         .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
             message: "@join__implements should exist for a fed2 supergraph".to_owned(),
         })?;
-
-    let supergraph_cost_spec_definition =
-        CostSpecDefinition::for_federation_schema(supergraph_schema)?;
 
     for TypeInfo {
         name: type_name,
@@ -985,7 +965,6 @@ fn extract_interface_type_content(
                         federation_spec_definition,
                         false,
                         None,
-                        supergraph_cost_spec_definition,
                     )?;
                 }
             } else {
@@ -1029,7 +1008,6 @@ fn extract_interface_type_content(
                         federation_spec_definition,
                         false,
                         Some(field_directive_application),
-                        supergraph_cost_spec_definition,
                     )?;
                 }
             }
@@ -1152,22 +1130,18 @@ fn extract_enum_type_content(
         };
         let type_ = pos.get(supergraph_schema.schema())?;
 
-        if let Some(cost_spec_definition) =
-            CostSpecDefinition::for_federation_schema(supergraph_schema)?
-        {
-            for graph_enum_value in subgraph_info.keys() {
-                let subgraph = get_subgraph(
-                    subgraphs,
-                    graph_enum_value_name_to_subgraph_name,
-                    graph_enum_value,
-                )?;
+        for graph_enum_value in subgraph_info.keys() {
+            let subgraph = get_subgraph(
+                subgraphs,
+                graph_enum_value_name_to_subgraph_name,
+                graph_enum_value,
+            )?;
 
-                cost_spec_definition.propagate_demand_control_directives_for_enum(
-                    supergraph_schema,
-                    &mut subgraph.schema,
-                    &pos,
-                )?;
-            }
+            CostSpecDefinition::propagate_demand_control_directives_for_enum(
+                supergraph_schema,
+                &mut subgraph.schema,
+                &pos,
+            )?;
         }
 
         for (value_name, value) in type_.values.iter() {
@@ -1242,8 +1216,6 @@ fn extract_input_object_type_content(
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
-    let supergraph_cost_spec_definition =
-        CostSpecDefinition::for_federation_schema(supergraph_schema)?;
 
     for TypeInfo {
         name: type_name,
@@ -1278,7 +1250,6 @@ fn extract_input_object_type_content(
                         supergraph_schema,
                         subgraph,
                         None,
-                        supergraph_cost_spec_definition,
                     )?;
                 }
             } else {
@@ -1312,7 +1283,6 @@ fn extract_input_object_type_content(
                         supergraph_schema,
                         subgraph,
                         Some(field_directive_application),
-                        supergraph_cost_spec_definition,
                     )?;
                 }
             }
@@ -1331,7 +1301,6 @@ fn add_subgraph_field(
     federation_spec_definition: &'static FederationSpecDefinition,
     is_shareable: bool,
     field_directive_application: Option<&FieldDirectiveArguments>,
-    cost_spec_definition: Option<&'static CostSpecDefinition>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1366,14 +1335,13 @@ fn add_subgraph_field(
             default_value: argument.default_value.clone(),
             directives: Default::default(),
         };
-        if let Some(cost_spec_definition) = cost_spec_definition {
-            cost_spec_definition.propagate_demand_control_directives(
-                supergraph_schema,
-                &argument.directives,
-                &subgraph.schema,
-                &mut destination_argument.directives,
-            )?;
-        }
+
+        CostSpecDefinition::propagate_demand_control_directives(
+            supergraph_schema,
+            &argument.directives,
+            &subgraph.schema,
+            &mut destination_argument.directives,
+        )?;
 
         subgraph_field
             .arguments
@@ -1419,14 +1387,12 @@ fn add_subgraph_field(
         ));
     }
 
-    if let Some(cost_spec_definition) = cost_spec_definition {
-        cost_spec_definition.propagate_demand_control_directives(
-            supergraph_schema,
-            &field.directives,
-            &subgraph.schema,
-            &mut subgraph_field.directives,
-        )?;
-    }
+    CostSpecDefinition::propagate_demand_control_directives(
+        supergraph_schema,
+        &field.directives,
+        &subgraph.schema,
+        &mut subgraph_field.directives,
+    )?;
 
     match object_or_interface_field_definition_position {
         ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
@@ -1446,7 +1412,6 @@ fn add_subgraph_input_field(
     supergraph_schema: &FederationSchema,
     subgraph: &mut FederationSubgraph,
     field_directive_application: Option<&FieldDirectiveArguments>,
-    cost_spec_definition: Option<&'static CostSpecDefinition>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1471,14 +1436,12 @@ fn add_subgraph_input_field(
         directives: Default::default(),
     };
 
-    if let Some(cost_spec_definition) = cost_spec_definition {
-        cost_spec_definition.propagate_demand_control_directives(
-            supergraph_schema,
-            &input_field.directives,
-            &subgraph.schema,
-            &mut subgraph_input_field.directives,
-        )?;
-    }
+    CostSpecDefinition::propagate_demand_control_directives(
+        supergraph_schema,
+        &input_field.directives,
+        &subgraph.schema,
+        &mut subgraph_input_field.directives,
+    )?;
 
     input_object_field_definition_position
         .insert(&mut subgraph.schema, Component::from(subgraph_input_field))?;

@@ -2,9 +2,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::EnumType;
-use apollo_compiler::schema::ObjectType;
-use apollo_compiler::schema::ScalarType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -34,7 +31,6 @@ pub struct CostSpecDefinition {
 macro_rules! propagate_demand_control_directives {
     ($func_name:ident, $directives_ty:ty, $wrap_ty:expr) => {
         pub(crate) fn $func_name(
-            &self,
             supergraph_schema: &FederationSchema,
             source: &$directives_ty,
             subgraph_schema: &FederationSchema,
@@ -43,7 +39,7 @@ macro_rules! propagate_demand_control_directives {
             let cost_directive = Self::cost_directive_name(supergraph_schema.schema())?
                 .and_then(|name| source.get(name.as_str()));
             if let Some(cost_directive) = cost_directive {
-                dest.push($wrap_ty(self.cost_directive(
+                dest.push($wrap_ty(Self::cost_directive(
                     subgraph_schema.schema(),
                     cost_directive.arguments.clone(),
                 )?));
@@ -52,7 +48,7 @@ macro_rules! propagate_demand_control_directives {
             let list_size_directive = Self::list_size_directive_name(supergraph_schema.schema())?
                 .and_then(|name| source.get(name.as_str()));
             if let Some(list_size_directive) = list_size_directive {
-                dest.push($wrap_ty(self.list_size_directive(
+                dest.push($wrap_ty(Self::list_size_directive(
                     subgraph_schema.schema(),
                     list_size_directive.arguments.clone(),
                 )?));
@@ -66,7 +62,6 @@ macro_rules! propagate_demand_control_directives {
 macro_rules! propagate_demand_control_directives_to_position {
     ($func_name:ident, $source_ty:ty, $pos_ty:ty) => {
         pub(crate) fn $func_name(
-            &self,
             supergraph_schema: &FederationSchema,
             subgraph_schema: &mut FederationSchema,
             pos: &$pos_ty,
@@ -78,7 +73,7 @@ macro_rules! propagate_demand_control_directives_to_position {
             if let Some(cost_directive) = cost_directive {
                 pos.insert_directive(
                     subgraph_schema,
-                    Component::from(self.cost_directive(
+                    Component::from(Self::cost_directive(
                         subgraph_schema.schema(),
                         cost_directive.arguments.clone(),
                     )?),
@@ -90,7 +85,7 @@ macro_rules! propagate_demand_control_directives_to_position {
             if let Some(list_size_directive) = list_size_directive {
                 pos.insert_directive(
                     subgraph_schema,
-                    Component::from(self.list_size_directive(
+                    Component::from(Self::list_size_directive(
                         subgraph_schema.schema(),
                         list_size_directive.arguments.clone(),
                     )?),
@@ -114,7 +109,6 @@ impl CostSpecDefinition {
     }
 
     pub(crate) fn cost_directive(
-        &self,
         schema: &Schema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
@@ -125,7 +119,6 @@ impl CostSpecDefinition {
     }
 
     pub(crate) fn list_size_directive(
-        &self,
         schema: &Schema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
@@ -156,10 +149,6 @@ impl CostSpecDefinition {
         ScalarTypeDefinitionPosition
     );
 
-    pub fn for_schema(schema: Schema) -> Result<Option<&'static Self>, FederationError> {
-        Self::for_federation_schema(&FederationSchema::new(schema)?)
-    }
-
     pub(crate) fn for_federation_schema(
         schema: &FederationSchema,
     ) -> Result<Option<&'static Self>, FederationError> {
@@ -171,6 +160,10 @@ impl CostSpecDefinition {
         Ok(cost_spec)
     }
 
+    /// Returns the name of the `@cost` directive in the given schema. This attempts to find the imported cost
+    /// specification and to use the imported or default name from the imported link, as is available. If the
+    /// cost specification is not directly imported, this will return the cost directive name from the
+    /// federation specification.
     pub fn cost_directive_name(schema: &Schema) -> Result<Option<Name>, FederationError> {
         let schema = FederationSchema::new(schema.clone())?;
         if let Some(name) = Self::for_federation_schema(&schema)?.and_then(|spec| {
@@ -186,6 +179,10 @@ impl CostSpecDefinition {
         }
     }
 
+    /// Returns the name of the `@listSize` directive in the given schema. This attempts to find the imported cost
+    /// specification and to use the imported or default name from the imported link, as is available. If the
+    /// cost specification is not directly imported, this will return the listSize directive name from the
+    /// federation specification.
     pub fn list_size_directive_name(schema: &Schema) -> Result<Option<Name>, FederationError> {
         let schema = FederationSchema::new(schema.clone())?;
         if let Some(name) = Self::for_federation_schema(&schema)?.and_then(|spec| {

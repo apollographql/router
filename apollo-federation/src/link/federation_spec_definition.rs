@@ -14,8 +14,6 @@ use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
-use crate::link::cost_spec_definition::CostSpecDefinition;
-use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -420,17 +418,6 @@ impl FederationSpecDefinition {
                 &FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
             )?,
         })
-    }
-
-    pub(crate) fn get_cost_spec_definition(
-        &self,
-        schema: &FederationSchema,
-    ) -> Option<&'static CostSpecDefinition> {
-        schema
-            .metadata()
-            .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()))
-            .and_then(|link| COST_VERSIONS.find(&link.url.version))
-            .or_else(|| COST_VERSIONS.find_for_federation_version(self.version()))
     }
 }
 
