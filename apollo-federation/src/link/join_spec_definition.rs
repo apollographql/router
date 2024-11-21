@@ -49,7 +49,7 @@ pub(crate) const JOIN_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("overrideLabel"
 pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
-pub(crate) const JOIN_MEMBER_CONTEXT_ARGUMENTS: Name = name!("contextArguments");
+pub(crate) const JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME: Name = name!("contextArguments");
 
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -81,7 +81,9 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
             value: &'a Value,
         ) -> Result<(), FederationError> {
             if let Some(first_value) = field {
-                bail!("Duplicate contextArgument for '{name}' field: {first_value} and {value}")
+                bail!(
+                    r#"Input field "{name}" in contextArguments was repeated with value "{value}" (previous value was "{first_value}")"#
+                )
             }
             let _ = field.insert(value);
             Ok(())
@@ -94,36 +96,36 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
             field
                 .ok_or_else(|| {
                     FederationError::internal(format!(
-                        "'{field_name}' field was missing from contextArgument"
+                        r#"Input field "{field_name}" was missing from contextArguments"#
                     ))
                 })?
                 .as_str()
                 .ok_or_else(|| {
                     FederationError::internal(format!(
-                        "'{field_name}' field of contextArgument was not a string"
+                        r#"Input field "{field_name}" in contextArguments was not a string"#
                     ))
                 })
         }
 
-        let Value::Object(names) = value else {
-            bail!("Item in contextArgument list is not an object {value}")
+        let Value::Object(input_object) = value else {
+            bail!(r#"Item "{value}" in contextArguments list was not an object"#)
         };
         let mut name = None;
         let mut type_ = None;
         let mut context = None;
         let mut selection = None;
-        for (arg_name, value) in names.as_slice() {
-            match arg_name.as_str() {
-                "name" => insert_value(arg_name, &mut name, value)?,
-                "type" => insert_value(arg_name, &mut type_, value)?,
-                "context" => insert_value(arg_name, &mut context, value)?,
-                "selection" => insert_value(arg_name, &mut selection, value)?,
-                _ => bail!("Found unknown contextArgument {arg_name}"),
+        for (input_field_name, value) in input_object {
+            match input_field_name.as_str() {
+                "name" => insert_value(input_field_name, &mut name, value)?,
+                "type" => insert_value(input_field_name, &mut type_, value)?,
+                "context" => insert_value(input_field_name, &mut context, value)?,
+                "selection" => insert_value(input_field_name, &mut selection, value)?,
+                _ => bail!(r#"Found unknown contextArguments input field "{input_field_name}""#),
             }
         }
 
         let name = field_or_else("name", name)?;
-        let type_ = field_or_else("type_", type_)?;
+        let type_ = field_or_else("type", type_)?;
         let context = field_or_else("context", context)?;
         let selection = field_or_else("selection", selection)?;
 
@@ -308,7 +310,7 @@ impl JoinSpecDefinition {
             )?,
             context_arguments: directive_optional_list_argument(
                 application,
-                &JOIN_MEMBER_CONTEXT_ARGUMENTS,
+                &JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME,
             )?
             .map(|values| {
                 values
