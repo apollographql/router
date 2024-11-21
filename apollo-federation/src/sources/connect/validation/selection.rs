@@ -27,6 +27,7 @@ use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::variable::ConnectorsContext;
 use crate::sources::connect::variable::ExpressionContext;
 use crate::sources::connect::variable::Namespace;
@@ -138,6 +139,7 @@ fn validate_selection_variables(
     selection_str: GraphQLString,
 ) -> Result<(), Message> {
     let namespaces: HashSet<Namespace> = expression_context.available_namespaces().collect();
+    let variable_resolver = VariableResolver::new(expression_context.clone(), schema);
     for reference in selection
         .external_var_paths()
         .into_iter()
@@ -156,6 +158,17 @@ fn validate_selection_variables(
                     .collect(),
             });
         }
+
+        variable_resolver
+            .resolve(&reference, selection_str)
+            .map_err(|message| Message {
+                code: message.code,
+                message: format!(
+                    "{coordinate} contains an invalid variable reference `{reference}` - {message}",
+                    message = message.message
+                ),
+                locations: message.locations,
+            })?;
     }
     Ok(())
 }
