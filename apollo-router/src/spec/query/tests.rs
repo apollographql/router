@@ -153,10 +153,6 @@ impl FormatTest {
             );
         }
 
-        println!(
-            "self.expected_errors: {:?}, actual errors: {:?}",
-            self.expected_errors, response.errors
-        );
         // If we don't expect any errors and we have some, then it's a mis-match
         match self.expected_errors {
             Some(e) => {
@@ -168,10 +164,6 @@ impl FormatTest {
             None => assert!(response.errors.is_empty()),
         }
 
-        println!(
-            "self.expected_extensions: {:?}, actual extensions: {:?}",
-            self.expected_extensions, response.extensions
-        );
         // If we don't expect any extensions and we have some, then it's a mis-match
         match self.expected_extensions {
             Some(e) => {
@@ -652,6 +644,18 @@ fn reformat_response_data_best_effort() {
                 },
             }
         })
+        .expected_errors(json! ([
+            {
+                "message": "Invalid non-object value of type string for composite type Element",
+                "path": ["get", "array", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-object value of type string for composite type Bar",
+                "path": ["get", "other"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
         .test();
 }
 
@@ -731,6 +735,18 @@ fn reformat_response_data_best_effort_relevant_query() {
                 },
             }
         })
+        .expected_errors(json! ([
+            {
+                "message": "Invalid non-object value of type string for composite type Element",
+                "path": ["get", "array", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-object value of type string for composite type Bar",
+                "path": ["get", "other"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
         .test();
 }
 
@@ -1466,6 +1482,14 @@ fn reformat_response_expected_int_range() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
             },
         ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.someOtherNumber",
+                    "path": ["me", "someOtherNumber"]
+                }
+            ]
+        }})
         .test();
 }
 
@@ -2321,6 +2345,13 @@ fn filter_root_errors() {
         .expected(json! {{
             "getInt": null,
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Query.getInt",
+                "path": ["getInt"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     FormatTest::builder()
@@ -2330,6 +2361,21 @@ fn filter_root_errors() {
             "getNonNullString": 1,
         }})
         .expected(Value::Null)
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Query.getNonNullString",
+                "path": ["getNonNullString"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Query.getNonNullString",
+                    "path": ["getNonNullString"]
+                }
+            ]
+        }})
         .test();
 }
 
@@ -2432,6 +2478,14 @@ fn filter_object_errors() {
         .expected(json! {{
             "me": null,
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.id",
+                    "path": ["me"]
+                }
+            ]
+        }})
         .test();
 
     // non null id was absent
@@ -2445,6 +2499,14 @@ fn filter_object_errors() {
         }})
         .expected(json! {{
             "me": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.id",
+                    "path": ["me"]
+                }
+            ]
         }})
         .test();
 
@@ -3588,6 +3650,14 @@ fn filter_scalar_errors() {
         .expected(json! {{
             "me": null,
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.b",
+                    "path": ["me", "b"]
+                }
+            ]
+        }})
         .test();
 
     // non null scalar b was absent, the operation should be null
@@ -3601,6 +3671,14 @@ fn filter_scalar_errors() {
         }})
         .expected(json! {{
             "me": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field User.b",
+                    "path": ["me"]
+                }
+            ]
         }})
         .test();
 }
@@ -5589,6 +5667,14 @@ fn include() {
         .expected(json! {{
             "get": null,
         }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Product.id",
+                    "path": ["get"]
+                }
+            ]
+        }})
         .test();
 
     FormatTest::builder()
@@ -5643,6 +5729,14 @@ fn include() {
         .operation("Example")
         .expected(json! {{
             "get": null,
+        }})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Product.id",
+                    "path": ["get"]
+                }
+            ]
         }})
         .test();
 }
@@ -5942,6 +6036,13 @@ fn inaccessible_on_interface() {
             "test_enum": null,
             "test_enum2": "Z"
         }})
+        .expected_errors(json! ([
+            {
+                "message": "Expected a valid enum value for type E",
+                "path": ["test_enum"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 }
 
@@ -6429,6 +6530,14 @@ fn query_operation_nullification() {
         )
         .response(json! {{ }})
         .expected(Value::Null)
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Query.get",
+                    "path": []
+                }
+            ]
+        }})
         .test();
 }
 
