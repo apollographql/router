@@ -14,52 +14,7 @@ To export metrics to Datadog, you must configure both the router to send traces 
 
 ### Router configuration
 
-The router should set attributes that Datadog uses to organize its APM view and other UI:
-
-- `otel.name`: span name that's fixed for Datadog
-- `resource.name`: Datadog resource name that's displayed in traces
-- `operation.name`: Datadog operation name that populates a dropdown menu in the Datadog service page
-
-You should add these attributes to your `router.yaml` configuration file. The example below sets these attributes for the `router`, `supergraph`, and `subgraph` stages of the router's request lifecycle:
-
-```yaml title="router.yaml"
-telemetry:
-  instrumentation:
-    spans:
-      mode: spec_compliant
-      router:
-        attributes:
-          otel.name: router
-          operation.name: "router"
-          resource.name:
-            request_method: true
-
-      supergraph:
-        attributes:
-          otel.name: supergraph
-          operation.name: "supergraph"
-          resource.name:
-            operation_name: string
-
-      subgraph:
-        attributes:
-          otel.name: subgraph
-          operation.name: "subgraph"
-          resource.name:
-            subgraph_operation_name: string
-```
-
-Consequently you can filter for these operations in Datadog APM:
-
-<img
-  className="screenshot"
-  alt="Datadog APM showing operations set with example attributes set in router.yaml"
-  src="../../../../images/router/datadog-apm-ops-example.png"
-  width="600"
-/>
-
-
-You should also enable the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp#configuration) and set both `temporality: delta` and `endpoint: <datadog-agent-endpoint>`. For example: 
+You should enable the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp#configuration) and set both `temporality: delta` and `endpoint: <datadog-agent-endpoint>`. For example: 
 
 ```yaml title="router.yaml"
 telemetry:
