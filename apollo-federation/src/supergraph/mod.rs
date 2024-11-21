@@ -723,8 +723,6 @@ fn extract_object_type_content(
                 .ok()
                 .map(|name_in_schema| (context_spec_def, name_in_schema))
         });
-    // let context_name_in_schema = context_spec_def
-    //     .and_then(|def| def.context_directive_name_in_schema(supergraph_schema).ok());
     for TypeInfo {
         name: type_name,
         subgraph_info,
