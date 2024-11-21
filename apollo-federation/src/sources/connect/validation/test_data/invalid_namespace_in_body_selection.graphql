@@ -11,6 +11,13 @@ type Mutation {
         POST: "http://127.0.0.1/users/{$args.id}"
         body: """
         id: $args.id
+        foo: $config.foo
+        bar: {
+          bar: $config.bar
+          baz: {
+            baz: $config.baz
+          }
+        }
         status: $status
         """
       }

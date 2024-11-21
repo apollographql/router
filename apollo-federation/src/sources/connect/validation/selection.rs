@@ -14,7 +14,6 @@ use itertools::Itertools;
 
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::SelectionCoordinate;
-use super::require_value_is_str;
 use super::Code;
 use super::Message;
 use super::Name;
@@ -41,14 +40,14 @@ pub(super) fn validate_selection(
     schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Result<(), Message> {
-    let (selection_arg, json_selection, selection_node) = get_json_selection(coordinate, schema)?;
+    let (selection_arg, json_selection, selection_str) = get_json_selection(coordinate, schema)?;
 
     if let Some(value) = validate_selection_variables(
         ConnectorsContext::new(coordinate.into(), Phase::Response, Target::Body),
         schema,
-        selection_node,
         selection_arg.coordinate.to_string(),
         &json_selection,
+        selection_str,
     ) {
         return value;
     }
@@ -91,9 +90,17 @@ pub(super) fn validate_body_selection(
     let coordinate =
         connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
 
-    let selection_str = require_value_is_str(selection_node, &coordinate, &schema.sources)?;
+    let selection_str =
+        GraphQLString::new(&selection_node, &schema.sources).map_err(|_| Message {
+            code: Code::GraphQLError,
+            message: format!("{coordinate} must be a string."),
+            locations: selection_node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })?;
 
-    let selection = JSONSelection::parse(selection_str).map_err(|err| Message {
+    let selection = JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
         message: format!("{coordinate} is not a valid JSONSelection: {err}"),
         locations: selection_node
@@ -118,9 +125,9 @@ pub(super) fn validate_body_selection(
     if let Some(value) = validate_selection_variables(
         ConnectorsContext::new(connect_coordinate.into(), Phase::Request, Target::Body),
         schema,
-        selection_node,
         coordinate,
         &selection,
+        selection_str,
     ) {
         return value;
     }
@@ -132,9 +139,9 @@ pub(super) fn validate_body_selection(
 fn validate_selection_variables(
     expression_context: ConnectorsContext,
     schema: &SchemaInfo,
-    selection_node: &Node<Value>,
     coordinate: String,
     selection: &JSONSelection,
+    selection_str: GraphQLString,
 ) -> Option<Result<(), Message>> {
     let namespaces: HashSet<Namespace> = expression_context.available_namespaces().collect();
     for reference in selection
@@ -150,11 +157,7 @@ fn validate_selection_variables(
                     namespace = reference.namespace.namespace,
                     available = expression_context.namespaces_joined(),
                 ),
-                locations: GraphQLString::new(selection_node, &schema.sources)
-                    .ok()
-                    .and_then(|expression| {
-                        expression.line_col_for_subslice(reference.location, schema)
-                    })
+                locations: selection_str.line_col_for_subslice(reference.location, schema)
                     .into_iter()
                     .collect(),
             }));
@@ -166,7 +169,7 @@ fn validate_selection_variables(
 fn get_json_selection<'a>(
     connect_directive: ConnectDirectiveCoordinate<'a>,
     schema: &'a SchemaInfo<'a>,
-) -> Result<(SelectionArg<'a>, JSONSelection, &'a Node<Value>), Message> {
+) -> Result<(SelectionArg<'a>, JSONSelection, GraphQLString<'a>), Message> {
     let coordinate = SelectionCoordinate::from(connect_directive);
     let selection_arg = connect_directive
         .directive
@@ -219,7 +222,7 @@ fn get_json_selection<'a>(
             coordinate,
         },
         selection,
-        &selection_arg.value,
+        selection_str,
     ))
 }
 

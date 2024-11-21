@@ -80,7 +80,7 @@ pub(crate) fn validate_arg<'a>(
                                 format!(
                                     "invalid variable namespace `{namespace}`, must be one of {available}",
                                     available = expression_context.namespaces_joined(),
-                                ),location),
+                                ), location),
                         };
                         (
                             message,
