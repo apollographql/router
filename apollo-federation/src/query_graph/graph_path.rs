@@ -1069,6 +1069,8 @@ where
         let mut edges = self.edges.clone();
         let mut edge_triggers = self.edge_triggers.clone();
         let mut edge_conditions = self.edge_conditions.clone();
+        let mut context_to_selection = self.context_to_selection.clone();
+        let mut parameter_to_context = self.parameter_to_context.clone();
         let mut last_subgraph_entering_edge_info = if defer.is_none() {
             self.last_subgraph_entering_edge_info.clone()
         } else {
@@ -1079,6 +1081,8 @@ where
             edges.push(edge);
             edge_triggers.push(Arc::new(trigger));
             edge_conditions.push(condition_path_tree);
+            context_to_selection.push(None);
+            parameter_to_context.push(None);
             return Ok(GraphPath {
                 graph: self.graph.clone(),
                 head: self.head,
@@ -1098,8 +1102,8 @@ where
                 ),
                 runtime_types_before_tail_if_last_is_cast: None,
                 defer_on_tail: defer,
-                context_to_selection: self.context_to_selection.clone(),
-                parameter_to_context: self.parameter_to_context.clone(),
+                context_to_selection,
+                parameter_to_context,
             });
         };
 
@@ -1471,6 +1475,8 @@ where
     pub(crate) fn iter(&self) -> impl Iterator<Item = GraphPathItem<'_, TTrigger, TEdge>> {
         debug_assert_eq!(self.edges.len(), self.edge_triggers.len());
         debug_assert_eq!(self.edges.len(), self.edge_conditions.len());
+        debug_assert_eq!(self.edges.len(), self.context_to_selection.len());
+        debug_assert_eq!(self.edges.len(), self.parameter_to_context.len());
         self.edges
             .iter()
             .copied()
