@@ -419,7 +419,7 @@ fn has_shape(
 ) -> Shape {
     // TODO We could be more clever here (sometimes) based on the input_shape
     // and argument shapes.
-    Shape::boolean()
+    Shape::bool()
 }
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -635,9 +635,9 @@ fn get_shape(
             );
             return match index_shape.case() {
                 ShapeCase::String(value_opt) => match input_shape.case() {
-                    ShapeCase::Object(fields, rest) => {
-                        if let Some(value) = value_opt {
-                            if let Some(shape) = fields.get(value.as_str()) {
+                    ShapeCase::Object { fields, rest, output_shape, .. } => {
+                        if let Some(literal_name) = value_opt {
+                            if let Some(shape) = fields.get(literal_name.as_str()) {
                                 return shape.clone();
                             }
                         }
@@ -645,10 +645,20 @@ fn get_shape(
                         if !rest.is_none() {
                             value_shapes.push(rest.clone());
                         }
+                        if let (Some(output_shape), Some(literal_name)) = (output_shape, value_opt) {
+                            // If we have an output shape like Book and a
+                            // literal_name like "isbn", include Book.isbn in
+                            // the Shape::one union.
+                            //
+                            // The extra member contributes nothing to the union
+                            // until the type of Book.isbn is known, and then
+                            // possibly allows for simplification of the union.
+                            value_shapes.push(output_shape.field(literal_name));
+                        }
                         value_shapes.push(Shape::none());
                         Shape::one(&value_shapes)
                     }
-                    ShapeCase::Array(_prefix, _tail) => Shape::error_with_range(
+                    ShapeCase::Array { .. } => Shape::error_with_range(
                         format!(
                             "Method ->{} applied to array requires integer index, not string",
                             method_name.as_ref()
@@ -669,7 +679,7 @@ fn get_shape(
 
                 ShapeCase::Int(value_opt) => {
                     match input_shape.case() {
-                        ShapeCase::Array(prefix, tail) => {
+                        ShapeCase::Array { prefix, tail } => {
                             if let Some(index) = value_opt {
                                 if let Some(item) = prefix.get(*index as usize) {
                                     return item.clone();
@@ -693,7 +703,7 @@ fn get_shape(
                         }
                         ShapeCase::String(None) => Shape::one(&[Shape::string(), Shape::none()]),
 
-                        ShapeCase::Object(_fields, _rest) => Shape::error_with_range(
+                        ShapeCase::Object { .. } => Shape::error_with_range(
                             format!(
                                 "Method ->{} applied to object requires string index, not integer",
                                 method_name.as_ref()
@@ -776,14 +786,16 @@ fn keys_shape(
     _named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     match input_shape.case() {
-        ShapeCase::Object(fields, rest) => {
+        ShapeCase::Object { fields, rest, .. } => {
+            // Any statically known field names become string literal shapes in
+            // the resulting keys array.
+            let keys_vec = fields
+                .keys()
+                .map(|key| Shape::string_value(key.as_str()))
+                .collect::<Vec<_>>();
+
             Shape::array(
-                // Any statically known field names become string literal shapes
-                // in the resulting keys array.
-                fields
-                    .keys()
-                    .map(|key| Shape::string_value(key.as_str()))
-                    .collect(),
+                &keys_vec,
                 // Since we're collecting key shapes, we want String for the
                 // rest shape when it's not None.
                 if rest.is_none() {
@@ -847,8 +859,9 @@ fn values_shape(
     _named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     match input_shape.case() {
-        ShapeCase::Object(fields, rest) => {
-            Shape::array(fields.values().cloned().collect(), rest.clone())
+        ShapeCase::Object { fields, rest, .. } => {
+            let values_vec = fields.values().cloned().collect::<Vec<_>>();
+            Shape::array(&values_vec, rest.clone())
         }
         _ => Shape::error("Method ->values requires an object input"),
     }
@@ -887,12 +900,12 @@ fn not_shape(
     _named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     match input_shape.case() {
-        ShapeCase::Boolean(Some(value)) => Shape::boolean_value(!*value),
-        ShapeCase::Int(Some(value)) => Shape::boolean_value(*value == 0),
-        ShapeCase::String(Some(value)) => Shape::boolean_value(value.is_empty()),
-        ShapeCase::Null => Shape::boolean_value(true),
-        ShapeCase::Array(_, _) | ShapeCase::Object(_, _) => Shape::boolean_value(false),
-        _ => Shape::boolean(),
+        ShapeCase::Bool(Some(value)) => Shape::bool_value(!*value),
+        ShapeCase::Int(Some(value)) => Shape::bool_value(*value == 0),
+        ShapeCase::String(Some(value)) => Shape::bool_value(value.is_empty()),
+        ShapeCase::Null => Shape::bool_value(true),
+        ShapeCase::Array { .. } | ShapeCase::Object { .. } => Shape::bool_value(false),
+        _ => Shape::bool(),
     }
 }
 
@@ -949,17 +962,17 @@ fn or_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     match input_shape.case() {
-        ShapeCase::Boolean(Some(true)) => {
-            return Shape::boolean_value(true);
+        ShapeCase::Bool(Some(true)) => {
+            return Shape::bool_value(true);
         }
         ShapeCase::Int(Some(value)) if *value != 0 => {
-            return Shape::boolean_value(true);
+            return Shape::bool_value(true);
         }
         ShapeCase::String(Some(value)) if !value.is_empty() => {
-            return Shape::boolean_value(true);
+            return Shape::bool_value(true);
         }
-        ShapeCase::Array(_, _) | ShapeCase::Object(_, _) => {
-            return Shape::boolean_value(true);
+        ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
+            return Shape::bool_value(true);
         }
         _ => {}
     };
@@ -972,24 +985,24 @@ fn or_shape(
                 named_var_shapes,
             );
             match arg_shape.case() {
-                ShapeCase::Boolean(Some(true)) => {
-                    return Shape::boolean_value(true);
+                ShapeCase::Bool(Some(true)) => {
+                    return Shape::bool_value(true);
                 }
                 ShapeCase::Int(Some(value)) if *value != 0 => {
-                    return Shape::boolean_value(true);
+                    return Shape::bool_value(true);
                 }
                 ShapeCase::String(Some(value)) if !value.is_empty() => {
-                    return Shape::boolean_value(true);
+                    return Shape::bool_value(true);
                 }
-                ShapeCase::Array(_, _) | ShapeCase::Object(_, _) => {
-                    return Shape::boolean_value(true);
+                ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
+                    return Shape::bool_value(true);
                 }
                 _ => {}
             }
         }
     }
 
-    Shape::boolean()
+    Shape::bool()
 }
 
 impl_arrow_method!(AndMethod, and_method, and_shape);
@@ -1035,17 +1048,17 @@ fn and_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     match input_shape.case() {
-        ShapeCase::Boolean(Some(false)) => {
-            return Shape::boolean_value(false);
+        ShapeCase::Bool(Some(false)) => {
+            return Shape::bool_value(false);
         }
         ShapeCase::Int(Some(value)) if *value == 0 => {
-            return Shape::boolean_value(false);
+            return Shape::bool_value(false);
         }
         ShapeCase::String(Some(value)) if value.is_empty() => {
-            return Shape::boolean_value(false);
+            return Shape::bool_value(false);
         }
         ShapeCase::Null => {
-            return Shape::boolean_value(false);
+            return Shape::bool_value(false);
         }
         _ => {}
     };
@@ -1058,22 +1071,22 @@ fn and_shape(
                 named_var_shapes,
             );
             match arg_shape.case() {
-                ShapeCase::Boolean(Some(false)) => {
-                    return Shape::boolean_value(false);
+                ShapeCase::Bool(Some(false)) => {
+                    return Shape::bool_value(false);
                 }
                 ShapeCase::Int(Some(value)) if *value == 0 => {
-                    return Shape::boolean_value(false);
+                    return Shape::bool_value(false);
                 }
                 ShapeCase::String(Some(value)) if value.is_empty() => {
-                    return Shape::boolean_value(false);
+                    return Shape::bool_value(false);
                 }
                 ShapeCase::Null => {
-                    return Shape::boolean_value(false);
+                    return Shape::bool_value(false);
                 }
                 _ => {}
             }
         }
     }
 
-    Shape::boolean()
+    Shape::bool()
 }

@@ -436,7 +436,7 @@ impl ApplyToInternal for NamedSelection {
             }
         };
 
-        ShapeCase::Object(output, Shape::none()).simplify()
+        Shape::object(output, Shape::none())
     }
 }
 
@@ -619,21 +619,21 @@ impl ApplyToInternal for WithRange<PathList> {
                 tail.compute_output_shape(var_shape, dollar_shape, named_var_shapes)
             }
 
-            PathList::Key(key, tail) => {
+            PathList::Key(key, rest) => {
                 // If this is the first key in the path,
                 // PathSelection::compute_output_shape will have set our
                 // input_shape equal to its dollar_shape, thereby ensuring that
                 // some.nested.path is equivalent to $.some.nested.path.
                 if input_shape.is_none() {
                     // Following WithRange<PathList>::apply_to_path, we do not
-                    // want to call tail.compute_output_shape recursively with
+                    // want to call rest.compute_output_shape recursively with
                     // an input data shape corresponding to missing data, though
                     // it might do the right thing.
                     return input_shape;
                 }
 
-                if let ShapeCase::Array(prefix, rest) = input_shape.case() {
-                    // Map tail.compute_output_shape over the prefix and rest
+                if let ShapeCase::Array { prefix, tail } = input_shape.case() {
+                    // Map rest.compute_output_shape over the prefix and rest
                     // elements of the array shape, so we don't have to map
                     // array shapes for the other PathList variants.
                     let mapped_prefix = prefix
@@ -642,29 +642,29 @@ impl ApplyToInternal for WithRange<PathList> {
                             if shape.is_none() {
                                 shape.clone()
                             } else {
-                                tail.compute_output_shape(
-                                    shape.field_shape(key.as_str()),
+                                rest.compute_output_shape(
+                                    shape.field(key.as_str()),
                                     dollar_shape.clone(),
                                     named_var_shapes,
                                 )
                             }
                         })
-                        .collect();
+                        .collect::<Vec<_>>();
 
-                    let mapped_rest = if rest.is_none() {
-                        rest.clone()
+                    let mapped_rest = if tail.is_none() {
+                        tail.clone()
                     } else {
-                        tail.compute_output_shape(
-                            rest.field_shape(key.as_str()),
+                        rest.compute_output_shape(
+                            tail.field(key.as_str()),
                             dollar_shape.clone(),
                             named_var_shapes,
                         )
                     };
 
-                    Shape::array(mapped_prefix, mapped_rest)
+                    Shape::array(&mapped_prefix, mapped_rest)
                 } else {
-                    tail.compute_output_shape(
-                        input_shape.field_shape(key.as_str()),
+                    rest.compute_output_shape(
+                        input_shape.field(key.as_str()),
                         dollar_shape.clone(),
                         named_var_shapes,
                     )
@@ -776,23 +776,22 @@ impl ApplyToInternal for WithRange<LitExpr> {
         named_var_shapes: &IndexMap<&str, Shape>,
     ) -> Shape {
         match self.as_ref() {
-            LitExpr::Null => ShapeCase::Null.simplify(),
-            LitExpr::Bool(value) => ShapeCase::Boolean(Some(*value)).simplify(),
-            LitExpr::String(value) => ShapeCase::String(Some(value.clone())).simplify(),
+            LitExpr::Null => Shape::null(),
+            LitExpr::Bool(value) => Shape::bool_value(*value),
+            LitExpr::String(value) => Shape::string_value(value.as_str()),
 
             LitExpr::Number(value) => {
                 if let Some(n) = value.as_i64() {
-                    ShapeCase::Int(Some(n))
+                    Shape::int_value(n)
                 } else if value.is_f64() {
-                    ShapeCase::Float
+                    Shape::float()
                 } else {
-                    ShapeCase::error("Number neither Int nor Float")
+                    Shape::error("Number neither Int nor Float")
                 }
             }
-            .simplify(),
 
             LitExpr::Object(map) => {
-                let mut fields = indexmap::IndexMap::new();
+                let mut fields = Shape::empty_map();
                 for (key, value) in map {
                     fields.insert(
                         key.as_string(),
@@ -803,9 +802,8 @@ impl ApplyToInternal for WithRange<LitExpr> {
                         ),
                     );
                 }
-                ShapeCase::Object(fields, Shape::none())
+                Shape::object(fields, Shape::none())
             }
-            .simplify(),
 
             LitExpr::Array(vec) => {
                 let mut shapes = Vec::with_capacity(vec.len());
@@ -816,9 +814,8 @@ impl ApplyToInternal for WithRange<LitExpr> {
                         named_var_shapes,
                     ));
                 }
-                ShapeCase::Array(shapes, Shape::none())
+                Shape::array(&shapes, Shape::none())
             }
-            .simplify(),
 
             LitExpr::Path(path) => {
                 path.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
@@ -872,25 +869,29 @@ impl ApplyToInternal for SubSelection {
         _previous_dollar_shape: Shape,
         named_var_shapes: &IndexMap<&str, Shape>,
     ) -> Shape {
-        // The SubSelection rebinds the $ variable to the selected input object,
-        // so we can ignore _previous_dollar_shape.
-        let dollar_shape = input_shape.clone();
-
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
         // shapes of each array element shape.
-        if let ShapeCase::Array(prefix, tail) = input_shape.case() {
+        if let ShapeCase::Array { prefix, tail } = input_shape.case() {
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
                     self.compute_output_shape(shape.clone(), shape.clone(), named_var_shapes)
                 })
-                .collect();
+                .collect::<Vec<_>>();
 
-            let new_tail = self.compute_output_shape(tail.clone(), tail.clone(), named_var_shapes);
+            let new_tail = if tail.is_none() {
+                tail.clone()
+            } else {
+                self.compute_output_shape(tail.clone(), tail.clone(), named_var_shapes)
+            };
 
-            return ShapeCase::Array(new_prefix, new_tail).simplify();
+            return Shape::array(&new_prefix, new_tail);
         }
+
+        // The SubSelection rebinds the $ variable to the selected input object,
+        // so we can ignore _previous_dollar_shape.
+        let dollar_shape = input_shape.clone();
 
         // Build up the merged object shape using Shape::all to merge the
         // individual named_selection object shapes.

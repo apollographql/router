@@ -125,7 +125,7 @@ fn map_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        if let ShapeCase::Array(prefix, tail) = input_shape.case() {
+        if let ShapeCase::Array { prefix, tail } = input_shape.case() {
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
@@ -135,13 +135,13 @@ fn map_shape(
                         named_var_shapes,
                     )
                 })
-                .collect();
+                .collect::<Vec<_>>();
             let new_tail = first_arg.compute_output_shape(
                 tail.clone(),
                 dollar_shape.clone(),
                 named_var_shapes,
             );
-            ShapeCase::Array(new_prefix, new_tail).simplify()
+            Shape::array(&new_prefix, new_tail)
         } else {
             first_arg.compute_output_shape(input_shape, dollar_shape.clone(), named_var_shapes)
         }
@@ -318,11 +318,9 @@ fn first_shape(
     }
 
     match input_shape.case() {
-        ShapeCase::String(Some(value)) => {
-            ShapeCase::String(Some(value.chars().take(1).collect())).simplify()
-        }
-        ShapeCase::String(None) => ShapeCase::String(None).simplify(),
-        ShapeCase::Array(prefix, tail) => {
+        ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1]),
+        ShapeCase::String(None) => Shape::string(),
+        ShapeCase::Array { prefix, tail } => {
             if let Some(first) = prefix.first() {
                 first.clone()
             } else if tail.is_none() {
@@ -400,13 +398,13 @@ fn last_shape(
     match input_shape.case() {
         ShapeCase::String(Some(value)) => {
             if let Some(last_char) = value.chars().last() {
-                ShapeCase::String(Some(last_char.to_string())).simplify()
+                Shape::string_value(last_char.to_string().as_str())
             } else {
                 Shape::none()
             }
         }
-        ShapeCase::String(None) => Shape::one(&[ShapeCase::String(None).simplify(), Shape::none()]),
-        ShapeCase::Array(prefix, tail) => {
+        ShapeCase::String(None) => Shape::one(&[Shape::string(), Shape::none()]),
+        ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 if let Some(last) = prefix.last() {
                     last.clone()
@@ -528,12 +526,12 @@ fn slice_shape(
     // safe (and honest) by returning a new variable-length array whose element
     // shape is a union of the original element (prefix and tail) shapes.
     match input_shape.case() {
-        ShapeCase::Array(prefix, tail) => {
+        ShapeCase::Array { prefix, tail } => {
             let mut one_shapes = prefix.clone();
             if !tail.is_none() {
                 one_shapes.push(tail.clone());
             }
-            Shape::array(vec![], Shape::one(&one_shapes))
+            Shape::array(&[], Shape::one(&one_shapes))
         }
         ShapeCase::String(_) => Shape::string(),
         _ => Shape::error_with_range(
@@ -616,23 +614,23 @@ fn size_shape(
     }
 
     match input_shape.case() {
-        ShapeCase::String(Some(value)) => ShapeCase::Int(Some(value.len() as i64)),
-        ShapeCase::String(None) => ShapeCase::Int(None),
-        ShapeCase::Array(prefix, tail) => {
+        ShapeCase::String(Some(value)) => Shape::int_value(value.len() as i64),
+        ShapeCase::String(None) => Shape::int(),
+        ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
-                ShapeCase::Int(Some(prefix.len() as i64))
+                Shape::int_value(prefix.len() as i64)
             } else {
-                ShapeCase::Int(None)
+                Shape::int()
             }
         }
-        ShapeCase::Object(fields, tail) => {
-            if tail.is_none() {
-                ShapeCase::Int(Some(fields.len() as i64))
+        ShapeCase::Object { fields, rest, .. } => {
+            if rest.is_none() {
+                Shape::int_value(fields.len() as i64)
             } else {
-                ShapeCase::Int(None)
+                Shape::int()
             }
         }
-        _ => ShapeCase::error_with_range(
+        _ => Shape::error_with_range(
             &format!(
                 "Method ->{} requires an array, string, or object input",
                 method_name.as_ref()
@@ -640,7 +638,6 @@ fn size_shape(
             method_name.range(),
         ),
     }
-    .simplify()
 }
 
 impl_arrow_method!(EntriesMethod, entries_method, entries_shape);
@@ -711,31 +708,27 @@ fn entries_shape(
     }
 
     match input_shape.case() {
-        ShapeCase::Object(fields, tail) => {
+        ShapeCase::Object { fields, rest, .. } => {
             let entry_shapes = fields
                 .iter()
                 .map(|(key, value)| {
                     let mut key_value_pair = Shape::empty_map();
-                    key_value_pair.insert(
-                        "key".to_string(),
-                        ShapeCase::String(Some(key.clone())).simplify(),
-                    );
+                    key_value_pair.insert("key".to_string(), Shape::string_value(key.as_str()));
                     key_value_pair.insert("value".to_string(), value.clone());
-                    ShapeCase::Object(key_value_pair, Shape::none()).simplify()
+                    Shape::object(key_value_pair, Shape::none())
                 })
-                .collect();
+                .collect::<Vec<_>>();
 
-            if tail.is_none() {
-                ShapeCase::Array(entry_shapes, tail.clone()).simplify()
+            if rest.is_none() {
+                Shape::array(&entry_shapes, rest.clone())
             } else {
                 let mut tail_key_value_pair = Shape::empty_map();
-                tail_key_value_pair.insert("key".to_string(), ShapeCase::String(None).simplify());
-                tail_key_value_pair.insert("value".to_string(), tail.clone());
-                ShapeCase::Array(
-                    entry_shapes,
-                    ShapeCase::Object(tail_key_value_pair, Shape::none()).simplify(),
+                tail_key_value_pair.insert("key".to_string(), Shape::string());
+                tail_key_value_pair.insert("value".to_string(), rest.clone());
+                Shape::array(
+                    &entry_shapes,
+                    Shape::object(tail_key_value_pair, Shape::none()),
                 )
-                .simplify()
             }
         }
         _ => Shape::error_with_range(
