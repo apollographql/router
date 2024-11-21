@@ -281,6 +281,10 @@ impl Field {
             let from_context_directive_definition_name = &federation_spec_definition
                 .from_context_directive_definition(schema)?
                 .name;
+            // We need to prevent arguments with `@fromContext` from being lost/overwriten. If the
+            // would-be parent type's field has `@fromContext` and one (or more) of this field's
+            // arguments doesn't exist in the would-be parent's field, rebasing would loose that
+            // context.
             if field_definition.arguments.iter().any(|arg_definition| {
                 arg_definition
                     .directives
