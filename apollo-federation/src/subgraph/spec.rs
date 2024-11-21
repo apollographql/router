@@ -364,7 +364,11 @@ impl FederationSpecDefinitions {
             }
             .into()],
             repeatable: true,
-            locations: vec![DirectiveLocation::Interface, DirectiveLocation::Object, DirectiveLocation::Union],
+            locations: vec![
+                DirectiveLocation::Interface,
+                DirectiveLocation::Object,
+                DirectiveLocation::Union,
+            ],
         }
     }
 
@@ -417,6 +421,10 @@ impl FederationSpecDefinitions {
         }
     }
 
+    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive definition.
     /// directive @fromContext(field: String!) on ARGUMENT_DEFINITION
     #[allow(clippy::wrong_self_convention)]
     fn from_context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
