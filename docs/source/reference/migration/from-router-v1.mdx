@@ -58,6 +58,11 @@ telemetry:
     metrics_reference_mode: standard
 ```
 
+### Check CORS configuration
+
+If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.
+With v2.x it will end up with an error and it won't start at all to avoid confusions and misconfigurations.
+
 ### Deploy your router
 
 Make sure that you are referencing the correct router release: **v2.0.0-preview.0**
