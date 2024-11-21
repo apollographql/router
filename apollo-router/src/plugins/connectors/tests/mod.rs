@@ -1125,7 +1125,6 @@ async fn error_redacted() {
 }
 
 #[tokio::test]
-#[ignore] // we currently disallow interfaceObject, will revisit later
 async fn test_interface_object() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1221,7 +1220,7 @@ async fn test_interface_object() {
             .method("POST")
             .path("/graphql")
             .body(serde_json::json!({
-              "query": r#"query($representations:[_Any!]!){_entities(representations:$representations){...on Itf{__typename ...on T1{a}...on T2{b}}}}"#,
+              "query": r#"query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onItf3_0}}fragment _generated_onItf3_0 on Itf{__typename ...on T1{a}...on T2{b}}"#,
               "variables": {
                 "representations": [
                   { "__typename": "Itf", "id": 1 },
