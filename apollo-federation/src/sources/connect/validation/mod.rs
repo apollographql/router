@@ -34,7 +34,6 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
@@ -389,18 +388,6 @@ fn parse_url<Coordinate: Display + Copy>(
             .collect(),
     })?;
     http::url::validate_base_url(&url, coordinate, value, str_value, schema)
-}
-
-fn require_value_is_str<'a, Coordinate: Display>(
-    value: &'a Node<Value>,
-    coordinate: Coordinate,
-    sources: &SourceMap,
-) -> Result<&'a str, Message> {
-    value.as_str().ok_or_else(|| Message {
-        code: Code::GraphQLError,
-        message: format!("The value for {coordinate} must be a string."),
-        locations: value.line_column_range(sources).into_iter().collect(),
-    })
 }
 
 /// For an object type, get all the keys that are resolvable.
