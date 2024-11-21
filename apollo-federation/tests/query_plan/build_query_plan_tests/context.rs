@@ -1452,16 +1452,6 @@ fn set_context_test_efficiently_merge_fetch_groups() {
     }
     "###
     );
-    /* TODO: Port
-    expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
-      {
-        path: ['identifiers', 'id5'],
-      },
-      {
-        path: ['mid'],
-      },
-    ]);
-    */
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
             Some(PlanNode::Flatten(node)) => match &*node.node {
@@ -1470,7 +1460,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
                         node.context_rewrites,
                         vec![
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__3_0").unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Key(
                                         Name::new_unchecked("identifiers"),
@@ -1483,7 +1473,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
                                 ],
                             })),
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__3_0").unwrap(),
+                                rename_key_to: Name::new("contextualArgument_1_1").unwrap(),
                                 path: vec![FetchDataPathElement::Key(
                                     Name::new_unchecked("mid"),
                                     Default::default()

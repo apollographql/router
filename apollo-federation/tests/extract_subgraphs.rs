@@ -725,7 +725,7 @@ fn extracts_set_context_directives() {
 
       directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
-      directive @context(name: String!) repeatable on INTERFACE | OBJECT
+      directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 
       directive @context__fromContext(field: String) on ARGUMENT_DEFINITION
 
