@@ -963,6 +963,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_responses_status() {
+        let selection = JSONSelection::parse("$status").unwrap();
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
@@ -980,12 +981,12 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$status").unwrap(),
+            selection: selection.clone(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
             request_variables: Default::default(),
-            response_variables: Default::default(),
+            response_variables: selection.external_variables().collect(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()

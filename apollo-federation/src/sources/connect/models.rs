@@ -595,6 +595,8 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
+                request_variables: {},
+                response_variables: {},
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -717,6 +719,8 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
+                request_variables: {},
+                response_variables: {},
             },
         }
         "###);
