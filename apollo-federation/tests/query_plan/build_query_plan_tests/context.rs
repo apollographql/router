@@ -77,33 +77,6 @@ macro_rules! node_assert {
             });
     };
 }
-/*
-vec![Arc::new(FetchDataRewrite::KeyRenamer(
-    FetchDataKeyRenamer {
-        rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-        path: vec![
-            FetchDataPathElement::Parent,
-            FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-            FetchDataPathElement::Key(
-                Name::new("a").unwrap(),
-                Default::default()
-            ),
-            FetchDataPathElement::Key(
-                Name::new("b").unwrap(),
-                Default::default()
-            ),
-            FetchDataPathElement::Key(
-                Name::new("c").unwrap(),
-                Default::default()
-            ),
-            FetchDataPathElement::Key(
-                Name::new("prop").unwrap(),
-                Default::default()
-            ),
-        ],
-    }
-)),]
-*/
 
 #[test]
 fn set_context_test_variable_is_from_same_subgraph() {
