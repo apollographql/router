@@ -36,6 +36,48 @@ use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::TopLevelPlanNode;
 
+fn parse_fetch_data_path_element(value: &str) -> FetchDataPathElement {
+    if value == ".." {
+        FetchDataPathElement::Parent
+    } else if let Some(("", ty)) = value.split_once("... on ") {
+        FetchDataPathElement::TypenameEquals(Name::new(ty).unwrap())
+    } else {
+        FetchDataPathElement::Key(Name::new(value).unwrap(), Default::default())
+    }
+}
+
+macro_rules! node_assert {
+    ($plan: ident, $index: literal, $($rename_key_to: literal, $path: expr),+$(,)?) => {
+        let Some(TopLevelPlanNode::Sequence(node)) = $plan.node else {
+            panic!("failed to get sequence node");
+        };
+        let Some(PlanNode::Flatten(node)) = node.nodes.get($index) else {
+            panic!("failed to get fetch node");
+        };
+        let PlanNode::Fetch(node) = &*node.node else {
+            panic!("failed to get flatten node");
+        };
+        let expected_rewrites = &[ $( $rename_key_to ),+ ];
+        let expected_paths = &[ $( $path.into_iter().map(parse_fetch_data_path_element).collect::<Vec<_>>() ),+ ];
+        assert_eq!(expected_rewrites.len(), expected_paths.len());
+        assert_eq!(node.context_rewrites.len(), expected_rewrites.len());
+        node
+            .context_rewrites
+            .iter()
+            .map(|rewriter| {
+                let FetchDataRewrite::KeyRenamer(renamer) = &**rewriter else {
+                    panic!("Expected KeyRenamer");
+                };
+                renamer
+            })
+            .zip(expected_rewrites.iter().zip(expected_paths))
+            .for_each(|(actual, (rename_key_to, path))|{
+                assert_eq!(&actual.rename_key_to.as_str(), rename_key_to);
+                assert_eq!(&actual.path, path);
+            });
+    };
+}
+
 #[test]
 fn set_context_test_variable_is_from_same_subgraph() {
     let planner = planner!(
@@ -110,33 +152,12 @@ fn set_context_test_variable_is_from_same_subgraph() {
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument_1_0",
+        ["..", "... on T", "prop"]
+    );
 }
 
 #[test]
@@ -230,33 +251,12 @@ fn set_context_test_variable_is_from_different_subgraph() {
                }
                "###);
 
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(2) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+    node_assert!(
+        plan,
+        2,
+        "contextualArgument_1_0",
+        ["..", "... on T", "prop"]
+    );
 }
 
 #[test]
@@ -337,33 +337,13 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument_1_0",
+        ["..", "... on T", "prop"]
+    );
 }
 
 #[test]
@@ -540,33 +520,13 @@ fn set_context_test_fetched_as_a_list() {
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument_1_0",
+        ["..", "... on T", "prop"]
+    );
 }
 
 #[test]
@@ -657,44 +617,15 @@ fn set_context_test_impacts_on_query_planning() {
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("A").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            })),
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("B").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            })),
-                        ]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument_1_0",
+        ["..", "... on A", "prop"],
+        "contextualArgument_1_0",
+        ["..", "... on B", "prop"]
+    );
 }
 
 #[test]
@@ -806,44 +737,15 @@ fn set_context_test_with_type_conditions_for_union() {
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("A").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            })),
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("B").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            })),
-                        ]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument_1_0",
+        ["..", "... on A", "prop"],
+        "contextualArgument_1_0",
+        ["..", "... on B", "prop"]
+    );
 }
 
 #[test]
@@ -921,36 +823,8 @@ fn set_context_test_accesses_a_different_top_level_query() {
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::Key(
-                                        Name::new("me").unwrap(),
-                                        Default::default()
-                                    ),
-                                    FetchDataPathElement::Key(
-                                        Name::new("locale").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(plan, 1, "contextualArgument_1_0", ["..", "me", "locale"]);
 }
 
 #[test]
@@ -1022,33 +896,13 @@ fn set_context_one_subgraph() {
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument_1_0",
+        ["..", "... on T", "prop"]
+    );
 }
 
 #[test]
@@ -1185,45 +1039,13 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
                }
                "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(3) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
-                            FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("a").unwrap(),
-                                        Default::default()
-                                    ),
-                                    FetchDataPathElement::Key(
-                                        Name::new("b").unwrap(),
-                                        Default::default()
-                                    ),
-                                    FetchDataPathElement::Key(
-                                        Name::new("c").unwrap(),
-                                        Default::default()
-                                    ),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            }
-                        )),]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(
+        plan,
+        3,
+        "contextualArgument_1_0",
+        ["..", "... on T", "a", "b", "c", "prop"]
+    );
 }
 
 #[test]
@@ -1452,40 +1274,13 @@ fn set_context_test_efficiently_merge_fetch_groups() {
     }
     "###
     );
-    match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Key(
-                                        Name::new_unchecked("identifiers"),
-                                        Default::default()
-                                    ),
-                                    FetchDataPathElement::Key(
-                                        Name::new_unchecked("id5"),
-                                        Default::default()
-                                    ),
-                                ],
-                            })),
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_1").unwrap(),
-                                path: vec![FetchDataPathElement::Key(
-                                    Name::new_unchecked("mid"),
-                                    Default::default()
-                                ),],
-                            })),
-                        ]
-                    );
-                }
-                _ => panic!("failed to get fetch node"),
-            },
-            _ => panic!("failed to get flatten node"),
-        },
-        _ => panic!("failed to get sequence node"),
-    }
+
+    node_assert!(
+        plan,
+        1,
+        "contextualArgument_1_0",
+        ["identifiers", "id5"],
+        "contextualArgument_1_1",
+        ["mid"]
+    );
 }
