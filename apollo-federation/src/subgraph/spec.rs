@@ -364,7 +364,11 @@ impl FederationSpecDefinitions {
             }
             .into()],
             repeatable: true,
-            locations: vec![DirectiveLocation::Interface, DirectiveLocation::Object, DirectiveLocation::Union],
+            locations: vec![
+                DirectiveLocation::Interface,
+                DirectiveLocation::Object,
+                DirectiveLocation::Union,
+            ],
         }
     }
 
