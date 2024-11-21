@@ -3,7 +3,6 @@ use std::num::NonZeroU32;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
@@ -51,8 +50,6 @@ use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
-
-pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
@@ -210,10 +207,10 @@ pub struct QueryPlanOptions {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct EnabledOverrideConditions(HashSet<String>);
+pub(crate) struct EnabledOverrideConditions(IndexSet<String>);
 
 impl Deref for EnabledOverrideConditions {
-    type Target = HashSet<String>;
+    type Target = IndexSet<String>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -245,7 +242,6 @@ impl QueryPlanner {
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
         config.assert_valid();
-        Self::check_unsupported_features(supergraph)?;
 
         let supergraph_schema = supergraph.schema.clone();
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
@@ -489,7 +485,7 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: EnabledOverrideConditions(HashSet::from_iter(
+            override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
                 options.override_conditions,
             )),
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
@@ -568,36 +564,6 @@ impl QueryPlanner {
     /// Get Query Planner's API Schema.
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
-    }
-
-    fn check_unsupported_features(supergraph: &Supergraph) -> Result<(), FederationError> {
-        // We will only check for `@context` direcive, since
-        // `@fromContext` can only be used if `@context` is already
-        // applied, and we assume a correctly composed supergraph.
-        //
-        // `@context` can only be applied on Object Types, Interface
-        // Types and Unions. For simplicity of this function, we just
-        // check all 'extended_type` directives.
-        let has_set_context = supergraph
-            .schema
-            .schema()
-            .types
-            .values()
-            .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
-        if has_set_context {
-            let message = "\
-                `experimental_query_planner_mode: new` or `both` cannot yet \
-                be used with `@context`. \
-                Remove uses of `@context` to try the experimental query planner, \
-                otherwise switch back to `legacy` or `both_best_effort`.\
-            ";
-            return Err(SingleFederationError::UnsupportedFeature {
-                message: message.to_owned(),
-                kind: crate::error::UnsupportedFeatureKind::Context,
-            }
-            .into());
-        }
-        Ok(())
     }
 }
 
