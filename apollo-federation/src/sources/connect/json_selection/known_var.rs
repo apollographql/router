@@ -6,7 +6,7 @@ use crate::sources::connect::variable::Namespace;
 
 #[derive(PartialEq, Eq, Clone, Hash)]
 pub(crate) enum KnownVariable {
-    Identifier(Namespace),
+    External(Namespace),
     Dollar,
     AtSign,
 }
@@ -16,13 +16,13 @@ impl KnownVariable {
         match var_name {
             "$" => Some(Self::Dollar),
             "@" => Some(Self::AtSign),
-            s => Namespace::from_str(s).ok().map(Self::Identifier),
+            s => Namespace::from_str(s).ok().map(Self::External),
         }
     }
 
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            Self::Identifier(namespace) => namespace.as_str(),
+            Self::External(namespace) => namespace.as_str(),
             Self::Dollar => "$",
             Self::AtSign => "@",
         }
@@ -48,6 +48,6 @@ impl std::fmt::Display for KnownVariable {
 
 impl From<Namespace> for KnownVariable {
     fn from(namespace: Namespace) -> Self {
-        Self::Identifier(namespace)
+        Self::External(namespace)
     }
 }

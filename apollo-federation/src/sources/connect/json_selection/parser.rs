@@ -438,7 +438,7 @@ impl PathSelection {
     pub(crate) fn variable_reference(&self) -> Option<VariableReference<Namespace>> {
         match self.path.as_ref() {
             PathList::Var(var, tail) => match var.as_ref() {
-                KnownVariable::Identifier(namespace) => {
+                KnownVariable::External(namespace) => {
                     let parts = tail.as_ref().variable_path_parts();
                     let location = parts
                         .last()
@@ -493,7 +493,7 @@ impl ExternalVarPaths for PathSelection {
         let mut paths = vec![];
         match self.path.as_ref() {
             PathList::Var(var_name, tail) => {
-                if matches!(var_name.as_ref(), KnownVariable::Identifier(_)) {
+                if matches!(var_name.as_ref(), KnownVariable::External(_)) {
                     paths.push(self);
                 }
                 paths.extend(tail.external_var_paths());
