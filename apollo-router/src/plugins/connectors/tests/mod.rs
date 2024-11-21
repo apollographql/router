@@ -41,13 +41,13 @@ mod quickstart;
 #[allow(dead_code)]
 mod req_asserts;
 
-const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
-const MUTATION_SCHEMA: &str = include_str!("./testdata/mutation.graphql");
-const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
-const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
-const NO_SOURCES_SCHEMA: &str = include_str!("./testdata/connector-without-source.graphql");
-const QUICKSTART_SCHEMA: &str = include_str!("./testdata/quickstart.graphql");
-const INTERFACE_OBJECT_SCHEMA: &str = include_str!("./testdata/interface-object.graphql");
+const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
+const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");
+const NULLABILITY_SCHEMA: &str = include_str!("../testdata/nullability.graphql");
+const SELECTION_SCHEMA: &str = include_str!("../testdata/selection.graphql");
+const NO_SOURCES_SCHEMA: &str = include_str!("../testdata/connector-without-source.graphql");
+const QUICKSTART_SCHEMA: &str = include_str!("../testdata/quickstart.graphql");
+const INTERFACE_OBJECT_SCHEMA: &str = include_str!("../testdata/interface-object.graphql");
 
 #[tokio::test]
 async fn value_from_config() {
@@ -923,7 +923,7 @@ async fn test_form_encoding() {
     let uri = mock_server.uri();
 
     let response = execute(
-        include_str!("./testdata/form-encoding.graphql"),
+        include_str!("../testdata/form-encoding.graphql"),
         &uri,
         "mutation {
           post(
