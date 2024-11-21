@@ -254,7 +254,9 @@ fn replace_value_at_path<'a>(
 
 // Removes value at path.
 fn remove_value_at_path<'a>(variables: &'a mut json_ext::Object, path: &'a [String]) {
-    let _ = get_value_at_path(variables, path).take();
+    if let Some(v) = get_value_at_path(variables, path) {
+        *v = serde_json_bytes::Value::Null;
+    }
 }
 
 fn get_value_at_path<'a>(
