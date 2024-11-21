@@ -350,7 +350,7 @@ impl FederationSpecDefinitions {
         }
     }
 
-    /// directive @context(name: String!) repeatable on INTERFACE | OBJECT
+    /// directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
     fn context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
@@ -364,7 +364,7 @@ impl FederationSpecDefinitions {
             }
             .into()],
             repeatable: true,
-            locations: vec![DirectiveLocation::Interface, DirectiveLocation::Object],
+            locations: vec![DirectiveLocation::Interface, DirectiveLocation::Object, DirectiveLocation::Union],
         }
     }
 
