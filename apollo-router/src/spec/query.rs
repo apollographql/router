@@ -611,16 +611,18 @@ impl Query {
                                 }
                             }
                             None => {
-                                parameters.validation_errors.push(
-                                    Error::builder()
-                                        .message(format!(
-                                            "Expected a valid enum value for type {}",
-                                            enum_type.name
-                                        ))
-                                        .path(Path::from_response_slice(path))
-                                        .extension_code(RESPONSE_VALIDATION)
-                                        .build(),
-                                );
+                                if !input.is_null() {
+                                    parameters.validation_errors.push(
+                                        Error::builder()
+                                            .message(format!(
+                                                "Expected a valid enum value for type {}",
+                                                enum_type.name
+                                            ))
+                                            .path(Path::from_response_slice(path))
+                                            .extension_code(RESPONSE_VALIDATION)
+                                            .build(),
+                                    );
+                                }
                                 *output = Value::Null;
                                 Ok(())
                             }
