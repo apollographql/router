@@ -36,186 +36,18 @@ use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::Configuration;
 
-pub(crate) mod mock_api {
-    struct PathTemplate(String);
+mod mock_api;
+mod quickstart;
+#[allow(dead_code)]
+mod req_asserts;
 
-    impl wiremock::Match for PathTemplate {
-        fn matches(&self, request: &wiremock::Request) -> bool {
-            let path = request.url.path();
-            let path = path.split('/');
-            let template = self.0.split('/');
-
-            for pair in path.zip_longest(template) {
-                match pair {
-                    EitherOrBoth::Both(p, t) => {
-                        if t.starts_with('{') && t.ends_with('}') {
-                            continue;
-                        }
-
-                        if p != t {
-                            return false;
-                        }
-                    }
-                    _ => return false,
-                }
-            }
-            true
-        }
-    }
-
-    #[allow(dead_code)]
-    fn path_template(template: &str) -> PathTemplate {
-        PathTemplate(template.to_string())
-    }
-
-    use super::*;
-
-    pub(crate) fn users() -> Mock {
-        Mock::given(method("GET")).and(path("/users")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-              {
-                "id": 1,
-                "name": "Leanne Graham"
-              },
-              {
-                "id": 2,
-                "name": "Ervin Howell",
-              }
-            ])),
-        )
-    }
-
-    pub(crate) fn user_2_nicknames() -> Mock {
-        Mock::given(method("GET"))
-            .and(path("/users/2/nicknames"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(["cat"])))
-    }
-
-    pub(crate) fn users_error() -> Mock {
-        Mock::given(method("GET")).and(path("/users")).respond_with(
-            ResponseTemplate::new(404).set_body_json(serde_json::json!([
-                {
-                    "kind": "json",
-                    "content": {},
-                    "selection": null
-                }
-            ])),
-        )
-    }
-
-    pub(crate) fn user_1() -> Mock {
-        Mock::given(method("GET"))
-            .and(path("/users/1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-              "id": 1,
-              "name": "Leanne Graham",
-              "username": "Bret",
-              "phone": "1-770-736-8031 x56442",
-              "email": "Sincere@april.biz",
-              "website": "hildegard.org"
-            })))
-    }
-
-    pub(crate) fn user_2() -> Mock {
-        Mock::given(method("GET"))
-            .and(path("/users/2"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-              "id": 2,
-              "name": "Ervin Howell",
-              "username": "Antonette",
-              "phone": "1-770-736-8031 x56442",
-              "email": "Shanna@melissa.tv",
-              "website": "anastasia.net"
-            })))
-    }
-
-    pub(crate) fn create_user() -> Mock {
-        Mock::given(method("POST")).and(path("/user")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!(
-              {
-                "id": 3,
-                "username": "New User"
-              }
-            )),
-        )
-    }
-
-    pub(crate) fn user_1_with_pet() -> Mock {
-        Mock::given(method("GET"))
-            .and(path("/users/1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-              "id": 1,
-              "name": "Leanne Graham",
-              "pet": {
-                  "name": "Spot"
-              }
-            })))
-    }
-
-    pub(crate) fn commits() -> Mock {
-        Mock::given(method("GET"))
-            .and(path("/repos/foo/bar/commits"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
-              [
-                {
-                  "sha": "abcdef",
-                  "commit": {
-                    "author": {
-                      "name": "Foo Bar",
-                      "email": "noone@nowhere",
-                      "date": "2024-07-09T01:22:33Z"
-                    },
-                    "message": "commit message",
-                  },
-                }]
-            )))
-    }
-
-    pub(crate) fn posts() -> Mock {
-        Mock::given(method("GET")).and(path("/posts")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-              {
-                "id": 1,
-                "title": "Post 1",
-                "userId": 1
-              },
-              {
-                "id": 2,
-                "title": "Post 2",
-                "userId": 2
-              }
-            ])),
-        )
-    }
-}
-
-pub(crate) mod mock_subgraph {
-    use super::*;
-
-    pub(crate) fn user_entity_query() -> Mock {
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .and(body_json(json!({
-              "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
-              "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
-            })))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .set_body_json(json!({
-                      "data": {
-                        "_entities": [{
-                          "__typename": "User",
-                          "c": "1",
-                        }, {
-                          "__typename": "User",
-                          "c": "2",
-                        }]
-                      }
-                    })),
-            )
-    }
-}
+const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
+const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");
+const NULLABILITY_SCHEMA: &str = include_str!("../testdata/nullability.graphql");
+const SELECTION_SCHEMA: &str = include_str!("../testdata/selection.graphql");
+const NO_SOURCES_SCHEMA: &str = include_str!("../testdata/connector-without-source.graphql");
+const QUICKSTART_SCHEMA: &str = include_str!("../testdata/quickstart.graphql");
+const INTERFACE_OBJECT_SCHEMA: &str = include_str!("../testdata/interface-object.graphql");
 
 #[tokio::test]
 async fn value_from_config() {
@@ -256,7 +88,7 @@ async fn value_from_config() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users/1").build()],
+        vec![Matcher::new().method("GET").path("/users/1")],
     );
 }
 
@@ -316,8 +148,8 @@ async fn max_requests() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("GET").path("/users/1"),
         ],
     );
 }
@@ -386,8 +218,8 @@ async fn source_max_requests() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("GET").path("/users/1"),
         ],
     );
 }
@@ -431,9 +263,9 @@ async fn test_root_field_plus_entity() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
         ],
     );
 }
@@ -444,7 +276,27 @@ async fn test_root_field_plus_entity_plus_requires() {
     mock_api::users().mount(&mock_server).await;
     mock_api::user_1().mount(&mock_server).await;
     mock_api::user_2().mount(&mock_server).await;
-    mock_subgraph::user_entity_query().mount(&mock_server).await;
+    Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(json!({
+              "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
+              "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(json!({
+                      "data": {
+                        "_entities": [{
+                          "__typename": "User",
+                          "c": "1",
+                        }, {
+                          "__typename": "User",
+                          "c": "2",
+                        }]
+                      }
+                    })),
+            ).mount(&mock_server).await;
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
@@ -480,12 +332,12 @@ async fn test_root_field_plus_entity_plus_requires() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("POST").path("/graphql").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("POST").path("/graphql"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
         ],
     );
 }
@@ -532,9 +384,9 @@ async fn test_entity_references() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/posts").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/posts"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
         ],
     );
 }
@@ -562,7 +414,7 @@ async fn basic_errors() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users").build()],
+        vec![Matcher::new().method("GET").path("/users")],
     );
 
     insta::assert_json_snapshot!(response, @r###"
@@ -670,8 +522,7 @@ async fn test_headers() {
                 HeaderName::from_str("x-context-value-connect").unwrap(),
                 HeaderValue::from_str("before val-from-request-context after").unwrap(),
             )
-            .path("/users")
-            .build()],
+            .path("/users")],
     );
 }
 
@@ -700,16 +551,14 @@ async fn test_args_and_this_in_header() {
                     HeaderName::from_str("x-from-args").unwrap(),
                     HeaderValue::from_str("before 2 after").unwrap(),
                 )
-                .path("/users/2")
-                .build(),
+                .path("/users/2"),
             Matcher::new()
                 .method("GET")
                 .header(
                     HeaderName::from_str("x-from-this").unwrap(),
                     HeaderValue::from_str("before 2 after").unwrap(),
                 )
-                .path("/users/2/nicknames")
-                .build(),
+                .path("/users/2/nicknames"),
         ],
     );
 }
@@ -806,9 +655,9 @@ async fn test_operation_counter() {
         req_asserts::matches(
             &mock_server.received_requests().await.unwrap(),
             vec![
-                Matcher::new().method("GET").path("/users").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-                Matcher::new().method("GET").path("/users/2").build(),
+                Matcher::new().method("GET").path("/users"),
+                Matcher::new().method("GET").path("/users/1"),
+                Matcher::new().method("GET").path("/users/2"),
             ],
         );
         assert_counter!(
@@ -861,8 +710,7 @@ async fn test_mutation() {
         vec![Matcher::new()
             .method("POST")
             .body(serde_json::json!({ "username": "New User" }))
-            .path("/user")
-            .build()],
+            .path("/user")],
     );
 }
 
@@ -939,10 +787,7 @@ async fn test_selection_set() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("GET")
-            .path("/repos/foo/bar/commits")
-            .build()],
+        vec![Matcher::new().method("GET").path("/repos/foo/bar/commits")],
     );
 }
 
@@ -979,7 +824,7 @@ async fn test_nullability() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users/1").build()],
+        vec![Matcher::new().method("GET").path("/users/1")],
     );
 }
 
@@ -1021,8 +866,7 @@ async fn test_default_argument_values() {
               "float": 1.23,
               "bool": true,
               "arr": ["default"],
-            }))
-            .build()],
+            }))],
     );
 }
 
@@ -1064,8 +908,7 @@ async fn test_default_argument_overrides() {
               "float": 9.87,
               "bool": false,
               "arr": ["hi again"],
-            }))
-            .build()],
+            }))],
     );
 }
 
@@ -1080,7 +923,7 @@ async fn test_form_encoding() {
     let uri = mock_server.uri();
 
     let response = execute(
-        include_str!("./testdata/form-encoding.graphql"),
+        include_str!("../testdata/form-encoding.graphql"),
         &uri,
         "mutation {
           post(
@@ -1149,7 +992,7 @@ async fn test_form_encoding() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("POST").path("/posts").build()],
+        vec![Matcher::new().method("POST").path("/posts")],
     );
 
     let reqs = mock_server.received_requests().await.unwrap();
@@ -1186,7 +1029,7 @@ async fn test_no_source() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users/1").build()],
+        vec![Matcher::new().method("GET").path("/users/1")],
     );
 }
 
@@ -1235,7 +1078,7 @@ async fn error_not_redacted() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users").build()],
+        vec![Matcher::new().method("GET").path("/users")],
     );
 }
 
@@ -1276,7 +1119,7 @@ async fn error_redacted() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users").build()],
+        vec![Matcher::new().method("GET").path("/users")],
     );
 }
 
@@ -1372,7 +1215,7 @@ async fn test_interface_object() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-          Matcher::new().method("GET").path("/itfs").build(),
+          Matcher::new().method("GET").path("/itfs"),
           Matcher::new()
             .method("POST")
             .path("/graphql")
@@ -1385,11 +1228,11 @@ async fn test_interface_object() {
                 ]
               }
             }))
-            .build(),
-          Matcher::new().method("GET").path("/itfs/1").build(),
-          Matcher::new().method("GET").path("/itfs/2").build(),
-          Matcher::new().method("GET").path("/itfs/1/e").build(),
-          Matcher::new().method("GET").path("/itfs/2/e").build(),
+            ,
+          Matcher::new().method("GET").path("/itfs/1"),
+          Matcher::new().method("GET").path("/itfs/2"),
+          Matcher::new().method("GET").path("/itfs/1/e"),
+          Matcher::new().method("GET").path("/itfs/2/e"),
         ],
     );
 }
@@ -1469,294 +1312,6 @@ async fn test_sources_in_context() {
     );
 }
 
-mod quickstart_tests {
-    use super::*;
-
-    macro_rules! map {
-        ($($tt:tt)*) => {
-          serde_json_bytes::json!($($tt)*).as_object().unwrap().clone()
-        };
-    }
-
-    async fn execute(query: &str, variables: JsonMap) -> (serde_json::Value, MockServer) {
-        let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/posts")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                },
-                {
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }]
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET")).and(path("/posts/1")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!(
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                }
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET")).and(path("/posts/2")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET"))
-            .and(path("/users/1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-              "id": 1,
-              "name": "Leanne Graham",
-              "username": "Bret",
-              "email": "Sincere@april.biz",
-              "address": {
-                "street": "Kulas Light",
-                "suite": "Apt. 556",
-                "city": "Gwenborough",
-                "zipcode": "92998-3874",
-                "geo": {
-                  "lat": "-37.3159",
-                  "lng": "81.1496"
-                }
-              },
-              "phone": "1-770-736-8031 x56442",
-              "website": "hildegard.org",
-              "company": {
-                "name": "Romaguera-Crona",
-                "catchPhrase": "Multi-layered client-server neural-net",
-                "bs": "harness real-time e-markets"
-              }
-            })))
-            .mount(&mock_server)
-            .await;
-        Mock::given(method("GET")).and(path("/users/1/posts")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                },
-                {
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }]
-            )),
-        ).mount(&mock_server).await;
-
-        let res = super::execute(
-            &QUICKSTART_SCHEMA.replace("https://jsonplaceholder.typicode.com", &mock_server.uri()),
-            &mock_server.uri(),
-            query,
-            variables,
-            None,
-            |_| {},
-        )
-        .await;
-
-        (res, mock_server)
-    }
-
-    #[tokio::test]
-    async fn query_1() {
-        let query = r#"
-          query Posts {
-            posts {
-              id
-              body
-              title
-            }
-          }
-        "#;
-
-        let (response, server) = execute(query, Default::default()).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "posts": [
-              {
-                "id": 1,
-                "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
-                "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"
-              },
-              {
-                "id": 2,
-                "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla",
-                "title": "qui est esse"
-              }
-            ]
-          }
-        }
-        "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![Matcher::new().method("GET").path("/posts").build()],
-        );
-    }
-
-    #[tokio::test]
-    async fn query_2() {
-        let query = r#"
-          query Post($postId: ID!) {
-            post(id: $postId) {
-              id
-              title
-              body
-            }
-          }
-        "#;
-
-        let (response, server) = execute(query, map!({ "postId": "1" })).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "post": {
-              "id": 1,
-              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-            }
-          }
-        }
-        "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![Matcher::new().method("GET").path("/posts/1").build()],
-        );
-    }
-
-    #[tokio::test]
-    async fn query_3() {
-        let query = r#"
-          query PostWithAuthor($postId: ID!) {
-            post(id: $postId) {
-              id
-              title
-              body
-              author {
-                id
-                name
-              }
-            }
-          }
-      "#;
-
-        let (response, server) = execute(query, map!({ "postId": "1" })).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "post": {
-              "id": 1,
-              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
-              "author": {
-                "id": 1,
-                "name": "Leanne Graham"
-              }
-            }
-          }
-        }
-        "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/posts/1").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-            ],
-        );
-    }
-
-    #[tokio::test]
-    async fn query_4() {
-        let query = r#"
-          query PostsForUser($userId: ID!) {
-            user(id: $userId) {
-              id
-              name
-              posts {
-                id
-                title
-                author {
-                  id
-                  name
-                }
-              }
-            }
-          }
-      "#;
-
-        let (response, server) = execute(query, map!({ "userId": "1" })).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "user": {
-              "id": 1,
-              "name": "Leanne Graham",
-              "posts": [
-                {
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "author": {
-                    "id": 1,
-                    "name": "Leanne Graham"
-                  }
-                },
-                {
-                  "id": 2,
-                  "title": "qui est esse",
-                  "author": {
-                    "id": 1,
-                    "name": "Leanne Graham"
-                  }
-                }
-              ]
-            }
-          }
-        }
-        "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/users/1").build(),
-                Matcher::new().method("GET").path("/users/1/posts").build(),
-                Matcher::new().method("GET").path("/posts/1").build(),
-                Matcher::new().method("GET").path("/posts/2").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-            ],
-        );
-    }
-}
-
-const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
-const MUTATION_SCHEMA: &str = include_str!("./testdata/mutation.graphql");
-const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
-const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
-const NO_SOURCES_SCHEMA: &str = include_str!("./testdata/connector-without-source.graphql");
-const QUICKSTART_SCHEMA: &str = include_str!("./testdata/quickstart.graphql");
-const INTERFACE_OBJECT_SCHEMA: &str = include_str!("./testdata/interface-object.graphql");
-
 async fn execute(
     schema: &str,
     uri: &str,
@@ -1827,146 +1382,4 @@ async fn execute(
         .unwrap();
 
     serde_json::from_slice(&response).unwrap()
-}
-
-#[allow(dead_code)]
-mod req_asserts {
-    use std::collections::HashMap;
-    use std::collections::HashSet;
-
-    use itertools::Itertools;
-    use wiremock::http::HeaderName;
-    use wiremock::http::HeaderValue;
-    use wiremock::http::HeaderValues;
-
-    #[derive(Clone)]
-    pub(crate) struct Matcher {
-        method: Option<String>,
-        path: Option<String>,
-        query: Option<String>,
-        body: Option<serde_json::Value>,
-        headers: HashMap<HeaderName, HeaderValues>,
-    }
-
-    impl Matcher {
-        pub(crate) fn new() -> Self {
-            Self {
-                method: None,
-                path: None,
-                query: None,
-                body: None,
-                headers: Default::default(),
-            }
-        }
-
-        pub(crate) fn method(&mut self, method: &str) -> &mut Self {
-            self.method = Some(method.to_string());
-            self
-        }
-
-        pub(crate) fn path(&mut self, path: &str) -> &mut Self {
-            self.path = Some(path.to_string());
-            self
-        }
-
-        pub(crate) fn query(&mut self, query: &str) -> &mut Self {
-            self.query = Some(query.to_string());
-            self
-        }
-
-        pub(crate) fn body(&mut self, body: serde_json::Value) -> &mut Self {
-            self.body = Some(body);
-            self
-        }
-
-        pub(crate) fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
-            let values = self.headers.entry(name).or_insert(Vec::new().into());
-            values.append(&mut Vec::from([value]).into());
-            self
-        }
-
-        pub(crate) fn build(&mut self) -> Self {
-            self.clone()
-        }
-
-        fn matches(&self, request: &wiremock::Request, index: usize) {
-            if let Some(method) = self.method.as_ref() {
-                assert_eq!(
-                    method,
-                    &request.method.to_string(),
-                    "[Request {}]: Expected method {}, got {}",
-                    index,
-                    method,
-                    request.method
-                )
-            }
-
-            if let Some(path) = self.path.as_ref() {
-                assert_eq!(
-                    path,
-                    request.url.path(),
-                    "[Request {}]: Expected path {}, got {}",
-                    index,
-                    path,
-                    request.url.path()
-                )
-            }
-
-            if let Some(query) = self.query.as_ref() {
-                assert_eq!(
-                    query,
-                    request.url.query().unwrap_or_default(),
-                    "[Request {}]: Expected query {}, got {}",
-                    index,
-                    query,
-                    request.url.query().unwrap_or_default()
-                )
-            }
-
-            if let Some(body) = self.body.as_ref() {
-                assert_eq!(
-                    body,
-                    &request.body_json::<serde_json::Value>().unwrap(),
-                    "[Request {}]: incorrect body",
-                    index,
-                )
-            }
-
-            for (name, expected) in self.headers.iter() {
-                match request.headers.get(name) {
-                    Some(actual) => {
-                        let expected: HashSet<String> =
-                            expected.iter().map(|v| v.as_str().to_owned()).collect();
-                        let actual: HashSet<String> =
-                            actual.iter().map(|v| v.as_str().to_owned()).collect();
-                        assert_eq!(
-                            expected,
-                            actual,
-                            "[Request {}]: expected header {} to be [{}], was [{}]",
-                            index,
-                            name,
-                            expected.iter().join(", "),
-                            actual.iter().join(", ")
-                        );
-                    }
-                    None => {
-                        panic!("[Request {}]: expected header {}, was missing", index, name);
-                    }
-                }
-            }
-        }
-    }
-
-    pub(crate) fn matches(received: &[wiremock::Request], matchers: Vec<Matcher>) {
-        assert_eq!(
-            received.len(),
-            matchers.len(),
-            "Expected {} requests, recorded {}",
-            matchers.len(),
-            received.len()
-        );
-        for (i, (request, matcher)) in received.iter().zip(matchers.iter()).enumerate() {
-            matcher.matches(request, i);
-        }
-    }
 }

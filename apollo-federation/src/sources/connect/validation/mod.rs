@@ -180,6 +180,8 @@ fn should_check_seen_fields(messages: &[Message]) -> bool {
     !messages.iter().any(|error| {
         // some invariant is violated, so let's just stop here
         error.code == Code::GraphQLError
+            // an invalid json selection means we can't visit the fields in the selection
+            || error.code == Code::InvalidJsonSelection
             // the selection visitor emits these errors and stops visiting, so there will probably be fields we haven't visited
             || error.code == Code::SelectedFieldNotFound
             || error.code == Code::GroupSelectionIsNotObject
