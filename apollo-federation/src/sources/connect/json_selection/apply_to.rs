@@ -851,6 +851,15 @@ impl ApplyToInternal for SubSelection {
         let mut output = JSONMap::new();
         let mut errors = Vec::new();
 
+        if let Some(ranged_output_name) = &self.output_shape {
+            output.insert(
+                // This "<?>" field holds the string value that may eventually
+                // be reported as __typename in the GraphQL response.
+                "<?>".to_string(),
+                JSON::String(ranged_output_name.as_str().into()),
+            );
+        }
+
         for named_selection in self.selections.iter() {
             let (value, apply_errors) = named_selection.apply_to_path(data, &vars, input_path);
             errors.extend(apply_errors);
@@ -876,6 +885,8 @@ impl ApplyToInternal for SubSelection {
         _previous_dollar_shape: Shape,
         named_var_shapes: &IndexMap<&str, Shape>,
     ) -> Shape {
+        // TODO Record raw input_shape as all_shape.input_shape?
+
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
         // shapes of each array element shape.
@@ -902,7 +913,12 @@ impl ApplyToInternal for SubSelection {
 
         // Build up the merged object shape using Shape::all to merge the
         // individual named_selection object shapes.
-        let mut all_shape = Shape::empty_object();
+        let mut all_shape = ShapeCase::Object {
+            fields: Shape::empty_map(),
+            rest: Shape::none(),
+            output_shape: self.output_shape.as_ref().map(|r| Shape::name(r.as_str())),
+        }
+        .simplify();
 
         for named_selection in self.selections.iter() {
             // Simplifying as we go with Shape::all keeps all_shape relatively
@@ -2454,6 +2470,8 @@ mod tests {
 
     #[test]
     fn test_compute_output_shape() {
+        assert_eq!(selection!("").static_shape().pretty_print(), "{}");
+
         assert_eq!(
             selection!("id name").static_shape().pretty_print(),
             "{ id: $root.id, name: $root.name }",
@@ -2463,6 +2481,15 @@ mod tests {
             selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
                 .static_shape()
                 .pretty_print(),
+            // Technically $.data could be an array, so this should be a union
+            // of this shape and a list of this shape, except with
+            // $root.data.0.maybe.{this,that} shape references.
+            //
+            // We could try to say that any { ... } shape represents either an
+            // object or a list of objects, by policy, to avoid having to write
+            // One<{...}, List<{...}>> everywhere a SubSelection appears.
+            //
+            // But then we don't know where the array indexes should go...
             "{ thisOrThat: One<$root.data.maybe.this, $root.data.maybe.that> }",
         );
 
@@ -2470,27 +2497,44 @@ mod tests {
             selection!(r#"
                 id
                 name
-                friends: friend_ids { id: $ }
+                friends: friend_ids { id: @ }
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
             "#).static_shape().pretty_print(),
-            // TODO The friends: { id: $root.friend_ids } part needs to simplify
-            // to friends being an array when/once we know $root.friend_ids is
-            // an array.
+
+            // This output shape is wrong if $root.friend_ids turns out to be an
+            // array, and it's tricky to see how to transform the shape to what
+            // it would have been if we knew that, where friends: List<{ id:
+            // $root.friend_ids.* }> (note the * meaning any array index),
+            // because who's to say it's not the id field that should become the
+            // List, rather than the friends field?
             "{ alias: { x: $root.arrayOfArrays.x, y: $root.arrayOfArrays.y }, friends: { id: $root.friend_ids }, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
+
+            // TODO Proposing a new syntax to capture the One<T, List<T>>
+            // ambiguity without combinatorial explosion of binary alternatives.
+            // The { <$root.friend_ids:Friend> id: $ } syntax means the
+            // subselection was applied to $root.friend_ids, has an output shape
+            // of Friend, and the $ shape is bound either to each element of
+            // $root.friend_ids if it's an array, or directly to
+            // $root.friend_ids if it's not an array, mirroring the way $ is
+            // used in JSONSelection SubSelection syntax.
+            //
+            //   "{ alias: { <$root.arrayOfArrays:> x: $.x, y: $.y }, friends: { <$root.friend_ids:Friend> id: $ }, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
+            //
+            // Once we find out if $root.friend_ids is an array, we can
+            // potentially simplify this shape further, so it no longer needs
+            // the indirection of the $ binding.
         );
 
         assert_eq!(
             selection!(r#"
-                upc
-                kind->match(
-                    ["book", ${ author title }],
-                    ["movie", ${ director title }],
-                    ["album", ${ artist title }],
-                )
-                price: cost
+                id
+                name
+                friends: friend_ids->map({ id: @ })
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
             "#).static_shape().pretty_print(),
-            "One<{ author: $root.author, price: $root.cost, title: $root.title, upc: $root.upc }, { director: $root.director, price: $root.cost, title: $root.title, upc: $root.upc }, { artist: $root.artist, price: $root.cost, title: $root.title, upc: $root.upc }>"
+            "{ alias: { x: $root.arrayOfArrays.x, y: $root.arrayOfArrays.y }, friends: One<{ id: $root.friend_ids }, List<{ id: $root.friend_ids.0 }>>, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
         );
 
         assert_eq!(
@@ -2538,6 +2582,98 @@ mod tests {
                 .static_shape()
                 .pretty_print(),
             "[{ k: \"wrapped\", v: $root }]",
+        );
+    }
+
+    #[test]
+    fn test_match_output_shape() {
+        assert_eq!(
+            selection!("<Product>").static_shape().pretty_print(),
+            "{ <Product> }",
+        );
+
+        assert_eq!(
+            selection!(r#"
+                upc
+                kind->match(
+                    ["book", ${ author title }],
+                    ["movie", ${ director title }],
+                    ["album", ${ artist title }],
+                )
+                price: cost
+            "#).static_shape().pretty_print(),
+            "One<{ author: $root.author, price: $root.cost, title: $root.title, upc: $root.upc }, { director: $root.director, price: $root.cost, title: $root.title, upc: $root.upc }, { artist: $root.artist, price: $root.cost, title: $root.title, upc: $root.upc }, { price: $root.cost, upc: $root.upc }>"
+        );
+
+        assert_eq!(
+            selection!(r#"
+                upc
+                kind->match(
+                    ["book", ${ <Book> title }],
+                    ["movie", ${ <Film> director }],
+                    ["album", ${ <Album> artist }],
+                    [@, ${ <Unknown> }],
+                )
+            "#).static_shape().pretty_print(),
+            "One<{ <Book> title: $root.title, upc: $root.upc }, { <Film> director: $root.director, upc: $root.upc }, { <Album> artist: $root.artist, upc: $root.upc }, { <Unknown> upc: $root.upc }>",
+        );
+
+        assert_eq!(
+            selection!(r#"
+                <Product>
+                upc
+                kind->match(
+                    ["book", ${ <Book> title }],
+                    ["movie", ${ <Film> director }],
+                )
+                price: cost
+            "#).static_shape().pretty_print(),
+            // Note All<Book, Product> would theoretically simplify down to just
+            // Book if the shape system knows Book is a subtype of Product.
+            "One<{ <All<Book, Product>> price: $root.cost, title: $root.title, upc: $root.upc }, { <All<Film, Product>> director: $root.director, price: $root.cost, upc: $root.upc }, { <Product> price: $root.cost, upc: $root.upc }>",
+        );
+
+        assert_eq!(
+            selection!("<Product> upc").apply_to(&json!({
+                "upc": "9780593734223",
+                "kind": ["book", { "title": "Sapiens" }],
+            })),
+            (
+                Some(json!({
+                    // Here's how we find out which concrete runtime shape was
+                    // actually returned.
+                    "<?>": "Product",
+                    "upc": "9780593734223",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                <Product>
+                upc
+                kind->match(
+                    ["book", ${ <Book> title }],
+                    ["movie", ${ <Film> director }],
+                    ["album", ${ <Album> artist }],
+                )
+            "#
+            )
+            .apply_to(&json!({
+                "upc": "9780593734223",
+                "kind": "book",
+                "title": "Sapiens",
+            })),
+            (
+                Some(json!({
+                    "<?>": "Book",
+                    "upc": "9780593734223",
+                    "title": "Sapiens",
+                })),
+                vec![],
+            ),
         );
     }
 }

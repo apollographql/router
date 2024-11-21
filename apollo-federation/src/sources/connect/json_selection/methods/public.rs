@@ -10,6 +10,7 @@ use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
+use crate::sources::connect::json_selection::known_var::KnownVariable;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
@@ -218,10 +219,23 @@ pub(super) fn match_shape(
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         let mut result_union = Vec::new();
+        let mut has_infallible_case = false;
 
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
+                    match pair[0].as_ref() {
+                        LitExpr::Path(path) => match path.path.as_ref() {
+                            PathList::Var(known_var, _tail) => {
+                                if known_var.as_ref() == &KnownVariable::AtSign {
+                                    has_infallible_case = true;
+                                }
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    };
+
                     let value_shape = pair[1].compute_output_shape(
                         input_shape.clone(),
                         dollar_shape.clone(),
@@ -230,6 +244,10 @@ pub(super) fn match_shape(
                     result_union.push(value_shape);
                 }
             }
+        }
+
+        if !has_infallible_case {
+            result_union.push(Shape::none());
         }
 
         if result_union.is_empty() {
