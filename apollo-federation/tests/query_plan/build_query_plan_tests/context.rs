@@ -1414,7 +1414,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
         "#,
     );
 
-    assert_plan!(planner,
+    let plan = assert_plan!(planner,
         r#"
         query {
           customer {
@@ -1467,16 +1467,47 @@ fn set_context_test_efficiently_merge_fetch_groups() {
     /* TODO: Port
     expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([
       {
-        kind: 'KeyRenamer',
         path: ['identifiers', 'id5'],
-        renameKeyTo: 'contextualArgument_3_0',
       },
       {
-        kind: 'KeyRenamer',
         path: ['mid'],
-        renameKeyTo: 'contextualArgument_3_1',
       },
     ]);
     */
-    todo!("See the comment above")
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![
+                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__3_0").unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Key(
+                                        Name::new_unchecked("identifiers"),
+                                        Default::default()
+                                    ),
+                                    FetchDataPathElement::Key(
+                                        Name::new_unchecked("id5"),
+                                        Default::default()
+                                    ),
+                                ],
+                            })),
+                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument__3_0").unwrap(),
+                                path: vec![FetchDataPathElement::Key(
+                                    Name::new_unchecked("mid"),
+                                    Default::default()
+                                ),],
+                            })),
+                        ]
+                    );
+                }
+                _ => panic!("failed to get fetch node"),
+            },
+            _ => panic!("failed to get flatten node"),
+        },
+        _ => panic!("failed to get sequence node"),
+    }
 }
