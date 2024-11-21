@@ -48,7 +48,6 @@ const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
 const NO_SOURCES_SCHEMA: &str = include_str!("./testdata/connector-without-source.graphql");
 const QUICKSTART_SCHEMA: &str = include_str!("./testdata/quickstart.graphql");
 const INTERFACE_OBJECT_SCHEMA: &str = include_str!("./testdata/interface-object.graphql");
-const VARIABLES_SCHEMA: &str = include_str!("./testdata/variables.graphql");
 
 #[tokio::test]
 async fn value_from_config() {
