@@ -74,39 +74,39 @@ fn set_context_test_variable_is_from_same_subgraph() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                prop
-                u {
-                  __typename
-                  id
-                  b
-                }
-              }
-            }
-          },
-          Flatten(path: "t.u") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         prop
+                         u {
+                           __typename
+                           id
+                           b
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
@@ -116,7 +116,7 @@ fn set_context_test_variable_is_from_same_subgraph() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -181,53 +181,53 @@ fn set_context_test_variable_is_from_different_subgraph() {
         }
             "#,
             @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                id
-                u {
-                  __typename
-                  id
-                }
-              }
-            }
-          },
-          Flatten(path: "t") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on T {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on T {
-                  prop
-                }
-              }
-            },
-          },
-          Flatten(path: "t.u") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-    "###);
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         id
+                         u {
+                           __typename
+                           id
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on T {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on T {
+                           prop
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###);
 
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(2) {
@@ -237,7 +237,7 @@ fn set_context_test_variable_is_from_different_subgraph() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -304,38 +304,38 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                prop
-                u {
-                  __typename
-                  id
-                }
-              }
-            }
-          },
-          Flatten(path: "t.u") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph2_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         prop
+                         u {
+                           __typename
+                           id
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
@@ -345,7 +345,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph2_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -405,38 +405,38 @@ fn set_context_test_variable_is_a_list() {
         }
       "#,
         @r###"
-    QueryPlan {
-      Sequence {
-        Fetch(service: "Subgraph1") {
-          {
-            t {
-              __typename
-              prop
-              u {
-                __typename
-                id
-              }
-            }
-          }
-        },
-        Flatten(path: "t.u") {
-          Fetch(service: "Subgraph1") {
-            {
-              ... on U {
-                __typename
-                id
-              }
-            } =>
-            {
-              ... on U {
-                field(a: $contextualArgument__Subgraph1_0)
-              }
-            }
-          },
-        },
-      },
-    }
-      "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         prop
+                         u {
+                           __typename
+                           id
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
@@ -446,7 +446,7 @@ fn set_context_test_variable_is_a_list() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -508,39 +508,39 @@ fn set_context_test_fetched_as_a_list() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                prop
-                u {
-                  __typename
-                  id
-                  b
-                }
-              }
-            }
-          },
-          Flatten(path: "t.@.u") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         prop
+                         u {
+                           __typename
+                           id
+                           b
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.@.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
@@ -550,7 +550,7 @@ fn set_context_test_fetched_as_a_list() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -626,39 +626,39 @@ fn set_context_test_impacts_on_query_planning() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                prop
-                u {
-                  __typename
-                  id
-                  b
-                }
-              }
-            }
-          },
-          Flatten(path: "t.u") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         prop
+                         u {
+                           __typename
+                           id
+                           b
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
@@ -668,7 +668,7 @@ fn set_context_test_impacts_on_query_planning() {
                         node.context_rewrites,
                         vec![
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -680,7 +680,7 @@ fn set_context_test_impacts_on_query_planning() {
                                 ],
                             })),
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -765,92 +765,94 @@ fn set_context_test_with_type_conditions_for_union() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                ... on A {
-                  __typename
-                  prop
-                  u {
-                    __typename
-                    id
-                    b
-                  }
-                }
-                ... on B {
-                  __typename
-                  prop
-                  u {
-                    __typename
-                    id
-                    b
-                  }
-                }
-              }
-            }
-          },
-          Flatten(path: "t.u") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         ... on A {
+                           __typename
+                           prop
+                           u {
+                             __typename
+                             id
+                             b
+                           }
+                         }
+                         ... on B {
+                           __typename
+                           prop
+                           u {
+                             __typename
+                             id
+                             b
+                           }
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
-        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
-            Some(PlanNode::Flatten(node)) => match &*node.node {
-                PlanNode::Fetch(node) => {
-                    assert_eq!(
-                        node.context_rewrites,
-                        vec![
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
-                                    .unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("A").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            })),
-                            Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
-                                    .unwrap(),
-                                path: vec![
-                                    FetchDataPathElement::Parent,
-                                    FetchDataPathElement::TypenameEquals(Name::new("B").unwrap()),
-                                    FetchDataPathElement::Key(
-                                        Name::new("prop").unwrap(),
-                                        Default::default()
-                                    ),
-                                ],
-                            })),
-                        ]
-                    );
-                }
-                _ => assert!(false, "failed to get fetch node"),
-            },
-            _ => assert!(false, "failed to get flatten node"),
-        },
-        _ => assert!(false, "failed to get sequence node"),
-    }
+      Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+          Some(PlanNode::Flatten(node)) => match &*node.node {
+              PlanNode::Fetch(node) => {
+                  assert_eq!(
+                      node.context_rewrites,
+                      vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                          FetchDataKeyRenamer {
+                              rename_key_to: Name::new("contextualArgument_1_0")
+                                  .unwrap(),
+                              path: vec![
+                                  FetchDataPathElement::Parent,
+                                  FetchDataPathElement::TypenameEquals(Name::new("A").unwrap()),
+                                  FetchDataPathElement::Key(
+                                      Name::new("prop").unwrap(),
+                                      Default::default()
+                                  ),
+                              ],
+                          }
+                      )),
+                      Arc::new(FetchDataRewrite::KeyRenamer(
+                        FetchDataKeyRenamer {
+                            rename_key_to: Name::new("contextualArgument_1_0")
+                                .unwrap(),
+                            path: vec![
+                                FetchDataPathElement::Parent,
+                                FetchDataPathElement::TypenameEquals(Name::new("B").unwrap()),
+                                FetchDataPathElement::Key(
+                                    Name::new("prop").unwrap(),
+                                    Default::default()
+                                ),
+                            ],
+                        }
+                    )),]
+                  );
+              }
+              _ => assert!(false, "failed to get fetch node"),
+          },
+          _ => assert!(false, "failed to get flatten node"),
+      },
+      _ => assert!(false, "failed to get sequence node"),
+  }
 }
 
 #[test]
@@ -895,38 +897,38 @@ fn set_context_test_accesses_a_different_top_level_query() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              __typename
-              me {
-                locale
-              }
-              product {
-                __typename
-                id
-              }
-            }
-          },
-          Flatten(path: "product") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on Product {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on Product {
-                  price(locale: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       __typename
+                       me {
+                         locale
+                       }
+                       product {
+                         __typename
+                         id
+                       }
+                     }
+                   },
+                   Flatten(path: "product") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on Product {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on Product {
+                           price(locale: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
@@ -936,7 +938,7 @@ fn set_context_test_accesses_a_different_top_level_query() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -997,38 +999,38 @@ fn set_context_one_subgraph() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                prop
-                u {
-                  __typename
-                  id
-                }
-              }
-            }
-          },
-          Flatten(path: "t.u") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         prop
+                         u {
+                           __typename
+                           id
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
@@ -1038,7 +1040,7 @@ fn set_context_one_subgraph() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -1123,76 +1125,76 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                a {
-                  __typename
-                  id
-                }
-                u {
-                  __typename
-                  id
-                }
-              }
-            }
-          },
-          Flatten(path: "t.a") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on A {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on A {
-                  b {
-                    __typename
-                    id
-                  }
-                }
-              }
-            },
-          },
-          Flatten(path: "t.a.b") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on B {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on B {
-                  c {
-                    prop
-                  }
-                }
-              }
-            },
-          },
-          Flatten(path: "t.u") {
-            Fetch(service: "Subgraph1") {
-              {
-                ... on U {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on U {
-                  field(a: $contextualArgument__Subgraph1_0)
-                }
-              }
-            },
-          },
-        },
-      }
-        "###
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         a {
+                           __typename
+                           id
+                         }
+                         u {
+                           __typename
+                           id
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "t.a") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on A {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on A {
+                           b {
+                             __typename
+                             id
+                           }
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "t.a.b") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on B {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on B {
+                           c {
+                             prop
+                           }
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
     );
     match plan.node {
         Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(3) {
@@ -1202,7 +1204,7 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument__Subgraph1_0")
+                                rename_key_to: Name::new("contextualArgument_1_0")
                                     .unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
@@ -1292,40 +1294,40 @@ fn set_context_test_before_key_resolution_transition() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              customer {
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            customer {
+              __typename
+              identifiers {
+                legacyUserId
+              }
+              child {
                 __typename
-                identifiers {
-                  legacyUserId
-                }
-                child {
-                  __typename
-                  id
-                }
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "customer.child") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on Child {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Child {
+                prop(legacyUserId: $contextualArgument_1_0)
               }
             }
           },
-          Flatten(path: "customer.child") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on Child {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on Child {
-                  prop(legacyUserId: $contextualArgument__Subgraph2_0)
-                }
-              }
-            },
-          },
         },
-      }
-        "###
+      },
+    }
+    "###
     );
 }
 
@@ -1425,42 +1427,42 @@ fn set_context_test_efficiently_merge_fetch_groups() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph2") {
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph2") {
+          {
+            customer {
+              __typename
+              id
+              identifiers {
+                id5
+              }
+              mid
+            }
+          }
+        },
+        Flatten(path: "customer") {
+          Fetch(service: "Subgraph3") {
             {
-              customer {
+              ... on Customer {
                 __typename
                 id
-                identifiers {
-                  id5
-                }
-                mid
               }
-            }
-          },
-          Flatten(path: "customer") {
-            Fetch(service: "Subgraph3") {
-              {
-                ... on Customer {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on Customer {
-                  accounts {
-                    foo(ctx_id5: $contextualArgument__Subgraph3_0, ctx_mid: $contextualArgument__Subgraph3_1) {
-                      id
-                    }
+            } =>
+            {
+              ... on Customer {
+                accounts {
+                  foo(ctx_id5: $contextualArgument_1_0, ctx_mid: $contextualArgument_1_1) {
+                    id
                   }
                 }
               }
-            },
+            }
           },
         },
-      }
-        "###
+      },
+    }
+    "###
     );
     /* TODO: Port
     expect((plan as any).node.nodes[1].node.contextRewrites).toEqual([

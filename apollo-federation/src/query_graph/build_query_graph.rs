@@ -1626,8 +1626,8 @@ impl FederatedQueryGraphBuilder {
             .base
             .query_graph
             .subgraphs()
-            .filter_map(|(source, _)| subgraph_to_args.get_key_value(source))
-            .map(|(source, args)| {
+            .filter_map(|(source, _)| subgraph_to_args.get_full(source))
+            .map(|(index, source, args)| {
                 Ok::<_, FederationError>((
                     source.clone(),
                     args.iter()
@@ -1636,7 +1636,7 @@ impl FederatedQueryGraphBuilder {
                         .map(|(i, arg)| {
                             Ok::<_, FederationError>((
                                 arg.clone(),
-                                format!("contextualArgument__{source}_{i}").try_into()?,
+                                format!("contextualArgument_{}_{}", index + 1, i).try_into()?,
                             ))
                         })
                         .process_results(|r| r.collect())?,
