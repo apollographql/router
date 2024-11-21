@@ -91,7 +91,7 @@ pub(super) fn validate_body_selection(
         connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
 
     let selection_str =
-        GraphQLString::new(&selection_node, &schema.sources).map_err(|_| Message {
+        GraphQLString::new(selection_node, &schema.sources).map_err(|_| Message {
             code: Code::GraphQLError,
             message: format!("{coordinate} must be a string."),
             locations: selection_node
@@ -153,7 +153,7 @@ fn validate_selection_variables(
             return Some(Err(Message {
                 code: Code::InvalidJsonSelection,
                 message: format!(
-                    "{coordinate} contains an invalid variable namespace `{namespace}`, must be one of {available}",
+                    "{coordinate} contains an invalid variable `{namespace}`, must be one of {available}",
                     namespace = reference.namespace.namespace,
                     available = expression_context.namespaces_joined(),
                 ),

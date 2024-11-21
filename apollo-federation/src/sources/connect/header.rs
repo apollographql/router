@@ -133,7 +133,7 @@ impl Display for HeaderValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HeaderValueError::InvalidVariableNamespace { namespace, .. } => {
-                write!(f, "invalid variable namespace: {namespace}")
+                write!(f, "invalid variable: {namespace}")
             }
             HeaderValueError::ParseError { message, .. }
             | HeaderValueError::InvalidHeaderValue { message, .. } => write!(f, "{message}"),

@@ -78,7 +78,7 @@ pub(crate) fn validate_arg<'a>(
                                 HeaderValueError::InvalidHeaderValue { message, location } => (message, location),
                             HeaderValueError::InvalidVariableNamespace{ namespace, location } => (
                                 format!(
-                                    "invalid variable namespace `{namespace}`, must be one of {available}",
+                                    "invalid variable `{namespace}`, must be one of {available}",
                                     available = expression_context.namespaces_joined(),
                                 ), location),
                         };
