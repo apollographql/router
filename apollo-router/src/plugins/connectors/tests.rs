@@ -88,7 +88,7 @@ async fn value_from_config() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users/1").build()],
+        vec![Matcher::new().method("GET").path("/users/1")],
     );
 }
 
@@ -148,8 +148,8 @@ async fn max_requests() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("GET").path("/users/1"),
         ],
     );
 }
@@ -218,8 +218,8 @@ async fn source_max_requests() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("GET").path("/users/1"),
         ],
     );
 }
@@ -263,9 +263,9 @@ async fn test_root_field_plus_entity() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
         ],
     );
 }
@@ -332,12 +332,12 @@ async fn test_root_field_plus_entity_plus_requires() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("POST").path("/graphql").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new().method("POST").path("/graphql"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
         ],
     );
 }
@@ -384,9 +384,9 @@ async fn test_entity_references() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/posts").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/posts"),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/2"),
         ],
     );
 }
@@ -414,7 +414,7 @@ async fn basic_errors() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users").build()],
+        vec![Matcher::new().method("GET").path("/users")],
     );
 
     insta::assert_json_snapshot!(response, @r###"
@@ -522,8 +522,7 @@ async fn test_headers() {
                 HeaderName::from_str("x-context-value-connect").unwrap(),
                 HeaderValue::from_str("before val-from-request-context after").unwrap(),
             )
-            .path("/users")
-            .build()],
+            .path("/users")],
     );
 }
 
@@ -552,16 +551,14 @@ async fn test_args_and_this_in_header() {
                     HeaderName::from_str("x-from-args").unwrap(),
                     HeaderValue::from_str("before 2 after").unwrap(),
                 )
-                .path("/users/2")
-                .build(),
+                .path("/users/2"),
             Matcher::new()
                 .method("GET")
                 .header(
                     HeaderName::from_str("x-from-this").unwrap(),
                     HeaderValue::from_str("before 2 after").unwrap(),
                 )
-                .path("/users/2/nicknames")
-                .build(),
+                .path("/users/2/nicknames"),
         ],
     );
 }
@@ -658,9 +655,9 @@ async fn test_operation_counter() {
         req_asserts::matches(
             &mock_server.received_requests().await.unwrap(),
             vec![
-                Matcher::new().method("GET").path("/users").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-                Matcher::new().method("GET").path("/users/2").build(),
+                Matcher::new().method("GET").path("/users"),
+                Matcher::new().method("GET").path("/users/1"),
+                Matcher::new().method("GET").path("/users/2"),
             ],
         );
         assert_counter!(
@@ -713,8 +710,7 @@ async fn test_mutation() {
         vec![Matcher::new()
             .method("POST")
             .body(serde_json::json!({ "username": "New User" }))
-            .path("/user")
-            .build()],
+            .path("/user")],
     );
 }
 
@@ -791,10 +787,7 @@ async fn test_selection_set() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("GET")
-            .path("/repos/foo/bar/commits")
-            .build()],
+        vec![Matcher::new().method("GET").path("/repos/foo/bar/commits")],
     );
 }
 
@@ -831,7 +824,7 @@ async fn test_nullability() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users/1").build()],
+        vec![Matcher::new().method("GET").path("/users/1")],
     );
 }
 
@@ -873,8 +866,7 @@ async fn test_default_argument_values() {
               "float": 1.23,
               "bool": true,
               "arr": ["default"],
-            }))
-            .build()],
+            }))],
     );
 }
 
@@ -916,8 +908,7 @@ async fn test_default_argument_overrides() {
               "float": 9.87,
               "bool": false,
               "arr": ["hi again"],
-            }))
-            .build()],
+            }))],
     );
 }
 
@@ -1001,7 +992,7 @@ async fn test_form_encoding() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("POST").path("/posts").build()],
+        vec![Matcher::new().method("POST").path("/posts")],
     );
 
     let reqs = mock_server.received_requests().await.unwrap();
@@ -1038,7 +1029,7 @@ async fn test_no_source() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users/1").build()],
+        vec![Matcher::new().method("GET").path("/users/1")],
     );
 }
 
@@ -1087,7 +1078,7 @@ async fn error_not_redacted() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users").build()],
+        vec![Matcher::new().method("GET").path("/users")],
     );
 }
 
@@ -1128,7 +1119,7 @@ async fn error_redacted() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users").build()],
+        vec![Matcher::new().method("GET").path("/users")],
     );
 }
 
@@ -1224,7 +1215,7 @@ async fn test_interface_object() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-          Matcher::new().method("GET").path("/itfs").build(),
+          Matcher::new().method("GET").path("/itfs"),
           Matcher::new()
             .method("POST")
             .path("/graphql")
@@ -1237,11 +1228,11 @@ async fn test_interface_object() {
                 ]
               }
             }))
-            .build(),
-          Matcher::new().method("GET").path("/itfs/1").build(),
-          Matcher::new().method("GET").path("/itfs/2").build(),
-          Matcher::new().method("GET").path("/itfs/1/e").build(),
-          Matcher::new().method("GET").path("/itfs/2/e").build(),
+            ,
+          Matcher::new().method("GET").path("/itfs/1"),
+          Matcher::new().method("GET").path("/itfs/2"),
+          Matcher::new().method("GET").path("/itfs/1/e"),
+          Matcher::new().method("GET").path("/itfs/2/e"),
         ],
     );
 }

@@ -26,34 +26,30 @@ impl Matcher {
         }
     }
 
-    pub(crate) fn method(&mut self, method: &str) -> &mut Self {
+    pub(crate) fn method(mut self, method: &str) -> Self {
         self.method = Some(method.to_string());
         self
     }
 
-    pub(crate) fn path(&mut self, path: &str) -> &mut Self {
+    pub(crate) fn path(mut self, path: &str) -> Self {
         self.path = Some(path.to_string());
         self
     }
 
-    pub(crate) fn query(&mut self, query: &str) -> &mut Self {
+    pub(crate) fn query(mut self, query: &str) -> Self {
         self.query = Some(query.to_string());
         self
     }
 
-    pub(crate) fn body(&mut self, body: serde_json::Value) -> &mut Self {
+    pub(crate) fn body(mut self, body: serde_json::Value) -> Self {
         self.body = Some(body);
         self
     }
 
-    pub(crate) fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
+    pub(crate) fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         let values = self.headers.entry(name).or_insert(Vec::new().into());
         values.append(&mut Vec::from([value]).into());
         self
-    }
-
-    pub(crate) fn build(&mut self) -> Self {
-        self.clone()
     }
 
     fn matches(&self, request: &wiremock::Request, index: usize) {

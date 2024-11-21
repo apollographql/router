@@ -135,7 +135,7 @@ async fn query_1() {
 
     req_asserts::matches(
         &server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/posts").build()],
+        vec![Matcher::new().method("GET").path("/posts")],
     );
 }
 
@@ -167,7 +167,7 @@ async fn query_2() {
 
     req_asserts::matches(
         &server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/posts/1").build()],
+        vec![Matcher::new().method("GET").path("/posts/1")],
     );
 }
 
@@ -208,8 +208,8 @@ async fn query_3() {
     req_asserts::matches(
         &server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/posts/1").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/posts/1"),
+            Matcher::new().method("GET").path("/users/1"),
         ],
     );
 }
@@ -267,11 +267,11 @@ async fn query_4() {
     req_asserts::matches(
         &server.received_requests().await.unwrap(),
         vec![
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/1/posts").build(),
-            Matcher::new().method("GET").path("/posts/1").build(),
-            Matcher::new().method("GET").path("/posts/2").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users/1"),
+            Matcher::new().method("GET").path("/users/1/posts"),
+            Matcher::new().method("GET").path("/posts/1"),
+            Matcher::new().method("GET").path("/posts/2"),
+            Matcher::new().method("GET").path("/users/1"),
         ],
     );
 }
