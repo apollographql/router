@@ -17,7 +17,6 @@ use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Deserializer;
 
-use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::resource::ConfigResource;
@@ -33,12 +32,6 @@ pub(crate) struct Logging {
     #[serde(skip)]
     /// Settings for logging to a file.
     pub(crate) file: File,
-}
-
-impl Logging {
-    pub(crate) fn validate(&self) -> Result<(), ConfigurationError> {
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
