@@ -158,6 +158,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 range: Some(
                     0..70,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -368,6 +369,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 range: Some(
                     0..70,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -508,6 +510,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 range: Some(
                     0..2,
                 ),
+                output_shape: None,
             },
         ),
         config: None,

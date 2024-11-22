@@ -65,6 +65,7 @@ Path(
                                             range: Some(
                                                 36..52,
                                             ),
+                                            output_shape: None,
                                         },
                                     ),
                                     range: Some(

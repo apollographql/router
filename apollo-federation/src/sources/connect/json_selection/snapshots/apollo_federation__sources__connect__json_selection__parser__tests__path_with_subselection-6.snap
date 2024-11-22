@@ -6,9 +6,10 @@ Ok(
     Named(
         SubSelection {
             selections: [
-                Path(
-                    None,
-                    PathSelection {
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -37,6 +38,7 @@ Ok(
                                             range: Some(
                                                 19..25,
                                             ),
+                                            output_shape: None,
                                         },
                                     ),
                                     range: Some(
@@ -49,10 +51,11 @@ Ok(
                             ),
                         },
                     },
-                ),
-                Path(
-                    None,
-                    PathSelection {
+                },
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -65,9 +68,10 @@ Ok(
                                     node: Selection(
                                         SubSelection {
                                             selections: [
-                                                Path(
-                                                    None,
-                                                    PathSelection {
+                                                Path {
+                                                    alias: None,
+                                                    inline: true,
+                                                    path: PathSelection {
                                                         path: WithRange {
                                                             node: Var(
                                                                 WithRange {
@@ -118,6 +122,7 @@ Ok(
                                                                                     range: Some(
                                                                                         54..68,
                                                                                     ),
+                                                                                    output_shape: None,
                                                                                 },
                                                                             ),
                                                                             range: Some(
@@ -135,11 +140,12 @@ Ok(
                                                             ),
                                                         },
                                                     },
-                                                ),
+                                                },
                                             ],
                                             range: Some(
                                                 44..70,
                                             ),
+                                            output_shape: None,
                                         },
                                     ),
                                     range: Some(
@@ -152,11 +158,12 @@ Ok(
                             ),
                         },
                     },
-                ),
+                },
             ],
             range: Some(
                 13..70,
             ),
+            output_shape: None,
         },
     ),
 )

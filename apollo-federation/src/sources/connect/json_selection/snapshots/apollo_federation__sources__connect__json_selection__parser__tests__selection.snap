@@ -96,8 +96,8 @@ Named(
                                 },
                                 None,
                             ),
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -112,7 +112,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Key(
                                             WithRange {
@@ -201,6 +202,7 @@ Named(
                                                                         range: Some(
                                                                             489..595,
                                                                         ),
+                                                                        output_shape: None,
                                                                     },
                                                                 ),
                                                                 range: Some(
@@ -223,7 +225,7 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
+                            },
                             Group(
                                 Alias {
                                     name: WithRange {
@@ -268,12 +270,14 @@ Named(
                                     range: Some(
                                         745..763,
                                     ),
+                                    output_shape: None,
                                 },
                             ),
                         ],
                         range: Some(
                             115..777,
                         ),
+                        output_shape: None,
                     },
                 ),
             ),
@@ -281,5 +285,6 @@ Named(
         range: Some(
             86..777,
         ),
+        output_shape: None,
     },
 )

@@ -6,8 +6,8 @@ Ok(
     Named(
         SubSelection {
             selections: [
-                Path(
-                    Some(
+                Path {
+                    alias: Some(
                         Alias {
                             name: WithRange {
                                 node: Field(
@@ -22,7 +22,8 @@ Ok(
                             ),
                         },
                     ),
-                    PathSelection {
+                    inline: false,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -58,10 +59,11 @@ Ok(
                             ),
                         },
                     },
-                ),
-                Path(
-                    None,
-                    PathSelection {
+                },
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -112,6 +114,7 @@ Ok(
                                                     range: Some(
                                                         50..108,
                                                     ),
+                                                    output_shape: None,
                                                 },
                                             ),
                                             range: Some(
@@ -129,11 +132,12 @@ Ok(
                             ),
                         },
                     },
-                ),
+                },
             ],
             range: Some(
                 13..108,
             ),
+            output_shape: None,
         },
     ),
 )

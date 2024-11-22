@@ -29,9 +29,10 @@ Named(
                 },
                 None,
             ),
-            Path(
-                None,
-                PathSelection {
+            Path {
+                alias: None,
+                inline: true,
+                path: PathSelection {
                     path: WithRange {
                         node: Key(
                             WithRange {
@@ -93,6 +94,7 @@ Named(
                                                         range: Some(
                                                             71..87,
                                                         ),
+                                                        output_shape: None,
                                                     },
                                                 ),
                                                 range: Some(
@@ -115,7 +117,7 @@ Named(
                         ),
                     },
                 },
-            ),
+            },
             Field(
                 None,
                 WithRange {
@@ -128,9 +130,10 @@ Named(
                 },
                 None,
             ),
-            Path(
-                None,
-                PathSelection {
+            Path {
+                alias: None,
+                inline: true,
+                path: PathSelection {
                     path: WithRange {
                         node: Key(
                             WithRange {
@@ -194,6 +197,7 @@ Named(
                                                         range: Some(
                                                             140..164,
                                                         ),
+                                                        output_shape: None,
                                                     },
                                                 ),
                                                 range: Some(
@@ -216,10 +220,11 @@ Named(
                         ),
                     },
                 },
-            ),
+            },
         ],
         range: Some(
             13..164,
         ),
+        output_shape: None,
     },
 )

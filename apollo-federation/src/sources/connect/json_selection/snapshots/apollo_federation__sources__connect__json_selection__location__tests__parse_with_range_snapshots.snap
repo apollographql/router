@@ -5,8 +5,8 @@ expression: "format!(\"{:#?}\", parsed)"
 Named(
     SubSelection {
         selections: [
-            Path(
-                Some(
+            Path {
+                alias: Some(
                     Alias {
                         name: WithRange {
                             node: Field(
@@ -21,7 +21,8 @@ Named(
                         ),
                     },
                 ),
-                PathSelection {
+                inline: false,
+                path: PathSelection {
                     path: WithRange {
                         node: Key(
                             WithRange {
@@ -97,6 +98,7 @@ Named(
                                                                         range: Some(
                                                                             46..54,
                                                                         ),
+                                                                        output_shape: None,
                                                                     },
                                                                 ),
                                                             ),
@@ -104,6 +106,7 @@ Named(
                                                         range: Some(
                                                             32..55,
                                                         ),
+                                                        output_shape: None,
                                                     },
                                                 ),
                                                 range: Some(
@@ -126,7 +129,7 @@ Named(
                         ),
                     },
                 },
-            ),
+            },
             Field(
                 Some(
                     Alias {
@@ -154,8 +157,8 @@ Named(
                 Some(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -170,7 +173,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -221,9 +225,9 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
-                            Path(
-                                Some(
+                            },
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -238,7 +242,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -325,7 +330,7 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
+                            },
                             Group(
                                 Alias {
                                     name: WithRange {
@@ -382,10 +387,11 @@ Named(
                                     range: Some(
                                         250..259,
                                     ),
+                                    output_shape: None,
                                 },
                             ),
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -400,7 +406,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -436,7 +443,7 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -453,6 +460,7 @@ Named(
                         range: Some(
                             91..316,
                         ),
+                        output_shape: None,
                     },
                 ),
             ),
@@ -460,5 +468,6 @@ Named(
         range: Some(
             9..316,
         ),
+        output_shape: None,
     },
 )

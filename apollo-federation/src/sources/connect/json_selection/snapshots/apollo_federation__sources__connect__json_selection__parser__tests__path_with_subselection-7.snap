@@ -6,9 +6,10 @@ Ok(
     Named(
         SubSelection {
             selections: [
-                Path(
-                    None,
-                    PathSelection {
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -37,6 +38,7 @@ Ok(
                                             range: Some(
                                                 60..66,
                                             ),
+                                            output_shape: None,
                                         },
                                     ),
                                     range: Some(
@@ -49,10 +51,11 @@ Ok(
                             ),
                         },
                     },
-                ),
-                Path(
-                    None,
-                    PathSelection {
+                },
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -65,8 +68,8 @@ Ok(
                                     node: Selection(
                                         SubSelection {
                                             selections: [
-                                                Path(
-                                                    Some(
+                                                Path {
+                                                    alias: Some(
                                                         Alias {
                                                             name: WithRange {
                                                                 node: Field(
@@ -81,7 +84,8 @@ Ok(
                                                             ),
                                                         },
                                                     ),
-                                                    PathSelection {
+                                                    inline: false,
+                                                    path: PathSelection {
                                                         path: WithRange {
                                                             node: Expr(
                                                                 WithRange {
@@ -104,10 +108,11 @@ Ok(
                                                             ),
                                                         },
                                                     },
-                                                ),
-                                                Path(
-                                                    None,
-                                                    PathSelection {
+                                                },
+                                                Path {
+                                                    alias: None,
+                                                    inline: true,
+                                                    path: PathSelection {
                                                         path: WithRange {
                                                             node: Var(
                                                                 WithRange {
@@ -158,6 +163,7 @@ Ok(
                                                                                     range: Some(
                                                                                         285..299,
                                                                                     ),
+                                                                                    output_shape: None,
                                                                                 },
                                                                             ),
                                                                             range: Some(
@@ -175,7 +181,7 @@ Ok(
                                                             ),
                                                         },
                                                     },
-                                                ),
+                                                },
                                                 Field(
                                                     None,
                                                     WithRange {
@@ -192,6 +198,7 @@ Ok(
                                             range: Some(
                                                 86..336,
                                             ),
+                                            output_shape: None,
                                         },
                                     ),
                                     range: Some(
@@ -204,9 +211,9 @@ Ok(
                             ),
                         },
                     },
-                ),
-                Path(
-                    Some(
+                },
+                Path {
+                    alias: Some(
                         Alias {
                             name: WithRange {
                                 node: Field(
@@ -221,7 +228,8 @@ Ok(
                             ),
                         },
                     ),
-                    PathSelection {
+                    inline: false,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -257,11 +265,12 @@ Ok(
                             ),
                         },
                     },
-                ),
+                },
             ],
             range: Some(
                 54..362,
             ),
+            output_shape: None,
         },
     ),
 )
