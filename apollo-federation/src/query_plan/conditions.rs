@@ -42,11 +42,16 @@ impl Display for ConditionKind {
     }
 }
 
-/// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
+/// Represents a combined set of conditions.
+///
+/// This struct is meant for tracking whether a selection set in a [FetchDependencyGraphNode] needs
 /// to be queried, based on the `@skip`/`@include` applications on the selections within.
-/// Accordingly, there is much logic around merging and short-circuiting; `OperationConditional` is
+/// Accordingly, there is much logic around merging and short-circuiting; [OperationConditional] is
 /// the more appropriate struct when trying to record the original structure/intent of those
 /// `@skip`/`@include` applications.
+///
+/// [FetchDependencyGraphNode]: crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode
+/// [OperationConditional]: crate::link::graphql_definition::OperationConditional
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) enum Conditions {
     Variables(VariableConditions),
