@@ -130,12 +130,6 @@ impl VariableConditions {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct VariableCondition {
-    variable: Name,
-    kind: ConditionKind,
-}
-
 impl Conditions {
     /// Create conditions from a map of variable conditions.
     ///
