@@ -73,14 +73,14 @@ impl GaugeStore {
                         "The CPU frequency of the underlying instance the router is deployed to",
                     )
                     .with_unit(Unit::new("Mhz"))
-                    .with_callback(move |i| {
+                    .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock().unwrap();
                         let system = system_getter.get_system();
                         let cpus = system.cpus();
                         let cpu_freq =
                             cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64;
-                        i.observe(cpu_freq, &[])
+                        gauge.observe(cpu_freq, &[])
                     })
                     .init(),
             );
@@ -93,12 +93,12 @@ impl GaugeStore {
                     .with_description(
                         "The number of CPUs reported by the instance the router is running on",
                     )
-                    .with_callback(move |i| {
+                    .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock().unwrap();
                         let system = system_getter.get_system();
                         let cpu_count = detect_cpu_count(system);
-                        i.observe(cpu_count, &[KeyValue::new("host.arch", get_otel_arch())])
+                        gauge.observe(cpu_count, &[KeyValue::new("host.arch", get_otel_arch())])
                     })
                     .init(),
             );
@@ -111,11 +111,11 @@ impl GaugeStore {
                     .with_description(
                         "The amount of memory reported by the instance the router is running on",
                     )
-                    .with_callback(move |i| {
+                    .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock().unwrap();
                         let system = system_getter.get_system();
-                        i.observe(
+                        gauge.observe(
                             system.total_memory(),
                             &[KeyValue::new("host.arch", get_otel_arch())],
                         )
@@ -129,13 +129,16 @@ impl GaugeStore {
                 meter
                     .u64_observable_gauge("apollo.router.schema")
                     .with_description("Details about the current in-use schema")
-                    .with_callback(|i| {
+                    .with_callback(|gauge| {
                         // TODO: get launch_id.
                         // NOTE: this is a fixed gauge. We only care about observing the included
                         // attributes.
-                        i.observe(
+                        gauge.observe(
                             1,
-                            &[KeyValue::new("launch_id", ""), KeyValue::new("schema_hash" opts.supergraph_schema_hash)],
+                            &[
+                                KeyValue::new("launch_id", ""),
+                                KeyValue::new("schema_hash", opts.supergraph_schema_hash),
+                            ],
                         )
                     })
                     .init(),
@@ -146,11 +149,11 @@ impl GaugeStore {
                 meter
                     .u64_observable_gauge("apollo.router.persisted_queries")
                     .with_description("Details about the current persisted queries")
-                    .with_callback(|i| {
+                    .with_callback(|gauge| {
                         // TODO: get persisted_queries_version.
                         // NOTE: this is a fixed gauge. We only care about observing the included
                         // attributes.
-                        i.observe(1, &[KeyValue::new("persisted_queries_version", "")])
+                        gauge.observe(1, &[KeyValue::new("persisted_queries_version", "")])
                     })
                     .init(),
             )
@@ -160,7 +163,7 @@ impl GaugeStore {
 }
 
 struct GaugeOptions {
-    // Router Supergraph Schema Hash (SHA256 of the SDL))
+    // Router Supergraph Schema Hash (SHA256 of the SDL)
     supergraph_schema_hash: String,
 }
 
