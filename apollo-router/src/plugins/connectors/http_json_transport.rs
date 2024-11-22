@@ -57,11 +57,6 @@ pub(crate) fn make_request(
 
     let (json_body, form_body, body, content_length, apply_to_errors) =
         if let Some(ref selection) = transport.body {
-            // The URL and headers use the $context above, but JSON Selection errors if it is present
-            let inputs = inputs
-                .into_iter()
-                .filter(|(k, _)| *k != "$context")
-                .collect();
             let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
             let mut form_body = None;
             let (body, content_length) = if let Some(json_body) = json_body.as_ref() {

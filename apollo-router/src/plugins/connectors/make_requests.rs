@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
+use apollo_federation::sources::connect::Namespace;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -17,6 +19,7 @@ use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
+use crate::Context;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -29,24 +32,63 @@ pub(crate) struct RequestInputs {
 }
 
 impl RequestInputs {
+    /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
+    /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
+    /// are actually referenced in the expressions for URLs, headers, body, or selection.
     pub(crate) fn merge(
         &self,
+        variables_used: &HashSet<Namespace>,
         config: Option<&CustomConfiguration>,
-        context: Option<Map<ByteString, Value>>,
+        context: &Context,
         status: Option<u16>,
     ) -> IndexMap<String, Value> {
-        let mut map = IndexMap::with_capacity_and_hasher(3, Default::default());
-        map.insert("$args".to_string(), Value::Object(self.args.clone()));
-        map.insert("$this".to_string(), Value::Object(self.this.clone()));
-        if let Some(context) = context {
-            map.insert("$context".to_string(), json!(context));
+        let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
+
+        // Not all connectors reference $args
+        if variables_used.contains(&Namespace::Args) {
+            map.insert(
+                Namespace::Args.as_str().into(),
+                Value::Object(self.args.clone()),
+            );
         }
-        if let Some(config) = config {
-            map.insert("$config".to_string(), json!(config));
+
+        // $this only applies to fields on entity types (not Query or Mutation)
+        if variables_used.contains(&Namespace::This) {
+            map.insert(
+                Namespace::This.as_str().into(),
+                Value::Object(self.this.clone()),
+            );
         }
-        if let Some(status) = status {
-            map.insert("$status".to_string(), Value::Number(status.into()));
+
+        // $context could be a large object, so we only convert it to JSON
+        // if it's used. It can also be mutated between requests, so we have
+        // to convert it each time.
+        if variables_used.contains(&Namespace::Context) {
+            let context: Map<ByteString, Value> = context
+                .iter()
+                .map(|r| (r.key().as_str().into(), r.value().clone()))
+                .collect();
+            map.insert(Namespace::Context.as_str().into(), Value::Object(context));
         }
+
+        // $config doesn't change unless the schema reloads, but we can avoid
+        // the allocation if it's unused.
+        if variables_used.contains(&Namespace::Config) {
+            if let Some(config) = config {
+                map.insert(Namespace::Config.as_str().into(), json!(config));
+            }
+        }
+
+        // $status is available only for response mapping
+        if variables_used.contains(&Namespace::Status) {
+            if let Some(status) = status {
+                map.insert(
+                    Namespace::Status.as_str().into(),
+                    Value::Number(status.into()),
+                );
+            }
+        }
+
         map
     }
 }
@@ -121,17 +163,15 @@ fn request_params_to_requests(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
-    let context: Map<ByteString, Value> = original_request
-        .context
-        .iter()
-        .map(|r| (r.key().as_str().into(), r.value().clone()))
-        .collect();
     for response_key in request_params {
         let (request, debug_request) = make_request(
             &connector.transport,
-            response_key
-                .inputs()
-                .merge(connector.config.as_ref(), Some(context.clone()), None),
+            response_key.inputs().merge(
+                &connector.request_variables,
+                connector.config.as_ref(),
+                &original_request.context,
+                None,
+            ),
             original_request,
             debug,
         )?;
@@ -580,6 +620,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -715,6 +757,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -878,6 +922,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -1111,6 +1157,8 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1431,6 +1479,8 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1732,6 +1782,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1955,6 +2007,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
@@ -2231,6 +2285,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
@@ -2504,6 +2560,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector ,&req).unwrap(), @r###"
@@ -2642,6 +2700,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         let requests = super::make_requests(req, &connector, &None).unwrap();

@@ -141,5 +141,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
+        request_variables: {
+            $args,
+        },
+        response_variables: {},
     },
 }

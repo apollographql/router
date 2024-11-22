@@ -122,7 +122,7 @@ pub(crate) enum Target {
 
 /// The variable namespaces defined for Apollo Connectors
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
-pub(crate) enum Namespace {
+pub enum Namespace {
     Args,
     Config,
     Context,
@@ -131,7 +131,7 @@ pub(crate) enum Namespace {
 }
 
 impl Namespace {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Args => "$args",
             Self::Config => "$config",
