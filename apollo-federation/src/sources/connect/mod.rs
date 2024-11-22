@@ -20,7 +20,7 @@ pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
-pub(crate) use spec::ConnectSpecDefinition;
+pub use spec::ConnectSpec;
 pub use url_template::URLTemplate;
 
 pub use self::models::Connector;

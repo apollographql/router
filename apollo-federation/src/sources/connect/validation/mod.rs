@@ -34,7 +34,6 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
@@ -64,11 +63,10 @@ use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
-use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
@@ -79,7 +77,7 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
     // TODO: Handle schema errors rather than relying on JavaScript to catch it later
     let schema = Schema::parse(source_text, file_name)
         .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
-    let connect_identity = ConnectSpecDefinition::identity();
+    let connect_identity = ConnectSpec::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
         return Vec::new(); // There are no connectors-related directives to validate
     };
@@ -91,8 +89,8 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
 
     let mut messages = check_conflicting_directives(&schema);
 
-    let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
-    let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
+    let source_directive_name = ConnectSpec::source_directive_name(&link);
+    let connect_directive_name = ConnectSpec::connect_directive_name(&link);
     let schema_info = SchemaInfo::new(
         &schema,
         source_text,
@@ -181,6 +179,8 @@ fn should_check_seen_fields(messages: &[Message]) -> bool {
     !messages.iter().any(|error| {
         // some invariant is violated, so let's just stop here
         error.code == Code::GraphQLError
+            // an invalid json selection means we can't visit the fields in the selection
+            || error.code == Code::InvalidJsonSelection
             // the selection visitor emits these errors and stops visiting, so there will probably be fields we haven't visited
             || error.code == Code::SelectedFieldNotFound
             || error.code == Code::GroupSelectionIsNotObject
@@ -270,11 +270,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
         .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
         .collect_vec();
 
-    let disallowed_imports = [
-        INTF_OBJECT_DIRECTIVE_NAME,
-        CONTEXT_DIRECTIVE_NAME,
-        FROM_CONTEXT_DIRECTIVE_NAME,
-    ];
+    let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];
     fed_link
         .imports
         .into_iter()
@@ -330,17 +326,13 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
             }
         }
 
-        errors.extend(
-            headers::validate_arg(
-                http_arg,
-                schema,
-                HttpHeadersCoordinate::Source {
-                    directive_name: &directive.name,
-                },
-            )
-            .into_iter()
-            .flatten(),
-        );
+        errors.extend(headers::validate_arg(
+            http_arg,
+            schema,
+            HttpHeadersCoordinate::Source {
+                directive_name: &directive.name,
+            },
+        ));
     } else {
         errors.push(Message {
             code: Code::GraphQLError,
@@ -391,18 +383,6 @@ fn parse_url<Coordinate: Display + Copy>(
             .collect(),
     })?;
     http::url::validate_base_url(&url, coordinate, value, str_value, schema)
-}
-
-fn require_value_is_str<'a, Coordinate: Display>(
-    value: &'a Node<Value>,
-    coordinate: Coordinate,
-    sources: &SourceMap,
-) -> Result<&'a str, Message> {
-    value.as_str().ok_or_else(|| Message {
-        code: Code::GraphQLError,
-        message: format!("The value for {coordinate} must be a string."),
-        locations: value.line_column_range(sources).into_iter().collect(),
-    })
 }
 
 /// For an object type, get all the keys that are resolvable.
@@ -515,21 +495,14 @@ pub enum Code {
     SelectedFieldNotFound,
     /// A group selection (`a { b }`) was used, but the field is not an object
     GroupSelectionIsNotObject,
-    /// Invalid header name
-    /// The `name` and `as` mappings should be valid, HTTP header names.
-    InvalidHttpHeaderName,
-    /// The `value` mapping should be either a valid HTTP header value or list of valid HTTP header values.
-    InvalidHttpHeaderValue,
     /// The `name` mapping must be unique for all headers.
     HttpHeaderNameCollision,
-    /// Header mappings cannot include both `as` and `value` properties.
-    InvalidHttpHeaderMapping,
+    /// A provided header in `@source` or `@connect` was not valid
+    InvalidHeader,
     /// Certain directives are not allowed when using connectors
     UnsupportedFederationDirective,
     /// Abstract types are not allowed when using connectors
     UnsupportedAbstractType,
-    /// Header does not define `from` or `value`
-    MissingHeaderSource,
     /// Fields that return an object type must use a group JSONSelection `{}`
     GroupSelectionRequiredForObject,
     /// Fields in the schema that aren't resolved by a connector

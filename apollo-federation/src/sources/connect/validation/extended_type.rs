@@ -249,9 +249,14 @@ fn validate_field(
             .iter()
             .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
         {
-            if let Err(err) =
-                validate_body_selection(connect_directive, object, field, schema, body)
-            {
+            if let Err(err) = validate_body_selection(
+                connect_directive,
+                connect_coordinate,
+                object,
+                field,
+                schema,
+                body,
+            ) {
                 errors.push(err);
             }
         }
@@ -297,19 +302,15 @@ fn validate_field(
             }
         }
 
-        errors.extend(
-            headers::validate_arg(
-                http_arg,
-                schema,
-                HttpHeadersCoordinate::Connect {
-                    connect: connect_coordinate,
-                    object: &object.name,
-                    field: &field.name,
-                },
-            )
-            .into_iter()
-            .flatten(),
-        );
+        errors.extend(headers::validate_arg(
+            http_arg,
+            schema,
+            HttpHeadersCoordinate::Connect {
+                connect: connect_coordinate,
+                object: &object.name,
+                field: &field.name,
+            },
+        ));
     }
     errors
 }

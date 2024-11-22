@@ -101,7 +101,7 @@ fn parse_template<'schema>(
                 Message {
                     code: Code::InvalidUrl,
                     message: format!(
-                        "{coordinate} must be a valid URL template. Invalid variable namespace `{namespace}`,  must be one of {available}",
+                        "{coordinate} must be a valid URL template. Invalid variable `{namespace}`,  must be one of {available}",
                         available = expression_context.namespaces_joined(),
                     ),
                     locations: str_value

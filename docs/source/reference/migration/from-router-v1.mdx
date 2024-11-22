@@ -33,6 +33,20 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 - `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
 - `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
 
+## Removed features in GraphOS Router v2.x
+
+### Support for Scaffold
+<!-- PR: https://github.com/apollographql/router/pull/6274 -->
+
+In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
+
+Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
+
+### `--apollo-uplink-poll-interval`
+<!-- PR: https://github.com/apollographql/router/pull/6268 -->
+
+The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
+
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
@@ -59,6 +73,7 @@ telemetry:
 ```
 
 ### Logging
+<!-- PR: https://github.com/apollographql/router/pull/6285 -->
 
 If you used the `experimental_when_header` feature previously like this for example:
 
@@ -120,6 +135,11 @@ telemetry:
             - supergraph_request_header: apollo-router-log-request
             - my_client
 ```
+
+### Check CORS configuration
+
+If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.
+With v2.x it will end up with an error and it won't start at all to avoid confusions and misconfigurations.
 
 ### Deploy your router
 

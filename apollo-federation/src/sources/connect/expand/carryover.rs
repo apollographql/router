@@ -28,7 +28,7 @@ use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::FederationSchema;
-use crate::sources::connect::spec::LATEST_CONNECT_VERSION;
+use crate::sources::connect::ConnectSpec;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
@@ -38,6 +38,7 @@ const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
 pub(super) fn carryover_directives(
     from: &FederationSchema,
     to: &mut FederationSchema,
+    specs: impl Iterator<Item = ConnectSpec>,
 ) -> Result<(), FederationError> {
     let Some(metadata) = from.metadata() else {
         return Ok(());
@@ -45,10 +46,9 @@ pub(super) fn carryover_directives(
 
     // @join__directive(graph: [], name: "link", args: { url: "https://specs.apollo.dev/connect/v0.1" })
     // this must exist for license key enforcement
-    SchemaDefinitionPosition.insert_directive(
-        to,
-        LATEST_CONNECT_VERSION.join_directive_application().into(),
-    )?;
+    for spec in specs {
+        SchemaDefinitionPosition.insert_directive(to, spec.join_directive_application().into())?;
+    }
 
     // @inaccessible
 
@@ -480,6 +480,7 @@ mod tests {
     use super::carryover_directives;
     use crate::merge::merge_federation_subgraphs;
     use crate::schema::FederationSchema;
+    use crate::sources::connect::ConnectSpec;
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
     #[test]
@@ -493,7 +494,12 @@ mod tests {
         let schema = merged.schema.into_inner();
         let mut schema = FederationSchema::new(schema).expect("federation schema failed");
 
-        carryover_directives(&supergraph_schema, &mut schema).expect("carryover failed");
+        carryover_directives(
+            &supergraph_schema,
+            &mut schema,
+            [ConnectSpec::V0_1].into_iter(),
+        )
+        .expect("carryover failed");
         assert_snapshot!(schema.schema().serialize().to_string());
     }
 }
