@@ -45,7 +45,6 @@ use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
-use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::subscription::SubscriptionHandle;
@@ -431,7 +430,6 @@ pub struct SubscriptionTaskParams {
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
     pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
-    pub(crate) service_name: String,
 }
 
 async fn subscription_task(
@@ -450,7 +448,6 @@ async fn subscription_task(
     };
     let subscription_config = sub_params.subscription_config;
     let subscription_handle = sub_params.subscription_handle;
-    let service_name = sub_params.service_name;
     let mut receiver = sub_params.stream_rx;
     let sender = sub_params.client_sender;
 
@@ -498,7 +495,6 @@ async fn subscription_task(
         .ok()
         .flatten()
         .unwrap_or_default();
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let mut receiver = match receiver.next().await {
         Some(receiver) => receiver,
@@ -542,9 +538,6 @@ async fn subscription_task(
             message = receiver.next() => {
                 match message {
                     Some(mut val) => {
-                        if display_body {
-                            tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
-                        }
                         val.created_at = Some(Instant::now());
                         let res = dispatch_event(&supergraph_req, &execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,

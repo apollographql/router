@@ -19,7 +19,6 @@ expression: "&metrics.non_zero()"
           opt.instruments.router: true
           opt.instruments.subgraph: true
           opt.instruments.supergraph: true
-          opt.logging.experimental_when_header: true
           opt.metrics.otlp: true
           opt.metrics.prometheus: true
           opt.spans: true
