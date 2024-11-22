@@ -95,7 +95,7 @@ impl Error {
     pub(crate) fn message(&self) -> String {
         match self {
             Error::InvalidVariableNamespace { namespace, .. } => {
-                format!("Invalid variable namespace: {namespace}")
+                format!("Invalid variable: {namespace}")
             }
             Error::ParseError { message, .. } => message.clone(),
         }

@@ -21,8 +21,9 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSON;
 
+use crate::sources::connect::variable;
+use crate::sources::connect::variable::parser::VariableParseError;
 use crate::sources::connect::variable::Namespace;
-use crate::sources::connect::variable::VariableParseError;
 use crate::sources::connect::variable::VariableReference;
 
 /// A header value, optionally containing variable references.
@@ -132,7 +133,7 @@ impl Display for HeaderValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HeaderValueError::InvalidVariableNamespace { namespace, .. } => {
-                write!(f, "invalid variable namespace: {namespace}")
+                write!(f, "invalid variable: {namespace}")
             }
             HeaderValueError::ParseError { message, .. }
             | HeaderValueError::InvalidHeaderValue { message, .. } => write!(f, "{message}"),
@@ -210,7 +211,7 @@ fn variable_reference(
     delimited(
         char('{'),
         |input| {
-            super::variable::variable_reference(input).map_err(|e| match e {
+            variable::parser::variable_reference(input).map_err(|e| match e {
                 nom::Err::Error(e) | nom::Err::Failure(e) => nom::Err::Failure(e.into()),
                 nom::Err::Incomplete(e) => nom::Err::Incomplete(e),
             })

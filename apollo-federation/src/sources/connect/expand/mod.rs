@@ -203,6 +203,7 @@ mod helpers {
     use super::visitors::SchemaVisitor;
     use super::FieldAndSelection;
     use crate::error::FederationError;
+    use crate::internal_error;
     use crate::link::spec::Identity;
     use crate::link::Link;
     use crate::schema::position::InterfaceFieldDefinitionPosition;
@@ -222,7 +223,9 @@ mod helpers {
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::PathSelection;
     use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
+    use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
     use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
     use crate::supergraph::new_empty_fed_2_subgraph_schema;
@@ -240,6 +243,9 @@ mod helpers {
 
         /// The name of the @key directive, as known in the subgraph
         key_name: Name,
+
+        /// The name of the @interfaceObject directive, as known in the subgraph
+        interface_object_name: Name,
 
         /// The original schema that contains connect directives
         original_schema: &'a ValidFederationSchema,
@@ -271,6 +277,12 @@ mod helpers {
                 .and_then(|m| m.for_identity(&Identity::federation_identity()))
                 .map(|f| f.directive_name_in_schema(&KEY_DIRECTIVE_NAME))
                 .unwrap_or(KEY_DIRECTIVE_NAME);
+            let interface_object_name = subgraph
+                .schema
+                .metadata()
+                .and_then(|m| m.for_identity(&Identity::federation_identity()))
+                .map(|f| f.directive_name_in_schema(&INTF_OBJECT_DIRECTIVE_NAME))
+                .unwrap_or(INTF_OBJECT_DIRECTIVE_NAME);
             let extra_excluded = [EXTERNAL_DIRECTIVE_NAME, REQUIRES_DIRECTIVE_NAME]
                 .into_iter()
                 .map(|d| {
@@ -291,6 +303,7 @@ mod helpers {
                 connect_name,
                 source_name,
                 key_name,
+                interface_object_name,
                 original_schema: &subgraph.schema,
                 directive_deny_list,
             }
@@ -442,7 +455,7 @@ mod helpers {
             output_type_name: Name,
         ) -> Result<(), FederationError> {
             let parent_type = self.original_schema.get_type(parent_type_name)?;
-            let output_type = to_schema.get_type(output_type_name)?;
+            let output_type = to_schema.get_type(output_type_name.clone())?;
 
             // The body of the request might include references to input arguments / sibling fields
             // that will need to be handled, so we extract any referenced variables now
@@ -603,10 +616,59 @@ mod helpers {
                     }
                 }?;
             } else {
-                // TODO: if the type has @interfaceObject and it doesn't have a key at this point
-                // we'll need to add a key — this is a requirement for using @interfaceObject.
-                // most likely we'll just copy over keys from the original supergraph, but we
-                // need to think through the implications of that.
+                self.copy_interface_object_keys(output_type_name, to_schema)?;
+            }
+
+            Ok(())
+        }
+
+        /// If the type has @interfaceObject and it doesn't have a key at this point
+        /// we'll need to add a key — this is a requirement for using @interfaceObject.
+        /// For now we'll just copy over keys from the original supergraph as resolvable: false
+        /// but we need to think through the implications of that.
+        fn copy_interface_object_keys(
+            &self,
+            type_name: Name,
+            to_schema: &mut FederationSchema,
+        ) -> Result<(), FederationError> {
+            let Some(original_output_type) = self.original_schema.schema().get_object(&type_name)
+            else {
+                return Ok(());
+            };
+
+            let is_interface_object = original_output_type
+                .directives
+                .iter()
+                .any(|d| d.name == self.interface_object_name);
+
+            if is_interface_object {
+                let pos = ObjectTypeDefinitionPosition {
+                    type_name: original_output_type.name.clone(),
+                };
+
+                for key in original_output_type
+                    .directives
+                    .iter()
+                    .filter(|d| d.name == self.key_name)
+                {
+                    let key_fields = key
+                        .argument_by_name("fields", self.original_schema.schema())
+                        .map_err(|_| internal_error!("@key(fields:) argument missing"))?;
+                    let key = Directive {
+                        name: key.name.clone(),
+                        arguments: vec![
+                            Node::new(Argument {
+                                name: name!("fields"),
+                                value: key_fields.clone(),
+                            }),
+                            Node::new(Argument {
+                                name: name!("resolvable"),
+                                value: Node::new(Value::Boolean(false)),
+                            }),
+                        ],
+                    };
+                    pos.insert_directive(to_schema, Component::new(key))?;
+                }
             }
 
             Ok(())
@@ -765,7 +827,7 @@ mod helpers {
         selection
             .external_var_paths()
             .into_iter()
-            .flat_map(|var_path| var_path.var_name_and_nested_keys()?.try_into().ok())
+            .flat_map(PathSelection::variable_reference)
     }
 
     // TODO: contribute some code to `position.rs` to make those types more flexible rather than adding it here

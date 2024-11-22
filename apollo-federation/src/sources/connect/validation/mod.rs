@@ -34,7 +34,6 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
@@ -68,7 +67,6 @@ use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
-use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
@@ -181,6 +179,8 @@ fn should_check_seen_fields(messages: &[Message]) -> bool {
     !messages.iter().any(|error| {
         // some invariant is violated, so let's just stop here
         error.code == Code::GraphQLError
+            // an invalid json selection means we can't visit the fields in the selection
+            || error.code == Code::InvalidJsonSelection
             // the selection visitor emits these errors and stops visiting, so there will probably be fields we haven't visited
             || error.code == Code::SelectedFieldNotFound
             || error.code == Code::GroupSelectionIsNotObject
@@ -270,11 +270,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
         .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
         .collect_vec();
 
-    let disallowed_imports = [
-        INTF_OBJECT_DIRECTIVE_NAME,
-        CONTEXT_DIRECTIVE_NAME,
-        FROM_CONTEXT_DIRECTIVE_NAME,
-    ];
+    let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];
     fed_link
         .imports
         .into_iter()
@@ -387,18 +383,6 @@ fn parse_url<Coordinate: Display + Copy>(
             .collect(),
     })?;
     http::url::validate_base_url(&url, coordinate, value, str_value, schema)
-}
-
-fn require_value_is_str<'a, Coordinate: Display>(
-    value: &'a Node<Value>,
-    coordinate: Coordinate,
-    sources: &SourceMap,
-) -> Result<&'a str, Message> {
-    value.as_str().ok_or_else(|| Message {
-        code: Code::GraphQLError,
-        message: format!("The value for {coordinate} must be a string."),
-        locations: value.line_column_range(sources).into_iter().collect(),
-    })
 }
 
 /// For an object type, get all the keys that are resolvable.

@@ -20,10 +20,10 @@ use thiserror::Error;
 use url::Url;
 
 use super::form_encoding::encode_json_as_form;
-use super::plugin::serialize_request;
-use super::plugin::ConnectorDebugHttpRequest;
-use crate::plugins::connectors::plugin::ConnectorContext;
-use crate::plugins::connectors::plugin::SelectionData;
+use crate::plugins::connectors::plugin::debug::serialize_request;
+use crate::plugins::connectors::plugin::debug::ConnectorContext;
+use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
+use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
 
