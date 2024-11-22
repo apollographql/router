@@ -1,3 +1,4 @@
+use core::slice::SlicePattern;
 use std::env;
 use std::env::consts::ARCH;
 use std::sync::Arc;
@@ -130,30 +131,14 @@ impl GaugeStore {
                     .u64_observable_gauge("apollo.router.schema")
                     .with_description("Details about the current in-use schema")
                     .with_callback(|gauge| {
-                        // TODO: get launch_id.
                         // NOTE: this is a fixed gauge. We only care about observing the included
                         // attributes.
-                        gauge.observe(
-                            1,
-                            &[
-                                KeyValue::new("launch_id", ""),
-                                KeyValue::new("schema_hash", opts.supergraph_schema_hash),
-                            ],
-                        )
-                    })
-                    .init(),
-            )
-        }
-        {
-            gauges.push(
-                meter
-                    .u64_observable_gauge("apollo.router.persisted_queries")
-                    .with_description("Details about the current persisted queries")
-                    .with_callback(|gauge| {
-                        // TODO: get persisted_queries_version.
-                        // NOTE: this is a fixed gauge. We only care about observing the included
-                        // attributes.
-                        gauge.observe(1, &[KeyValue::new("persisted_queries_version", "")])
+                        let mut attributes: Vec<KeyValue> =
+                            vec![KeyValue::new("schema_hash", opts.supergraph_schema_hash)];
+                        if let Some(launch_id) = opts.launch_id {
+                            attributes.push(KeyValue::new("launch_id", launch_id));
+                        }
+                        gauge.observe(1, attributes.as_slice())
                     })
                     .init(),
             )
@@ -164,6 +149,8 @@ impl GaugeStore {
 
 #[derive(Default)]
 struct GaugeOptions {
+    launch_id: Option<String>,
+
     // Router Supergraph Schema Hash (SHA256 of the SDL)
     supergraph_schema_hash: String,
 }
@@ -188,6 +175,7 @@ impl PluginPrivate for FleetDetector {
         }
 
         let gauge_options = GaugeOptions {
+            launch_id: None,
             supergraph_schema_hash: (*&plugin).supergraph_schema_id.to_string(),
         };
 

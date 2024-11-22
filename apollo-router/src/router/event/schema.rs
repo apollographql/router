@@ -81,7 +81,14 @@ impl SchemaSource {
                 });
                 stream::once(future::ready(update_schema)).boxed()
             }
-            SchemaSource::Stream(stream) => stream.map(UpdateSchema).boxed(),
+            SchemaSource::Stream(stream) => stream
+                .map(|sdl| {
+                    UpdateSchema(SchemaState {
+                        sdl,
+                        launch_id: None,
+                    })
+                })
+                .boxed(),
             #[allow(deprecated)]
             SchemaSource::File {
                 path,
@@ -106,7 +113,10 @@ impl SchemaSource {
                                         async move {
                                             match tokio::fs::read_to_string(&path).await {
                                                 Ok(schema) => {
-                                                    let update_schema = UpdateSchema(SchemaState{sdl:schema,launch_id:None});
+                                                    let update_schema = UpdateSchema(SchemaState {
+                                                        sdl: schema,
+                                                        launch_id: None,
+                                                    });
                                                     Some(update_schema)
                                                 }
                                                 Err(err) => {
@@ -118,7 +128,10 @@ impl SchemaSource {
                                     })
                                     .boxed()
                             } else {
-                                let update_schema = UpdateSchema(SchemaState{sdl:schema,launch_id:None});
+                                let update_schema = UpdateSchema(SchemaState {
+                                    sdl: schema,
+                                    launch_id: None,
+                                });
                                 stream::once(future::ready(update_schema)).boxed()
                             }
                         }
