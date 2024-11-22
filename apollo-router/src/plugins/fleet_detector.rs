@@ -188,7 +188,7 @@ impl PluginPrivate for FleetDetector {
         }
 
         let gauge_options = GaugeOptions {
-            supergraph_schema_hash: (*&plugin).supergraph_schema_id.clone(),
+            supergraph_schema_hash: (*&plugin).supergraph_schema_id.to_string(),
         };
 
         Ok(FleetDetector {

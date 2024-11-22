@@ -19,6 +19,8 @@ pub(crate) mod license_stream;
 pub(crate) mod persisted_queries_manifest_stream;
 pub(crate) mod schema_stream;
 
+pub mod schema;
+
 const GCP_URL: &str = "https://uplink.api.apollographql.com";
 const AWS_URL: &str = "https://aws.uplink.api.apollographql.com";
 

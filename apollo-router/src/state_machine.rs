@@ -539,7 +539,7 @@ where
                 NoMoreConfiguration => state.no_more_configuration().await,
                 UpdateSchema(schema) => {
                     state
-                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None)
+                        .update_inputs(&mut self, Some(Arc::new(schema.sdl)), None, None)
                         .await
                 }
                 NoMoreSchema => state.no_more_schema().await,
@@ -612,11 +612,15 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::RouterRequest;
+    use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
 
-    fn example_schema() -> String {
-        include_str!("testdata/supergraph.graphql").to_owned()
+    fn example_schema() -> SchemaState {
+        SchemaState {
+            sdl: include_str!("testdata/supergraph.graphql").to_owned(),
+            launch_id: None,
+        }
     }
 
     macro_rules! assert_matches {
@@ -870,7 +874,10 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     UpdateLicense(LicenseState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
@@ -893,9 +900,15 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
@@ -916,7 +929,10 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     UpdateLicense(LicenseState::default()),
                     UpdateLicense(LicenseState::Licensed),
                     Shutdown
@@ -1039,7 +1055,10 @@ mod tests {
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
@@ -1097,7 +1116,10 @@ mod tests {
                             .build()
                             .unwrap()
                     ),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ]),
             )
