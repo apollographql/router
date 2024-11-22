@@ -55,7 +55,7 @@ impl DemandControlledSchema {
 
                         if let Some(cost_directive) = CostSpecDefinition::cost_directive_from_field(
                             &schema,
-                            &field_definition,
+                            field_definition,
                             field_type,
                         ) {
                             field_cost_directives.insert(field_name.clone(), cost_directive);
@@ -64,7 +64,7 @@ impl DemandControlledSchema {
                         if let Some(list_size_directive) =
                             CostSpecDefinition::list_size_directive_from_field_definition(
                                 &schema,
-                                &field_definition,
+                                field_definition,
                             )
                         {
                             field_list_size_directives
@@ -94,7 +94,7 @@ impl DemandControlledSchema {
 
                         if let Some(cost_directive) = CostSpecDefinition::cost_directive_from_field(
                             &schema,
-                            &field_definition,
+                            field_definition,
                             field_type,
                         ) {
                             field_cost_directives.insert(field_name.clone(), cost_directive);
@@ -103,7 +103,7 @@ impl DemandControlledSchema {
                         if let Some(list_size_directive) =
                             CostSpecDefinition::list_size_directive_from_field_definition(
                                 &schema,
-                                &field_definition,
+                                field_definition,
                             )
                         {
                             field_list_size_directives

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveList;
@@ -10,7 +12,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use lazy_static::lazy_static;
-use std::collections::HashSet;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -302,7 +303,7 @@ impl ListSizeDirective {
         directive_name: &Name,
         definition: &FieldDefinition,
     ) -> Option<Self> {
-        let directive = definition.directives.get(&directive_name);
+        let directive = definition.directives.get(directive_name);
         if let Some(directive) = directive {
             let assumed_size = directive
                 .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
