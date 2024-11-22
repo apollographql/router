@@ -1779,7 +1779,7 @@ impl FetchDependencyGraph {
             .graph
             .node_weight_mut(node_index)
             .ok_or_else(|| FederationError::internal("Node unexpectedly missing"))?;
-        let conditions = handled_conditions.update_with(&node.selection_set.conditions);
+        let conditions = node.selection_set.conditions.update_with(&handled_conditions);
         let new_handled_conditions = conditions.clone().merge(handled_conditions);
 
         let processed = processor.on_node(
