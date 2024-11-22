@@ -1412,3 +1412,43 @@ fn rebase_non_intersecting_without_dropping_inline_fragment_due_to_directive() {
     "###
     );
 }
+
+#[test]
+fn field_condition_propagation_to_parent_node() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+                test: T!
+            }
+
+            type T {
+                id: ID!
+                name: String!
+                x: Int!
+            }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query($v1: Boolean!) {
+              test @include(if: $v1) {
+                  id @include(if: false)
+              }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Include(if: $v1) {
+        Fetch(service: "Subgraph1") {
+          {
+            test {
+              id
+            }
+          }
+        },
+      },
+    }
+    "###
+    );
+}
