@@ -1437,18 +1437,6 @@ fn field_condition_propagation_to_parent_node() {
               }
           }
         "#,
-        @r###"
-    QueryPlan {
-      Include(if: $v1) {
-        Fetch(service: "Subgraph1") {
-          {
-            test {
-              id
-            }
-          }
-        },
-      },
-    }
-    "###
+        @"QueryPlan {}"
     );
 }

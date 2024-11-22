@@ -424,14 +424,20 @@ impl Selection {
             Ok(Conditions::Boolean(false))
         } else {
             match self {
-                Selection::Field(_) => {
-                    // The sub-selections of this field don't affect whether we should query this
-                    // field, so we explicitly do not merge them in.
-                    //
-                    // PORT_NOTE: The JS codebase merges the sub-selections' conditions in with the
-                    // field's conditions when field's selections are non-boolean. This is arguably
-                    // a bug, so we've fixed it here.
-                    Ok(self_conditions)
+                Selection::Field(field) => {
+                    // If it's `true`, then it means that element is included. If it is a field,
+                    // then we should also stop and return `true`, because no matter what the
+                    // sub-selection is, we need to get that field.
+                    // Note: The `Boolean(false)` case has been already checked above. Thus, this
+                    //       case is really checking for `Boolean(true)`.
+                    if matches!(self_conditions, Conditions::Boolean(_)) {
+                        return Ok(self_conditions);
+                    }
+                    let Some(ref selection_set) = field.selection_set else {
+                        // No subselection set => condition won't change.
+                        return Ok(self_conditions);
+                    };
+                    Ok(self_conditions.merge(selection_set.conditions()?))
                 }
                 Selection::InlineFragment(inline) => {
                     Ok(self_conditions.merge(inline.selection_set.conditions()?))
