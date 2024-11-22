@@ -145,7 +145,9 @@ fn make_uri(
                 .map_err(HttpJsonTransportError::TemplateGenerationError)?,
         );
 
-    let query_params = template.interpolate_query(inputs);
+    let query_params = template
+        .interpolate_query(inputs)
+        .map_err(HttpJsonTransportError::TemplateGenerationError)?;
     if !query_params.is_empty() {
         url.query_pairs_mut().extend_pairs(query_params);
     }
@@ -229,8 +231,8 @@ pub(crate) enum HttpJsonTransportError {
     FormBodySerialization(&'static str),
     /// Error building URI: {0:?}
     InvalidUrl(url::ParseError),
-    /// Could not generate path from inputs: {0}
-    TemplateGenerationError(String),
+    /// Could not generate URI from inputs: {0}
+    TemplateGenerationError(&'static str),
     /// Either a source or a fully qualified URL must be provided to `@connect`
     NoBaseUrl,
 }
@@ -333,13 +335,12 @@ mod test_make_uri {
 
         assert_snapshot!(
             make_uri(None, &template, &Default::default())
-                .err()
                 .unwrap()
-                .to_string(),
-            @"Could not generate path from inputs: Path parameter {$this.user_id} was missing one or more values in {}"
+                .as_str(),
+            @"http://localhost/users/?a=&e="
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -351,10 +352,10 @@ mod test_make_uri {
             )
             .unwrap()
             .to_string(),
-            "http://localhost/users/123?a=456&e=abc"
+            @"http://localhost/users/123?a=456&e=abc"
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -364,11 +365,11 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .to_string(),
-            "http://localhost/users/123"
+            .as_str(),
+            @"http://localhost/users/123?a=&e="
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -379,8 +380,8 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .to_string(),
-            "http://localhost/users/123?a=456"
+            .as_str(),
+            @"http://localhost/users/123?a=456&e="
         );
 
         assert_eq!(
@@ -428,7 +429,7 @@ mod test_make_uri {
             "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C8%5D"
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -445,10 +446,10 @@ mod test_make_uri {
             )
             .unwrap()
             .as_str(),
-            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6",
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C%5D",
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -465,10 +466,10 @@ mod test_make_uri {
             )
             .unwrap()
             .as_str(),
-            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6",
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C8%5D",
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -483,7 +484,7 @@ mod test_make_uri {
             )
             .unwrap()
             .as_str(),
-            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6",
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C%5D",
         );
 
         assert_snapshot!(
@@ -496,10 +497,9 @@ mod test_make_uri {
                     "z" => 3
                 }
             )
-            .err()
             .unwrap()
-            .to_string(),
-            @r###"Could not generate path from inputs: Path parameter xyz({$this.x},{$this.y},{$this.z}) was missing one or more values in {"$this.y": Number(2), "$this.z": Number(3)}"###,
+            .as_str(),
+            @"http://localhost/locations/xyz(,2,3)?required=%2C%3B&optional=%5B%2C%5D",
         );
 
         assert_snapshot!(
@@ -512,10 +512,9 @@ mod test_make_uri {
                     // "z" => 3,
                 }
             )
-            .err()
             .unwrap()
-            .to_string(),
-            @r###"Could not generate path from inputs: Path parameter xyz({$this.x},{$this.y},{$this.z}) was missing one or more values in {"$this.x": Number(1), "$this.y": Number(2)}"###
+            .as_str(),
+            @"http://localhost/locations/xyz(1,2,)?required=%2C%3B&optional=%5B%2C%5D"
         );
 
         assert_snapshot!(
@@ -533,14 +532,14 @@ mod test_make_uri {
             )
             .unwrap()
             .to_string(),
-            @"http://localhost/locations/xyz(1,2,3)"
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C%3B6&optional=%5B%2C%5D"
         );
 
         let line_template = "http://localhost/line/{$this.p1.x},{$this.p1.y},{$this.p1.z}/{$this.p2.x},{$this.p2.y},{$this.p2.z}"
             .parse()
             .unwrap();
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &line_template,
@@ -555,7 +554,7 @@ mod test_make_uri {
             )
             .unwrap()
             .as_str(),
-            "http://localhost/line/1,2,3/4,5,6"
+            @"http://localhost/line/1,2,3/4,5,6"
         );
 
         assert_snapshot!(
@@ -571,10 +570,9 @@ mod test_make_uri {
                     // "p2.z" => 6,
                 }
             )
-            .err()
             .unwrap()
-            .to_string(),
-            @r###"Could not generate path from inputs: Path parameter {$this.p2.x},{$this.p2.y},{$this.p2.z} was missing one or more values in {"$this.p1.x": Number(1), "$this.p1.y": Number(2), "$this.p1.z": Number(3), "$this.p2.x": Number(4), "$this.p2.y": Number(5)}"###
+            .as_str(),
+            @"http://localhost/line/1,2,3/4,5,"
         );
 
         assert_snapshot!(
@@ -590,10 +588,9 @@ mod test_make_uri {
                     "p2.z" => 6
                 }
             )
-            .err()
             .unwrap()
-            .to_string(),
-            @r###"Could not generate path from inputs: Path parameter {$this.p1.x},{$this.p1.y},{$this.p1.z} was missing one or more values in {"$this.p1.x": Number(1), "$this.p1.z": Number(3), "$this.p2.x": Number(4), "$this.p2.y": Number(5), "$this.p2.z": Number(6)}"###
+            .as_str(),
+            @"http://localhost/line/1,,3/4,5,6"
         );
     }
 
