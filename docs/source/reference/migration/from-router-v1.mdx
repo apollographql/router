@@ -35,6 +35,13 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 
 ## Removed features in GraphOS Router v2.x
 
+### Support for Scaffold
+<!-- PR: https://github.com/apollographql/router/pull/6274 -->
+
+In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
+
+Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
+
 ### `--apollo-uplink-poll-interval`
 <!-- PR: https://github.com/apollographql/router/pull/6268 -->
 

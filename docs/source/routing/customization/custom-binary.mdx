@@ -22,47 +22,23 @@ To compile the router, you need to have the following installed:
 * [Node.js 16.9.1 or later](https://nodejs.org/en/download/)
 * [CMake 3.5.1 or later](https://cmake.org/download/)
 
-After you install the above, also install the `cargo-xtask` and `cargo-scaffold` crates:
-
-```sh
-cargo install cargo-xtask
-cargo install cargo-scaffold
-```
-
 ## 1. Create a new project
 
-1. Use the `cargo-scaffold` command to create a project for your custom router:
+1. Use the `cargo new` command to create a project for your custom router:
 
    ```bash
-   cargo-scaffold scaffold https://github.com/apollographql/router.git -r apollo-router-scaffold/templates/base -t main
+   cargo new --bin starstuff
    ```
 
-2. The `cargo-scaffold` command prompts you for some configuration settings. For the purposes of this tutorial, set your project's name to `starstuff`.
+For the purposes of this tutorial, set your project's name to `starstuff`.
 
-3. After your project is created, change to the `starstuff` directory:
+2. After your project is created, change to the `starstuff` directory:
 
    ```bash
    cd starstuff
    ```
 
-The generated project has the following layout:
-
-```bash
-starstuff
-├── Cargo.toml       # Dependencies are declared here
-├── README.md
-├── router.yaml      # Router yaml config
-├── src
-│   ├── main.rs      # Entry point
-│   └── plugins      # Custom plugins are located here
-│       └── mod.rs
-└── xtask            # Build support files
-    ├── Cargo.toml
-    └── src
-        └── main.rs
-```
-
-The router uses an auto-discovery mechanism for plugins, so any plugins you add via dependency are automatically available to the router at runtime.
+Write the source code for your custom binary.
 
 ## 2. Compile the router
 
@@ -104,30 +80,9 @@ If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_R
 
 ## 4. Create a plugin
 
-1. From within your project directory, scaffold a new plugin with the following command:
+1. From within your project directory, implement your new plugin.
 
-   ```bash
-   cargo router plugin create hello_world
-   ```
-
-2. The command prompts you to choose a starting template:
-
-   ```bash {2}
-   Select a plugin template:
-   > "basic"
-   "auth"
-   "tracing"
-   ```
-
-   The available templates are:
-
-   * `basic` - a barebones plugin
-   * `auth` - an authentication plugin for making an external call
-   * `tracing` - a telemetry plugin that adds a custom metric span and a log message
-
-   For the purposes of this tutorial, choose `basic`.
-
-4. Add configuration options for the created plugin to your `router.yaml` file:
+2. Add configuration options for the created plugin to your `router.yaml` file:
 
    ```yaml  title="router.yaml"
    plugins:
@@ -135,7 +90,7 @@ If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_R
        message: "starting my plugin"
    ```
 
-5. Run the router again:
+3. Run the router again:
 
     ```bash
     cargo run -- --hot-reload --config router.yaml --supergraph supergraph-schema.graphql
@@ -148,16 +103,6 @@ If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_R
     ```
 
 Nice work! You now have a custom router binary with an associated plugin. Next, you can extend the plugin with the functionality you need or add more plugins.
-
-## Removing a plugin
-
-To remove a previously added plugin from your router project, use the following command:
-
-```bash
-cargo router plugin remove hello_world
-```
-
-Note that depending on the structure of your plugin, the command might fail to remove all of its associated files.
 
 ## Memory allocator
 
@@ -176,38 +121,6 @@ apollo-router = {version = "[…]", default-features = false}
 If you make a library crate, also specify `default-features = false`
 in order to leave the choice open for the eventual executable crate.
 (Cargo default features are only disabled if *all* dependents specify `default-features = false`.)
-
-## Docker
-
-You can use the provided [Dockerfile](https://github.com/apollographql/router/tree/main/apollo-router-scaffold/templates/base/Dockerfile) to build a release container.
-
-Make sure your router is configured to listen to `0.0.0.0` so you can query it from outside the container:
-
-```yml
- supergraph:
-   listen: 0.0.0.0:4000
-```
-
-Use your `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables to run the router in managed federation.
-
-   ```bash
-      docker build -t my_custom_router .
-      docker run -e APOLLO_KEY="your apollo key" -e APOLLO_GRAPH_REF="your apollo graph ref" my_custom_router
-   ```
-
-Otherwise add a `COPY` step to the Dockerfile, and edit the entrypoint:
-
-```Dockerfile
-# Copy configuration for docker image
-COPY router.yaml /dist/config.yaml
-# Copy supergraph for docker image
-COPY my_supergraph.graphql /dist/supergraph.graphql
-
-# [...] and change the entrypoint
-
-# Default executable is the router
-ENTRYPOINT ["/dist/router", "-s", "/dist/supergraph.graphql"]
-```
 
 ## Related topics
 

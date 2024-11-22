@@ -173,7 +173,8 @@ impl Prepare {
         Ok(())
     }
 
-    /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
+    /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml`
+    /// files.
     fn update_cargo_tomls(&self, version: &Version) -> Result<String> {
         println!("updating Cargo.toml files");
         fn bump(component: &str) -> Result<()> {
@@ -238,24 +239,12 @@ impl Prepare {
             .to_string();
 
         if let Version::Nightly = version {
-            println!("Not changing `apollo-router-scaffold` or `apollo-router-benchmarks` because of nightly build mode.");
+            println!("Not changing `apollo-router-benchmarks` because of nightly build mode.");
         } else {
-            let packages = vec!["apollo-router-scaffold", "apollo-router-benchmarks"];
+            let packages = vec!["apollo-router-benchmarks"];
             for package in packages {
                 cargo!(["set-version", &resolved_version, "--package", package])
             }
-            replace_in_file!(
-                "./apollo-router-scaffold/templates/base/Cargo.template.toml",
-                "^apollo-router\\s*=\\s*\"[^\"]+\"",
-                format!("apollo-router = \"{resolved_version}\"")
-            );
-            replace_in_file!(
-                "./apollo-router-scaffold/templates/base/xtask/Cargo.template.toml",
-                r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
-                format!(
-                    r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{resolved_version}" }}"#
-                )
-            );
         }
 
         Ok(resolved_version)
