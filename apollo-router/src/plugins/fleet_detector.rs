@@ -162,6 +162,7 @@ impl GaugeStore {
     }
 }
 
+#[derive(Default)]
 struct GaugeOptions {
     // Router Supergraph Schema Hash (SHA256 of the SDL)
     supergraph_schema_hash: String,
@@ -187,7 +188,7 @@ impl PluginPrivate for FleetDetector {
         }
 
         let gauge_options = GaugeOptions {
-            supergraph_schema_hash: (*plugin).supergraph_schema_id.to_string(),
+            supergraph_schema_hash: (*&plugin).supergraph_schema_id.clone(),
         };
 
         Ok(FleetDetector {
