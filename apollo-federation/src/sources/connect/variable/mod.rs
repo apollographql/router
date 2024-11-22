@@ -131,7 +131,7 @@ pub enum Namespace {
 }
 
 impl Namespace {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Args => "$args",
             Self::Config => "$config",

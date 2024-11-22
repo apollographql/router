@@ -46,12 +46,18 @@ impl RequestInputs {
 
         // Not all connectors reference $args
         if variables_used.contains(&Namespace::Args) {
-            map.insert("$args".to_string(), Value::Object(self.args.clone()));
+            map.insert(
+                Namespace::Args.as_str().into(),
+                Value::Object(self.args.clone()),
+            );
         }
 
         // $this only applies to fields on entity types (not Query or Mutation)
         if variables_used.contains(&Namespace::This) {
-            map.insert("$this".to_string(), Value::Object(self.this.clone()));
+            map.insert(
+                Namespace::This.as_str().into(),
+                Value::Object(self.this.clone()),
+            );
         }
 
         // $context could be a large object, so we only convert it to JSON
@@ -62,21 +68,24 @@ impl RequestInputs {
                 .iter()
                 .map(|r| (r.key().as_str().into(), r.value().clone()))
                 .collect();
-            map.insert("$context".to_string(), Value::Object(context));
+            map.insert(Namespace::Context.as_str().into(), Value::Object(context));
         }
 
         // $config doesn't change unless the schema reloads, but we can avoid
         // the allocation if it's unused.
         if variables_used.contains(&Namespace::Config) {
             if let Some(config) = config {
-                map.insert("$config".to_string(), json!(config));
+                map.insert(Namespace::Config.as_str().into(), json!(config));
             }
         }
 
         // $status is available only for response mapping
         if variables_used.contains(&Namespace::Status) {
             if let Some(status) = status {
-                map.insert("$status".to_string(), Value::Number(status.into()));
+                map.insert(
+                    Namespace::Status.as_str().into(),
+                    Value::Number(status.into()),
+                );
             }
         }
 
