@@ -76,6 +76,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                 range: Some(
                                     2..8,
                                 ),
+                                output_shape: None,
                             },
                         ),
                     ),
@@ -121,6 +122,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                 range: Some(
                                                     15..21,
                                                 ),
+                                                output_shape: None,
                                             },
                                         ),
                                     ),
@@ -128,6 +130,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                 range: Some(
                                     11..23,
                                 ),
+                                output_shape: None,
                             },
                         ),
                     ),
@@ -135,6 +138,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                 range: Some(
                     0..23,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
