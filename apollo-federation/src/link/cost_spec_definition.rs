@@ -174,14 +174,14 @@ impl CostSpecDefinition {
     /// prefixes such as `@federation__cost`. This checks the linked cost specification, if there is one, and falls back
     /// to the federation spec.
     fn cost_directive_name(schema: &FederationSchema) -> Result<Option<Name>, FederationError> {
-        if let Some(name) = Self::for_federation_schema(&schema)?.and_then(|spec| {
-            spec.directive_name_in_schema(&schema, &COST_DIRECTIVE_NAME)
+        if let Some(name) = Self::for_federation_schema(schema)?.and_then(|spec| {
+            spec.directive_name_in_schema(schema, &COST_DIRECTIVE_NAME)
                 .ok()
                 .flatten()
         }) {
             Ok(Some(name))
-        } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(&schema) {
-            fed_spec.directive_name_in_schema(&schema, &COST_DIRECTIVE_NAME)
+        } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
+            fed_spec.directive_name_in_schema(schema, &COST_DIRECTIVE_NAME)
         } else {
             Ok(None)
         }
@@ -193,14 +193,14 @@ impl CostSpecDefinition {
     fn list_size_directive_name(
         schema: &FederationSchema,
     ) -> Result<Option<Name>, FederationError> {
-        if let Some(name) = Self::for_federation_schema(&schema)?.and_then(|spec| {
-            spec.directive_name_in_schema(&schema, &LIST_SIZE_DIRECTIVE_NAME)
+        if let Some(name) = Self::for_federation_schema(schema)?.and_then(|spec| {
+            spec.directive_name_in_schema(schema, &LIST_SIZE_DIRECTIVE_NAME)
                 .ok()
                 .flatten()
         }) {
             Ok(Some(name))
-        } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(&schema) {
-            fed_spec.directive_name_in_schema(&schema, &LIST_SIZE_DIRECTIVE_NAME)
+        } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
+            fed_spec.directive_name_in_schema(schema, &LIST_SIZE_DIRECTIVE_NAME)
         } else {
             Ok(None)
         }
