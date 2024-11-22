@@ -132,8 +132,9 @@ pub(crate) struct VariableCondition {
 }
 
 impl Conditions {
-    /// Create conditions from a map of variable conditions. If empty, instead returns a
-    /// condition that always evaluates to true.
+    /// Create conditions from a map of variable conditions.
+    ///
+    /// If empty, instead returns a condition that always evaluates to true.
     fn from_variables(map: IndexMap<Name, ConditionKind>) -> Self {
         if map.is_empty() {
             Self::always()
@@ -206,7 +207,27 @@ impl Conditions {
         Ok(Self::from_variables(variables))
     }
 
-    // TODO(@goto-bus-stop): what exactly is the difference between this and `Self::merge`?
+    /// Returns a new set of conditions that omits those conditions that are already handled by the
+    /// argument.
+    ///
+    /// For example, if we have a selection set like so:
+    /// ```graphql
+    /// a @skip(if: $a) {
+    ///   b @skip(if: $a) @include(if: $b) {
+    ///     c
+    ///   }
+    /// }
+    /// ```
+    /// Then we may call `b.conditions().update_with( a.conditions() )`, and get:
+    /// ```graphql
+    /// a @skip(if: $a) {
+    ///   b @include(if: $b) {
+    ///     c
+    ///   }
+    /// }
+    /// ```
+    /// because the `@skip(if: $a)` condition in `b` must always match, as implied by
+    /// being nested inside `a`.
     pub(crate) fn update_with(&self, handled_conditions: &Self) -> Self {
         match (self, handled_conditions) {
             (Conditions::Boolean(_), _) | (_, Conditions::Boolean(_)) => self.clone(),
