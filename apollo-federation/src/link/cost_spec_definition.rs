@@ -1,11 +1,16 @@
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use lazy_static::lazy_static;
+use std::collections::HashSet;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -19,8 +24,14 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
-pub const COST_DIRECTIVE_NAME: Name = name!("cost");
-pub const LIST_SIZE_DIRECTIVE_NAME: Name = name!("listSize");
+const COST_DIRECTIVE_NAME: Name = name!("cost");
+const COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
+const LIST_SIZE_DIRECTIVE_NAME: Name = name!("listSize");
+const LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME: Name = name!("assumedSize");
+const LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME: Name = name!("slicingArguments");
+const LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME: Name = name!("sizedFields");
+const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
+    name!("requireOneSlicingArgument");
 
 #[derive(Clone)]
 pub struct CostSpecDefinition {
@@ -130,7 +141,7 @@ impl CostSpecDefinition {
 
     propagate_demand_control_directives!(
         propagate_demand_control_directives,
-        apollo_compiler::ast::DirectiveList,
+        DirectiveList,
         Node::new
     );
     propagate_demand_control_directives_to_position!(
@@ -149,7 +160,7 @@ impl CostSpecDefinition {
         ScalarTypeDefinitionPosition
     );
 
-    pub(crate) fn for_federation_schema(
+    fn for_federation_schema(
         schema: &FederationSchema,
     ) -> Result<Option<&'static Self>, FederationError> {
         let cost_link = schema
@@ -160,11 +171,11 @@ impl CostSpecDefinition {
         Ok(cost_spec)
     }
 
-    /// Returns the name of the `@cost` directive in the given schema. This attempts to find the imported cost
-    /// specification and to use the imported or default name from the imported link, as is available. If the
-    /// cost specification is not directly imported, this will return the cost directive name from the
-    /// federation specification.
-    pub fn cost_directive_name(schema: &Schema) -> Result<Option<Name>, FederationError> {
+    /// Returns the name of the `@cost` directive in the given schema, accounting for import aliases or specification name
+    /// prefixes such as `@federation__cost`. This checks the linked cost specification, if there is one, and falls back
+    /// to the federation spec.
+    fn cost_directive_name(schema: &Schema) -> Result<Option<Name>, FederationError> {
+        // TODO: Update FederationSchema to take Arc<Schema> so we don't have to clone
         let schema = FederationSchema::new(schema.clone())?;
         if let Some(name) = Self::for_federation_schema(&schema)?.and_then(|spec| {
             spec.directive_name_in_schema(&schema, &COST_DIRECTIVE_NAME)
@@ -179,11 +190,11 @@ impl CostSpecDefinition {
         }
     }
 
-    /// Returns the name of the `@listSize` directive in the given schema. This attempts to find the imported cost
-    /// specification and to use the imported or default name from the imported link, as is available. If the
-    /// cost specification is not directly imported, this will return the listSize directive name from the
-    /// federation specification.
-    pub fn list_size_directive_name(schema: &Schema) -> Result<Option<Name>, FederationError> {
+    /// Returns the name of the `@listSize` directive in the given schema, accounting for import aliases or specification name
+    /// prefixes such as `@federation__listSize`. This checks the linked cost specification, if there is one, and falls back
+    /// to the federation spec.
+    fn list_size_directive_name(schema: &Schema) -> Result<Option<Name>, FederationError> {
+        // TODO: Update FederationSchema to take Arc<Schema> so we don't have to clone
         let schema = FederationSchema::new(schema.clone())?;
         if let Some(name) = Self::for_federation_schema(&schema)?.and_then(|spec| {
             spec.directive_name_in_schema(&schema, &LIST_SIZE_DIRECTIVE_NAME)
@@ -196,6 +207,36 @@ impl CostSpecDefinition {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn cost_directive_from_argument(
+        schema: &Schema,
+        argument: &InputValueDefinition,
+        ty: &ExtendedType,
+    ) -> Option<CostDirective> {
+        let directive_name = Self::cost_directive_name(schema).ok().flatten()?;
+        CostDirective::from_directives(&directive_name, &argument.directives).or(
+            CostDirective::from_schema_directives(&directive_name, ty.directives()),
+        )
+    }
+
+    pub fn cost_directive_from_field(
+        schema: &Schema,
+        field: &FieldDefinition,
+        ty: &ExtendedType,
+    ) -> Option<CostDirective> {
+        let directive_name = Self::cost_directive_name(schema).ok().flatten()?;
+        CostDirective::from_directives(&directive_name, &field.directives).or(
+            CostDirective::from_schema_directives(&directive_name, ty.directives()),
+        )
+    }
+
+    pub fn list_size_directive_from_field_definition(
+        schema: &Schema,
+        field: &FieldDefinition,
+    ) -> Option<ListSizeDirective> {
+        let directive_name = Self::list_size_directive_name(schema).ok().flatten()?;
+        ListSizeDirective::from_field_definition(&directive_name, field)
     }
 }
 
@@ -218,4 +259,89 @@ lazy_static! {
         ));
         definitions
     };
+}
+
+pub struct CostDirective {
+    weight: i32,
+}
+
+impl CostDirective {
+    pub fn weight(&self) -> f64 {
+        self.weight as f64
+    }
+
+    fn from_directives(directive_name: &Name, directives: &DirectiveList) -> Option<Self> {
+        directives
+            .get(directive_name)
+            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
+            .and_then(|weight| weight.to_i32())
+            .map(|weight| Self { weight })
+    }
+
+    fn from_schema_directives(
+        directive_name: &Name,
+        directives: &apollo_compiler::schema::DirectiveList,
+    ) -> Option<Self> {
+        directives
+            .get(directive_name)
+            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
+            .and_then(|weight| weight.to_i32())
+            .map(|weight| Self { weight })
+    }
+}
+
+pub struct ListSizeDirective {
+    pub assumed_size: Option<i32>,
+    pub slicing_argument_names: Option<HashSet<String>>,
+    pub sized_fields: Option<HashSet<String>>,
+    pub require_one_slicing_argument: bool,
+}
+
+impl ListSizeDirective {
+    pub fn from_field_definition(
+        directive_name: &Name,
+        definition: &FieldDefinition,
+    ) -> Option<Self> {
+        let directive = definition.directives.get(&directive_name);
+        if let Some(directive) = directive {
+            let assumed_size = directive
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
+                .and_then(|arg| arg.to_i32());
+            let slicing_argument_names = directive
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
+                .and_then(|arg| arg.as_list())
+                .map(|arg_list| {
+                    arg_list
+                        .iter()
+                        .flat_map(|arg| arg.as_str())
+                        .map(String::from)
+                        .collect()
+                });
+            let sized_fields = directive
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
+                .and_then(|arg| arg.as_list())
+                .map(|arg_list| {
+                    arg_list
+                        .iter()
+                        .flat_map(|arg| arg.as_str())
+                        .map(String::from)
+                        .collect()
+                });
+            let require_one_slicing_argument = directive
+                .specified_argument_by_name(
+                    &LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME,
+                )
+                .and_then(|arg| arg.to_bool())
+                .unwrap_or(true);
+
+            Some(Self {
+                assumed_size,
+                slicing_argument_names,
+                sized_fields,
+                require_one_slicing_argument,
+            })
+        } else {
+            None
+        }
+    }
 }

@@ -163,7 +163,7 @@ impl StaticCostCalculator {
             .schema
             .type_field_list_size_directive(parent_type, &field.name)
         {
-            Some(dir) => dir.with_field_and_variables(field, ctx.variables).map(Some),
+            Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
             None => Ok(None),
         }?;
         let instance_count = if !field.ty().is_list() {
