@@ -1305,3 +1305,143 @@ fn rebase_non_intersecting_without_dropping_inline_fragment_due_to_directive() {
     "###
     );
 }
+
+mod selection_condition_tests {
+    use apollo_federation::query_plan::query_planner::QueryPlanner;
+    use apollo_federation::schema::ValidFederationSchema;
+
+    fn test_planner() -> (ValidFederationSchema, QueryPlanner) {
+        planner!(
+            Subgraph1: r#"
+                type Query {
+                    test: T!
+                }
+
+                type T {
+                    id: ID!
+                    name: String!
+                    x: Int!
+                    t: T!
+                }
+            "#,
+        )
+    }
+
+    #[test]
+    fn false_condition_propagation_to_parent_selection() {
+        let planner = test_planner();
+        // A selection set becomes empty after removing infeasible conditions, however its
+        // parent selection should be retained.
+        assert_plan!(
+            &planner,
+            r#"
+            query($v1: Boolean!) {
+                test @include(if: $v1) {
+                    t @include(if: false) {
+                      id
+                    }
+                    t2: t @skip(if: $v1) {
+                      name
+                    }
+                }
+            }
+            "#,
+            @r###"
+        QueryPlan {
+          Include(if: $v1) {
+            Fetch(service: "Subgraph1") {
+              {
+                test {
+                  t {
+                    id
+                  }
+                  t2: t @skip(if: $v1) {
+                    name
+                  }
+                }
+              }
+            },
+          },
+        }
+        "###
+        );
+    }
+
+    #[test]
+    fn false_condition_at_root_selection() {
+        let planner = planner!(
+            Subgraph1: r#"
+                type Query {
+                    test: T!
+                }
+
+                type T {
+                    id: ID!
+                    name: String!
+                    x: Int!
+                }
+            "#,
+        );
+        // This query has a constant `false` condition on the root field selection, dropping the
+        // whole query entirely.
+        assert_plan!(
+            &planner,
+            r#"
+            query($v1: Boolean!) {
+                test @include(if: false) {
+                    id @include(if: $v1)
+                }
+            }
+            "#,
+            @r###"
+        QueryPlan {}
+        "###
+        );
+    }
+
+    #[test]
+    fn selection_set_with_some_false_condition_field_selections() {
+        let planner = planner!(
+            Subgraph1: r#"
+                type Query {
+                    test: T!
+                }
+
+                type T {
+                    id: ID!
+                    name: String!
+                    x: Int!
+                }
+            "#,
+        );
+        // A selection set becomes empty after removing infeasible conditions, however its
+        // parent selection should be retained.
+        assert_plan!(
+            &planner,
+            r#"
+            query($v1: Boolean!) {
+                test @include(if: $v1) {
+                    id @include(if: false)
+                    name @include(if: true)
+                    x @skip(if: $v1)
+                }
+            }
+            "#,
+            @r###"
+        QueryPlan {
+          Include(if: $v1) {
+            Fetch(service: "Subgraph1") {
+              {
+                test {
+                  id
+                  name
+                  x @skip(if: $v1)
+                }
+              }
+            },
+          },
+        }
+        "###
+        );
+    }
+}
