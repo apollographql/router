@@ -368,9 +368,7 @@ impl InstrumentData {
             opt.spans.subgraph,
             "$..spans.subgraph",
             opt.spans.supergraph,
-            "$..spans.supergraph",
-            opt.logging.experimental_when_header,
-            "$..logging.experimental_when_header"
+            "$..spans.supergraph"
         );
 
         populate_config_instrument!(

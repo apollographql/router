@@ -20,16 +20,6 @@ telemetry:
         enabled: true
         agent:
           endpoint: default
-    logging:
-      experimental_when_header:
-        - name: apollo-router-log-request
-          value: test
-          headers: true # default: false
-          body: true # default: false
-        # log request for all requests coming from Iphones
-        - name: custom-header
-          match: ^foo.*
-          headers: true
   instrumentation:
     spans:
       mode: spec_compliant
