@@ -211,17 +211,21 @@ impl Conditions {
     ///
     /// For example, if we have a selection set like so:
     /// ```graphql
-    /// a @skip(if: $a) {
-    ///   b @skip(if: $a) @include(if: $b) {
-    ///     c
+    /// {
+    ///   a @skip(if: $a) {
+    ///     b @skip(if: $a) @include(if: $b) {
+    ///       c
+    ///     }
     ///   }
     /// }
     /// ```
     /// Then we may call `b.conditions().update_with( a.conditions() )`, and get:
     /// ```graphql
-    /// a @skip(if: $a) {
-    ///   b @include(if: $b) {
-    ///     c
+    /// {
+    ///   a @skip(if: $a) {
+    ///     b @include(if: $b) {
+    ///       c
+    ///     }
     ///   }
     /// }
     /// ```
