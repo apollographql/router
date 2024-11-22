@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/valid_selection_with_escapes.graphql
+---
+[
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(selection:)` on `Query.something` is not a valid JSONSelection: Path selection . must be followed by key (identifier or quoted string literal) at offset 7: .",
+        locations: [
+            20:26..20:27,
+        ],
+    },
+]

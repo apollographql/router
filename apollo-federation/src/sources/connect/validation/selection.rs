@@ -99,7 +99,7 @@ pub(super) fn validate_body_selection(
                 .collect(),
         })?;
 
-    let selection = JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
+    let selection = JSONSelection::parse(&selection_str.as_string()).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
         message: format!("{coordinate} is not a valid JSONSelection: {err}"),
         locations: selection_node
@@ -202,7 +202,7 @@ fn get_json_selection<'a>(
                 .collect(),
         })?;
 
-    let selection = JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
+    let selection = JSONSelection::parse(&selection_str.as_string()).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
         message: format!("{coordinate} is not a valid JSONSelection: {err}",),
         locations: selection_str

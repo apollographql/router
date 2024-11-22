@@ -1,0 +1,27 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  something: T
+    # bug fix
+    @connect(http: { GET: "http://127.0.0.1/something" }, selection: "foo\nbar")
+    # this always worked
+    @connect(
+      http: { GET: "http://127.0.0.1/something" }
+      selection: """
+      foo
+      bar
+      """
+    )
+    # results in an error. the location should be 20:27..20:28,
+    # but because we remove the escape for the newline, it's 20:26..20:27
+    @connect(
+      http: { GET: "http://127.0.0.1/something" }
+      selection: "foo\nbar."
+    )
+}
+
+type T {
+  foo: String
+  bar: String
+}

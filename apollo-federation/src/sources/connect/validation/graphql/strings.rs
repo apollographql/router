@@ -61,6 +61,10 @@ impl<'schema> GraphQLString<'schema> {
         self.raw_string
     }
 
+    pub(crate) fn as_string(&self) -> String {
+        self.raw_string.replace("\\n", "\n")
+    }
+
     pub(crate) fn line_col_for_subslice(
         &self,
         substring_location: Range<usize>,
