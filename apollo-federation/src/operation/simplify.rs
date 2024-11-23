@@ -1,11 +1,6 @@
 use std::sync::Arc;
 
-use apollo_compiler::executable;
-use apollo_compiler::name;
-
 use super::runtime_types_intersect;
-use super::DirectiveList;
-use super::Field;
 use super::FieldSelection;
 use super::FragmentSpreadSelection;
 use super::InlineFragmentSelection;
@@ -70,12 +65,11 @@ impl FieldSelection {
         if let Some(selection_set) = &self.selection_set {
             let field_composite_type_position: CompositeTypeDefinitionPosition =
                 field_element.output_base_type()?.try_into()?;
-            let mut normalized_selection: SelectionSet = selection_set
-                .flatten_unnecessary_fragments(
-                    &field_composite_type_position,
-                    named_fragments,
-                    schema,
-                )?;
+            let normalized_selection: SelectionSet = selection_set.flatten_unnecessary_fragments(
+                &field_composite_type_position,
+                named_fragments,
+                schema,
+            )?;
 
             let mut selection = self.with_updated_element(field_element);
             if normalized_selection.is_empty() {
@@ -83,27 +77,10 @@ impl FieldSelection {
                 // sub-selection is empty. Which suggest something may be wrong with this part of the query
                 // intent, but the query was valid while keeping an empty sub-selection isn't. So in that
                 // case, we just add some "non-included" __typename field just to keep the query valid.
-                let directives = DirectiveList::one(executable::Directive {
-                    name: name!("include"),
-                    arguments: vec![(name!("if"), false).into()],
-                });
-                let non_included_typename = Selection::from_field(
-                    Field {
-                        schema: schema.clone(),
-                        field_position: field_composite_type_position
-                            .introspection_typename_field(),
-                        alias: None,
-                        arguments: Default::default(),
-                        directives,
-                        sibling_typename: None,
-                    },
-                    None,
-                );
-                let mut typename_selection = SelectionMap::new();
-                typename_selection.insert(non_included_typename);
-
-                normalized_selection.selections = Arc::new(typename_selection);
-                selection.selection_set = Some(normalized_selection);
+                selection.selection_set = Some(SelectionSet::empty_with_non_included_typename(
+                    schema.clone(),
+                    field_composite_type_position,
+                ));
             } else {
                 selection.selection_set = Some(normalized_selection);
             }
@@ -218,33 +195,16 @@ impl InlineFragmentSelection {
                 // We should be able to rebase, or there is a bug, so error if that is the case.
                 // If we rebased successfully then we add "non-included" __typename field selection
                 // just to keep the query valid.
-                let directives = DirectiveList::one(executable::Directive {
-                    name: name!("include"),
-                    arguments: vec![(name!("if"), false).into()],
-                });
-                let parent_typename_field = if let Some(condition) = this_condition {
-                    condition.introspection_typename_field()
-                } else {
-                    parent_type.introspection_typename_field()
-                };
-                let typename_field_selection = Selection::from_field(
-                    Field {
-                        schema: schema.clone(),
-                        field_position: parent_typename_field,
-                        alias: None,
-                        arguments: Default::default(),
-                        directives,
-                        sibling_typename: None,
-                    },
-                    None,
-                );
 
                 // Return `... [on <rebased condition>] { __typename @include(if: false) }`
                 let rebased_casted_type = rebased_fragment.casted_type();
                 return Ok(Some(SelectionOrSet::Selection(
                     InlineFragmentSelection::new(
                         rebased_fragment,
-                        SelectionSet::from_selection(rebased_casted_type, typename_field_selection),
+                        SelectionSet::empty_with_non_included_typename(
+                            schema.clone(),
+                            rebased_casted_type,
+                        ),
                     )
                     .into(),
                 )));
@@ -484,6 +444,7 @@ impl SelectionSet {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::executable;
     use apollo_compiler::Schema;
 
     use super::*;

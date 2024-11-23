@@ -1284,6 +1284,34 @@ impl SelectionSet {
         }
     }
 
+    // Returns a new selection set `{ __typename @include(if: false) }`.
+    pub(crate) fn empty_with_non_included_typename(
+        schema: ValidFederationSchema,
+        type_position: CompositeTypeDefinitionPosition,
+    ) -> Self {
+        let directives = DirectiveList::one(Directive {
+            name: name!("include"),
+            arguments: vec![(name!("if"), false).into()],
+        });
+        let typename_field = type_position.introspection_typename_field();
+        let typename_field_selection = Selection::from_field(
+            Field {
+                schema: schema.clone(),
+                field_position: typename_field,
+                alias: None,
+                arguments: Default::default(),
+                directives,
+                sibling_typename: None,
+            },
+            None, // no subselection
+        );
+        Self {
+            schema,
+            type_position,
+            selections: Arc::new(std::iter::once(typename_field_selection).collect()),
+        }
+    }
+
     pub(crate) fn split_top_level_fields(self) -> impl Iterator<Item = SelectionSet> {
         // NOTE: Ideally, we could just use a generator but, instead, we have to manually implement
         // one :(
