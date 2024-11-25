@@ -496,7 +496,9 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 }
 
 #[macro_export]
-/// Get or create a u64 monotonic counter metric and add a value to it
+/// Get or create a `u64` monotonic counter metric and add a value to it.
+///
+/// Each metric needs a description.
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
@@ -506,6 +508,33 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
 ///
 /// New metrics should be added using these macros.
+///
+/// # Examples
+/// ```ignore
+/// // Count a thing:
+/// u64_counter!(
+///     "apollo.router.operations.frobbles",
+///     "The amount of frobbles we've operated on",
+///     1
+/// );
+/// // Count a thing with attributes:
+/// u64_counter!(
+///     "apollo.router.operations.frobbles",
+///     "The amount of frobbles we've operated on",
+///     1,
+///     frobbles.color = "blue"
+/// );
+/// // Count a thing with dynamic attributes:
+/// let attributes = [
+///     opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()),
+/// ];
+/// u64_counter!(
+///     "apollo.router.operations.frobbles",
+///     "The amount of frobbles we've operated on",
+///     1,
+///     attributes
+/// );
+/// ```
 #[allow(unused_macros)]
 macro_rules! u64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
