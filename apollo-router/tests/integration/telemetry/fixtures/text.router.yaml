@@ -112,10 +112,6 @@ telemetry:
         agent:
           endpoint: default
     logging:
-      experimental_when_header:
-        - name: content-type
-          value: "application/json"
-          body: true
       stdout:
         format:
           text:

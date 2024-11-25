@@ -72,6 +72,70 @@ telemetry:
     metrics_reference_mode: standard
 ```
 
+### Logging
+<!-- PR: https://github.com/apollographql/router/pull/6285 -->
+
+If you used the `experimental_when_header` feature previously like this for example:
+
+```yaml title="router.previous.yaml"
+telemetry:
+  exporters:
+    logging:
+      # If one of these headers matches we will log supergraph and subgraphs requests/responses
+      experimental_when_header: # REMOVED
+        - name: apollo-router-log-request
+          value: my_client
+          headers: true # default: false
+          body: true # default: false
+```
+
+This feature no longer exists and can be replaced with another one included in custom telemetry. Here is how you would configure custom telemetry to achieve the same result:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      router:
+        request: # Display router request log
+          level: info
+          condition:
+            eq:
+            - request_header: apollo-router-log-request
+            - my_client
+        response: # Display router response log
+          level: info
+          condition:
+            eq:
+            - request_header: apollo-router-log-request
+            - my_client
+      supergraph:
+        request: # Display supergraph request log
+          level: info
+          condition:
+            eq:
+            - request_header: apollo-router-log-request
+            - my_client
+        response:
+          level: info
+          condition:
+            eq:
+            - request_header: apollo-router-log-request
+            - my_client
+      subgraph:
+        request: # Display subgraph request log
+          level: info
+          condition:
+            eq:
+            - supergraph_request_header: apollo-router-log-request
+            - my_client
+        response: # Display subgraph response log
+          level: info
+          condition:
+            eq:
+            - supergraph_request_header: apollo-router-log-request
+            - my_client
+```
+
 ### Check CORS configuration
 
 If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.

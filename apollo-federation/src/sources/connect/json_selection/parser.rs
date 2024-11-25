@@ -235,6 +235,13 @@ impl JSONSelection {
             JSONSelection::Path(path) => path.next_mut_subselection(),
         }
     }
+
+    pub fn external_variables(&self) -> impl Iterator<Item = Namespace> + '_ {
+        self.external_var_paths()
+            .into_iter()
+            .flat_map(|var_path| var_path.variable_reference())
+            .map(|var_ref| var_ref.namespace.namespace)
+    }
 }
 
 impl ExternalVarPaths for JSONSelection {

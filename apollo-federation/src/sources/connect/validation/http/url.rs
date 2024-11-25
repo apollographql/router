@@ -36,41 +36,44 @@ pub(crate) fn validate_template(
     }
 
     let variable_resolver = VariableResolver::new(expression_context, schema);
-    for variable in template.path_variables() {
+    for variable in template.variables() {
         match variable_resolver.resolve(variable, str_value) {
-            Err(message) => {
-                messages.push(Message {
-                    code: message.code,
-                    message: format!("{coordinate} contains an invalid variable reference `{{{variable}}}` - {message}", message = message.message),
-                    locations: message.locations,
-                })
-            },
+            Err(message) => messages.push(Message {
+                code: message.code,
+                message: format!(
+                    "{coordinate} contains an invalid expression `{{{variable}}}` - {message}",
+                    message = message.message
+                ),
+                locations: message.locations,
+            }),
             Ok(Some(ty)) => {
-                if !ty.is_non_null() {
+                if ty.is_list() {
                     messages.push(Message {
-                        code: Code::NullabilityMismatch,
-                        message: format!(
-                            "Variables in path parameters should be non-null, but {coordinate} contains `{{{variable}}}` which is nullable. \
-                             If a null value is provided at runtime, the request will fail.",
-                        ),
+                        code: Code::InvalidUrl,
+                        message: format!("{coordinate} contains an invalid expression `{{{variable}}}` - URI templates can't contain lists.", variable = variable),
                         locations: str_value
                             .line_col_for_subslice(variable.location.clone(), schema)
                             .into_iter()
                             .collect(),
-                    });
+                    })
+                }
+                if schema.schema.get_object(ty.inner_named_type()).is_some()
+                    || schema
+                        .schema
+                        .get_input_object(ty.inner_named_type())
+                        .is_some()
+                {
+                    messages.push(Message {
+                        code: Code::InvalidUrl,
+                        message: format!("{coordinate} contains an invalid expression `{{{variable}}}` - URI templates can't contain objects.", variable = variable),
+                        locations: str_value
+                            .line_col_for_subslice(variable.location.clone(), schema)
+                            .into_iter()
+                            .collect(),
+                    })
                 }
             }
             Ok(_) => {} // Type cannot be resolved
-        }
-    }
-
-    for variable in template.query_variables() {
-        if let Err(message) = variable_resolver.resolve(variable, str_value) {
-            messages.push(Message {
-                code: message.code,
-                message: format!("{coordinate} contains an invalid variable reference `{{{variable}}}` - {message}", message = message.message),
-                locations: message.locations,
-            })
         }
     }
 

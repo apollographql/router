@@ -40,8 +40,6 @@ use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
-use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
-use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
@@ -306,25 +304,9 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 http_request
             };
 
-            let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
-            let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-
-            // Print out the debug for the request
-            if display_headers {
-                tracing::info!(http.request.headers = ?http_request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
-            }
-            if display_body {
-                tracing::info!(http.request.body = ?http_request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
-            }
-
             let http_response = do_fetch(client, &context, &service_name, http_request)
                 .instrument(http_req_span)
                 .await?;
-
-            // Print out the debug for the response
-            if display_headers {
-                tracing::info!(response.headers = ?http_response.headers(), apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
-            }
 
             Ok(HttpResponse {
                 http_response,

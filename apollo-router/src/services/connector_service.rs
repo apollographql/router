@@ -205,6 +205,7 @@ async fn execute(
     connector: &Connector,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
+    let context2 = request.context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
     let (debug, request_limit) = context.extensions().with_lock(|lock| {
@@ -292,7 +293,7 @@ async fn execute(
         .await
         .map_err(BoxError::from)?;
 
-    handle_responses(responses, connector, &debug)
+    handle_responses(responses, connector, &context2, &debug)
         .await
         .map_err(BoxError::from)
 }
