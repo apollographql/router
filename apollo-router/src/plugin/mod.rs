@@ -140,6 +140,7 @@ where
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
+            .launch_id(Some("launch_id".to_string()))
             .notify(Notify::for_tests())
             .build()
     }
@@ -252,7 +253,7 @@ impl PluginInit<serde_json::Value> {
             .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
-            .launch_id(self.launch_id)
+            // .launch_id(self.launch_id)
             .notify(self.notify.clone())
             .build()
     }
