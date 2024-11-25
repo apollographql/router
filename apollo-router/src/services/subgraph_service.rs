@@ -300,17 +300,15 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         })?;
                         stream_tx.send(Box::pin(handle.into_stream())).await?;
 
-                        tracing::info!(
-                            monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-                            subscriptions.mode = %"callback",
+                        u64_counter!(
+                            "apollo.router.operations.subscriptions",
+                            "Total requests with subscription operations",
+                            1,
+                            subscriptions.mode = "callback",
                             subscriptions.deduplicated = !created,
-                            subgraph.service.name = service_name,
+                            subgraph.service.name = service_name.clone()
                         );
                         if !created {
-                            tracing::info!(
-                                monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
-                                mode = %"callback",
-                            );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
                                 .subgraph_name(service_name.clone())
@@ -507,20 +505,18 @@ async fn call_websocket(
     let (handle, created) = notify
         .create_or_subscribe(subscription_hash.clone(), false)
         .await?;
-    tracing::info!(
-        monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-        subscriptions.mode = %"passthrough",
+    u64_counter!(
+        "apollo.router.operations.subscriptions",
+        "Total requests with subscription operations",
+        1,
+        subscriptions.mode = "passthrough",
         subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name,
+        subgraph.service.name = service_name.clone()
     );
     if !created {
         subscription_stream_tx
             .send(Box::pin(handle.into_stream()))
             .await?;
-        tracing::info!(
-            monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
-            mode = %"passthrough",
-        );
 
         // Dedup happens here
         return Ok(SubgraphResponse::builder()
@@ -868,9 +864,14 @@ pub(crate) async fn process_batch(
         subgraph = &service
     );
 
-    tracing::info!(monotonic_counter.apollo.router.operations.batching = 1u64,
-        mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
-        subgraph = &service
+    u64_counter!(
+        "apollo.router.operations.batching",
+        "Total requests with batched operations",
+        1,
+        // XXX(@goto-bus-stop): Should these be `batching.mode`, `batching.subgraph`?
+        // Also, other metrics use a different convention to report the subgraph name
+        mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
+        subgraph = service.clone()
     );
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
