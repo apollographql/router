@@ -72,7 +72,7 @@ fn fragment_with_intersecting_parent_type_and_directive_condition() {
 }
 
 #[test]
-fn nested_fragment_with_interseting_parent_type_and_directive_condition() {
+fn nested_fragment_with_intersecting_parent_type_and_directive_condition() {
     let planner = planner!(
         A: r#"
           directive @test on INLINE_FRAGMENT
@@ -124,18 +124,6 @@ fn nested_fragment_with_interseting_parent_type_and_directive_condition() {
           }
     "#;
 
-    //   expect(operation.expandAllFragments().toString()).toMatchInlineSnapshot(`
-    //     "{
-    //       i {
-    //         _id
-    //         ... on I2 {
-    //           ... on I2 @test {
-    //             id
-    //           }
-    //         }
-    //       }
-    //     }"
-    //   `);
     assert_plan!(
         &planner,
         operation,

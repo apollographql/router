@@ -1,6 +1,6 @@
 # File based integration tests
 
-This folder contains a serie of Router integration tests that can be defined entirely through a JSON file. Thos tests are able to start and stop a router, reload its schema or configiration, make requests and check the expected response. While we can make similar tests from inside the Router's code, these tests here are faster to write and modify because they do not require recompilations of the Router, at the cost of a slightly higher runtime cost.
+This folder contains a series of Router integration tests that can be defined entirely through a JSON file. Thos tests are able to start and stop a router, reload its schema or configiration, make requests and check the expected response. While we can make similar tests from inside the Router's code, these tests here are faster to write and modify because they do not require recompilations of the Router, at the cost of a slightly higher runtime cost.
 
 ## How to write a test
 

@@ -80,15 +80,6 @@ impl Display for BooleanOrVariable {
     }
 }
 
-impl BooleanOrVariable {
-    pub(crate) fn to_ast_value(&self) -> Value {
-        match self {
-            BooleanOrVariable::Boolean(b) => Value::Boolean(*b),
-            BooleanOrVariable::Variable(name) => Value::Variable(name.clone()),
-        }
-    }
-}
-
 impl From<BooleanOrVariable> for Value {
     fn from(b: BooleanOrVariable) -> Self {
         match b {

@@ -306,10 +306,23 @@ impl From<&'_ next::FetchDataKeyRenamer> for rewrites::DataKeyRenamer {
 
 impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
     fn from(value: &'_ next::FetchDataPathElement) -> Self {
+        // TODO: Go all in on Name eventually
         match value {
-            // TODO: Type conditioned fetching once it's available in the rust planner
-            next::FetchDataPathElement::Key(value) => Self::Key(value.to_string(), None),
-            next::FetchDataPathElement::AnyIndex => Self::Flatten(None),
+            next::FetchDataPathElement::Key(name, conditions) => Self::Key(
+                name.to_string(),
+                if conditions.is_empty() {
+                    None
+                } else {
+                    Some(conditions.iter().map(|c| c.to_string()).collect())
+                },
+            ),
+            next::FetchDataPathElement::AnyIndex(conditions) => {
+                Self::Flatten(if conditions.is_empty() {
+                    None
+                } else {
+                    Some(conditions.iter().map(|c| c.to_string()).collect())
+                })
+            }
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
         }
     }

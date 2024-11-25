@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
@@ -14,8 +15,8 @@ use crate::Context;
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CacheAttributes {
     /// Entity type
-    #[serde(rename = "entity.type")]
-    pub(crate) entity_type: Option<bool>,
+    #[serde(rename = "graphql.type.name")]
+    pub(crate) entity_type: Option<StandardAttribute>,
 }
 
 impl DefaultForLevel for CacheAttributes {
@@ -26,7 +27,8 @@ impl DefaultForLevel for CacheAttributes {
     ) {
         if let TelemetryDataKind::Metrics = kind {
             if let DefaultAttributeRequirementLevel::Required = requirement_level {
-                self.entity_type.get_or_insert(false);
+                self.entity_type
+                    .get_or_insert(StandardAttribute::Bool(false));
             }
         }
     }

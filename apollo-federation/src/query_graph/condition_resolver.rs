@@ -31,6 +31,8 @@ pub(crate) enum ConditionResolution {
         path_tree: Option<Arc<OpPathTree>>,
     },
     Unsatisfied {
+        // NOTE: This seems to be a false positive...
+        #[allow(dead_code)]
         reason: Option<UnsatisfiedConditionReason>,
     },
 }
@@ -53,7 +55,7 @@ impl ConditionResolution {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::IsVariant)]
 pub(crate) enum ConditionResolutionCacheResult {
     /// Cache hit.
     Hit(ConditionResolution),
@@ -61,20 +63,6 @@ pub(crate) enum ConditionResolutionCacheResult {
     Miss,
     /// The value can't be cached; Or, an incompatible value is already in cache.
     NotApplicable,
-}
-
-impl ConditionResolutionCacheResult {
-    pub(crate) fn is_hit(&self) -> bool {
-        matches!(self, Self::Hit(_))
-    }
-
-    pub(crate) fn is_miss(&self) -> bool {
-        matches!(self, Self::Miss)
-    }
-
-    pub(crate) fn is_not_applicable(&self) -> bool {
-        matches!(self, Self::NotApplicable)
-    }
 }
 
 pub(crate) struct ConditionResolverCache {
@@ -179,7 +167,7 @@ mod tests {
                 &empty_destinations,
                 &empty_conditions
             )
-            .is_hit());
+            .is_hit(),);
 
         let edge2 = EdgeIndex::new(2);
 

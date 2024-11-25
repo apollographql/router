@@ -1,5 +1,5 @@
 limits:
-  http_max_request_bytes: 60
+  http_max_request_bytes: 200
 telemetry:
   exporters:
     metrics:
@@ -9,18 +9,18 @@ telemetry:
         path: /metrics
       common:
         views:
-        - name: apollo_router_http_request_duration_seconds
-          aggregation:
-            histogram:
-              buckets:
-              - 0.1
-              - 0.5
-              - 1
-              - 2
-              - 3
-              - 4
-              - 5
-              - 100
+          - name: apollo_router_http_request_duration_seconds
+            aggregation:
+              histogram:
+                buckets:
+                  - 0.1
+                  - 0.5
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 100
         attributes:
           subgraph:
             all:
@@ -39,3 +39,10 @@ override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:
   all: true
+supergraph:
+  introspection: true
+apq:
+  router:
+    cache:
+      in_memory:
+        limit: 1000

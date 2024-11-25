@@ -1,7 +1,7 @@
-# Composed from subgraphs with hash: 0574a22aea40ebfdb91c4ea931889f285c43a04c
+# Composed from subgraphs with hash: a0524dbe1bbd3a7450a2e15f5c25c5cf2eed4242
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
 {
   query: Query
   mutation: Mutation
@@ -9,9 +9,11 @@ schema
 
 directive @field on FIELD
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -34,6 +36,8 @@ type Foo
   t: T! @join__field(graph: SUBGRAPHA)
   baz: Int @join__field(graph: SUBGRAPHB)
 }
+
+scalar join__DirectiveArguments
 
 scalar join__FieldSet
 

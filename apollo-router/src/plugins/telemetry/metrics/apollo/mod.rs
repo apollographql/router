@@ -55,7 +55,7 @@ impl MetricsConfigurator for Config {
                 apollo_graph_ref: Some(reference),
                 schema_id,
                 batch_processor,
-                experimental_apollo_metrics_reference_mode,
+                metrics_reference_mode,
                 ..
             } => {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
@@ -69,7 +69,7 @@ impl MetricsConfigurator for Config {
                     reference,
                     schema_id,
                     batch_processor,
-                    *experimental_apollo_metrics_reference_mode,
+                    *metrics_reference_mode,
                 )?;
                 // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
                 if std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")

@@ -80,6 +80,7 @@ pub(crate) struct Response {
 pub(crate) enum QueryPlannerContent {
     Plan { plan: Arc<QueryPlan> },
     Response { response: Box<graphql::Response> },
+    CachedIntrospectionResponse { response: Box<graphql::Response> },
     IntrospectionDisabled,
 }
 

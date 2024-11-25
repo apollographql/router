@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
@@ -21,6 +22,7 @@ use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::operation::merge_selection_sets;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -140,6 +142,7 @@ impl BaseQueryGraphBuilder {
             QueryGraphEdge {
                 transition,
                 conditions,
+                override_condition: None,
             },
         );
         let head_weight = self.query_graph.node_weight(head)?;
@@ -982,6 +985,7 @@ impl FederatedQueryGraphBuilder {
         self.add_root_edges()?;
         self.handle_key()?;
         self.handle_requires()?;
+        self.handle_progressive_overrides()?;
         // Note that @provides must be handled last when building since it requires copying nodes
         // and their edges, and it's easier to reason about this if we know previous
         self.handle_provides()?;
@@ -1374,6 +1378,102 @@ impl FederatedQueryGraphBuilder {
         Ok(())
     }
 
+    /// Handling progressive overrides here. For each progressive @override
+    /// application (with a label), we want to update the edges to the overridden
+    /// field within the "to" and "from" subgraphs with their respective override
+    /// condition (the label and a T/F value). The "from" subgraph will have an
+    /// override condition of `false`, whereas the "to" subgraph will have an
+    /// override condition of `true`.
+    fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
+        let mut edge_to_conditions: HashMap<EdgeIndex, OverrideCondition> = Default::default();
+
+        fn collect_edge_condition(
+            query_graph: &QueryGraph,
+            target_graph: &str,
+            target_field: &ObjectFieldDefinitionPosition,
+            label: &str,
+            condition: bool,
+            edge_to_conditions: &mut HashMap<EdgeIndex, OverrideCondition>,
+        ) -> Result<(), FederationError> {
+            let target_field = FieldDefinitionPosition::Object(target_field.clone());
+            let subgraph_nodes = query_graph
+                .types_to_nodes_by_source
+                .get(target_graph)
+                .unwrap();
+            let parent_node = subgraph_nodes
+                .get(target_field.type_name())
+                .unwrap()
+                .first()
+                .unwrap();
+            for edge in query_graph.out_edges(*parent_node) {
+                let edge_weight = query_graph.edge_weight(edge.id())?;
+                let QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } = &edge_weight.transition
+                else {
+                    continue;
+                };
+
+                if &target_field == field_definition_position {
+                    edge_to_conditions.insert(
+                        edge.id(),
+                        OverrideCondition {
+                            label: label.to_string(),
+                            condition,
+                        },
+                    );
+                }
+            }
+            Ok(())
+        }
+
+        for (to_subgraph_name, subgraph) in &self.base.query_graph.subgraphs_by_name {
+            let subgraph_data = self.subgraphs.get(to_subgraph_name)?;
+            if let Some(override_referencers) = subgraph
+                .referencers()
+                .directives
+                .get(&subgraph_data.overrides_directive_definition_name)
+            {
+                for field_definition_position in &override_referencers.object_fields {
+                    let field = field_definition_position.get(subgraph.schema())?;
+                    for directive in field
+                        .directives
+                        .get_all(&subgraph_data.overrides_directive_definition_name)
+                    {
+                        let application = subgraph_data
+                            .federation_spec_definition
+                            .override_directive_arguments(directive)?;
+                        if let Some(label) = application.label {
+                            collect_edge_condition(
+                                &self.base.query_graph,
+                                to_subgraph_name,
+                                field_definition_position,
+                                label,
+                                true,
+                                &mut edge_to_conditions,
+                            )?;
+                            collect_edge_condition(
+                                &self.base.query_graph,
+                                application.from,
+                                field_definition_position,
+                                label,
+                                false,
+                                &mut edge_to_conditions,
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (edge, condition) in edge_to_conditions {
+            let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
+            mutable_edge.override_condition = Some(condition);
+        }
+        Ok(())
+    }
+
     /// Handle @provides by copying the appropriate nodes/edges.
     fn handle_provides(&mut self) -> Result<(), FederationError> {
         let mut provide_id = 0;
@@ -1472,8 +1572,8 @@ impl FederatedQueryGraphBuilder {
                     Selection::Field(field_selection) => {
                         let existing_edge_info = base
                             .query_graph
-                            .graph
-                            .edges_directed(node, Direction::Outgoing)
+                            .out_edges_with_federation_self_edges(node)
+                            .into_iter()
                             .find_map(|edge_ref| {
                                 let edge_weight = edge_ref.weight();
                                 let QueryGraphEdgeTransition::FieldCollection {
@@ -1597,8 +1697,8 @@ impl FederatedQueryGraphBuilder {
                             // construction.
                             let (edge, tail) = base
                                 .query_graph
-                                .graph
-                                .edges_directed(node, Direction::Outgoing)
+                                .out_edges_with_federation_self_edges(node)
+                                .into_iter()
                                 .find_map(|edge_ref| {
                                     let edge_weight = edge_ref.weight();
                                     let QueryGraphEdgeTransition::Downcast {
@@ -1710,11 +1810,7 @@ impl FederatedQueryGraphBuilder {
         new_node_weight.has_reachable_cross_subgraph_edges = has_reachable_cross_subgraph_edges;
 
         let mut new_edges = Vec::new();
-        for edge_ref in base
-            .query_graph
-            .graph
-            .edges_directed(node, Direction::Outgoing)
-        {
+        for edge_ref in base.query_graph.out_edges_with_federation_self_edges(node) {
             let edge_tail = edge_ref.target();
             let edge_weight = edge_ref.weight();
             new_edges.push(QueryGraphEdgeData {
@@ -1868,13 +1964,9 @@ impl FederatedQueryGraphBuilder {
         for edge in self.base.query_graph.graph.edge_indices() {
             let edge_weight = self.base.query_graph.edge_weight(edge)?;
             let (_, tail) = self.base.query_graph.edge_endpoints(edge)?;
-            let mut non_trivial_followups = IndexSet::default();
-            for followup_edge_ref in self
-                .base
-                .query_graph
-                .graph
-                .edges_directed(tail, Direction::Outgoing)
-            {
+            let out_edges = self.base.query_graph.out_edges(tail);
+            let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
+            for followup_edge_ref in out_edges {
                 let followup_edge_weight = followup_edge_ref.weight();
                 match edge_weight.transition {
                     QueryGraphEdgeTransition::KeyResolution => {
@@ -1935,7 +2027,7 @@ impl FederatedQueryGraphBuilder {
                     }
                     _ => {}
                 }
-                non_trivial_followups.insert(followup_edge_ref.id());
+                non_trivial_followups.push(followup_edge_ref.id());
             }
             self.base
                 .query_graph
@@ -1987,6 +2079,10 @@ impl FederatedQueryGraphBuilderSubgraphs {
                         ),
                     }
                 })?;
+            let overrides_directive_definition_name = federation_spec_definition
+                .override_directive_definition(schema)?
+                .name
+                .clone();
             subgraphs.map.insert(
                 source.clone(),
                 FederatedQueryGraphBuilderSubgraphData {
@@ -1995,6 +2091,7 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     requires_directive_definition_name,
                     provides_directive_definition_name,
                     interface_object_directive_definition_name,
+                    overrides_directive_definition_name,
                 },
             );
         }
@@ -2020,6 +2117,7 @@ struct FederatedQueryGraphBuilderSubgraphData {
     requires_directive_definition_name: Name,
     provides_directive_definition_name: Name,
     interface_object_directive_definition_name: Name,
+    overrides_directive_definition_name: Name,
 }
 
 #[derive(Debug)]

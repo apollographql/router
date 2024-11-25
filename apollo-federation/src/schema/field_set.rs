@@ -17,7 +17,6 @@ use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 
 // Federation spec does not allow the alias syntax in field set strings.
@@ -165,37 +164,6 @@ pub(crate) fn collect_target_fields_from_field_set(
         }
     }
     Ok(fields)
-}
-
-// PORT_NOTE: This is meant as a companion function for collect_target_fields_from_field_set(), as
-// some callers will also want to include interface field implementations.
-pub(crate) fn add_interface_field_implementations(
-    fields: Vec<FieldDefinitionPosition>,
-    schema: &FederationSchema,
-) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
-    let mut new_fields = vec![];
-    for field in fields {
-        let interface_field = if let FieldDefinitionPosition::Interface(field) = &field {
-            Some(field.clone())
-        } else {
-            None
-        };
-        new_fields.push(field);
-        if let Some(interface_field) = interface_field {
-            for implementing_type in &schema
-                .referencers
-                .get_interface_type(&interface_field.type_name)?
-                .object_types
-            {
-                new_fields.push(
-                    implementing_type
-                        .field(interface_field.field_name.clone())
-                        .into(),
-                );
-            }
-        }
-    }
-    Ok(new_fields)
 }
 
 #[cfg(test)]

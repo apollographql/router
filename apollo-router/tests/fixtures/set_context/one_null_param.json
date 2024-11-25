@@ -1,0 +1,43 @@
+{
+    "mocks": [
+        {
+            "request": {
+              "query": "query Query_Null_Param__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+              "operationName": "Query_Null_Param__Subgraph1__0"
+            },
+            "response": {
+              "data": {
+                "t": {
+                  "__typename": "T",
+                  "prop": null,
+                  "id": "1",
+                  "u": {
+                    "__typename": "U",
+                    "id": "1"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "request": {
+              "query": "query Query_Null_Param__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+              "operationName": "Query_Null_Param__Subgraph1__1",
+              "variables": {
+                "contextualArgument_1_0": null,
+                "representations": [{ "__typename": "U", "id": "1" }]
+              }
+            },
+            "response": {
+              "data": {
+                "_entities": [
+                  {
+                    "id": "1",
+                    "field": 1234
+                  }
+                ]
+              }
+            }
+          }
+    ]
+}

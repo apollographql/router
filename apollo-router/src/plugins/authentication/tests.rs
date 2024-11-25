@@ -177,10 +177,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
         .unwrap();
 
     // Let's create a request with our operation name
-    let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
-        .build()
-        .unwrap();
+    let request_with_appropriate_name = supergraph::Request::canned_builder().build().unwrap();
 
     // ...And call our service stack with it
     let mut service_response = test_harness
@@ -214,7 +211,6 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, "invalid")
         .build()
         .unwrap();
@@ -251,7 +247,6 @@ async fn it_rejects_when_auth_prefix_has_no_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, "Bearer")
         .build()
         .unwrap();
@@ -288,7 +283,6 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, "Bearer header.payload")
         .build()
         .unwrap();
@@ -327,7 +321,6 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(
             http::header::AUTHORIZATION,
             "Bearer header.payload.signature",
@@ -367,7 +360,6 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5B",
@@ -407,7 +399,6 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -445,7 +436,6 @@ async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
     let test_harness = build_a_test_harness(None, None, false, true).await;
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
         .build()
         .unwrap();
@@ -481,7 +471,6 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -521,7 +510,6 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 "SOMETHING",
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -561,7 +549,6 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "SOMETHING eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -600,7 +587,6 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -702,7 +688,6 @@ async fn it_extracts_the_token_from_cookies() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(
             http::header::COOKIE,
             format!("a= b; c = d HttpOnly; authz = {token}; e = f"),
@@ -799,7 +784,6 @@ async fn it_supports_multiple_sources() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header("Authz2", format!("Bear {token}"))
         .build()
         .unwrap();
@@ -1001,7 +985,6 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();
@@ -1039,7 +1022,6 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();
@@ -1076,7 +1058,6 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();
@@ -1108,7 +1089,6 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();

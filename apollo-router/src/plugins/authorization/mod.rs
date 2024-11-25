@@ -437,7 +437,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = AuthenticatedVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             dry_run,
         ) {
@@ -475,7 +474,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = ScopeFilteringVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             scopes.iter().cloned().collect(),
             dry_run,
@@ -510,7 +508,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = PolicyFilteringVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             policies.iter().cloned().collect(),
             dry_run,

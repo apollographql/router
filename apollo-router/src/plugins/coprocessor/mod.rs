@@ -48,13 +48,13 @@ use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
+use crate::services::hickory_dns_connector::new_async_http_connector;
+use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::router::body::RouterBodyConverter;
 use crate::services::subgraph;
-use crate::services::trust_dns_connector::new_async_http_connector;
-use crate::services::trust_dns_connector::AsyncHyperResolver;
 
 #[cfg(test)]
 mod test;

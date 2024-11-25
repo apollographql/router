@@ -15,6 +15,7 @@
         paths = [
             '''^apollo-router\/src\/.+\/testdata\/.+''',
             '''^apollo-router\/tests\/snapshots\/apollo_otel_traces__.+\.snap$''',
+            "docs/source/configuration/entity-caching.mdx"
         ]
 
 [[ rules ]]

@@ -283,6 +283,7 @@ mod test {
     use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
     use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
     use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
+    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -312,8 +313,8 @@ mod test {
             extendable_conf.attributes,
             SupergraphAttributes {
                 graphql_document: None,
-                graphql_operation_name: Some(true),
-                graphql_operation_type: Some(true),
+                graphql_operation_name: Some(StandardAttribute::Bool(true)),
+                graphql_operation_type: Some(StandardAttribute::Bool(true)),
                 cost: Default::default()
             }
         );
@@ -384,12 +385,12 @@ mod test {
                 trace_id: None,
                 baggage: None,
                 common: HttpCommonAttributes {
-                    http_request_method: Some(true),
-                    http_response_status_code: Some(true),
+                    http_request_method: Some(StandardAttribute::Bool(true)),
+                    http_response_status_code: Some(StandardAttribute::Bool(true)),
                     ..Default::default()
                 },
                 server: HttpServerAttributes {
-                    url_path: Some(true),
+                    url_path: Some(StandardAttribute::Bool(true)),
                     ..Default::default()
                 }
             }

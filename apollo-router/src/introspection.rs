@@ -1,138 +1,163 @@
-#[cfg(test)]
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::Planner;
-use tower::BoxError;
+use apollo_compiler::executable::Selection;
+use serde_json_bytes::json;
 
 use crate::cache::storage::CacheStorage;
-use crate::graphql::Response;
-use crate::query_planner::QueryPlanResult;
+use crate::graphql;
+use crate::query_planner::QueryKey;
+use crate::services::layers::query_analysis::ParsedDocument;
+use crate::spec;
+use crate::Configuration;
 
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
 
-/// A cache containing our well known introspection queries.
-pub(crate) struct Introspection {
-    cache: CacheStorage<String, Response>,
-    planner: Arc<Planner<QueryPlanResult>>,
+#[derive(Clone)]
+pub(crate) enum IntrospectionCache {
+    Disabled,
+    Enabled {
+        storage: Arc<CacheStorage<String, graphql::Response>>,
+    },
 }
 
-impl Introspection {
-    pub(crate) async fn with_capacity(
-        planner: Arc<Planner<QueryPlanResult>>,
-        capacity: NonZeroUsize,
-    ) -> Result<Self, BoxError> {
-        Ok(Self {
-            cache: CacheStorage::new(capacity, None, "introspection").await?,
-            planner,
-        })
-    }
-
-    pub(crate) async fn new(planner: Arc<Planner<QueryPlanResult>>) -> Result<Self, BoxError> {
-        Self::with_capacity(planner, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn from_cache(
-        planner: Arc<Planner<QueryPlanResult>>,
-        cache: HashMap<String, Response>,
-    ) -> Result<Self, BoxError> {
-        let this = Self::with_capacity(planner, cache.len().try_into().unwrap()).await?;
-
-        for (query, response) in cache.into_iter() {
-            this.cache.insert(query, response).await;
+impl IntrospectionCache {
+    pub(crate) fn new(configuration: &Configuration) -> Self {
+        if configuration.supergraph.introspection {
+            let storage = Arc::new(CacheStorage::new_in_memory(
+                DEFAULT_INTROSPECTION_CACHE_CAPACITY,
+                "introspection",
+            ));
+            storage.activate();
+            Self::Enabled { storage }
+        } else {
+            Self::Disabled
         }
-        Ok(this)
     }
 
-    /// Execute an introspection and cache the response.
-    pub(crate) async fn execute(&self, query: String) -> Result<Response, IntrospectionError> {
-        if let Some(response) = self.cache.get(&query, |_| Ok(())).await {
-            return Ok(response);
+    pub(crate) fn activate(&self) {
+        match self {
+            IntrospectionCache::Disabled => {}
+            IntrospectionCache::Enabled { storage } => storage.activate(),
         }
+    }
 
-        // Do the introspection query and cache it
+    /// If `request` is a query with only introspection fields,
+    /// execute it and return a (cached) response
+    pub(crate) async fn maybe_execute(
+        &self,
+        schema: &Arc<spec::Schema>,
+        key: &QueryKey,
+        doc: &ParsedDocument,
+    ) -> ControlFlow<graphql::Response, ()> {
+        Self::maybe_lone_root_typename(schema, doc)?;
+        if doc.operation.is_query() {
+            if doc.has_explicit_root_fields && doc.has_schema_introspection {
+                ControlFlow::Break(Self::mixed_fields_error())?;
+            } else if !doc.has_explicit_root_fields {
+                ControlFlow::Break(self.cached_introspection(schema, key, doc).await)?
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// A `{ __typename }` query is often used as a ping or health check.
+    /// Handle it without touching the cache.
+    ///
+    /// This fast path only applies if no fragment or directive is used,
+    /// so that we don’t have to deal with `@skip` or `@include` here.
+    fn maybe_lone_root_typename(
+        schema: &Arc<spec::Schema>,
+        doc: &ParsedDocument,
+    ) -> ControlFlow<graphql::Response, ()> {
+        if doc.operation.selection_set.selections.len() == 1 {
+            if let Selection::Field(field) = &doc.operation.selection_set.selections[0] {
+                if field.name == "__typename" && field.directives.is_empty() {
+                    // `{ alias: __typename }` is much less common so handling it here is not essential
+                    // but easier than a conditional to reject it
+                    let key = field.response_key().as_str();
+                    let object_type_name = schema
+                        .api_schema()
+                        .root_operation(doc.operation.operation_type)
+                        .expect("validation should have caught undefined root operation")
+                        .as_str();
+                    let data = json!({key: object_type_name});
+                    ControlFlow::Break(graphql::Response::builder().data(data).build())?
+                }
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn mixed_fields_error() -> graphql::Response {
+        let error = graphql::Error::builder()
+            .message(
+                "\
+                Mixed queries with both schema introspection and concrete fields \
+                are not supported yet: https://github.com/apollographql/router/issues/2789\
+            ",
+            )
+            .extension_code("MIXED_INTROSPECTION")
+            .build();
+        graphql::Response::builder().error(error).build()
+    }
+
+    async fn cached_introspection(
+        &self,
+        schema: &Arc<spec::Schema>,
+        key: &QueryKey,
+        doc: &ParsedDocument,
+    ) -> graphql::Response {
+        let storage = match self {
+            IntrospectionCache::Enabled { storage } => storage,
+            IntrospectionCache::Disabled => {
+                let error = graphql::Error::builder()
+                    .message(String::from("introspection has been disabled"))
+                    .extension_code("INTROSPECTION_DISABLED")
+                    .build();
+                return graphql::Response::builder().error(error).build();
+            }
+        };
+        let query = key.filtered_query.clone();
+        // TODO:  when adding support for variables in introspection queries,
+        // variable values should become part of the cache key.
+        // https://github.com/apollographql/router/issues/3831
+        let cache_key = query;
+        if let Some(response) = storage.get(&cache_key, |_| unreachable!()).await {
+            return response;
+        }
+        let schema = schema.clone();
+        let doc = doc.clone();
         let response =
-            self.planner
-                .introspect(query.clone())
+            tokio::task::spawn_blocking(move || Self::execute_introspection(&schema, &doc))
                 .await
-                .map_err(|_e| IntrospectionError {
-                    message: String::from("cannot find the introspection response").into(),
-                })?;
+                .expect("Introspection panicked");
+        storage.insert(cache_key, response.clone()).await;
+        response
+    }
 
-        let introspection_result = response.into_result().map_err(|err| IntrospectionError {
-            message: format!(
-                "introspection error : {}",
-                err.into_iter()
-                    .map(|err| err.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
+    fn execute_introspection(schema: &spec::Schema, doc: &ParsedDocument) -> graphql::Response {
+        let schema = schema.api_schema();
+        let operation = &doc.operation;
+        let variable_values = Default::default();
+        match apollo_compiler::execution::coerce_variable_values(
+            schema,
+            operation,
+            &variable_values,
+        ) {
+            Ok(variable_values) => apollo_compiler::execution::execute_introspection_only_query(
+                schema,
+                &doc.executable,
+                operation,
+                &variable_values,
             )
             .into(),
-        })?;
-
-        let response = Response::builder().data(introspection_result).build();
-
-        self.cache.insert(query, response.clone()).await;
-
-        Ok(response)
-    }
-}
-
-#[cfg(test)]
-mod introspection_tests {
-    use std::sync::Arc;
-
-    use router_bridge::planner::IncrementalDeliverySupport;
-    use router_bridge::planner::QueryPlannerConfig;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_plan_cache() {
-        let query_to_test = r#"{
-            __schema {
-              types {
-                name
-              }
+            Err(e) => {
+                let error = e.into_graphql_error(&doc.executable.sources);
+                graphql::Response::builder().error(error).build()
             }
-          }"#;
-        let schema = include_str!("../tests/fixtures/supergraph.graphql");
-        let expected_data = Response::builder().data(42).build();
-
-        let planner = Arc::new(
-            Planner::new(
-                schema.to_string(),
-                QueryPlannerConfig {
-                    incremental_delivery: Some(IncrementalDeliverySupport {
-                        enable_defer: Some(true),
-                    }),
-                    graphql_validation: true,
-                    reuse_query_fragments: Some(false),
-                    generate_query_fragments: None,
-                    debug: None,
-                    type_conditioned_fetching: false,
-                },
-            )
-            .await
-            .unwrap(),
-        );
-
-        let cache = [(query_to_test.to_string(), expected_data.clone())]
-            .iter()
-            .cloned()
-            .collect();
-        let introspection = Introspection::from_cache(planner, cache).await.unwrap();
-
-        assert_eq!(
-            expected_data,
-            introspection
-                .execute(query_to_test.to_string())
-                .await
-                .unwrap()
-        );
+        }
     }
 }

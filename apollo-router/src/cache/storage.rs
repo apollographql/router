@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use lru::LruCache;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Meter;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::KeyValue;
@@ -53,13 +52,14 @@ pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
 // a suitable implementation.
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
-    caller: String,
+    caller: &'static str,
     inner: Arc<Mutex<LruCache<K, V>>>,
     redis: Option<RedisCacheStorage>,
     cache_size: Arc<AtomicI64>,
     cache_estimated_storage: Arc<AtomicI64>,
-    _cache_size_gauge: ObservableGauge<i64>,
-    _cache_estimated_storage_gauge: ObservableGauge<i64>,
+    // It's OK for these to be mutexes as they are only initialized once
+    cache_size_gauge: Arc<std::sync::Mutex<Option<ObservableGauge<i64>>>>,
+    cache_estimated_storage_gauge: Arc<std::sync::Mutex<Option<ObservableGauge<i64>>>>,
 }
 
 impl<K, V> CacheStorage<K, V>
@@ -72,18 +72,12 @@ where
         config: Option<RedisCache>,
         caller: &'static str,
     ) -> Result<Self, BoxError> {
-        // Because calculating the cache size is expensive we do this as we go rather than iterating. This means storing the values for the gauges
-        let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
-        let (cache_size, cache_size_gauge) = Self::create_cache_size_gauge(&meter, caller);
-        let (cache_estimated_storage, cache_estimated_storage_gauge) =
-            Self::create_cache_estimated_storage_size_gauge(&meter, caller);
-
         Ok(Self {
-            _cache_size_gauge: cache_size_gauge,
-            _cache_estimated_storage_gauge: cache_estimated_storage_gauge,
-            cache_size,
-            cache_estimated_storage,
-            caller: caller.to_string(),
+            cache_size_gauge: Default::default(),
+            cache_estimated_storage_gauge: Default::default(),
+            cache_size: Default::default(),
+            cache_estimated_storage: Default::default(),
+            caller,
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
@@ -107,13 +101,23 @@ where
         })
     }
 
-    fn create_cache_size_gauge(
-        meter: &Meter,
-        caller: &'static str,
-    ) -> (Arc<AtomicI64>, ObservableGauge<i64>) {
-        let current_cache_size = Arc::new(AtomicI64::new(0));
-        let current_cache_size_for_gauge = current_cache_size.clone();
-        let cache_size_gauge = meter
+    pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
+        Self {
+            cache_size_gauge: Default::default(),
+            cache_estimated_storage_gauge: Default::default(),
+            cache_size: Default::default(),
+            cache_estimated_storage: Default::default(),
+            caller,
+            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
+            redis: None,
+        }
+    }
+
+    fn create_cache_size_gauge(&self) -> ObservableGauge<i64> {
+        let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
+        let current_cache_size_for_gauge = self.cache_size.clone();
+        let caller = self.caller;
+        meter
             // TODO move to dot naming convention
             .i64_observable_gauge("apollo_router_cache_size")
             .with_description("Cache size")
@@ -126,16 +130,13 @@ where
                     ],
                 )
             })
-            .init();
-        (current_cache_size, cache_size_gauge)
+            .init()
     }
 
-    fn create_cache_estimated_storage_size_gauge(
-        meter: &Meter,
-        caller: &'static str,
-    ) -> (Arc<AtomicI64>, ObservableGauge<i64>) {
-        let cache_estimated_storage = Arc::new(AtomicI64::new(0));
-        let cache_estimated_storage_for_gauge = cache_estimated_storage.clone();
+    fn create_cache_estimated_storage_size_gauge(&self) -> ObservableGauge<i64> {
+        let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
+        let cache_estimated_storage_for_gauge = self.cache_estimated_storage.clone();
+        let caller = self.caller;
         let cache_estimated_storage_gauge = meter
             .i64_observable_gauge("apollo.router.cache.storage.estimated_size")
             .with_description("Estimated cache storage")
@@ -154,7 +155,7 @@ where
                 }
             })
             .init();
-        (cache_estimated_storage, cache_estimated_storage_gauge)
+        cache_estimated_storage_gauge
     }
 
     /// `init_from_redis` is called with values newly deserialized from Redis cache
@@ -292,6 +293,17 @@ where
     pub(crate) async fn len(&self) -> usize {
         self.inner.lock().await.len()
     }
+
+    pub(crate) fn activate(&self) {
+        // Gauges MUST be created after the meter provider is initialized
+        // This means that on reload we need a non-fallible way to recreate the gauges, hence this function.
+        *self.cache_size_gauge.lock().expect("lock poisoned") =
+            Some(self.create_cache_size_gauge());
+        *self
+            .cache_estimated_storage_gauge
+            .lock()
+            .expect("lock poisoned") = Some(self.create_cache_estimated_storage_size_gauge());
+    }
 }
 
 enum CacheStorageName {
@@ -350,6 +362,7 @@ mod test {
                 CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
                     .await
                     .unwrap();
+            cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
             assert_gauge!(
@@ -385,6 +398,7 @@ mod test {
                 CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
                     .await
                     .unwrap();
+            cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
             // This metric won't exist
@@ -418,6 +432,7 @@ mod test {
                 CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test")
                     .await
                     .unwrap();
+            cache.activate();
 
             cache
                 .insert(

@@ -69,7 +69,7 @@ preview_entity_cache:
 
 telemetry:
   apollo:
-    experimental_apollo_metrics_reference_mode: extended
+    metrics_reference_mode: extended
   instrumentation:
     spans:
       router:

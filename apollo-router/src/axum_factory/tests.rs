@@ -2267,10 +2267,14 @@ async fn test_supergraph_timeout() {
 
     let schema = include_str!("..//testdata/minimal_supergraph.graphql");
     let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
-    let planner =
-        BridgeQueryPlannerPool::new(schema.clone(), conf.clone(), NonZeroUsize::new(1).unwrap())
-            .await
-            .unwrap();
+    let planner = BridgeQueryPlannerPool::new(
+        Vec::new(),
+        schema.clone(),
+        conf.clone(),
+        NonZeroUsize::new(1).unwrap(),
+    )
+    .await
+    .unwrap();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph

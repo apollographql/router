@@ -1,0 +1,52 @@
+---
+title: Cloud Dedicated Overview
+subtitle: Learn about the Dedicated cloud router offering and pricing
+description: Learn about Apollo's dedicated cloud routing for GraphQL APIs including available AWS regions and pricing.
+---
+
+<CloudPlanPause />
+
+GraphOS _Cloud Dedicated_ is the Apollo offering that lets you run a cloud router on dedicated, pre-provisioned infrastructure that you control and scale. It gives you access to a fully managed and monitored fleet of GraphOS Routers.
+
+The Cloud Dedicated approach lets you implement and scale your supergraph without managing any additional infrastructure. Tailored for teams handling production-grade workloads, Cloud Dedicated offers additional control over performance and security.
+
+<Tip>
+
+Go the [Cloud Dedicated quickstart](/graphos/routing/cloud/dedicated-quickstart) to get started.
+
+</Tip>
+
+## Runs on AWS
+
+Cloud Dedicated runs a fleet of GraphOS Routers in the AWS region of your choice. The following regions are currently available:
+
+- us-east-1
+- us-east-2
+- us-west-2
+- ap-southeast-1
+- ap-southeast-2
+- ap-northeast-1
+- ca-central-1
+- eu-central-1
+- eu-west-1
+- eu-west-2
+- eu-north-1
+
+Dedicated supports subgraphs running in any cloud region or provider. However, you may incur additional networking charges for subgraphs running outside your selected AWS region. AWS VPC Lattice is only supported for the regions listed above.
+
+## Pricing
+
+Cloud Dedicated pricing is based on the amount of _Graph Compute Units_ (GCUs) needed to run your graph. A GCU is a unit of throughput capacity. You can scale GCUs via [GraphOS Studio](https://studio.apollographql.com?referrer=docs-content) or the [GraphOS Platform API](/graphos/reference/platform-api/).
+
+To learn about GCU performance and scaling, consult the [Throughput guide](/graphos/routing/cloud/throughput-guide).
+
+## Private preview
+
+Cloud Dedicated is a new product and is in [preview](/graphos/reference/feature-launch-stages/#preview) while it matures. It is only available to select customers on an invite-only basis. If you have feedback or are interested in joining the preview, <TrackableLink href="https://www.apollographql.com/contact-sales?type=dedicated&referrer=docs" eventName="content_contact_cloud">get in touch</TrackableLink>.
+
+Please note the following while Cloud Dedicated is in preview:
+
+- 99.9% SLA for ingress traffic
+- Limited to customers running subgraphs in AWS
+- Month-to-month billing, pricing subject to change
+- Limited scaling, up to 10 GCUs per variant

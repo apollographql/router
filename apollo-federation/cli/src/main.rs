@@ -254,7 +254,10 @@ fn cmd_plan(
 
     let query_doc =
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
-    print!("{}", planner.build_query_plan(&query_doc, None)?);
+    print!(
+        "{}",
+        planner.build_query_plan(&query_doc, None, Default::default())?
+    );
     Ok(())
 }
 

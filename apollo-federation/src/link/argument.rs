@@ -13,7 +13,7 @@ pub(crate) fn directive_optional_enum_argument(
     application: &Node<Directive>,
     name: &Name,
 ) -> Result<Option<Name>, FederationError> {
-    match application.argument_by_name(name) {
+    match application.specified_argument_by_name(name) {
         Some(value) => match value.deref() {
             Value::Enum(name) => Ok(Some(name.clone())),
             Value::Null => Ok(None),
@@ -48,7 +48,7 @@ pub(crate) fn directive_optional_string_argument<'doc>(
     application: &'doc Node<Directive>,
     name: &Name,
 ) -> Result<Option<&'doc str>, FederationError> {
-    match application.argument_by_name(name) {
+    match application.specified_argument_by_name(name) {
         Some(value) => match value.deref() {
             Value::String(name) => Ok(Some(name)),
             Value::Null => Ok(None),
@@ -83,7 +83,7 @@ pub(crate) fn directive_optional_boolean_argument(
     application: &Node<Directive>,
     name: &Name,
 ) -> Result<Option<bool>, FederationError> {
-    match application.argument_by_name(name) {
+    match application.specified_argument_by_name(name) {
         Some(value) => match value.deref() {
             Value::Boolean(value) => Ok(Some(*value)),
             Value::Null => Ok(None),
@@ -119,7 +119,7 @@ pub(crate) fn directive_optional_variable_boolean_argument(
     application: &Node<Directive>,
     name: &Name,
 ) -> Result<Option<BooleanOrVariable>, FederationError> {
-    match application.argument_by_name(name) {
+    match application.specified_argument_by_name(name) {
         Some(value) => match value.deref() {
             Value::Variable(name) => Ok(Some(BooleanOrVariable::Variable(name.clone()))),
             Value::Boolean(value) => Ok(Some(BooleanOrVariable::Boolean(*value))),

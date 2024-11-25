@@ -253,3 +253,6 @@ probes:
 
 # -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
 topologySpreadConstraints: []
+
+# -- Sets the restart policy of pods
+restartPolicy: Always
