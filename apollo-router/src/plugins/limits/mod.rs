@@ -178,7 +178,6 @@ impl LimitsPlugin {
         match resp {
             Ok(r) => {
                 if r.response.status() == StatusCode::PAYLOAD_TOO_LARGE {
-                    Self::increment_legacy_metric();
                     Ok(BodyLimitError::PayloadTooLarge.into_response(ctx))
                 } else {
                     Ok(r)
@@ -193,25 +192,10 @@ impl LimitsPlugin {
 
                 match root_cause.downcast_ref::<BodyLimitError>() {
                     None => Err(e),
-                    Some(_) => {
-                        Self::increment_legacy_metric();
-                        Ok(BodyLimitError::PayloadTooLarge.into_response(ctx))
-                    }
+                    Some(_) => Ok(BodyLimitError::PayloadTooLarge.into_response(ctx)),
                 }
             }
         }
-    }
-
-    fn increment_legacy_metric() {
-        // Remove this eventually
-        // This is already handled by the telemetry plugin via the http.server.request metric.
-        u64_counter!(
-            "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
-            1,
-            status = StatusCode::PAYLOAD_TOO_LARGE.as_u16() as i64,
-            error = BodyLimitError::PayloadTooLarge.to_string()
-        );
     }
 }
 

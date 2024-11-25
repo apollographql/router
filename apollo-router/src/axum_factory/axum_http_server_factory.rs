@@ -301,9 +301,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 main_listener,
-                actual_main_listen_address.clone(),
                 all_routers.main.1,
-                true,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -340,9 +338,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             listener,
-                            listen_addr.clone(),
                             router,
-                            false,
                             all_connections_stopped_sender.clone(),
                         );
                         (
@@ -509,13 +505,6 @@ async fn license_handler<B>(
         license,
         LicenseState::LicensedHalt | LicenseState::LicensedWarn
     ) {
-        u64_counter!(
-            "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
-            1,
-            status = StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
-            error = LICENSE_EXPIRED_SHORT_MESSAGE
-        );
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
         // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.

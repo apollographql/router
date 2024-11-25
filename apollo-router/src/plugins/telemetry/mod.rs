@@ -648,7 +648,7 @@ impl PluginPrivate for Telemetry {
                         .supergraph
                         .attributes
                         .on_request(req);
-                    Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
+                    Self::populate_context(field_level_instrumentation_ratio, req);
                     let custom_instruments = config
                         .instrumentation
                         .instruments
@@ -1204,11 +1204,7 @@ impl Telemetry {
         res
     }
 
-    fn populate_context(
-        config: Arc<Conf>,
-        field_level_instrumentation_ratio: f64,
-        req: &SupergraphRequest,
-    ) {
+    fn populate_context(field_level_instrumentation_ratio: f64, req: &SupergraphRequest) {
         let context = &req.context;
 
         // List of custom attributes for metrics

@@ -63,7 +63,6 @@ async fn test_metrics_reloading() {
     );
     check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
     check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
-    check_metrics_contains(&metrics, r#"apollo_router_session_count_total"#);
     check_metrics_contains(&metrics, r#"custom_header="test_custom""#);
 
     router

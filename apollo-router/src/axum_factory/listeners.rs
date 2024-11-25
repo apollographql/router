@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +29,6 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
 
-static SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug)]
@@ -199,9 +197,7 @@ pub(super) async fn get_extra_listeners(
 
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
-    address: ListenAddr,
     router: axum::Router,
-    main_graphql_port: bool,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -214,8 +210,6 @@ pub(super) fn serve_router_on_listen_addr(
         tokio::pin!(shutdown_receiver);
 
         let connection_shutdown = Arc::new(Notify::new());
-
-        let address = address.to_string();
 
         loop {
             tokio::select! {
@@ -233,16 +227,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 tracing::info!("can accept connections again");
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
-                            // We only want to recognise sessions if we are the main graphql port.
-                            if main_graphql_port {
-                                let session_count = SESSION_COUNT.fetch_add(1, Ordering::Acquire)+1;
-                                tracing::info!(
-                                    value.apollo_router_session_count_total = session_count,
-                                    listener = &address
-                                );
-                            }
 
-                            let address = address.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
@@ -356,15 +341,6 @@ pub(super) fn serve_router_on_listen_addr(
                                             }
                                         }
                                     }
-                                }
-
-                                // We only want to recognise sessions if we are the main graphql port.
-                                if main_graphql_port {
-                                    let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Acquire)-1;
-                                    tracing::info!(
-                                        value.apollo_router_session_count_total = session_count,
-                                        listener = &address
-                                    );
                                 }
                             });
                         }
