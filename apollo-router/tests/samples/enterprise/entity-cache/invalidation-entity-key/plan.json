@@ -31,7 +31,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){..._generated_onProduct1_0}}fragment _generated_onProduct1_0 on Product{reviews{body}}",
                                     "operationName": "InvalidationEntityKey__invalidation_entity_key_reviews__1",
                                     "variables":{"representations":[{"upc":"0","__typename":"Product"},{"upc":"1","__typename":"Product"}]}
                                 }
@@ -115,7 +115,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){..._generated_onProduct1_0}}fragment _generated_onProduct1_0 on Product{reviews{body}}",
                                     "variables":{"representations":[{"upc":"1","__typename":"Product"}]}
                                 }
                             },
@@ -202,7 +202,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){..._generated_onProduct1_0}}fragment _generated_onProduct1_0 on Product{reviews{body}}",
                                     "variables":{"representations":[{"upc":"1","__typename":"Product"}]}
                                 }
                             },

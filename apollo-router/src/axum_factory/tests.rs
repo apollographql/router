@@ -1847,7 +1847,7 @@ async fn http_compressed_service() -> impl Service<
                 "apollo.include_subgraph_errors": {
                     "all": true
                 }
-            }
+            },
         }))
         .unwrap()
         .supergraph_hook(move |service| {

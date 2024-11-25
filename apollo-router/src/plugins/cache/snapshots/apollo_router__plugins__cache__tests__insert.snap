@@ -1,7 +1,16 @@
 ---
 source: apollo-router/src/plugins/cache/tests.rs
-expression: response.response.headers().get(CACHE_CONTROL)
+expression: cache_keys
 ---
-Some(
-    "public",
-)
+[
+  {
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:hash:d0b09a1a50750b5e95f73a196acf6ef5a8d60bf19599854b0dbee5dec6ee7ed6:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "status": "new",
+    "cache_control": "public"
+  },
+  {
+    "key": "version:1.0:subgraph:user:type:Query:hash:a3b7f56680be04e3ae646cf8a025aed165e8dd0f6c3dc7c95d745f8cb1348083:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "status": "new",
+    "cache_control": "public"
+  }
+]

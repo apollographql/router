@@ -171,11 +171,7 @@ async fn service_call(
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
 
-    let QueryPlannerResponse {
-        content,
-        context,
-        errors,
-    } = match plan_query(
+    let QueryPlannerResponse { content, errors } = match plan_query(
         planning,
         body.operation_name.clone(),
         context.clone(),

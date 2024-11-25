@@ -53,7 +53,8 @@ allow = [
     "MIT",
     "MPL-2.0",
     "Elastic-2.0",
-    "Unicode-DFS-2016"
+    "Unicode-DFS-2016",
+    "Zlib"
 ]
 copyleft = "warn"
 allow-osi-fsf-free = "neither"

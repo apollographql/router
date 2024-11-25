@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -549,6 +550,11 @@ expression: "&schema"
     "Client": {
       "additionalProperties": false,
       "properties": {
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
@@ -1312,6 +1318,20 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
+        "http1_max_request_buf_size": {
+          "default": null,
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
+          "nullable": true,
+          "type": "string"
+        },
+        "http1_max_request_headers": {
+          "default": null,
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
@@ -1679,6 +1699,11 @@ expression: "&schema"
         "enabled": {
           "default": false,
           "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
           "type": "boolean"
         },
         "invalidation": {
@@ -2160,6 +2185,45 @@ expression: "&schema"
         },
         {
           "type": "boolean"
+        }
+      ]
+    },
+    "DnsResolutionStrategy": {
+      "oneOf": [
+        {
+          "description": "Only query for `A` (IPv4) records",
+          "enum": [
+            "ipv4_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Only query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv6_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel",
+          "enum": [
+            "ipv4_and_ipv6"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records",
+          "enum": [
+            "ipv6_then_ipv4"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv4_then_ipv6"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -5930,6 +5994,11 @@ expression: "&schema"
           "description": "Send the service name",
           "type": "boolean"
         },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
+          "type": "boolean"
+        },
         "uri": {
           "default": false,
           "description": "Send the subgraph URI",
@@ -5970,6 +6039,11 @@ expression: "&schema"
         "status_code": {
           "default": false,
           "description": "Send the http status",
+          "type": "boolean"
+        },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
           "type": "boolean"
         }
       },
@@ -6395,6 +6469,11 @@ expression: "&schema"
           "nullable": true,
           "type": "boolean"
         },
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
@@ -6545,8 +6624,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "generate_query_fragments": {
-          "default": false,
-          "description": "Enable QP generation of fragments for subgraph requests Default: false",
+          "default": true,
+          "description": "Enable QP generation of fragments for subgraph requests Default: true",
           "type": "boolean"
         },
         "introspection": {

@@ -8,8 +8,8 @@ use apollo_compiler::Node;
 use indexmap::map::Entry;
 use serde::Serialize;
 
+use crate::bail;
 use crate::error::FederationError;
-use crate::internal_error;
 use crate::operation::DirectiveList;
 use crate::operation::NamedFragments;
 use crate::operation::Selection;
@@ -122,7 +122,7 @@ impl Conditions {
 
         if let Some(skip) = directives.get("skip") {
             let Some(value) = skip.specified_argument_by_name("if") else {
-                internal_error!("missing @skip(if:) argument");
+                bail!("missing @skip(if:) argument");
             };
 
             match value.as_ref() {
@@ -134,14 +134,14 @@ impl Conditions {
                     variables.insert(name.clone(), ConditionKind::Skip);
                 }
                 _ => {
-                    internal_error!("expected boolean or variable `if` argument, got {value}");
+                    bail!("expected boolean or variable `if` argument, got {value}");
                 }
             }
         }
 
         if let Some(include) = directives.get("include") {
             let Some(value) = include.specified_argument_by_name("if") else {
-                internal_error!("missing @include(if:) argument");
+                bail!("missing @include(if:) argument");
             };
 
             match value.as_ref() {
@@ -159,7 +159,7 @@ impl Conditions {
                     }
                 }
                 _ => {
-                    internal_error!("expected boolean or variable `if` argument, got {value}");
+                    bail!("expected boolean or variable `if` argument, got {value}");
                 }
             }
         }

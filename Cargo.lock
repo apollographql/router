@@ -178,11 +178,12 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.57.1"
+version = "1.58.0-rc.2"
 dependencies = [
  "apollo-compiler",
  "derive_more",
  "either",
+ "hashbrown 0.15.0",
  "hex",
  "indexmap 2.2.6",
  "insta",
@@ -191,6 +192,7 @@ dependencies = [
  "multimap 0.10.0",
  "nom",
  "petgraph",
+ "regex",
  "ron",
  "serde",
  "serde_json_bytes",
@@ -229,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.57.1"
+version = "1.58.0-rc.2"
 dependencies = [
  "access-json",
  "ahash",
@@ -397,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.57.1"
+version = "1.58.0-rc.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -413,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.57.1"
+version = "1.58.0-rc.2"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -2578,6 +2580,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
+
+[[package]]
 name = "forbid-anonymous-operations"
 version = "0.1.0"
 dependencies = [
@@ -2927,8 +2935,8 @@ dependencies = [
  "aho-corasick",
  "bstr",
  "log",
- "regex-automata 0.4.7",
- "regex-syntax 0.8.4",
+ "regex-automata 0.4.8",
+ "regex-syntax 0.8.5",
 ]
 
 [[package]]
@@ -3083,6 +3091,17 @@ checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
  "allocator-api2",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
 ]
 
 [[package]]
@@ -3364,9 +3383,8 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a152ddd61dfaec7273fe8419ab357f33aee0d914c5f4efbf0d96fa749eea5ec9"
+version = "0.14.31"
+source = "git+https://github.com/apollographql/hyper.git?tag=header-customizations-20241108#c42aec785394b40645a283384838b856beace011"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -3379,6 +3397,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
+ "smallvec",
  "socket2 0.5.7",
  "tokio",
  "tower-service",
@@ -5288,14 +5307,14 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.5"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91213439dad192326a0d7c6ee3955910425f441d7038e0d6933b0aec5c4517f"
+checksum = "b544ef1b4eac5dc2db33ea63606ae9ffcfac26c1416a2806ae0bf5f56b201191"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-automata 0.4.7",
- "regex-syntax 0.8.4",
+ "regex-automata 0.4.8",
+ "regex-syntax 0.8.5",
 ]
 
 [[package]]
@@ -5309,13 +5328,13 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.7"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38caf58cc5ef2fed281f89292ef23f6365465ed9a41b7a7754eb4e26496c92df"
+checksum = "368758f23274712b504848e9d5a6f010445cc8b87a7cdb4d7cbee666c1288da3"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-syntax 0.8.4",
+ "regex-syntax 0.8.5",
 ]
 
 [[package]]
@@ -5332,9 +5351,9 @@ checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "regex-syntax"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
+checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "reqwest"
