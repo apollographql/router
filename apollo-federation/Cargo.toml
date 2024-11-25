@@ -39,6 +39,7 @@ tracing = "0.1.40"
 ron = { version = "0.8.1", optional = true }
 either = "1.13.0"
 regex = "1.11.1"
+uuid = { version = "1.11.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 hex.workspace = true

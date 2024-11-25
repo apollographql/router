@@ -5,7 +5,6 @@ use std::fmt::Write;
 use std::hash::Hash;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::sync::atomic;
 use std::sync::Arc;
 
 use apollo_compiler::ast::InputValueDefinition;
@@ -24,6 +23,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use tracing::debug;
 use tracing::debug_span;
+use uuid::Uuid;
 
 use super::condition_resolver::ContextMapEntry;
 use crate::bail;
@@ -251,22 +251,12 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
 
 /// Wrapper for an override ID, which indicates a relationship between a group of `OpGraphPath`s
 /// where one "overrides" the others in the group.
-///
-/// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
-/// to be something like UUIDs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-// NOTE(@TylerBloom): This feature gate can be removed once the condition in the comment above is
-// met.
-#[cfg_attr(feature = "snapshot_tracing", derive(serde::Serialize))]
-pub(crate) struct OverrideId(usize);
-
-/// Global storage for the counter used to allocate `OverrideId`s.
-static NEXT_OVERRIDE_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+pub(crate) struct OverrideId(Uuid);
 
 impl OverrideId {
     fn new() -> Self {
-        // atomically increment global counter
-        Self(NEXT_OVERRIDE_ID.fetch_add(1, atomic::Ordering::AcqRel))
+        Self(Uuid::new_v4())
     }
 }
 
