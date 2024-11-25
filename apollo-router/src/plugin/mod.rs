@@ -140,7 +140,7 @@ where
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
-            .launch_id(Some("launch_id".to_string()))
+            .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
             .build()
     }

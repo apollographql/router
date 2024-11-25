@@ -516,6 +516,7 @@ pub(crate) async fn add_plugin(
     schema_id: Arc<String>,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    launch_id: Option<Arc<String>>,
     notify: &crate::notification::Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
@@ -528,6 +529,7 @@ pub(crate) async fn add_plugin(
                 .supergraph_schema_id(schema_id)
                 .supergraph_schema(supergraph_schema)
                 .subgraph_schemas(subgraph_schemas)
+                .launch_id(launch_id)
                 .notify(notify.clone())
                 .build(),
         )
