@@ -77,7 +77,6 @@ use self::config_new::instruments::RouterInstruments;
 use self::config_new::instruments::SubgraphInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
-use self::metrics::AttributesForwardConf;
 use self::reload::reload_fmt;
 pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -142,8 +141,6 @@ use crate::services::execution;
 use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::subgraph;
-use crate::services::subgraph::Request;
-use crate::services::subgraph::Response;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
@@ -696,7 +693,6 @@ impl PluginPrivate for Telemetry {
                             config.clone(),
                             ctx.clone(),
                             result,
-                            start.elapsed(),
                             custom_instruments,
                             supergraph_events,
                             custom_graphql_instruments,
@@ -740,9 +736,6 @@ impl PluginPrivate for Telemetry {
         let config = self.config.clone();
         let span_mode = self.config.instrumentation.spans.mode;
         let conf = self.config.clone();
-        let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
-        let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
-        let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
         let static_subgraph_instruments = self.subgraph_custom_instruments.read().clone();
@@ -753,11 +746,6 @@ impl PluginPrivate for Telemetry {
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
-                    Self::store_subgraph_request_attributes(
-                        subgraph_metrics_conf_req.as_ref(),
-                        sub_request,
-                    );
-
                     let custom_attributes = config
                         .instrumentation
                         .spans
@@ -800,11 +788,7 @@ impl PluginPrivate for Telemetry {
                     CacheInstruments,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
-                    let subgraph_attribute = subgraph_attribute.clone();
-                    let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
                     let conf = conf.clone();
-                    // Using Instant because it is guaranteed to be monotonically increasing.
-                    let now = Instant::now();
                     async move {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
@@ -844,13 +828,6 @@ impl PluginPrivate for Telemetry {
                             }
                         }
 
-                        Self::store_subgraph_response_attributes(
-                            &context,
-                            subgraph_attribute,
-                            subgraph_metrics_conf.as_ref(),
-                            now,
-                            &result,
-                        );
                         result
                     }
                 },
@@ -1141,29 +1118,12 @@ impl Telemetry {
         config: Arc<Conf>,
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
-        request_duration: Duration,
         custom_instruments: SupergraphInstruments,
         custom_events: SupergraphEvents,
         custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
-        let mut metric_attrs = context
-            .extensions()
-            .with_lock(|lock| lock.get::<MetricsAttributes>().cloned())
-            .map(|attrs| {
-                attrs
-                    .0
-                    .into_iter()
-                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                    .collect::<Vec<KeyValue>>()
-            })
-            .unwrap_or_default();
         let res = match result {
             Ok(response) => {
-                metric_attrs.push(KeyValue::new(
-                    "status",
-                    response.response.status().as_u16().to_string(),
-                ));
-
                 let ctx = context.clone();
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
@@ -1190,19 +1150,6 @@ impl Telemetry {
                 });
                 let (first_response, rest) = stream.into_future().await;
 
-                let attributes = config
-                    .exporters
-                    .metrics
-                    .common
-                    .attributes
-                    .supergraph
-                    .get_attributes_from_router_response(&parts, &context, &first_response);
-
-                metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
-
-                if !parts.status.is_success() {
-                    metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
-                }
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -1212,26 +1159,9 @@ impl Telemetry {
 
                 Ok(SupergraphResponse { context, response })
             }
-            Err(err) => {
-                metric_attrs.push(KeyValue::new("status", "500"));
-                Err(err)
-            }
+            Err(err) => Err(err),
         };
 
-        // http_requests_total - the total number of HTTP requests received
-        u64_counter!(
-            "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
-            1,
-            metric_attrs
-        );
-
-        f64_histogram!(
-            "apollo_router_http_request_duration_seconds",
-            "Duration of HTTP requests.",
-            request_duration.as_secs_f64(),
-            metric_attrs
-        );
         res
     }
 
@@ -1241,8 +1171,6 @@ impl Telemetry {
         req: &SupergraphRequest,
     ) {
         let context = &req.context;
-        let http_request = &req.supergraph_request;
-        let headers = http_request.headers();
 
         let (should_log_headers, should_log_body) = config.exporters.logging.should_log(req);
         if should_log_headers {
@@ -1271,158 +1199,11 @@ impl Telemetry {
             );
         }
 
-        let router_attributes_conf = &config.exporters.metrics.common.attributes.supergraph;
-        attributes.extend(
-            router_attributes_conf
-                .get_attributes_from_request(headers, req.supergraph_request.body()),
-        );
-        attributes.extend(router_attributes_conf.get_attributes_from_context(context));
-
-        let _ = context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(MetricsAttributes(attributes)));
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
                 .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
         }
-    }
-
-    fn create_subgraph_metrics_conf(&self, name: &str) -> Arc<AttributesForwardConf> {
-        let subgraph_cfg = &self.config.exporters.metrics.common.attributes.subgraph;
-        macro_rules! extend_config {
-            ($forward_kind: ident) => {{
-                let mut cfg = subgraph_cfg.all.$forward_kind.clone();
-                cfg.extend(
-                    subgraph_cfg
-                        .subgraphs
-                        .get(&name.to_owned())
-                        .map(|s| s.$forward_kind.clone())
-                        .unwrap_or_default(),
-                );
-
-                cfg
-            }};
-        }
-        macro_rules! merge_config {
-            ($forward_kind: ident) => {{
-                let mut cfg = subgraph_cfg.all.$forward_kind.clone();
-                cfg.merge(
-                    subgraph_cfg
-                        .subgraphs
-                        .get(&name.to_owned())
-                        .map(|s| s.$forward_kind.clone())
-                        .unwrap_or_default(),
-                );
-
-                cfg
-            }};
-        }
-
-        Arc::new(AttributesForwardConf {
-            insert: extend_config!(insert),
-            request: merge_config!(request),
-            response: merge_config!(response),
-            errors: merge_config!(errors),
-            context: extend_config!(context),
-        })
-    }
-
-    fn store_subgraph_request_attributes(
-        attribute_forward_config: &AttributesForwardConf,
-        sub_request: &Request,
-    ) {
-        let mut attributes = HashMap::new();
-        attributes.extend(attribute_forward_config.get_attributes_from_request(
-            sub_request.subgraph_request.headers(),
-            sub_request.subgraph_request.body(),
-        ));
-        attributes
-            .extend(attribute_forward_config.get_attributes_from_context(&sub_request.context));
-        sub_request
-            .context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(SubgraphMetricsAttributes(attributes)));
-        //.unwrap();
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn store_subgraph_response_attributes(
-        context: &Context,
-        subgraph_attribute: KeyValue,
-        attribute_forward_config: &AttributesForwardConf,
-        now: Instant,
-        result: &Result<Response, BoxError>,
-    ) {
-        let mut metric_attrs = context
-            .extensions()
-            .with_lock(|lock| lock.get::<SubgraphMetricsAttributes>().cloned())
-            .map(|attrs| {
-                attrs
-                    .0
-                    .into_iter()
-                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                    .collect::<Vec<KeyValue>>()
-            })
-            .unwrap_or_default();
-        metric_attrs.push(subgraph_attribute);
-        // Fill attributes from context
-        metric_attrs.extend(
-            attribute_forward_config
-                .get_attributes_from_context(context)
-                .into_iter()
-                .map(|(k, v)| KeyValue::new(k, v)),
-        );
-
-        match &result {
-            Ok(response) => {
-                metric_attrs.push(KeyValue::new(
-                    "status",
-                    response.response.status().as_u16().to_string(),
-                ));
-
-                // Fill attributes from response
-                metric_attrs.extend(
-                    attribute_forward_config
-                        .get_attributes_from_response(
-                            response.response.headers(),
-                            response.response.body(),
-                        )
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                );
-
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    metric_attrs
-                );
-            }
-            Err(err) => {
-                metric_attrs.push(KeyValue::new("status", "500"));
-                // Fill attributes from error
-                metric_attrs.extend(
-                    attribute_forward_config
-                        .get_attributes_from_error(err)
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                );
-
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    metric_attrs
-                );
-            }
-        }
-        f64_histogram!(
-            "apollo_router_http_request_duration_seconds",
-            "Duration of HTTP requests.",
-            now.elapsed().as_secs_f64(),
-            metric_attrs
-        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1453,27 +1234,6 @@ impl Telemetry {
                         Default::default(),
                     );
                 }
-                let mut metric_attrs = Vec::new();
-                // Fill attributes from error
-
-                metric_attrs.extend(
-                    config
-                        .exporters
-                        .metrics
-                        .common
-                        .attributes
-                        .supergraph
-                        .get_attributes_from_error(&e)
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                );
-
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    metric_attrs
-                );
 
                 Err(e)
             }
@@ -2218,9 +1978,6 @@ pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Ve
         }
     });
 }
-
-#[derive(Clone)]
-struct MetricsAttributes(HashMap<String, AttributeValue>);
 
 #[derive(Clone)]
 struct SubgraphMetricsAttributes(HashMap<String, AttributeValue>);
