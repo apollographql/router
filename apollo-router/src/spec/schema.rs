@@ -30,6 +30,7 @@ pub(crate) struct Schema {
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
     pub(crate) schema_id: Arc<String>,
+    pub(crate) launch_id: Option<Arc<String>>,
 }
 
 /// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
@@ -130,6 +131,7 @@ impl Schema {
             implementers_map,
             api_schema: ApiSchema(api_schema),
             schema_id,
+            launch_id: None, // TODO: get from uplink
         })
     }
 
@@ -336,7 +338,8 @@ impl std::fmt::Debug for Schema {
             subgraphs,
             implementers_map,
             api_schema: _, // skip
-            schema_id: _,
+            schema_id: _,  // skip
+            launch_id: _,  // skip
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
@@ -406,7 +409,7 @@ mod tests {
             type Baz {
               me: String
             }
-            
+
             union UnionType2 = Foo | Bar
             "#,
             );

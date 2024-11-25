@@ -587,6 +587,7 @@ pub(crate) async fn create_plugins(
                 supergraph_schema_id.clone(),
                 supergraph_schema.clone(),
                 subgraph_schemas.clone(),
+                schema.launch_id,
                 &configuration.notify.clone(),
                 &mut plugin_instances,
                 &mut errors,
