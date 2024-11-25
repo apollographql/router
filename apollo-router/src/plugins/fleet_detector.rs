@@ -1,4 +1,3 @@
-use core::slice::SlicePattern;
 use std::env;
 use std::env::consts::ARCH;
 use std::sync::Arc;
@@ -149,10 +148,8 @@ impl GaugeStore {
 
 #[derive(Default)]
 struct GaugeOptions {
-    launch_id: Option<String>,
-
-    // Router Supergraph Schema Hash (SHA256 of the SDL)
     supergraph_schema_hash: String,
+    launch_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -175,8 +172,8 @@ impl PluginPrivate for FleetDetector {
         }
 
         let gauge_options = GaugeOptions {
-            launch_id: None,
             supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
+            launch_id: plugin.launch_id,
         };
 
         Ok(FleetDetector {

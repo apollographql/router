@@ -77,6 +77,9 @@ pub struct PluginInit<T> {
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
 
+    /// Launch ID
+    pub(crate) launch_id: Option<Arc<String>>,
+
     pub(crate) notify: Notify<String, graphql::Response>,
 }
 
@@ -173,6 +176,7 @@ where
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
@@ -181,6 +185,7 @@ where
             supergraph_schema_id,
             supergraph_schema,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id,
             notify,
         }
     }
@@ -196,6 +201,7 @@ where
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -205,6 +211,7 @@ where
             supergraph_schema,
             supergraph_schema_id,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id,
             notify,
         })
     }
@@ -217,6 +224,7 @@ where
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
         PluginInit {
@@ -226,6 +234,7 @@ where
             supergraph_schema: supergraph_schema
                 .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
         }
     }
@@ -243,6 +252,7 @@ impl PluginInit<serde_json::Value> {
             .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
+            .launch_id(self.launch_id)
             .notify(self.notify.clone())
             .build()
     }
