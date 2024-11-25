@@ -1,6 +1,8 @@
-### Move heavy computation to a thread pool with a priority queue 
+### Move heavy computation to a thread pool with a priority queue ([PR #6247](https://github.com/apollographql/router/pull/6247))
 
-These components can take non-trivial amounts of CPU time:
+The router now avoids blocking threads when executing asynchronous code by using a thread pool with a priority queue.
+
+This improves the performance of the following components can take non-trivial amounts of CPU time:
 
 * GraphQL parsing
 * GraphQL validation

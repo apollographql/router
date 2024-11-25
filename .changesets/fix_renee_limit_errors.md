@@ -1,6 +1,5 @@
-### Limit the amount of GraphQL validation errors returned in the response ([PR #6187](https://github.com/apollographql/router/pull/6187))
+### Limit the amount of GraphQL validation errors returned per response ([PR #6187](https://github.com/apollographql/router/pull/6187))
 
-When an invalid query is submitted, the router now returns at most 100 GraphQL parsing and validation errors in the response.
-This prevents generating a very large response for nonsense documents.
+When an invalid query is submitted, the router now returns at most one hundred GraphQL parsing and validation errors in a response. This prevents generating too large of a response for a nonsensical document.
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6187
