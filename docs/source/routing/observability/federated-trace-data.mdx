@@ -26,15 +26,16 @@ In summary, subgraphs report timing and error information to the router, and the
 
 ### In your subgraphs
 
-For a subgraph to include trace data in its responses to your router, it must use a subgraph-compatible library that supports the trace format.
+For a subgraph to include trace data in its responses to your router, it must use a [subgraph-compatible library](/graphos/reference/federation/compatible-subgraphs) that supports the trace format.
 
-To check whether your subgraph library supports federated tracing, see the `FEDERATED TRACING` entry for the library on [this page](/federation/building-supergraphs/supported-subgraphs/).
+To check whether your subgraph library supports federated tracing, see the `FEDERATED TRACING` entry for the library on [this page](/graphos/reference/federation/compatible-subgraphs).
 
 If your library does support federated tracing, see its documentation to learn how to enable the feature.
 
 <Note>
 
 If your subgraph uses Apollo Server with `@apollo/subgraph`, federated tracing is enabled by default. You can customize this behavior with Apollo Server's [inline trace plugin](/apollo-server/api/plugin/inline-trace).
+If your subgraph uses the Ariadne Python library, this [demo repository](https://github.com/apollosolutions/ariadne-federated-traces) shows how to add support for federated tracing.
 
 </Note>
 
