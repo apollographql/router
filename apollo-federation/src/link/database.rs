@@ -15,6 +15,28 @@ use crate::link::LinkError;
 use crate::link::LinksMetadata;
 use crate::link::DEFAULT_LINK_NAME;
 
+use super::federation_spec_definition::get_all_federation_directive_names;
+
+fn validate_federation_imports(link: &Arc<Link>) -> Result<(), LinkError> {
+    let federation_directives = get_all_federation_directive_names();
+
+    for imp in &link.imports {
+        if !imp.is_directive && federation_directives.contains(imp.element.as_str()) {
+            return Err(LinkError::InvalidImport(format!(
+                "Cannot import unknown element \"{}\". Did you mean directive \"{}\"?",
+                imp.element,
+                format!("@{}", imp.element)
+            )));
+        } else if imp.is_directive && !federation_directives.contains(&imp.element) {
+            return Err(LinkError::InvalidImport(format!(
+                "Cannot import unknown federation directive \"@{}\".",
+                imp.element
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Extract @link metadata from a schema.
 pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkError> {
     // This finds "bootstrap" uses of @link / @core regardless of order. By spec,
@@ -80,6 +102,10 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     // We do a 2nd pass to collect and validate all the imports (it's a separate path so we
     // know all the names of the spec linked in the schema).
     for link in &links {
+        if link.url.identity == Identity::federation_identity() {
+            validate_federation_imports(link)?;
+        }
+
         for import in &link.imports {
             let imported_name = import.imported_name();
             let element_map = if import.is_directive {
@@ -537,8 +563,6 @@ mod tests {
             insta::assert_snapshot!(errors, @"Invalid use of @link in schema: invalid alias 'myKey' for import name '@key': should start with '@' since the imported name does");
         }
 
-        // TODO Implement
-        /*
         #[test]
         fn errors_on_importing_unknown_elements_for_known_features() {
             let schema = r#"
@@ -557,8 +581,44 @@ mod tests {
 
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
-            insta::assert_snapshot!(errors, @"");
+            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation directive \"@foo\".");
+
+            // TODO Support multiple errors, in the meantime we'll just clone the code and run again
+            let schema = r#"
+                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+                extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [ "key", { name: "@sharable" } ]
+                )
+
+                type Query {
+                q: Int
+                }
+
+                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+            "#;
+
+            let schema = Schema::parse(schema, "testSchema").unwrap();
+            let errors = links_metadata(&schema).expect_err("should error");
+            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown element \"key\". Did you mean directive \"@key\"?");
+
+            let schema = r#"
+                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+                extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [ { name: "@sharable" } ]
+                )
+
+                type Query {
+                q: Int
+                }
+
+                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+            "#;
+
+            let schema = Schema::parse(schema, "testSchema").unwrap();
+            let errors = links_metadata(&schema).expect_err("should error");
+            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation directive \"@sharable\".");
         }
-        */
     }
 }
