@@ -133,7 +133,7 @@ impl PersistedQueryLayer {
             } else {
                 tracing::info!(
                     monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
-                    persisted_quieries.not_found = true
+                    persisted_queries.not_found = true
                 );
                 // if APQ is not enabled, return an error indicating the query was not found
                 Err(supergraph_err_operation_not_found(
