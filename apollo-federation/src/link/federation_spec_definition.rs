@@ -1,5 +1,4 @@
 use apollo_compiler::ast::Argument;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
@@ -625,21 +624,4 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
             message: "Subgraph unexpectedly does not use a supported federation spec version"
                 .to_owned(),
         })?)
-}
-
-pub(crate) fn get_all_federation_directive_names() -> IndexSet<Name> {
-    vec![
-        FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
-    ]
-    .into_iter()
-    .collect()
 }

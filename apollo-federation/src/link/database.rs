@@ -3,24 +3,25 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::ty;
 use apollo_compiler::Schema;
 
-use super::federation_spec_definition::get_all_federation_directive_names;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::Link;
 use crate::link::LinkError;
 use crate::link::LinksMetadata;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
 
 fn validate_federation_imports(link: &Arc<Link>) -> Result<(), LinkError> {
-    let federation_directives = get_all_federation_directive_names();
+    let federation_directives: HashSet<_> = FEDERATION_V2_DIRECTIVE_NAMES.into_iter().collect();
 
     for imp in &link.imports {
-        if !imp.is_directive && federation_directives.contains(imp.element.as_str()) {
+        if !imp.is_directive && federation_directives.contains(&imp.element) {
             return Err(LinkError::InvalidImport(format!(
                 "Cannot import unknown element \"{}\". Did you mean directive \"@{}\"?",
                 imp.element, imp.element,
