@@ -8,6 +8,7 @@ use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::ty;
 use apollo_compiler::Schema;
 
+use super::federation_spec_definition::get_all_federation_directive_names;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::Link;
@@ -15,22 +16,19 @@ use crate::link::LinkError;
 use crate::link::LinksMetadata;
 use crate::link::DEFAULT_LINK_NAME;
 
-use super::federation_spec_definition::get_all_federation_directive_names;
-
 fn validate_federation_imports(link: &Arc<Link>) -> Result<(), LinkError> {
     let federation_directives = get_all_federation_directive_names();
 
     for imp in &link.imports {
         if !imp.is_directive && federation_directives.contains(imp.element.as_str()) {
             return Err(LinkError::InvalidImport(format!(
-                "Cannot import unknown element \"{}\". Did you mean directive \"{}\"?",
-                imp.element,
-                format!("@{}", imp.element)
+                "Cannot import unknown element \"{}\". Did you mean directive \"@{}\"?",
+                imp.element, imp.element,
             )));
         } else if imp.is_directive && !federation_directives.contains(&imp.element) {
             return Err(LinkError::InvalidImport(format!(
                 "Cannot import unknown federation directive \"@{}\".",
-                imp.element
+                imp.element,
             )));
         }
     }
