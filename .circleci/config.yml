@@ -378,7 +378,7 @@ commands:
             fi
 
             if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --version 0.9.70 cargo-nextest
+              cargo install --locked --version 0.9.84 cargo-nextest
             fi
 
   fetch_dependencies:
