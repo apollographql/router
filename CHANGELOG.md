@@ -65,7 +65,7 @@ The router now compresses operations sent to subgraphs by default by generating 
 definitions and using them in the operation.
 
 This change enables `generate_query_fragments` by default while disabling `experimental_reuse_query_fragments`. When enabled, `experimental_reuse_query_fragments` attempts to intelligently reuse the fragment definitions
-from the original operation. However, fragment generation with `generate_query_fragments` is much faster also produces better outputs in most cases.
+from the original operation. However, fragment generation with `generate_query_fragments` is much faster and produces better outputs in most cases.
 
 If you are relying on the shape of fragments in your subgraph operations or tests, you can opt out of the new algorithm with the configuration below. 
 
