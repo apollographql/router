@@ -68,7 +68,9 @@ pub struct FetchNode {
     /// `FragmentSpread`.
     // PORT_NOTE: This was its own type in the JS codebase, but it's likely simpler to just have the
     // constraint be implicit for router instead of creating a new type.
-    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_optional_vec_of_exe_selection")]
+    #[serde(
+        serialize_with = "crate::utils::serde_bridge::serialize_optional_vec_of_exe_selection"
+    )]
     pub requires: Option<Vec<executable::Selection>>,
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the

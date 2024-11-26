@@ -1,5 +1,9 @@
-use apollo_compiler::{executable, validation::Valid, ExecutableDocument, Node};
-use serde::{ser::SerializeSeq, Serializer};
+use apollo_compiler::executable;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
+use serde::ser::SerializeSeq;
+use serde::Serializer;
 
 /// This module contains functions used to bridge the apollo compiler serialization methods with
 /// serialization with serde.

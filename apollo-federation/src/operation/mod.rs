@@ -83,7 +83,9 @@ impl SelectionId {
 #[derive(Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub(crate) struct ArgumentList {
     /// The inner list *must* be sorted with `sort_arguments`.
-    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_optional_slice_of_exe_argument_nodes")]
+    #[serde(
+        serialize_with = "crate::utils::serde_bridge::serialize_optional_slice_of_exe_argument_nodes"
+    )]
     inner: Option<Arc<[Node<executable::Argument>]>>,
 }
 
