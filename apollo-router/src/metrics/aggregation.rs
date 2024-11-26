@@ -7,24 +7,24 @@ use std::sync::Mutex;
 
 use derive_more::From;
 use itertools::Itertools;
-use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::Counter;
-use opentelemetry::metrics::Histogram;
-use opentelemetry::metrics::InstrumentProvider;
-use opentelemetry::metrics::Meter;
-use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::ObservableCounter;
-use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::SyncCounter;
-use opentelemetry::metrics::SyncHistogram;
-use opentelemetry::metrics::SyncUpDownCounter;
-use opentelemetry::metrics::Unit;
-use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::AsyncInstrument;
+use opentelemetry_api::metrics::Callback;
 use opentelemetry_api::metrics::CallbackRegistration;
+use opentelemetry_api::metrics::Counter;
+use opentelemetry_api::metrics::Histogram;
+use opentelemetry_api::metrics::InstrumentProvider;
+use opentelemetry_api::metrics::Meter;
+use opentelemetry_api::metrics::MeterProvider;
+use opentelemetry_api::metrics::ObservableCounter;
+use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::metrics::ObservableUpDownCounter;
 use opentelemetry_api::metrics::Observer;
+use opentelemetry_api::metrics::SyncCounter;
+use opentelemetry_api::metrics::SyncHistogram;
+use opentelemetry_api::metrics::SyncUpDownCounter;
+use opentelemetry_api::metrics::Unit;
+use opentelemetry_api::metrics::UpDownCounter;
+use opentelemetry_api::KeyValue;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -326,7 +326,7 @@ macro_rules! aggregate_observable_instrument_fn {
             description: Option<Cow<'static, str>>,
             unit: Option<Unit>,
             callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
+        ) -> opentelemetry_api::metrics::Result<$wrapper<$ty>> {
             let callback: Vec<Arc<Callback<$ty>>> =
                 callback.into_iter().map(|c| Arc::new(c)).collect_vec();
             let delegates = self
@@ -359,7 +359,7 @@ macro_rules! aggregate_observable_instrument_fn {
                             })?,
                         )
                     };
-                    let result: opentelemetry::metrics::Result<_> =
+                    let result: opentelemetry_api::metrics::Result<_> =
                         Ok((delegate, registration.map(DroppingUnregister)));
                     result
                 })
@@ -378,7 +378,7 @@ macro_rules! aggregate_instrument_fn {
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
             unit: Option<Unit>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
+        ) -> opentelemetry_api::metrics::Result<$wrapper<$ty>> {
             let delegates = self
                 .meters
                 .iter()
@@ -487,22 +487,22 @@ mod test {
     use std::sync::Arc;
     use std::sync::Weak;
 
-    use opentelemetry::sdk::metrics::data::Gauge;
-    use opentelemetry::sdk::metrics::data::ResourceMetrics;
-    use opentelemetry::sdk::metrics::data::Temporality;
-    use opentelemetry::sdk::metrics::reader::AggregationSelector;
-    use opentelemetry::sdk::metrics::reader::MetricProducer;
-    use opentelemetry::sdk::metrics::reader::MetricReader;
-    use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry::sdk::metrics::Aggregation;
-    use opentelemetry::sdk::metrics::InstrumentKind;
-    use opentelemetry::sdk::metrics::ManualReader;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::Pipeline;
     use opentelemetry_api::global::GlobalMeterProvider;
     use opentelemetry_api::metrics::MeterProvider;
     use opentelemetry_api::metrics::Result;
     use opentelemetry_api::Context;
+    use opentelemetry_sdk::metrics::data::Gauge;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::reader::MetricProducer;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::metrics::Temporality;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;

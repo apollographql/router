@@ -292,7 +292,9 @@ where
             .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
-            .body(serde_json::to_vec(&self)?.into())?;
+            .body(crate::services::router::body::full(serde_json::to_vec(
+                &self,
+            )?))?;
 
         get_text_map_propagator(|propagator| {
             propagator.inject_context(

@@ -40,7 +40,7 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
-use crate::services::transport;
+// use crate::services::transport;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
@@ -73,10 +73,10 @@ impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
     #[deprecated = "use `from_router_service` instead"]
     #[allow(deprecated)]
-    pub fn new(path: String, handler: transport::BoxService) -> Self {
+    pub fn new(path: String, handler: router::BoxService) -> Self {
         let router_service = ServiceBuilder::new()
             .map_request(|request: router::Request| request.router_request)
-            .map_response(|response: transport::Response| response.into())
+            .map_response(|response: router::Response| response.into())
             .service(handler)
             .boxed();
         Self {

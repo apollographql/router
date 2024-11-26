@@ -1,15 +1,19 @@
+pub(crate) use http_body_util::BodyStream;
+/*
 use std::task::Poll;
 
 use futures::Stream;
 use pin_project_lite::pin_project;
 
-pin_project! {
+pub(crate type BodyStream = http_body_util::BodyStream;
+
+// pin_project! {
     /// Allows conversion between an http_body::Body and a futures stream.
-    pub(crate) struct BodyStream<B: http_body::Body> {
-        #[pin]
-        inner: B
-    }
-}
+    // pub(crate) struct BodyStream<B: http_body::Body> {
+        // #[pin]
+        // inner: B
+    // }
+// }
 
 impl<B: hyper::body::HttpBody> BodyStream<B> {
     /// Create a new `BodyStream`.
@@ -32,3 +36,4 @@ where
         self.project().inner.poll_data(cx)
     }
 }
+*/

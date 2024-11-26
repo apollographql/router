@@ -2,7 +2,7 @@ use std::future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tower::retry::budget::Budget;
+use tower::retry::budget::TpsBudget;
 use tower::retry::Policy;
 
 use crate::query_planner::OperationKind;
@@ -10,7 +10,7 @@ use crate::services::subgraph;
 
 #[derive(Clone, Default)]
 pub(crate) struct RetryPolicy {
-    budget: Arc<Budget>,
+    budget: Arc<TpsBudget>,
     retry_mutations: bool,
     subgraph_name: String,
 }
@@ -24,7 +24,7 @@ impl RetryPolicy {
         subgraph_name: String,
     ) -> Self {
         Self {
-            budget: Arc::new(Budget::new(
+            budget: Arc::new(TpsBudget::new(
                 duration.unwrap_or_else(|| Duration::from_secs(10)),
                 min_per_sec.unwrap_or(10),
                 retry_percent.unwrap_or(0.2),

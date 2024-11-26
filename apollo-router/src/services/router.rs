@@ -35,8 +35,10 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
-//#[deprecated]
-pub type Body = hyper::Body;
+// #[deprecated]
+// pub type Body = hyper::Body;
+
+pub type Body = RouterBody;
 pub type Error = hyper::Error;
 
 pub mod body;

@@ -13,8 +13,9 @@ use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
-use hyper::client::HttpConnector;
+use http_body::Body as HttpBody;
 use hyper_rustls::HttpsConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
@@ -47,10 +48,14 @@ use crate::services::router::body::RouterBody;
 use crate::Configuration;
 use crate::Context;
 
-type HTTPClient =
-    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>>;
+type HTTPClient = Decompression<
+    hyper_util::client::legacy::Client<
+        HttpsConnector<HttpConnector<AsyncHyperResolver>>,
+        RouterBody,
+    >,
+>;
 #[cfg(unix)]
-type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, RouterBody>>;
+type UnixHTTPClient = Decompression<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>;
 #[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
@@ -87,7 +92,7 @@ impl Display for Compression {
 
 #[derive(Clone)]
 pub(crate) struct HttpClientService {
-    // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
+    // Note: We use hyper_util::client::legacy::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
     http_client: HTTPClient,
@@ -155,7 +160,7 @@ impl HttpClientService {
             builder.wrap_connector(http_connector)
         };
 
-        let http_client = hyper::Client::builder()
+        let http_client = hyper_util::client::legacy::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
             .http2_only(http2 == Http2Config::Http2Only)
             .build(connector);
@@ -166,7 +171,7 @@ impl HttpClientService {
             #[cfg(unix)]
             unix_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
-                .service(hyper::Client::builder().build(UnixConnector)),
+                .service(hyper_util::client::legacy::Client::builder().build(UnixConnector)),
             service: Arc::new(service.into()),
         })
     }
@@ -342,13 +347,13 @@ async fn do_fetch(
 }
 
 pin_project! {
-    pub(crate) struct BodyStream<B: hyper::body::HttpBody> {
+    pub(crate) struct BodyStream<B: HttpBody> {
         #[pin]
         inner: DecompressionBody<B>
     }
 }
 
-impl<B: hyper::body::HttpBody> BodyStream<B> {
+impl<B: HttpBody> BodyStream<B> {
     /// Create a new `BodyStream`.
     pub(crate) fn new(body: DecompressionBody<B>) -> Self {
         Self { inner: body }
@@ -357,7 +362,7 @@ impl<B: hyper::body::HttpBody> BodyStream<B> {
 
 impl<B> Stream for BodyStream<B>
 where
-    B: hyper::body::HttpBody,
+    B: HttpBody,
     B::Error: Into<tower_http::BoxError>,
 {
     type Item = Result<Bytes, BoxError>;
@@ -366,8 +371,6 @@ where
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        use hyper::body::HttpBody;
-
         self.project().inner.poll_data(cx)
     }
 }

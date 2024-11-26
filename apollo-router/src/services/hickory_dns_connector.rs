@@ -9,9 +9,9 @@ use std::task::Poll;
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::TokioAsyncResolver;
-use hyper::client::connect::dns::Name;
-use hyper::client::HttpConnector;
-use hyper::service::Service;
+use hyper_util::client::legacy::connect::dns::Name;
+use hyper_util::client::legacy::connect::HttpConnector;
+use tower::Service;
 
 use crate::configuration::shared::DnsResolutionStrategy;
 

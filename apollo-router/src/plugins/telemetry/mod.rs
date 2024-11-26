@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use ::tracing::info_span;
 use ::tracing::Span;
-use axum::headers::HeaderName;
+use axum_extra::headers::HeaderName;
 use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
@@ -28,13 +28,11 @@ use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
-use opentelemetry::metrics::MetricsError;
+use opentelemetry::propagation::composite::TextMapCompositePropagator;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::TextMapCompositePropagator;
-use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
@@ -43,7 +41,9 @@ use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry_api::metrics::MetricsError;
 use opentelemetry_api::trace::TraceId;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -215,7 +215,7 @@ pub(crate) struct Telemetry {
 }
 
 struct TelemetryActivation {
-    tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
+    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
     // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
@@ -289,7 +289,7 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        opentelemetry::global::set_error_handler(handle_error)
+        opentelemetry_api::global::set_error_handler(handle_error)
             .expect("otel error handler lock poisoned, fatal");
 
         let mut config = init.config;
@@ -1065,14 +1065,14 @@ impl Telemetry {
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
         if propagation.jaeger || tracing.jaeger.enabled() {
-            propagators.push(Box::<opentelemetry_jaeger::Propagator>::default());
+            propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
         }
         if propagation.baggage {
-            propagators.push(Box::<opentelemetry::sdk::propagation::BaggagePropagator>::default());
+            propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
         }
         if propagation.trace_context || tracing.otlp.enabled {
             propagators
-                .push(Box::<opentelemetry::sdk::propagation::TraceContextPropagator>::default());
+                .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
@@ -1081,7 +1081,7 @@ impl Telemetry {
             propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
-            propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
+            propagators.push(Box::<opentelemetry_aws::trace::XrayPropagator>::default());
         }
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
@@ -1095,7 +1095,7 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry_sdk::trace::TracerProvider), BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
@@ -1105,7 +1105,7 @@ impl Telemetry {
         common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
         let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
+            opentelemetry_sdk::trace::TracerProvider::builder().with_config((&common).into());
 
         builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
@@ -1899,7 +1899,7 @@ impl Telemetry {
         }
     }
 
-    fn checked_tracer_shutdown(tracer_provider: opentelemetry::sdk::trace::TracerProvider) {
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::TracerProvider) {
         Self::checked_spawn_task(Box::new(move || {
             drop(tracer_provider);
         }));
@@ -2038,7 +2038,7 @@ enum ErrorType {
 }
 static OTEL_ERROR_LAST_LOGGED: OnceCell<DashMap<ErrorType, Instant>> = OnceCell::new();
 
-fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
+fn handle_error<T: Into<opentelemetry_api::global::Error>>(err: T) {
     // We have to rate limit these errors because when they happen they are very frequent.
     // Use a dashmap to store the message type with the last time it was logged.
     let last_logged_map = OTEL_ERROR_LAST_LOGGED.get_or_init(DashMap::new);
@@ -2046,7 +2046,7 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     handle_error_internal(err, last_logged_map);
 }
 
-fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
+fn handle_error_internal<T: Into<opentelemetry_api::global::Error>>(
     err: T,
     last_logged_map: &DashMap<ErrorType, Instant>,
 ) {
@@ -2054,8 +2054,8 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
 
     // We don't want the dashmap to get big, so we key the error messages by type.
     let error_type = match err {
-        opentelemetry::global::Error::Trace(_) => ErrorType::Trace,
-        opentelemetry::global::Error::Metric(_) => ErrorType::Metric,
+        opentelemetry_api::global::Error::Trace(_) => ErrorType::Trace,
+        opentelemetry_api::global::Error::Metric(_) => ErrorType::Metric,
         _ => ErrorType::Other,
     };
     #[cfg(not(test))]
@@ -2065,7 +2065,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
 
     // For now we have to suppress Metrics error: reader is shut down or not registered
     // https://github.com/open-telemetry/opentelemetry-rust/issues/1244
-    if let opentelemetry::global::Error::Metric(err) = &err {
+    if let opentelemetry_api::global::Error::Metric(err) = &err {
         if err.to_string() == "Metrics error: reader is shut down or not registered" {
             return;
         }
@@ -2083,10 +2083,10 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
 
     if last_logged == now {
         match err {
-            opentelemetry::global::Error::Trace(err) => {
+            opentelemetry_api::global::Error::Trace(err) => {
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
-            opentelemetry::global::Error::Metric(err) => {
+            opentelemetry_api::global::Error::Metric(err) => {
                 if let MetricsError::Other(msg) = &err {
                     if msg.contains("Warning") {
                         ::tracing::warn!("OpenTelemetry metric warning occurred: {}", msg);
@@ -2095,7 +2095,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                 }
                 ::tracing::error!("OpenTelemetry metric error occurred: {}", err);
             }
-            opentelemetry::global::Error::Other(err) => {
+            opentelemetry_api::global::Error::Other(err) => {
                 ::tracing::error!("OpenTelemetry error occurred: {}", err)
             }
             other => {
@@ -3310,15 +3310,15 @@ mod tests {
         async {
             // Log twice rapidly, they should get deduped
             handle_error_internal(
-                opentelemetry::global::Error::Other("other error".to_string()),
+                opentelemetry_api::global::Error::Other("other error".to_string()),
                 &error_map,
             );
             handle_error_internal(
-                opentelemetry::global::Error::Other("other error".to_string()),
+                opentelemetry_api::global::Error::Other("other error".to_string()),
                 &error_map,
             );
             handle_error_internal(
-                opentelemetry::global::Error::Trace("trace error".to_string().into()),
+                opentelemetry_api::global::Error::Trace("trace error".to_string().into()),
                 &error_map,
             );
         }
@@ -3332,7 +3332,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         async {
             handle_error_internal(
-                opentelemetry::global::Error::Other("other error".to_string()),
+                opentelemetry_api::global::Error::Other("other error".to_string()),
                 &error_map,
             );
         }

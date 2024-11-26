@@ -379,7 +379,7 @@ async fn deserialize_response<T: HttpBody>(
         .add_subgraph_name(&connector.id.subgraph_name)
     };
 
-    let body = &hyper::body::to_bytes(body).await.map_err(|_| make_err())?;
+    let body = &axum::body::to_bytes(body).await.map_err(|_| make_err())?;
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {

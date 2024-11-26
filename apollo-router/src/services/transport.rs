@@ -1,3 +1,4 @@
+/*
 #![allow(deprecated)]
 #![allow(missing_docs)]
 
@@ -13,3 +14,4 @@ pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 #[deprecated = "use `apollo_router::services::router::ServiceResult` instead"]
 pub type ServiceResult = Result<Response, BoxError>;
+*/

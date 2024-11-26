@@ -8,8 +8,8 @@ pub(crate) mod tracer;
 pub(crate) use layer::layer;
 pub(crate) use layer::OpenTelemetryLayer;
 use opentelemetry::Key;
-use opentelemetry::OrderMap;
 use opentelemetry::Value;
+use opentelemetry_api::OrderMap;
 pub(crate) use span_ext::OpenTelemetrySpanExt;
 pub(crate) use tracer::PreSampledTracer;
 

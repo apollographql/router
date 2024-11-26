@@ -16,9 +16,9 @@ use http::header;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
-use hyper::client::HttpConnector;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -53,7 +53,7 @@ use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
-use crate::services::router::body::RouterBodyConverter;
+// use crate::services::router::body::RouterBodyConverter;
 use crate::services::subgraph;
 
 #[cfg(test)]
@@ -67,9 +67,11 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type HTTPClientService = RouterBodyConverter<
-    tower::timeout::Timeout<
-        hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>,
+type HTTPClientService = tower::timeout::Timeout<
+    hyper_util::client::legacy::Client<
+        HttpsConnector<HttpConnector<AsyncHyperResolver>>,
+        RouterBody,
+        // >,
     >,
 >;
 
@@ -102,17 +104,27 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             builder.wrap_connector(http_connector)
         };
 
+        /*
         let http_client = RouterBodyConverter {
             inner: ServiceBuilder::new()
                 .layer(TimeoutLayer::new(init.config.timeout))
                 .service(
-                    hyper::Client::builder()
+                    hyper_util::client::legacy::Client::builder()
                         .http2_only(experimental_http2 == Http2Config::Http2Only)
                         .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                         .build(connector),
                 ),
         };
+        */
 
+        let http_client = ServiceBuilder::new()
+            .layer(TimeoutLayer::new(init.config.timeout))
+            .service(
+                hyper_util::client::legacy::Client::builder()
+                    .http2_only(experimental_http2 == Http2Config::Http2Only)
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .build(connector),
+            );
         CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
 

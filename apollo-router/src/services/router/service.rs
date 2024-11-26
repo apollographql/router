@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::body::StreamBody;
 use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
@@ -25,6 +24,7 @@ use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http_body::Body as _;
+use http_body_util::StreamBody;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use tower::BoxError;
@@ -282,10 +282,9 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(
-                            RouterBody::from("router service is not available to process request")
-                                .into_inner(),
-                        )
+                        .body(router::body::full(
+                            "router service is not available to process request",
+                        ))
                         .expect("cannot fail"),
                     context,
                 })
@@ -305,10 +304,7 @@ impl RouterService {
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
                         Ok(router::Response {
-                            response: http::Response::from_parts(
-                                parts,
-                                RouterBody::from(body).into_inner(),
-                            ),
+                            response: http::Response::from_parts(parts, RouterBody::from(body)),
                             context,
                         })
                     })
@@ -502,10 +498,7 @@ impl RouterService {
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
-                response: http::Response::from_parts(
-                    parts,
-                    RouterBody::from(bytes.freeze()).into_inner(),
-                ),
+                response: http::Response::from_parts(parts, RouterBody::from(bytes.freeze())),
                 context,
             })
         } else {

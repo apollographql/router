@@ -5,19 +5,20 @@ use derivative::Derivative;
 use futures::future;
 use futures::future::BoxFuture;
 use futures::TryFutureExt;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedQueue;
-use opentelemetry::sdk::Resource;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
-use opentelemetry::InstrumentationLibrary;
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::SpanExporterBuilder;
+use opentelemetry_api::InstrumentationLibrary;
+use opentelemetry_otlp::span::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::SpanEvents;
+use opentelemetry_sdk::trace::SpanLinks;
+use opentelemetry_sdk::Resource;
 use parking_lot::Mutex;
 use sys_info::hostname;
 use tonic::codec::CompressionEncoding;
@@ -76,7 +77,7 @@ impl ApolloOtlpExporter {
         let otlp_exporter = match protocol {
             Protocol::Grpc => {
                 let mut span_exporter = SpanExporterBuilder::from(
-                    opentelemetry_otlp::new_exporter()
+                    opentelemetry_otlp::SpanExporter::builder()
                         .tonic()
                         .with_timeout(batch_config.max_export_timeout)
                         .with_endpoint(endpoint.to_string())
@@ -106,7 +107,7 @@ impl ApolloOtlpExporter {
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
             Protocol::Http => Arc::new(Mutex::new(
                 SpanExporterBuilder::from(
-                    opentelemetry_otlp::new_exporter()
+                    opentelemetry_otlp::SpanExporter::builder()
                         .http()
                         .with_timeout(batch_config.max_export_timeout)
                         .with_endpoint(endpoint.to_string()),
@@ -200,8 +201,8 @@ impl ApolloOtlpExporter {
             start_time: span.start_time,
             end_time: span.end_time,
             attributes: span.attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status: span.status,
             // If the underlying exporter supported it, we could
             // group by resource attributes here and significantly reduce the
@@ -253,8 +254,8 @@ impl ApolloOtlpExporter {
             start_time: span.start_time,
             end_time: span.end_time,
             attributes: span.attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status,
             resource: Cow::Owned(self.resource_template.to_owned()),
             instrumentation_lib: self.intrumentation_library.clone(),

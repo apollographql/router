@@ -6,11 +6,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::Instant;
 
-use opentelemetry::sdk::Resource;
 use opentelemetry_api::trace::SpanId;
 use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::KeyValue;
+use opentelemetry_sdk::Resource;
 use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;

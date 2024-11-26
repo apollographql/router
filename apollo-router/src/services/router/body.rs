@@ -6,12 +6,41 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::Stream;
 use http_body::SizeHint;
-use hyper::body::HttpBody;
+use http_body_util::combinators::BoxBody;
+use http_body_util::BodyExt;
+use http_body_util::Empty;
+use http_body_util::Full;
+use hyper::body::Body as HttpBody;
 use tower::BoxError;
 use tower::Service;
 
-pub struct RouterBody(super::Body);
+pub type RouterBody = BoxBody<Bytes, hyper::Error>;
 
+pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
+    Ok(body
+        .collect()
+        .await?
+        // .map_err(axum::Error::new)?
+        .to_bytes())
+}
+
+// We create some utility functions to make Empty and Full bodies
+// fit our broadened Response body type.
+pub(crate) fn empty() -> BoxBody<Bytes, hyper::Error> {
+    Empty::<Bytes>::new()
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+    Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+// pub struct RouterBody(super::Body);
+
+/*
 impl RouterBody {
     pub fn empty() -> Self {
         Self(super::Body::empty())
@@ -131,3 +160,4 @@ where
         }))
     }
 }
+*/

@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
+// use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::Extension;
 use axum::extract::State;
@@ -23,8 +24,9 @@ use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
-use http_body::combinators::UnsyncBoxBody;
-use hyper::Body;
+use http_body::Body;
+use http_body_util::combinators::BoxBody;
+use http_body_util::combinators::UnsyncBoxBody;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
@@ -489,7 +491,7 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
+async fn metrics_handler<B>(request: Request<B>, next: Next) -> Response {
     let resp = next.run(request).await;
     u64_counter!(
         "apollo.router.operations",
@@ -503,7 +505,7 @@ async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
 async fn license_handler<B>(
     State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
     request: Request<B>,
-    next: Next<B>,
+    next: Next,
 ) -> Response {
     if matches!(
         license,
@@ -549,9 +551,7 @@ async fn license_handler<B>(
     }
 }
 
-pub(super) fn main_router<RF>(
-    configuration: &Configuration,
-) -> axum::Router<(), DecompressionBody<Body>>
+pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router<()>
 where
     RF: RouterFactory,
 {
@@ -560,7 +560,8 @@ where
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
         get({
-            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
+            move |Extension(service): Extension<RF>,
+                  request: Request<DecompressionBody<router::body::RouterBody>>| {
                 handle_graphql(
                     service.create().boxed(),
                     early_cancel,
@@ -570,7 +571,8 @@ where
             }
         })
         .post({
-            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
+            move |Extension(service): Extension<RF>,
+                  request: Request<DecompressionBody<router::body::RouterBody>>| {
                 handle_graphql(
                     service.create().boxed(),
                     early_cancel,
@@ -586,7 +588,7 @@ where
             "/",
             get({
                 move |Extension(service): Extension<RF>,
-                      request: Request<DecompressionBody<Body>>| {
+                      request: Request<DecompressionBody<router::body::RouterBody>>| {
                     handle_graphql(
                         service.create().boxed(),
                         early_cancel,
@@ -597,7 +599,7 @@ where
             })
             .post({
                 move |Extension(service): Extension<RF>,
-                      request: Request<DecompressionBody<Body>>| {
+                      request: Request<DecompressionBody<router::body::RouterBody>>| {
                     handle_graphql(
                         service.create().boxed(),
                         early_cancel,
@@ -616,7 +618,7 @@ async fn handle_graphql(
     service: router::BoxService,
     early_cancel: bool,
     experimental_log_on_broken_pipe: bool,
-    http_request: Request<DecompressionBody<Body>>,
+    http_request: Request<DecompressionBody<router::body::RouterBody>>,
 ) -> impl IntoResponse {
     let _guard = SessionCountGuard::start();
 

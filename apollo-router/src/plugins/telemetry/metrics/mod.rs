@@ -6,10 +6,12 @@ use http::header::HeaderName;
 use http::response::Parts;
 use http::HeaderMap;
 use multimap::MultiMap;
-use opentelemetry::sdk::metrics::reader::AggregationSelector;
-use opentelemetry::sdk::metrics::Aggregation;
-use opentelemetry::sdk::metrics::InstrumentKind;
-use opentelemetry::sdk::Resource;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::Resource;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -428,9 +430,9 @@ impl AttributesForwardConf {
 }
 
 pub(crate) struct MetricsBuilder {
-    pub(crate) public_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
-    pub(crate) apollo_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
-    pub(crate) prometheus_meter_provider: Option<opentelemetry::sdk::metrics::MeterProvider>,
+    pub(crate) public_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
+    pub(crate) apollo_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
+    pub(crate) prometheus_meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
     pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     pub(crate) apollo_metrics_sender: Sender,
     pub(crate) resource: Resource,
@@ -442,9 +444,11 @@ impl MetricsBuilder {
 
         Self {
             resource: resource.clone(),
-            public_meter_provider_builder: opentelemetry::sdk::metrics::MeterProvider::builder()
-                .with_resource(resource.clone()),
-            apollo_meter_provider_builder: opentelemetry::sdk::metrics::MeterProvider::builder(),
+            public_meter_provider_builder:
+                opentelemetry_sdk::metrics::MeterProviderBuilder::default()
+                    .with_resource(resource.clone()),
+            apollo_meter_provider_builder:
+                opentelemetry_sdk::metrics::MeterProviderBuilder::default(),
             prometheus_meter_provider: None,
             custom_endpoints: MultiMap::new(),
             apollo_metrics_sender: Sender::default(),
@@ -482,18 +486,24 @@ impl CustomAggregationSelector {
     }
 }
 
-impl AggregationSelector for CustomAggregationSelector {
-    fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-        match kind {
-            InstrumentKind::Counter
-            | InstrumentKind::UpDownCounter
-            | InstrumentKind::ObservableCounter
-            | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
-            InstrumentKind::ObservableGauge => Aggregation::LastValue,
-            InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
-                boundaries: self.boundaries.clone(),
-                record_min_max: self.record_min_max,
-            },
+impl View for CustomAggregationSelector {
+    fn match_inst(&self, inst: &Instrument) -> Option<Stream> {
+        None
+        /*
+         * TBD
+        if let Some(kind) = inst.kind {
+            match kind {
+                InstrumentKind::Counter
+                | InstrumentKind::UpDownCounter
+                | InstrumentKind::ObservableCounter
+                | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
+                InstrumentKind::ObservableGauge => Aggregation::LastValue,
+                InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
+                    boundaries: self.boundaries.clone(),
+                    record_min_max: self.record_min_max,
+                },
+            }
         }
+        */
     }
 }

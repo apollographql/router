@@ -15,7 +15,6 @@ pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
 use opentelemetry::global;
-use opentelemetry::sdk;
 use opentelemetry::trace::TraceError;
 use opentelemetry::KeyValue;
 use opentelemetry_api::trace::TracerProvider;
@@ -298,7 +297,7 @@ impl DatadogPipelineBuilder {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
+            opentelemetry_sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
         let tracer = provider.versioned_tracer(
@@ -319,8 +318,8 @@ impl DatadogPipelineBuilder {
     ) -> Result<Tracer, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_batch_exporter(exporter, runtime);
+        let mut provider_builder = opentelemetry_sdk::trace::TracerProvider::builder()
+            .with_batch_exporter(exporter, runtime);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
         let tracer = provider.versioned_tracer(

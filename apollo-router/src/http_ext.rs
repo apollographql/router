@@ -7,7 +7,6 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use http::header;
@@ -445,7 +444,7 @@ impl IntoResponse for Response<graphql::Response> {
             .headers
             .insert(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
 
-        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
+        axum::response::Response::from_parts(parts, http_body_util::Full::new(json_body_bytes))
     }
 }
 
@@ -454,7 +453,7 @@ impl IntoResponse for Response<Bytes> {
         // todo: chunks?
         let (parts, body) = http::Response::from(self).into_parts();
 
-        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
+        axum::response::Response::from_parts(parts, http_body_util::Full::new(body))
     }
 }
 

@@ -3,10 +3,10 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use opentelemetry::metrics::Unit;
 use opentelemetry_api::metrics::Counter;
 use opentelemetry_api::metrics::Histogram;
 use opentelemetry_api::metrics::MeterProvider;
+use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::metrics::UpDownCounter;
 use opentelemetry_api::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;

@@ -72,8 +72,10 @@ use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
+use crate::services::router;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
@@ -1211,7 +1213,7 @@ pub(crate) async fn call_single_http(
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
-    let mut request = http::Request::from_parts(parts, RouterBody::from(body));
+    let mut request = http::Request::from_parts(parts, router::body::full(body));
 
     request
         .headers_mut()
@@ -1450,8 +1452,7 @@ async fn do_fetch(
     let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
-        let body = body
-            .to_bytes()
+        let body = router::body::get_body_bytes(body)
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await
             .map_err(|err| {

@@ -8,9 +8,6 @@ use ahash::HashMap;
 use ahash::HashMapExt;
 use futures::future::BoxFuture;
 use http::Uri;
-use opentelemetry::sdk;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
 use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::SpanKind;
@@ -19,6 +16,8 @@ use opentelemetry_api::KeyValue;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -123,7 +122,7 @@ impl TracingConfigurator for Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let common: sdk::trace::Config = trace.into();
+        let common: opentelemetry_sdk::trace::Config = trace.into();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
         let resource_mappings = self.enable_span_mapping.then(|| {
@@ -216,7 +215,7 @@ impl TracingConfigurator for Config {
                     delegate: exporter,
                     span_metrics,
                 },
-                opentelemetry::runtime::Tokio,
+                opentelemetry_sdk::runtime::Tokio,
             )
             .with_batch_config(self.batch_processor.clone().into())
             .build()

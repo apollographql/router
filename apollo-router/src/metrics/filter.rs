@@ -3,28 +3,28 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use buildstructor::buildstructor;
-use opentelemetry::metrics::noop::NoopMeterProvider;
-use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::Counter;
-use opentelemetry::metrics::Histogram;
-use opentelemetry::metrics::InstrumentProvider;
-use opentelemetry::metrics::Meter;
-use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
-use opentelemetry::metrics::ObservableCounter;
-use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Unit;
-use opentelemetry::metrics::UpDownCounter;
+use opentelemetry_api::metrics::noop::NoopMeterProvider;
+use opentelemetry_api::metrics::Callback;
 use opentelemetry_api::metrics::CallbackRegistration;
+use opentelemetry_api::metrics::Counter;
+use opentelemetry_api::metrics::Histogram;
+use opentelemetry_api::metrics::InstrumentProvider;
+use opentelemetry_api::metrics::Meter;
+use opentelemetry_api::metrics::MeterProvider as OtelMeterProvider;
+use opentelemetry_api::metrics::ObservableCounter;
+use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::metrics::ObservableUpDownCounter;
 use opentelemetry_api::metrics::Observer;
+use opentelemetry_api::metrics::Unit;
+use opentelemetry_api::metrics::UpDownCounter;
 use opentelemetry_api::Context;
 use opentelemetry_api::KeyValue;
 use regex::Regex;
 
 #[derive(Clone)]
 pub(crate) enum MeterProvider {
-    Regular(opentelemetry::sdk::metrics::MeterProvider),
-    Global(opentelemetry::global::GlobalMeterProvider),
+    Regular(opentelemetry_sdk::metrics::SdkMeterProvider),
+    Global(opentelemetry_api::global::GlobalMeterProvider),
 }
 
 impl MeterProvider {
@@ -44,14 +44,14 @@ impl MeterProvider {
             }
         }
     }
-    fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+    fn shutdown(&self) -> opentelemetry_api::metrics::Result<()> {
         match self {
             MeterProvider::Regular(provider) => provider.shutdown(),
             MeterProvider::Global(_provider) => Ok(()),
         }
     }
 
-    fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
+    fn force_flush(&self, cx: &Context) -> opentelemetry_api::metrics::Result<()> {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(cx),
             MeterProvider::Global(_provider) => Ok(()),
@@ -59,14 +59,14 @@ impl MeterProvider {
     }
 }
 
-impl From<opentelemetry::sdk::metrics::MeterProvider> for MeterProvider {
-    fn from(provider: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+impl From<opentelemetry_sdk::metrics::SdkMeterProvider> for MeterProvider {
+    fn from(provider: opentelemetry_sdk::metrics::SdkMeterProvider) -> Self {
         MeterProvider::Regular(provider)
     }
 }
 
-impl From<opentelemetry::global::GlobalMeterProvider> for MeterProvider {
-    fn from(provider: opentelemetry::global::GlobalMeterProvider) -> Self {
+impl From<opentelemetry_api::global::GlobalMeterProvider> for MeterProvider {
+    fn from(provider: opentelemetry_api::global::GlobalMeterProvider) -> Self {
         MeterProvider::Global(provider)
     }
 }
@@ -116,12 +116,12 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder().delegate(delegate).build()
     }
 
-    pub(crate) fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+    pub(crate) fn shutdown(&self) -> opentelemetry_api::metrics::Result<()> {
         self.delegate.shutdown()
     }
 
     #[allow(dead_code)]
-    pub(crate) fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
+    pub(crate) fn force_flush(&self, cx: &Context) -> opentelemetry_api::metrics::Result<()> {
         self.delegate.force_flush(cx)
     }
 }
@@ -140,7 +140,7 @@ macro_rules! filter_instrument_fn {
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
             unit: Option<Unit>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
+        ) -> opentelemetry_api::metrics::Result<$wrapper<$ty>> {
             let mut builder = match (&self.deny, &self.allow) {
                 (Some(deny), Some(allow)) if deny.is_match(&name) && !allow.is_match(&name) => {
                     self.noop.$name(name)
@@ -168,7 +168,7 @@ macro_rules! filter_observable_instrument_fn {
             description: Option<Cow<'static, str>>,
             unit: Option<Unit>,
             callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
+        ) -> opentelemetry_api::metrics::Result<$wrapper<$ty>> {
             let mut builder = match (&self.deny, &self.allow) {
                 (Some(deny), Some(allow)) if deny.is_match(&name) && !allow.is_match(&name) => {
                     self.noop.$name(name)
@@ -218,7 +218,7 @@ impl InstrumentProvider for FilteredInstrumentProvider {
         &self,
         instruments: &[Arc<dyn Any>],
         callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
+    ) -> opentelemetry_api::metrics::Result<Box<dyn CallbackRegistration>> {
         self.delegate.register_callback(instruments, callbacks)
     }
 }
@@ -245,14 +245,14 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 #[cfg(test)]
 mod test {
 
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::metrics::Unit;
-    use opentelemetry::runtime;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::PeriodicReader;
+    use opentelemetry::metrics::SdkMeterProvider;
     use opentelemetry::testing::metrics::InMemoryMetricsExporter;
     use opentelemetry_api::global::GlobalMeterProvider;
+    use opentelemetry_api::metrics::Unit;
     use opentelemetry_api::Context;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::runtime;
 
     use crate::metrics::filter::FilterMeterProvider;
 

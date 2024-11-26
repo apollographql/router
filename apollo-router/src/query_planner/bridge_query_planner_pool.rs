@@ -12,7 +12,7 @@ use async_channel::Sender;
 use futures::future::BoxFuture;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::metrics::Unit;
+use opentelemetry_api::metrics::Unit;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;

@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
-use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::Key;
-use opentelemetry::OrderMap;
 use opentelemetry::Value;
+use opentelemetry_api::OrderMap;
+use opentelemetry_sdk::Resource;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
