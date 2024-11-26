@@ -1131,6 +1131,26 @@ impl Selectors for SubgraphAttributes {
     }
 }
 
+/// Key used in context to save number of retries for a subgraph http request
+pub(crate) struct SubgraphRequestResendCountKey<'a> {
+    subgraph_req: &'a subgraph::Request,
+}
+
+impl<'a> SubgraphRequestResendCountKey<'a> {
+    pub(crate) fn new(subgraph_req: &'a subgraph::Request) -> Self {
+        Self { subgraph_req }
+    }
+}
+
+impl<'a> From<SubgraphRequestResendCountKey<'a>> for String {
+    fn from(value: SubgraphRequestResendCountKey) -> Self {
+        format!(
+            "apollo::telemetry::http_request_resend_count_{}",
+            value.subgraph_req.id
+        )
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::net::SocketAddr;
