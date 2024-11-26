@@ -409,7 +409,7 @@ mod tests {
             type Baz {
               me: String
             }
-
+            
             union UnionType2 = Foo | Bar
             "#,
             );

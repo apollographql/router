@@ -253,7 +253,6 @@ impl PluginInit<serde_json::Value> {
             .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
-            // .launch_id(self.launch_id)
             .notify(self.notify.clone())
             .build()
     }
