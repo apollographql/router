@@ -4,7 +4,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::task::Poll;
 use std::time::Instant;
 
 use apollo_compiler::validation::Valid;
@@ -22,7 +21,6 @@ use tower::ServiceExt;
 
 use super::bridge_query_planner::BridgeQueryPlanner;
 use super::QueryPlanResult;
-use crate::configuration::QueryPlannerMode;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::introspection::IntrospectionCache;
@@ -38,29 +36,18 @@ static CHANNEL_SIZE: usize = 1_000;
 #[derive(Clone)]
 pub(crate) struct BridgeQueryPlannerPool {
     js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
-    pool_mode: PoolMode,
+    sender: Sender<(
+        QueryPlannerRequest,
+        oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
+    )>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
+    pool_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_used: Arc<AtomicU64>,
     v8_heap_used_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_total: Arc<AtomicU64>,
     v8_heap_total_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     introspection_cache: Arc<IntrospectionCache>,
-}
-
-#[derive(Clone)]
-enum PoolMode {
-    Pool {
-        sender: Sender<(
-            QueryPlannerRequest,
-            oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
-        )>,
-        pool_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
-    },
-    PassThrough {
-        delegate: BridgeQueryPlanner,
-    },
 }
 
 impl BridgeQueryPlannerPool {
@@ -72,100 +59,79 @@ impl BridgeQueryPlannerPool {
     ) -> Result<Self, ServiceBuildError> {
         let rust_planner = PlannerMode::maybe_rust(&schema, &configuration)?;
 
+        let mut join_set = JoinSet::new();
+
+        let (sender, receiver) = bounded::<(
+            QueryPlannerRequest,
+            oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
+        )>(CHANNEL_SIZE);
+
         let mut old_js_planners_iterator = old_js_planners.into_iter();
 
         // All query planners in the pool now share the same introspection cache.
         // This allows meaningful gauges, and it makes sense that queries should be cached across all planners.
         let introspection_cache = Arc::new(IntrospectionCache::new(&configuration));
 
-        let pool_mode;
-        let js_planners;
-        let subgraph_schemas;
-        if let QueryPlannerMode::New = configuration.experimental_query_planner_mode {
+        for _ in 0..size.into() {
+            let schema = schema.clone();
+            let configuration = configuration.clone();
+            let rust_planner = rust_planner.clone();
+            let introspection_cache = introspection_cache.clone();
+
             let old_planner = old_js_planners_iterator.next();
-            let delegate = BridgeQueryPlanner::new(
-                schema.clone(),
-                configuration,
-                old_planner,
-                rust_planner,
-                introspection_cache.clone(),
-            )
-            .await?;
-            js_planners = delegate.js_planner().into_iter().collect::<Vec<_>>();
-            subgraph_schemas = delegate.subgraph_schemas();
-            pool_mode = PoolMode::PassThrough { delegate }
-        } else {
-            let mut join_set = JoinSet::new();
-            let (sender, receiver) = bounded::<(
-                QueryPlannerRequest,
-                oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
-            )>(CHANNEL_SIZE);
+            join_set.spawn(async move {
+                BridgeQueryPlanner::new(
+                    schema,
+                    configuration,
+                    old_planner,
+                    rust_planner,
+                    introspection_cache,
+                )
+                .await
+            });
+        }
 
-            for _ in 0..size.into() {
-                let schema = schema.clone();
-                let configuration = configuration.clone();
-                let rust_planner = rust_planner.clone();
-                let introspection_cache = introspection_cache.clone();
+        let mut bridge_query_planners = Vec::new();
 
-                let old_planner = old_js_planners_iterator.next();
-                join_set.spawn(async move {
-                    BridgeQueryPlanner::new(
-                        schema,
-                        configuration,
-                        old_planner,
-                        rust_planner,
-                        introspection_cache,
-                    )
-                    .await
-                });
-            }
+        while let Some(task_result) = join_set.join_next().await {
+            let bridge_query_planner =
+                task_result.map_err(|e| ServiceBuildError::ServiceError(Box::new(e)))??;
+            bridge_query_planners.push(bridge_query_planner);
+        }
 
-            let mut bridge_query_planners = Vec::new();
+        let subgraph_schemas = bridge_query_planners
+            .first()
+            .ok_or_else(|| {
+                ServiceBuildError::QueryPlannerError(QueryPlannerError::PoolProcessing(
+                    "There should be at least 1 Query Planner service in pool".to_string(),
+                ))
+            })?
+            .subgraph_schemas();
 
-            while let Some(task_result) = join_set.join_next().await {
-                let bridge_query_planner =
-                    task_result.map_err(|e| ServiceBuildError::ServiceError(Box::new(e)))??;
-                bridge_query_planners.push(bridge_query_planner);
-            }
+        let js_planners: Vec<_> = bridge_query_planners
+            .iter()
+            .filter_map(|p| p.js_planner())
+            .collect();
 
-            subgraph_schemas = bridge_query_planners
-                .first()
-                .ok_or_else(|| {
-                    ServiceBuildError::QueryPlannerError(QueryPlannerError::PoolProcessing(
-                        "There should be at least 1 Query Planner service in pool".to_string(),
-                    ))
-                })?
-                .subgraph_schemas();
+        for mut planner in bridge_query_planners.into_iter() {
+            let receiver = receiver.clone();
 
-            js_planners = bridge_query_planners
-                .iter()
-                .filter_map(|p| p.js_planner())
-                .collect();
+            tokio::spawn(async move {
+                while let Ok((request, res_sender)) = receiver.recv().await {
+                    let svc = match planner.ready().await {
+                        Ok(svc) => svc,
+                        Err(e) => {
+                            let _ = res_sender.send(Err(e));
 
-            for mut planner in bridge_query_planners.into_iter() {
-                let receiver = receiver.clone();
+                            continue;
+                        }
+                    };
 
-                tokio::spawn(async move {
-                    while let Ok((request, res_sender)) = receiver.recv().await {
-                        let svc = match planner.ready().await {
-                            Ok(svc) => svc,
-                            Err(e) => {
-                                let _ = res_sender.send(Err(e));
+                    let res = svc.call(request).await;
 
-                                continue;
-                            }
-                        };
-
-                        let res = svc.call(request).await;
-
-                        let _ = res_sender.send(res);
-                    }
-                });
-            }
-            pool_mode = PoolMode::Pool {
-                sender,
-                pool_size_gauge: Default::default(),
-            }
+                    let _ = res_sender.send(res);
+                }
+            });
         }
         let v8_heap_used: Arc<AtomicU64> = Default::default();
         let v8_heap_total: Arc<AtomicU64> = Default::default();
@@ -182,10 +148,10 @@ impl BridgeQueryPlannerPool {
 
         Ok(Self {
             js_planners,
-            pool_mode,
+            sender,
             schema,
             subgraph_schemas,
-            compute_jobs_queue_size_gauge: Default::default(),
+            pool_size_gauge: Default::default(),
             v8_heap_used,
             v8_heap_used_gauge: Default::default(),
             v8_heap_total,
@@ -194,22 +160,15 @@ impl BridgeQueryPlannerPool {
         })
     }
 
-    fn create_pool_size_gauge(&self) {
-        if let PoolMode::Pool {
-            sender,
-            pool_size_gauge,
-        } = &self.pool_mode
-        {
-            let sender = sender.clone();
-            let meter = meter_provider().meter("apollo/router");
-            let gauge = meter
-                .u64_observable_gauge("apollo.router.query_planning.queued")
-                .with_description("Number of queries waiting to be planned")
-                .with_unit(Unit::new("query"))
-                .with_callback(move |m| m.observe(sender.len() as u64, &[]))
-                .init();
-            *pool_size_gauge.lock().expect("lock poisoned") = Some(gauge);
-        }
+    fn create_pool_size_gauge(&self) -> ObservableGauge<u64> {
+        let sender = self.sender.clone();
+        let meter = meter_provider().meter("apollo/router");
+        meter
+            .u64_observable_gauge("apollo.router.query_planning.queued")
+            .with_description("Number of queries waiting to be planned")
+            .with_unit(Unit::new("query"))
+            .with_callback(move |m| m.observe(sender.len() as u64, &[]))
+            .init()
     }
 
     fn create_heap_used_gauge(&self) -> ObservableGauge<u64> {
@@ -269,11 +228,7 @@ impl BridgeQueryPlannerPool {
     pub(super) fn activate(&self) {
         // Gauges MUST be initialized after a meter provider is created.
         // When a hot reload happens this means that the gauges must be re-initialized.
-        *self
-            .compute_jobs_queue_size_gauge
-            .lock()
-            .expect("lock poisoned") = Some(crate::compute_job::create_queue_size_gauge());
-        self.create_pool_size_gauge();
+        *self.pool_size_gauge.lock().expect("lock poisoned") = Some(self.create_pool_size_gauge());
         *self.v8_heap_used_gauge.lock().expect("lock poisoned") =
             Some(self.create_heap_used_gauge());
         *self.v8_heap_total_gauge.lock().expect("lock poisoned") =
@@ -289,20 +244,22 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if crate::compute_job::is_full() {
-            return Poll::Pending;
-        }
-        match &self.pool_mode {
-            PoolMode::Pool { sender, .. } if sender.is_full() => Poll::Ready(Err(
-                QueryPlannerError::PoolProcessing("query plan queue is full".into()),
-            )),
-            _ => Poll::Ready(Ok(())),
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        if self.sender.is_full() {
+            std::task::Poll::Ready(Err(QueryPlannerError::PoolProcessing(
+                "query plan queue is full".into(),
+            )))
+        } else {
+            std::task::Poll::Ready(Ok(()))
         }
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
-        let pool_mode = self.pool_mode.clone();
+        let (response_sender, response_receiver) = oneshot::channel();
+        let sender = self.sender.clone();
 
         let get_metrics_future =
             if let Some(bridge_query_planner) = self.js_planners.first().cloned() {
@@ -316,22 +273,12 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
             };
 
         Box::pin(async move {
-            let start;
-            let res = match pool_mode {
-                PoolMode::Pool { sender, .. } => {
-                    let (response_sender, response_receiver) = oneshot::channel();
-                    start = Instant::now();
-                    let _ = sender.send((req, response_sender)).await;
+            let start = Instant::now();
+            let _ = sender.send((req, response_sender)).await;
 
-                    response_receiver
-                        .await
-                        .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?
-                }
-                PoolMode::PassThrough { mut delegate } => {
-                    start = Instant::now();
-                    delegate.call(req).await
-                }
-            };
+            let res = response_receiver
+                .await
+                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
 
             f64_histogram!(
                 "apollo.router.query_planning.total.duration",

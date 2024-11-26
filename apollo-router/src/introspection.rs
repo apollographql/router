@@ -6,7 +6,6 @@ use apollo_compiler::executable::Selection;
 use serde_json_bytes::json;
 
 use crate::cache::storage::CacheStorage;
-use crate::compute_job;
 use crate::graphql;
 use crate::query_planner::QueryKey;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -137,9 +136,8 @@ impl IntrospectionCache {
         }
         let schema = schema.clone();
         let doc = doc.clone();
-        let priority = compute_job::Priority::P1; // Low priority
         let response =
-            compute_job::execute(priority, move || Self::execute_introspection(&schema, &doc))
+            tokio::task::spawn_blocking(move || Self::execute_introspection(&schema, &doc))
                 .await
                 .expect("Introspection panicked");
         storage.insert(cache_key, response.clone()).await;

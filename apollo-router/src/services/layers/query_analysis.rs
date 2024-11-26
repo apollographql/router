@@ -13,10 +13,10 @@ use http::StatusCode;
 use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
+use tokio::task;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
-use crate::compute_job;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
@@ -89,8 +89,7 @@ impl QueryAnalysisLayer {
         // parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
-        let priority = compute_job::Priority::P4; // Medium priority
-        let job = move || {
+        task::spawn_blocking(move || {
             span.in_scope(|| {
                 Query::parse_document(
                     &query,
@@ -99,12 +98,9 @@ impl QueryAnalysisLayer {
                     conf.as_ref(),
                 )
             })
-        };
-        // TODO: is this correct?
-        let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(priority, job)
-            .await
-            .expect("Query::parse_document panicked")
+        })
+        .await
+        .expect("parse_document task panicked")
     }
 
     pub(crate) async fn supergraph_request(
