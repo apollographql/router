@@ -1,12 +1,11 @@
+/// This module contains functions used to bridge the apollo compiler serialization methods with
+/// serialization with serde.
 use apollo_compiler::executable;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use serde::ser::SerializeSeq;
 use serde::Serializer;
-
-/// This module contains functions used to bridge the apollo compiler serialization methods with
-/// serialization with serde.
 
 pub(crate) fn serialize_exe_field<S: Serializer>(
     field: &executable::Field,
@@ -43,11 +42,15 @@ pub(crate) fn serialize_optional_slice_of_exe_argument_nodes<
         return ser.serialize_none();
     };
     let args = args.as_ref();
-    let _ser = ser.serialize_seq(Some(args.len()))?;
-    // FIXME: Arg doesn't have the serialize method like the other types:
-    // args.iter().try_for_each(|arg| ser.serialize_element(&arg.))?;
-    // ser.end()
-    todo!();
+    let mut ser = ser.serialize_seq(Some(args.len()))?;
+    args.iter().try_for_each(|arg| {
+        ser.serialize_element(&format!(
+            "{}: {}",
+            arg.name,
+            arg.value.serialize().no_indent()
+        ))
+    })?;
+    ser.end()
 }
 
 pub(crate) fn serialize_exe_directive_list<S: Serializer>(
