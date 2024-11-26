@@ -6,6 +6,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.58.0] - 2024-11-26
 
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
 ## 🚀 Features
 
 ### Support DNS resolution strategy configuration ([PR #6109](https://github.com/apollographql/router/pull/6109))
@@ -260,9 +263,6 @@ By [@tninesling](https://github.com/tninesling) in https://github.com/apollograp
 ## 🛠 Maintenance
 
 ### Query planner cache key improvements ([Issue #5160](https://github.com/apollographql/router/issues/5160))
-
-> [!IMPORTANT]
-> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 Several performance improvements have been implemented for query plan cache key generation. In particular, the distributed cache's key format has changed, which adds prefixes to the different key segments to help in debugging.
 
