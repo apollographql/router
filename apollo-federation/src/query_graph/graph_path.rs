@@ -5,6 +5,7 @@ use std::fmt::Write;
 use std::hash::Hash;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::sync::atomic;
 use std::sync::Arc;
 
 use apollo_compiler::ast::InputValueDefinition;
@@ -23,7 +24,6 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use tracing::debug;
 use tracing::debug_span;
-use uuid::Uuid;
 
 use super::condition_resolver::ContextMapEntry;
 use crate::bail;
@@ -251,12 +251,21 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
 
 /// Wrapper for an override ID, which indicates a relationship between a group of `OpGraphPath`s
 /// where one "overrides" the others in the group.
+///
+/// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
+/// startup. It currently implements `Serialize` for debugging purposes. It should not implement
+/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// provided (i.e. the inner type is a `Uuid` or the like).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
-pub(crate) struct OverrideId(Uuid);
+pub(crate) struct OverrideId(usize);
+
+// Global storage for the counter used to uniquely identify selections
+static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 
 impl OverrideId {
     fn new() -> Self {
-        Self(Uuid::new_v4())
+        // atomically increment global counter
+        Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
     }
 }
 

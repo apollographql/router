@@ -18,6 +18,16 @@ pub(crate) mod query_planning_traversal;
 
 pub type QueryPlanCost = f64;
 
+// NOTE: This type implements `Serialize` for debugging purposes; however, it should not implement
+// `Deserialize` until two requires are met.
+// 1) `SelectionId`s and `OverrideId`s are only unique per lifetime of the application. To avoid
+//    problems when caching, this needs to be changes.
+// 2) There are several types transatively used in the query plan that are from `apollo-compiler`.
+//    They are serialized as strings and use the `serialize` methods provided by that crate. In
+//    order to implement `Deserialize`, care needs to be taken to deserialize these correctly.
+//    Moreover, how we serialize these types should also be revisited to make sure we can and want
+//    to support how they are serialized long term (e.g. how `DirectiveList` is serialized can be
+//    optimized).
 #[derive(Debug, Default, PartialEq, Serialize)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,

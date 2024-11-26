@@ -17,6 +17,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::ops::Deref;
+use std::sync::atomic;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
@@ -28,7 +29,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
-use uuid::Uuid;
 
 use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
@@ -65,13 +65,22 @@ pub(crate) use rebase::*;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
+// Global storage for the counter used to uniquely identify selections
+static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
+
 /// Opaque wrapper of the unique selection ID type.
+///
+/// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
+/// startup. It currently implements `Serialize` for debugging purposes. It should not implement
+/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// provided (i.e. the inner type is a `Uuid` or the like).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
-pub(crate) struct SelectionId(Uuid);
+pub(crate) struct SelectionId(usize);
 
 impl SelectionId {
     pub(crate) fn new() -> Self {
-        Self(Uuid::new_v4())
+        // atomically increment global counter
+        Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
     }
 }
 
