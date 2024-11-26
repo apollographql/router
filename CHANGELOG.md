@@ -172,7 +172,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 The router now avoids blocking threads when executing asynchronous code by using a thread pool with a priority queue.
 
-This improves the performance of the following components can take non-trivial amounts of CPU time:
+This improves the performance of the following components that can take non-trivial amounts of CPU time:
 
 * GraphQL parsing
 * GraphQL validation
