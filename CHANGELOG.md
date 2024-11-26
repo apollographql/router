@@ -124,8 +124,12 @@ By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apol
 
 ### Add `@context` support in the native query planner ([PR #6310](https://github.com/apollographql/router/pull/6310))
 
-The [`@context`](https://www.apollographql.com/docs/graphos/reference/federation/directives#context) feature is now available in the native query planner.
-This brings the native query planner to feature parity with the legacy query planner for all Federation v2 graphs.
+The [`@context`](https://www.apollographql.com/docs/graphos/reference/federation/directives#context) feature is now available in the [native query planner](https://www.apollographql.com/docs/graphos/routing/query-planning/native-query-planner).
+This brings the native query planner to feature parity with the legacy query planner for all Federation v2 graphs. The native query planner can be enabled with the following configuration:
+```yaml, filename=router.yaml
+experimental_query_planner_mode: new
+```
+
 
 By [@clenfest](https://github.com/clenfest), [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/6310
 
@@ -179,8 +183,7 @@ This improves the performance of the following components that can take non-triv
 * Query planning
 * Schema introspection
 
-In order to avoid blocking threads that execute asynchronous code,
-they are now run in a new thread pool with a priority queue. The size of the thread pool is based on the number of available CPU cores.
+The size of the thread pool is based on the number of available CPU cores.
 
 The thread pool replaces the router's prior implementation that used Tokio’s [`spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html).
 
