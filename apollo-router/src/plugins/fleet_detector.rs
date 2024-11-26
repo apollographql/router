@@ -125,17 +125,20 @@ impl GaugeStore {
             );
         }
         {
+            let opts = opts.clone();
             gauges.push(
                 meter
                     .u64_observable_gauge("apollo.router.schema")
                     .with_description("Details about the current in-use schema")
-                    .with_callback(|gauge| {
+                    .with_callback(move |gauge| {
                         // NOTE: this is a fixed gauge. We only care about observing the included
                         // attributes.
-                        let mut attributes: Vec<KeyValue> =
-                            vec![KeyValue::new("schema_hash", opts.supergraph_schema_hash)];
-                        if let Some(launch_id) = opts.launch_id {
-                            attributes.push(KeyValue::new("launch_id", launch_id));
+                        let mut attributes: Vec<KeyValue> = vec![KeyValue::new(
+                            "schema_hash",
+                            opts.supergraph_schema_hash.clone(),
+                        )];
+                        if let Some(launch_id) = opts.launch_id.as_ref() {
+                            attributes.push(KeyValue::new("launch_id", launch_id.to_string()));
                         }
                         gauge.observe(1, attributes.as_slice())
                     })
@@ -146,7 +149,7 @@ impl GaugeStore {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct GaugeOptions {
     supergraph_schema_hash: String,
     launch_id: Option<String>,
@@ -173,7 +176,7 @@ impl PluginPrivate for FleetDetector {
 
         let gauge_options = GaugeOptions {
             supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
-            launch_id: plugin.launch_id.and_then(|id| Some(id.to_string())),
+            launch_id: plugin.launch_id.map(|s| s.to_string()),
         };
 
         Ok(FleetDetector {

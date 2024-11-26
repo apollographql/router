@@ -177,7 +177,7 @@ where
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
-        launch_id: Option<Arc<String>>,
+        launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
@@ -186,7 +186,7 @@ where
             supergraph_schema_id,
             supergraph_schema,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
-            launch_id,
+            launch_id: launch_id.flatten(),
             notify,
         }
     }
