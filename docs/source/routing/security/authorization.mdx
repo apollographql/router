@@ -964,6 +964,14 @@ authorization:
     dry_run: true # default: false
 ```
 
-## Related topics
+## Additional resources
 
-* [Authenticating requests with the GraphOS Router](/technotes/TN0004-router-authentication/)
+Refer to the guide on [authenticating requests with the GraphOS Router](/graphos/routing/security/router-authentication) for an overview of authorization and authentication techniques.
+
+- See the Apollo Solutions [auth coprocessor example](https://github.com/apollosolutions/example-coprocessor-custom-auth-directive) for how to set up a JavaScript coprocessor that applies custom auth checks.
+- See the Apollo Solutions [`@policy` coprocessor example](https://github.com/apollosolutions/example-coprocessor-auth-policy) for how to set up a JavaScript coprocessor that evaluates policy-based authorization
+- See the following Apollo Solutions repositories for examples of how to use JWT authentication with the `@requiresScopes` directive:
+  - [Standard JWT authentication and authorization](https://github.com/apollosolutions/example-jwtauthentication)
+  - [Non-standard authorization](https://github.com/apollosolutions/example-rhai-normalizejwtscopes) with Rhai scripts
+
+<SolutionsNote />
