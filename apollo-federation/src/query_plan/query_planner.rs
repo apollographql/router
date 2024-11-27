@@ -53,16 +53,6 @@ use crate::Supergraph;
 
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
-    /// Whether the query planner should try to reuse the named fragments of the planned query in
-    /// subgraph fetches.
-    ///
-    /// Reusing fragments requires complicated validations, so it can take a long time on large
-    /// queries with many fragments. This option may be removed in the future in favour of
-    /// [`generate_query_fragments`][QueryPlannerConfig::generate_query_fragments].
-    ///
-    /// Defaults to false.
-    pub reuse_query_fragments: bool,
-
     /// If enabled, the query planner will extract inline fragments into fragment
     /// definitions before sending queries to subgraphs. This can significantly
     /// reduce the size of the query sent to subgraphs.
@@ -104,7 +94,6 @@ pub struct QueryPlannerConfig {
 impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
-            reuse_query_fragments: false,
             generate_query_fragments: false,
             subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
@@ -451,16 +440,6 @@ impl QueryPlanner {
 
         let operation_compression = if self.config.generate_query_fragments {
             SubgraphOperationCompression::GenerateFragments
-        } else if self.config.reuse_query_fragments {
-            // For all subgraph fetches we query `__typename` on every abstract types (see
-            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
-            // fragments, we should make sure those fragments also query `__typename` for every
-            // abstract type.
-            SubgraphOperationCompression::ReuseFragments(RebasedFragments::new(
-                normalized_operation
-                    .named_fragments
-                    .add_typename_field_for_abstract_types_in_named_fragments()?,
-            ))
         } else {
             SubgraphOperationCompression::Disabled
         };
@@ -875,7 +854,6 @@ impl RebasedFragments {
 }
 
 pub(crate) enum SubgraphOperationCompression {
-    ReuseFragments(RebasedFragments),
     GenerateFragments,
     Disabled,
 }
@@ -884,17 +862,9 @@ impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
     pub(crate) fn compress(
         &mut self,
-        subgraph_name: &Arc<str>,
-        subgraph_schema: &ValidFederationSchema,
         operation: Operation,
     ) -> Result<Operation, FederationError> {
         match self {
-            Self::ReuseFragments(fragments) => {
-                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
-                let mut operation = operation;
-                operation.reuse_fragments(rebased)?;
-                Ok(operation)
-            }
             Self::GenerateFragments => {
                 let mut operation = operation;
                 operation.generate_fragments()?;
