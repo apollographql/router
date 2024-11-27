@@ -131,7 +131,6 @@ use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
@@ -1761,14 +1760,30 @@ impl Telemetry {
             || tracing_zipkin_used
             || tracing_datadog_used
         {
-            ::tracing::info!(
-                monotonic_counter.apollo.router.operations.telemetry = 1u64,
-                telemetry.metrics.otlp = metrics_otlp_used.or_empty(),
-                telemetry.metrics.prometheus = metrics_prom_used.or_empty(),
-                telemetry.tracing.otlp = tracing_otlp_used.or_empty(),
-                telemetry.tracing.datadog = tracing_datadog_used.or_empty(),
-                telemetry.tracing.jaeger = tracing_jaeger_used.or_empty(),
-                telemetry.tracing.zipkin = tracing_zipkin_used.or_empty(),
+            let mut attributes = Vec::new();
+            if metrics_otlp_used {
+                attributes.push(KeyValue::new("telemetry.metrics.otlp", true));
+            }
+            if metrics_prom_used {
+                attributes.push(KeyValue::new("telemetry.metrics.prometheus", true));
+            }
+            if tracing_otlp_used {
+                attributes.push(KeyValue::new("telemetry.tracing.otlp", true));
+            }
+            if tracing_datadog_used {
+                attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
+            }
+            if tracing_jaeger_used {
+                attributes.push(KeyValue::new("telemetry.tracing.jaeger", true));
+            }
+            if tracing_zipkin_used {
+                attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
+            }
+            u64_counter!(
+                "apollo.router.operations.telemetry",
+                "Telemetry systems in use",
+                1,
+                &attributes
             );
         }
     }
