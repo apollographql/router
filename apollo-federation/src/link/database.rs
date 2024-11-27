@@ -16,19 +16,21 @@ use crate::link::LinkError;
 use crate::link::LinksMetadata;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
+use crate::subgraph::spec::FEDERATION_V2_ELEMENT_NAMES;
 
-fn validate_federation_imports(link: &Arc<Link>) -> Result<(), LinkError> {
+fn validate_federation_imports(link: &Link) -> Result<(), LinkError> {
     let federation_directives: HashSet<_> = FEDERATION_V2_DIRECTIVE_NAMES.into_iter().collect();
+    let federation_elements: HashSet<_> = FEDERATION_V2_ELEMENT_NAMES.into_iter().collect();
 
     for imp in &link.imports {
-        if !imp.is_directive && federation_directives.contains(&imp.element) {
-            return Err(LinkError::InvalidImport(format!(
-                "Cannot import unknown element \"{}\". Did you mean directive \"@{}\"?",
-                imp.element, imp.element,
-            )));
-        } else if imp.is_directive && !federation_directives.contains(&imp.element) {
+        if imp.is_directive && !federation_directives.contains(&imp.element) {
             return Err(LinkError::InvalidImport(format!(
                 "Cannot import unknown federation directive \"@{}\".",
+                imp.element,
+            )));
+        } else if !imp.is_directive && !federation_elements.contains(&imp.element) {
+            return Err(LinkError::InvalidImport(format!(
+                "Cannot import unknown federation element \"{}\".",
                 imp.element,
             )));
         }
@@ -599,7 +601,7 @@ mod tests {
 
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
-            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown element \"key\". Did you mean directive \"@key\"?");
+            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation element \"key\".");
 
             let schema = r#"
                 extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
