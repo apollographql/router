@@ -1,4 +1,4 @@
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;

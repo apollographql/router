@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use jsonpath_rust::JsonPathInst;
+use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Meter;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use paste::paste;
 use serde_json::Value;
 

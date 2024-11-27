@@ -29,9 +29,9 @@ pub(crate) mod test_utils {
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
     use opentelemetry::Array;
-    use opentelemetry::KeyValue;
     use opentelemetry::Value;
     use opentelemetry_api::Context;
+    use opentelemetry::KeyValue;
     use opentelemetry_sdk::metrics::data::DataPoint;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::Histogram;
@@ -1149,7 +1149,7 @@ impl<T> FutureMetricsExt<T> for T where T: Future {}
 #[cfg(test)]
 mod test {
     use opentelemetry_api::metrics::MeterProvider;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry::KeyValue;
 
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;

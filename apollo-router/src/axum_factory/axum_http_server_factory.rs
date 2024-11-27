@@ -25,8 +25,6 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
 use http_body::Body;
-use http_body_util::combinators::BoxBody;
-use http_body_util::combinators::UnsyncBoxBody;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
@@ -491,7 +489,7 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-async fn metrics_handler<B>(request: Request<B>, next: Next) -> Response {
+async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Response {
     let resp = next.run(request).await;
     u64_counter!(
         "apollo.router.operations",
@@ -502,9 +500,9 @@ async fn metrics_handler<B>(request: Request<B>, next: Next) -> Response {
     resp
 }
 
-async fn license_handler<B>(
+async fn license_handler(
     State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
-    request: Request<B>,
+    request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     if matches!(
@@ -544,7 +542,7 @@ async fn license_handler<B>(
     if matches!(license, LicenseState::LicensedHalt) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(UnsyncBoxBody::default())
+            .body(axum::body::Body::default())
             .expect("canned response must be valid")
     } else {
         next.run(request).await

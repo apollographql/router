@@ -7,24 +7,24 @@ use std::sync::Mutex;
 
 use derive_more::From;
 use itertools::Itertools;
-use opentelemetry_api::metrics::AsyncInstrument;
-use opentelemetry_api::metrics::Callback;
+use opentelemetry::metrics::AsyncInstrument;
+use opentelemetry::metrics::Callback;
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::InstrumentProvider;
+use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableCounter;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::metrics::ObservableUpDownCounter;
+use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::CallbackRegistration;
-use opentelemetry_api::metrics::Counter;
-use opentelemetry_api::metrics::Histogram;
-use opentelemetry_api::metrics::InstrumentProvider;
-use opentelemetry_api::metrics::Meter;
-use opentelemetry_api::metrics::MeterProvider;
-use opentelemetry_api::metrics::ObservableCounter;
-use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::metrics::ObservableUpDownCounter;
 use opentelemetry_api::metrics::Observer;
 use opentelemetry_api::metrics::SyncCounter;
 use opentelemetry_api::metrics::SyncHistogram;
 use opentelemetry_api::metrics::SyncUpDownCounter;
 use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::metrics::UpDownCounter;
-use opentelemetry_api::KeyValue;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -60,7 +60,7 @@ impl Default for AggregateMeterProvider {
         meter_provider.set(
             MeterProviderType::OtelDefault,
             Some(FilterMeterProvider::public(
-                opentelemetry_api::global::meter_provider(),
+                opentelemetry::global::meter_provider(),
             )),
         );
 
@@ -239,7 +239,7 @@ pub(crate) struct AggregateCounter<T> {
 }
 
 impl<T: Copy> SyncCounter<T> for AggregateCounter<T> {
-    fn add(&self, value: T, attributes: &[KeyValue]) {
+    fn add(&self, value: T, attributes: &[opentelemetry_api::KeyValue]) {
         for counter in &self.delegates {
             counter.add(value, attributes)
         }
@@ -250,7 +250,7 @@ pub(crate) struct AggregateObservableCounter<T> {
     delegates: Vec<(ObservableCounter<T>, Option<DroppingUnregister>)>,
 }
 
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
+impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
         for (counter, _) in &self.delegates {
             counter.observe(value, attributes)
@@ -528,16 +528,12 @@ mod test {
             self.0.register_pipeline(pipeline)
         }
 
-        fn register_producer(&self, producer: Box<dyn MetricProducer>) {
-            self.0.register_producer(producer)
-        }
-
         fn collect(&self, rm: &mut ResourceMetrics) -> Result<()> {
             self.0.collect(rm)
         }
 
-        fn force_flush(&self, cx: &Context) -> Result<()> {
-            self.0.force_flush(cx)
+        fn force_flush(&self) -> Result<()> {
+            self.0.force_flush()
         }
 
         fn shutdown(&self) -> Result<()> {

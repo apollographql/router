@@ -9,7 +9,7 @@ use std::time::Instant;
 use opentelemetry_api::trace::SpanId;
 use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 use parking_lot::Mutex;
 use serde_json::Number;

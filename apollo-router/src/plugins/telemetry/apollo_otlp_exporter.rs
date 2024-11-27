@@ -11,7 +11,6 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::KeyValue;
 use opentelemetry_api::InstrumentationLibrary;
-use opentelemetry_otlp::span::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
@@ -76,15 +75,13 @@ impl ApolloOtlpExporter {
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let otlp_exporter = match protocol {
             Protocol::Grpc => {
-                let mut span_exporter = SpanExporterBuilder::from(
-                    opentelemetry_otlp::SpanExporter::builder()
-                        .tonic()
-                        .with_timeout(batch_config.max_export_timeout)
-                        .with_endpoint(endpoint.to_string())
-                        .with_metadata(metadata)
-                        .with_compression(opentelemetry_otlp::Compression::Gzip),
-                )
-                .build_span_exporter()?;
+                let mut span_exporter = opentelemetry_otlp::SpanExporter::builder()
+                    .tonic()
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_endpoint(endpoint.to_string())
+                    .with_metadata(metadata)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .build_span_exporter()?;
 
                 // This is a hack and won't be needed anymore once opentelemetry_otlp will be upgraded
                 span_exporter = if let opentelemetry_otlp::SpanExporter::Tonic {

@@ -108,7 +108,7 @@ impl Request {
         let mut router_request = http::Request::builder()
             .uri(uri.unwrap_or_else(|| http::Uri::from_static("http://example.com/")))
             .method(method.unwrap_or(Method::GET))
-            .body(body.unwrap_or_else(Body::empty))?;
+            .body(body.unwrap_or_else(self::body::empty))?;
         *router_request.headers_mut() = header_map(headers)?;
         Ok(Self {
             router_request,
@@ -159,14 +159,13 @@ impl TryFrom<supergraph::Request> for Request {
                 .parse()
                 .map_err(ParseError::InvalidUri)?;
 
-            http::Request::from_parts(parts, RouterBody::empty().into_inner())
+            http::Request::from_parts(parts, self::body::empty())
         } else {
             http::Request::from_parts(
                 parts,
-                RouterBody::from(
+                self::body::full(
                     serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
-                )
-                .into_inner(),
+                ),
             )
         };
         Ok(Self {
@@ -240,7 +239,7 @@ impl Response {
 
         // let response = builder.body(once(ready(res)).boxed())?;
 
-        let response = builder.body(RouterBody::from(serde_json::to_vec(&res)?).into_inner())?;
+        let response = builder.body(self::body::full(serde_json::to_vec(&res)?).into_inner())?;
 
         Ok(Self { response, context })
     }
@@ -303,7 +302,7 @@ impl Response {
         }
 
         let response = builder
-            .body(RouterBody::from(serde_json::to_vec(&res).expect("can't fail")).into_inner())
+            .body(self::body::full(serde_json::to_vec(&res).expect("can't fail")).into_inner())
             .expect("can't fail");
 
         Self { response, context }

@@ -3,7 +3,7 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
@@ -197,23 +197,23 @@ macro_rules! impl_to_otel_value {
                         $type::Array(value) => {
                             // Arrays must be uniform in value
                             if value.iter().all(|v| v.is_i64()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
+                                Some(opentelemetry::Value::Array(opentelemetry_api::Array::I64(
                                     value.iter().filter_map(|v| v.as_i64()).collect(),
                                 )))
                             } else if value.iter().all(|v| v.is_f64()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
+                                Some(opentelemetry::Value::Array(opentelemetry_api::Array::F64(
                                     value.iter().filter_map(|v| v.as_f64()).collect(),
                                 )))
                             } else if value.iter().all(|v| v.is_boolean()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
+                                Some(opentelemetry::Value::Array(opentelemetry_api::Array::Bool(
                                     value.iter().filter_map(|v| v.as_bool()).collect(),
                                 )))
                             } else if value.iter().all(|v| v.is_object()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                                Some(opentelemetry::Value::Array(opentelemetry_api::Array::String(
                                     value.iter().map(|v| v.to_string().into()).collect(),
                                 )))
                             } else if value.iter().all(|v| v.is_string()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                                Some(opentelemetry::Value::Array(opentelemetry_api::Array::String(
                                     value
                                         .iter()
                                         .filter_map(|v| v.as_str())

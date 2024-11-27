@@ -785,7 +785,7 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(
-            RouterBody::from(
+            router::body::full(
                 serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                     id: new_sub_id.clone(),
                     verifier: verifier.clone(),
@@ -807,7 +807,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(RouterBody::from(
+        .body(router::body::full(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -836,7 +836,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(RouterBody::from(
+        .body(router::body::full(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -855,7 +855,7 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(
-            RouterBody::from(
+            router::body::full(
                 serde_json::to_vec(&CallbackPayload::Subscription(
                     SubscriptionPayload::Heartbeat {
                         id: new_sub_id.clone(),
@@ -932,7 +932,7 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(
-            RouterBody::from(
+            router::body::full(
                 serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                     id: new_sub_id.clone(),
                     verifier: verifier.clone(),
@@ -948,7 +948,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(RouterBody::from(
+        .body(router::body::full(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1024,7 +1024,7 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(
-            RouterBody::from(
+            router::body::full(
                 serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                     id: new_sub_id.clone(),
                     verifier: verifier.clone(),
@@ -1074,7 +1074,7 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(
-            RouterBody::from(
+            router::body::full(
                 serde_json::to_vec(&CallbackPayload::Subscription(
                     SubscriptionPayload::Complete {
                         id: new_sub_id.clone(),
@@ -1108,7 +1108,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(RouterBody::from(
+        .body(router::body::full(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()

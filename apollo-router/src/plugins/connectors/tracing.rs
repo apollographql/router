@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use apollo_federation::sources::connect::expand::Connectors;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 
 use crate::metrics::meter_provider;
 

@@ -3,8 +3,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use opentelemetry_api::KeyValue;
-use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::runtime;
@@ -107,24 +107,21 @@ impl Config {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
-        let exporter = MetricsExporterBuilder::Tonic(
-            opentelemetry_otlp::MetricExporter::builder()
-                .tonic()
-                .with_endpoint(endpoint.as_str())
-                .with_timeout(batch_processor.max_export_timeout)
-                .with_metadata(metadata)
-                .with_compression(opentelemetry_otlp::Compression::Gzip),
-        )
-        .build_metrics_exporter(
-            Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::Temporality::Delta,
-            )),
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
-                    .build(),
-            ),
-        )?;
+        let exporter = opentelemetry_otlp::MetricExporter::builder()
+            .tonic()
+            .with_endpoint(endpoint.as_str())
+            .with_timeout(batch_processor.max_export_timeout)
+            .with_metadata(metadata)
+            .build_metrics_exporter(
+                Box::new(CustomTemporalitySelector(
+                    opentelemetry_sdk::metrics::Temporality::Delta,
+                )),
+                Box::new(
+                    CustomAggregationSelector::builder()
+                        .boundaries(default_buckets())
+                        .build(),
+                ),
+            )?;
         let reader = PeriodicReader::builder(exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
             .build();

@@ -304,7 +304,7 @@ impl RouterService {
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
                         Ok(router::Response {
-                            response: http::Response::from_parts(parts, RouterBody::from(body)),
+                            response: http::Response::from_parts(parts, router::body::full(body)),
                             context,
                         })
                     })
@@ -498,7 +498,7 @@ impl RouterService {
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
-                response: http::Response::from_parts(parts, RouterBody::from(bytes.freeze())),
+                response: http::Response::from_parts(parts, router::body::full(bytes.freeze())),
                 context,
             })
         } else {

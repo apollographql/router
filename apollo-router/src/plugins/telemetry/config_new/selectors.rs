@@ -1,6 +1,6 @@
 use access_json::JSONQuery;
 use derivative::Derivative;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::path::JsonPathInst;

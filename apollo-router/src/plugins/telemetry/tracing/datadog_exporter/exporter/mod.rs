@@ -26,7 +26,6 @@ use opentelemetry_sdk::export::trace::SpanExporter;
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::resource::SdkProvidedResourceDetector;
 use opentelemetry_sdk::runtime::RuntimeChannel;
-use opentelemetry_sdk::trace::BatchMessage;
 use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::Tracer;
 use opentelemetry_sdk::Resource;
@@ -312,10 +311,7 @@ impl DatadogPipelineBuilder {
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
-    pub fn install_batch<R: RuntimeChannel<BatchMessage>>(
-        mut self,
-        runtime: R,
-    ) -> Result<Tracer, TraceError> {
+    pub fn install_batch<R: RuntimeChannel>(mut self, runtime: R) -> Result<Tracer, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder = opentelemetry_sdk::trace::TracerProvider::builder()

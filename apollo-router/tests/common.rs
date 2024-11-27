@@ -32,7 +32,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;

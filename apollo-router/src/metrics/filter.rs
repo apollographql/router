@@ -3,22 +3,22 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use buildstructor::buildstructor;
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::ObservableCounter;
+use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::noop::NoopMeterProvider;
 use opentelemetry_api::metrics::Callback;
 use opentelemetry_api::metrics::CallbackRegistration;
-use opentelemetry_api::metrics::Counter;
-use opentelemetry_api::metrics::Histogram;
 use opentelemetry_api::metrics::InstrumentProvider;
 use opentelemetry_api::metrics::Meter;
 use opentelemetry_api::metrics::MeterProvider as OtelMeterProvider;
-use opentelemetry_api::metrics::ObservableCounter;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::metrics::ObservableUpDownCounter;
 use opentelemetry_api::metrics::Observer;
 use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::metrics::UpDownCounter;
 use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -53,7 +53,7 @@ impl MeterProvider {
 
     fn force_flush(&self, cx: &Context) -> opentelemetry_api::metrics::Result<()> {
         match self {
-            MeterProvider::Regular(provider) => provider.force_flush(cx),
+            MeterProvider::Regular(provider) => provider.force_flush(),
             MeterProvider::Global(_provider) => Ok(()),
         }
     }

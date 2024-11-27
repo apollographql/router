@@ -761,8 +761,8 @@ where
     // are present in our co_processor_output.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => RouterBody::from(bytes),
-        None => RouterBody::from(bytes),
+        Some(bytes) => router::body::full(bytes),
+        None => router::body::full(bytes),
     };
 
     request.router_request = http::Request::from_parts(parts, new_body.into_inner());
@@ -876,8 +876,8 @@ where
     // bits that we sent to the co_processor.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => RouterBody::from(bytes),
-        None => RouterBody::from(bytes),
+        Some(bytes) => router::body::full(bytes),
+        None => router::body::full(bytes),
     };
 
     response.response = http::Response::from_parts(parts, new_body.into_inner());

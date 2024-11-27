@@ -1228,7 +1228,7 @@ impl ChildNodes for Vec<TreeData> {
 mod test {
     use std::time::SystemTime;
     use opentelemetry::Value;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry::KeyValue;
     use opentelemetry_api::trace::{SpanId, SpanKind, TraceId};
     use serde_json::json;
     use crate::plugins::telemetry::apollo::ErrorConfiguration;

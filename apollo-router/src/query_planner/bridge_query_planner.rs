@@ -17,7 +17,7 @@ use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
