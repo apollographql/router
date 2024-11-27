@@ -176,7 +176,7 @@ fn otlp_endpoint_default() -> Url {
     Url::parse(OTLP_ENDPOINT_DEFAULT).expect("must be valid url")
 }
 
-pub(crate) const fn client_name_header_default_str() -> &'static str {
+const fn client_name_header_default_str() -> &'static str {
     "apollographql-client-name"
 }
 

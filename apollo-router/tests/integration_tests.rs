@@ -1133,15 +1133,6 @@ impl CountingServiceRegistry {
     fn totals(&self) -> HashMap<String, usize> {
         self.counts.lock().unwrap().clone()
     }
-
-    /// Like `totals`, but clears the counters, so that each assertion is
-    /// independent of each other.
-    fn totals_reset(&self) -> HashMap<String, usize> {
-        let mut totals = self.counts.lock().unwrap();
-        let ret = totals.clone();
-        totals.clear();
-        ret
-    }
 }
 
 #[async_trait::async_trait]
