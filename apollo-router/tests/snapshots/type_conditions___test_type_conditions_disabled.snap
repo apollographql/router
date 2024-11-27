@@ -72,14 +72,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "searchSubgraph",
               "variableUsages": [],
-              "operation": "query Search__searchSubgraph__0 { search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }",
+              "operation": "query Search__searchSubgraph__0 { search { __typename ..._generated_onMovieResult2_0 ..._generated_onArticleResult2_0 } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { __typename id } fragment _generated_onGallerySection2_0 on GallerySection { __typename id } fragment _generated_onMovieResult2_0 on MovieResult { sections { __typename ..._generated_onEntityCollectionSection2_0 ..._generated_onGallerySection2_0 } id } fragment _generated_onArticleResult2_0 on ArticleResult { id sections { __typename ..._generated_onGallerySection2_0 ..._generated_onEntityCollectionSection2_0 } }",
               "operationName": "Search__searchSubgraph__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "5201830580c9c5fadd9c59aea072878f84465c1ae9d905207fa281aa7c1d5340",
+              "schemaAwareHash": "0e1644746fe4beab7def35ec8cc12bde39874c6bb8b9dfd928456196b814a111",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -130,14 +130,14 @@ expression: response
                 "variableUsages": [
                   "movieResultParam"
                 ],
-                "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ... on EntityCollectionSection { title artwork(params: $movieResultParam) } ... on GallerySection { artwork(params: $movieResultParam) } } }",
+                "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ..._generated_onEntityCollectionSection2_0 ... on GallerySection { artwork(params: $movieResultParam) } } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { title artwork(params: $movieResultParam) }",
                 "operationName": "Search__artworkSubgraph__1",
                 "operationKind": "query",
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "62ff891f6971184d3e42b98f8166be72027b5479f9ec098af460a48ea6f6cbf4",
+                "schemaAwareHash": "6510f6b9672829bd9217618b78ef6f329fbddb125f88184d04e6faaa982ff8bb",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -148,7 +148,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        search {\n          __typename\n          ... on MovieResult {\n            sections {\n              __typename\n              ... on EntityCollectionSection {\n                __typename\n                id\n              }\n              ... on GallerySection {\n                __typename\n                id\n              }\n            }\n            id\n          }\n          ... on ArticleResult {\n            id\n            sections {\n              __typename\n              ... on GallerySection {\n                __typename\n                id\n              }\n              ... on EntityCollectionSection {\n                __typename\n                id\n              }\n            }\n          }\n        }\n      }\n    },\n    Flatten(path: \"search.@.sections.@\") {\n      Fetch(service: \"artworkSubgraph\") {\n        {\n          ... on EntityCollectionSection {\n            __typename\n            id\n          }\n          ... on GallerySection {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on EntityCollectionSection {\n            title\n            artwork(params: $movieResultParam)\n          }\n          ... on GallerySection {\n            artwork(params: $movieResultParam)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        search {\n          __typename\n          ..._generated_onMovieResult2_0\n          ..._generated_onArticleResult2_0\n        }\n      }\n      \n      fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n        __typename\n        id\n      }\n      \n      fragment _generated_onGallerySection2_0 on GallerySection {\n        __typename\n        id\n      }\n      \n      fragment _generated_onMovieResult2_0 on MovieResult {\n        sections {\n          __typename\n          ..._generated_onEntityCollectionSection2_0\n          ..._generated_onGallerySection2_0\n        }\n        id\n      }\n      \n      fragment _generated_onArticleResult2_0 on ArticleResult {\n        id\n        sections {\n          __typename\n          ..._generated_onGallerySection2_0\n          ..._generated_onEntityCollectionSection2_0\n        }\n      }\n    },\n    Flatten(path: \"search.@.sections.@\") {\n      Fetch(service: \"artworkSubgraph\") {\n        {\n          ... on EntityCollectionSection {\n            __typename\n            id\n          }\n          ... on GallerySection {\n            __typename\n            id\n          }\n        } =>\n        {\n          ..._generated_onEntityCollectionSection2_0\n          ... on GallerySection {\n            artwork(params: $movieResultParam)\n          }\n        }\n        \n        fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n          title\n          artwork(params: $movieResultParam)\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

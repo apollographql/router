@@ -11,10 +11,8 @@ use super::Field;
 use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpread;
-use super::FragmentSpreadData;
 use super::FragmentSpreadSelection;
 use super::InlineFragment;
-use super::InlineFragmentData;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::OperationElement;
@@ -24,6 +22,7 @@ use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
@@ -191,28 +190,28 @@ impl Field {
                 }
                 .into())
             } else {
-                let mut updated_field_data = self.data().clone();
-                updated_field_data.schema = schema.clone();
-                updated_field_data.field_position = parent_type.introspection_typename_field();
-                Ok(Field::new(updated_field_data))
+                let mut updated_field = self.clone();
+                updated_field.schema = schema.clone();
+                updated_field.field_position = parent_type.introspection_typename_field();
+                Ok(updated_field)
             };
         }
 
         let field_from_parent = parent_type.field(self.name().clone())?;
-        return if field_from_parent.try_get(schema.schema()).is_some()
+        if field_from_parent.try_get(schema.schema()).is_some()
             && self.can_rebase_on(parent_type)?
         {
-            let mut updated_field_data = self.data().clone();
-            updated_field_data.schema = schema.clone();
-            updated_field_data.field_position = field_from_parent;
-            Ok(Field::new(updated_field_data))
+            let mut updated_field = self.clone();
+            updated_field.schema = schema.clone();
+            updated_field.field_position = field_from_parent;
+            Ok(updated_field)
         } else {
             Err(RebaseError::CannotRebase {
                 field_position: self.field_position.clone(),
                 parent_type: parent_type.clone(),
             }
             .into())
-        };
+        }
     }
 
     /// Verifies whether given field can be rebase on following parent type.
@@ -267,19 +266,42 @@ impl Field {
             };
             return Ok(Some(schema.get_type(type_name.clone())?.try_into()?));
         }
-        if self.can_rebase_on(parent_type)? {
-            let Some(type_name) = parent_type
-                .field(data.field_position.field_name().clone())
-                .ok()
-                .and_then(|field_pos| field_pos.get(schema.schema()).ok())
-                .map(|field| field.ty.inner_named_type())
-            else {
-                return Ok(None);
-            };
-            Ok(Some(schema.get_type(type_name.clone())?.try_into()?))
-        } else {
-            Ok(None)
+        if !self.can_rebase_on(parent_type)? {
+            return Ok(None);
         }
+        let Some(field_definition) = parent_type
+            .field(data.field_position.field_name().clone())
+            .ok()
+            .and_then(|field_pos| field_pos.get(schema.schema()).ok())
+        else {
+            return Ok(None);
+        };
+        if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
+        {
+            let from_context_directive_definition_name = &federation_spec_definition
+                .from_context_directive_definition(schema)?
+                .name;
+            // We need to prevent arguments with `@fromContext` from being lost/overwriten. If the
+            // would-be parent type's field has `@fromContext` and one (or more) of this field's
+            // arguments doesn't exist in the would-be parent's field, rebasing would loose that
+            // context.
+            if field_definition.arguments.iter().any(|arg_definition| {
+                arg_definition
+                    .directives
+                    .has(from_context_directive_definition_name)
+                    && !data
+                        .arguments
+                        .iter()
+                        .any(|arg| arg.name == arg_definition.name)
+            }) {
+                return Ok(None);
+            }
+        }
+        Ok(Some(
+            schema
+                .get_type(field_definition.ty.inner_named_type().clone())?
+                .try_into()?,
+        ))
     }
 }
 
@@ -390,10 +412,10 @@ impl FragmentSpread {
             &named_fragment.type_condition_position,
             &self.schema,
         ) {
-            Ok(FragmentSpread::new(FragmentSpreadData::from_fragment(
+            Ok(FragmentSpread::from_fragment(
                 named_fragment,
                 &self.directives,
-            )))
+            ))
         } else {
             Err(RebaseError::NonIntersectingCondition {
                 type_condition: named_fragment.type_condition_position.clone().into(),
@@ -474,23 +496,20 @@ impl FragmentSpreadSelection {
                 Err(RebaseError::EmptySelectionSet.into())
             } else {
                 Ok(InlineFragmentSelection::new(
-                    InlineFragment::new(InlineFragmentData {
+                    InlineFragment {
                         schema: schema.clone(),
                         parent_type_position: parent_type.clone(),
                         type_condition_position: None,
                         directives: Default::default(),
                         selection_id: SelectionId::new(),
-                    }),
+                    },
                     expanded_selection_set,
                 )
                 .into())
             };
         }
 
-        let spread = FragmentSpread::new(FragmentSpreadData::from_fragment(
-            named_fragment,
-            &self.spread.directives,
-        ));
+        let spread = FragmentSpread::from_fragment(named_fragment, &self.spread.directives);
         Ok(FragmentSpreadSelection {
             spread,
             selection_set: named_fragment.selection_set.clone(),
@@ -508,7 +527,7 @@ impl FragmentSpreadSelection {
     }
 }
 
-impl InlineFragmentData {
+impl InlineFragment {
     fn casted_type_if_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -517,33 +536,18 @@ impl InlineFragmentData {
         if self.schema == *schema && self.parent_type_position == *parent_type {
             return Some(self.casted_type());
         }
-        match self.can_rebase_on(parent_type, schema) {
-            (false, _) => None,
-            (true, None) => Some(parent_type.clone()),
-            (true, Some(ty)) => Some(ty),
-        }
-    }
-
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
         let Some(ty) = self.type_condition_position.as_ref() else {
-            return (true, None);
+            return Some(parent_type.clone());
         };
-        match schema
+
+        let rebased_type = schema
             .get_type(ty.type_name().clone())
             .ok()
-            .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())
-        {
-            Some(ty) if runtime_types_intersect(parent_type, &ty, schema) => (true, Some(ty)),
-            _ => (false, None),
-        }
-    }
-}
+            .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())?;
 
-impl InlineFragment {
+        runtime_types_intersect(parent_type, &rebased_type, schema).then_some(rebased_type)
+    }
+
     pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -566,11 +570,11 @@ impl InlineFragment {
             }
             .into())
         } else {
-            let mut rebased_fragment_data = self.data().clone();
-            rebased_fragment_data.parent_type_position = parent_type.clone();
-            rebased_fragment_data.type_condition_position = rebased_condition;
-            rebased_fragment_data.schema = schema.clone();
-            Ok(InlineFragment::new(rebased_fragment_data))
+            let mut rebased_fragment = self.clone();
+            rebased_fragment.parent_type_position = parent_type.clone();
+            rebased_fragment.type_condition_position = rebased_condition;
+            rebased_fragment.schema = schema.clone();
+            Ok(rebased_fragment)
         }
     }
 
@@ -710,8 +714,8 @@ impl SelectionSet {
     ) -> Result<SelectionSet, FederationError> {
         let rebased_results = self
             .selections
-            .iter()
-            .map(|(_, selection)| {
+            .values()
+            .map(|selection| {
                 selection.rebase_inner(
                     parent_type,
                     named_fragments,

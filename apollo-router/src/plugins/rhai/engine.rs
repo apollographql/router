@@ -692,6 +692,13 @@ mod router_plugin {
         *obj.uri_mut() = uri;
         Ok(())
     }
+
+    #[rhai_fn(get = "subgraph_request_id", pure, return_raw)]
+    pub(crate) fn get_subgraph_id(
+        obj: &mut SharedMut<subgraph::Request>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|request| request.id.to_string()))
+    }
     // End of SubgraphRequest specific section
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -788,6 +795,13 @@ mod router_plugin {
         obj: &mut SharedMut<subgraph::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
+    }
+
+    #[rhai_fn(get = "subgraph_request_id", pure, return_raw)]
+    pub(crate) fn get_subgraph_id_response(
+        obj: &mut SharedMut<subgraph::Response>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.id.to_string()))
     }
 
     /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided

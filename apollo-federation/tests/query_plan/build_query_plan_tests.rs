@@ -31,6 +31,7 @@ fn some_name() {
 }
 */
 
+mod context;
 mod debug_max_evaluated_plans_configuration;
 mod defer;
 mod fetch_operation_names;
@@ -1356,6 +1357,56 @@ fn condition_order_router799() {
             }
           },
         },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn rebase_non_intersecting_without_dropping_inline_fragment_due_to_directive() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            test: X
+          }
+
+          interface I {
+            i: Int
+          }
+
+          type X implements I {
+            i: Int
+          }
+
+          type Y implements I {
+            i: Int
+          }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            test { # type X
+              ... on I { # upcast to I
+                ... @skip(if: false) { # This fragment can't be dropped due to its directive.
+                  ... on Y { # downcast to Y (non-intersecting)
+                    i
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          test {
+            __typename @include(if: false)
+          }
+        }
       },
     }
     "###

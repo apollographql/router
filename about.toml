@@ -9,7 +9,8 @@ accepted = [
     "LicenseRef-ring",
     "MIT",
     "MPL-2.0",
-    "Unicode-DFS-2016"
+    "Unicode-DFS-2016",
+    "Zlib"
 ]
 
 # See https://github.com/EmbarkStudios/cargo-about/pull/216

@@ -29,6 +29,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
+use crate::compute_job;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -43,7 +44,6 @@ use crate::metrics::meter_provider;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
-use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
@@ -259,7 +259,8 @@ impl PlannerMode {
             PlannerMode::Rust(rust_planner) => {
                 let doc = doc.clone();
                 let rust_planner = rust_planner.clone();
-                let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
+                let priority = compute_job::Priority::P8; // High priority
+                let (plan, mut root_node) = compute_job::execute(priority, move || {
                     let start = Instant::now();
 
                     let query_plan_options = QueryPlanOptions {
@@ -594,21 +595,14 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let QueryPlannerRequest {
             query: original_query,
             operation_name,
-            context,
+            document,
+            metadata,
+            plan_options,
         } = req;
 
-        let metadata = context
-            .extensions()
-            .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned().unwrap_or_default());
         let this = self.clone();
         let fut = async move {
-            let mut doc = match context
-                .extensions()
-                .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-            {
-                None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
-                Some(d) => d,
-            };
+            let mut doc = document;
 
             let api_schema = this.schema.api_schema();
             match add_defer_labels(api_schema, &doc.ast) {
@@ -635,18 +629,8 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         operation_name.as_deref(),
                         Arc::new(QueryHash(hash)),
                     )?;
-                    context
-                        .extensions()
-                        .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
                 }
             }
-
-            let plan_options = PlanOptions {
-                override_conditions: context
-                    .get(LABELS_TO_OVERRIDE_KEY)
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            };
 
             let res = this
                 .get(
@@ -664,27 +648,8 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
                     .content(query_planner_content)
-                    .context(context)
                     .build()),
-                Err(e) => {
-                    match &e {
-                        QueryPlannerError::PlanningErrors(pe) => {
-                            context.extensions().with_lock(|mut lock| {
-                                lock.insert(Arc::new(pe.usage_reporting.clone()))
-                            });
-                        }
-                        QueryPlannerError::SpecError(e) => {
-                            context.extensions().with_lock(|mut lock| {
-                                lock.insert(Arc::new(UsageReporting {
-                                    stats_report_key: e.get_error_key().to_string(),
-                                    referenced_fields_by_type: HashMap::new(),
-                                }))
-                            });
-                        }
-                        _ => (),
-                    }
-                    Err(e)
-                }
+                Err(e) => Err(e),
             }
         };
 

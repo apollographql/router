@@ -42,36 +42,47 @@ impl Plugin for IncludeSubgraphErrors {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        // Search for subgraph in our configured subgraph map.
-        // If we can't find it, use the "all" value
-        if !*self.config.subgraphs.get(name).unwrap_or(&self.config.all) {
-            let sub_name_response = name.to_string();
-            let sub_name_error = name.to_string();
-            return service
-                .map_response(move |mut response: SubgraphResponse| {
-                    if !response.response.body().errors.is_empty() {
+        // Search for subgraph in our configured subgraph map. If we can't find it, use the "all" value
+        let include_subgraph_errors = *self.config.subgraphs.get(name).unwrap_or(&self.config.all);
+
+        let sub_name_response = name.to_string();
+        let sub_name_error = name.to_string();
+        return service
+            .map_response(move |mut response: SubgraphResponse| {
+                let errors = &mut response.response.body_mut().errors;
+                if !errors.is_empty() {
+                    if include_subgraph_errors {
+                        for error in errors.iter_mut() {
+                            error
+                                .extensions
+                                .entry("service")
+                                .or_insert(sub_name_response.clone().into());
+                        }
+                    } else {
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
-                        for error in response.response.body_mut().errors.iter_mut() {
+                        for error in errors.iter_mut() {
                             error.message = REDACTED_ERROR_MESSAGE.to_string();
                             error.extensions = Object::default();
                         }
                     }
-                    response
-                })
-                // _error to stop clippy complaining about unused assignments...
-                .map_err(move |mut _error: BoxError| {
+                }
+
+                response
+            })
+            .map_err(move |error: BoxError| {
+                if include_subgraph_errors {
+                    error
+                } else {
                     // Create a redacted error to replace whatever error we have
                     tracing::info!("redacted subgraph({sub_name_error}) error");
-                    _error = Box::new(crate::error::FetchError::SubrequestHttpError {
+                    Box::new(crate::error::FetchError::SubrequestHttpError {
                         status_code: None,
                         service: "redacted".to_string(),
                         reason: "redacted".to_string(),
-                    });
-                    _error
-                })
-                .boxed();
-        }
-        service
+                    })
+                }
+            })
+            .boxed();
     }
 }
 
@@ -104,7 +115,7 @@ mod test {
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR","service":"products"}}]}"#.as_bytes())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -191,13 +202,19 @@ mod test {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
+        let mut configuration = Configuration::default();
+        // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+        configuration.supergraph.generate_query_fragments = false;
+        let configuration = Arc::new(configuration);
+
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Schema::parse(schema, &Default::default()).unwrap();
+        let schema = Schema::parse(schema, &configuration).unwrap();
+
         let planner = BridgeQueryPlannerPool::new(
             Vec::new(),
             schema.into(),
-            Default::default(),
+            Arc::clone(&configuration),
             NonZeroUsize::new(1).unwrap(),
         )
         .await
@@ -207,15 +224,9 @@ mod test {
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let mut plugins = create_plugins(
-            &Configuration::default(),
-            &schema,
-            subgraph_schemas,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let mut plugins = create_plugins(&configuration, &schema, subgraph_schemas, None, None)
+            .await
+            .unwrap();
 
         plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
@@ -228,10 +239,10 @@ mod test {
         let supergraph_creator = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+            Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
             Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
+            configuration,
         )
         .await
         .unwrap()

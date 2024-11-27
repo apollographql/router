@@ -167,3 +167,41 @@ async fn test_validation_error() {
     }
     "###);
 }
+
+#[tokio::test]
+async fn test_lots_of_validation_errors() {
+    let query = format!(
+        "{{ __typename {} }}",
+        "@a".repeat(4_000), // Stay under the token limit: "@a" is two tokens every time
+    );
+
+    let request = serde_json::json!({ "query": query });
+    let request = apollo_router::services::router::Request::fake_builder()
+        .body(request.to_string())
+        .method(hyper::Method::POST)
+        .header("content-type", "application/json")
+        .build()
+        .unwrap();
+    let response = apollo_router::TestHarness::builder()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_router()
+        .await
+        .unwrap()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let v: serde_json::Value = serde_json::from_slice(&response).unwrap();
+    let errors = v["errors"].as_array().unwrap();
+    assert!(!errors.is_empty(), "should have errors");
+    // Make sure we're actually testing the validation errors, and we're not hitting some other limit
+    assert_eq!(
+        errors.first().unwrap()["extensions"]["code"],
+        serde_json::Value::from("GRAPHQL_VALIDATION_FAILED")
+    );
+    assert!(errors.len() <= 100, "should return limited error count");
+}
