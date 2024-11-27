@@ -246,7 +246,7 @@ commands:
             - run:
                 name: Install CMake
                 command: |
-                  choco install cmake -y
+                  choco install cmake.install -y
                   echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
                   SAVED_EXIT_CODE=$LASTEXITCODE
 
