@@ -6642,12 +6642,6 @@ expression: "&schema"
           "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
           "type": "boolean"
         },
-        "experimental_reuse_query_fragments": {
-          "default": null,
-          "description": "Enable reuse of query fragments Default: depends on the federation version",
-          "nullable": true,
-          "type": "boolean"
-        },
         "generate_query_fragments": {
           "default": true,
           "description": "Enable QP generation of fragments for subgraph requests Default: true",
