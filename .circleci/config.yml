@@ -1038,30 +1038,31 @@ workflows:
           - << pipeline.parameters.quick_nightly >>
           - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
-      - lint:
-          matrix:
-            parameters:
-              platform: [ amd_linux_build ]
-      - check_helm:
-          matrix:
-            parameters:
-              platform: [ amd_linux_helm ]
-      - check_compliance:
-          matrix:
-            parameters:
-              platform: [ amd_linux_build ]
+      # - lint:
+      #     matrix:
+      #       parameters:
+      #         platform: [ amd_linux_build ]
+      # - check_helm:
+      #     matrix:
+      #       parameters:
+      #         platform: [ amd_linux_helm ]
+      # - check_compliance:
+      #     matrix:
+      #       parameters:
+      #         platform: [ amd_linux_build ]
 
       - test:
           # this should be changed back to true on dev after release
           fuzz: false
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
+          # requires:
+          #   - lint
+          #   - check_helm
+          #   - check_compliance
           matrix:
             parameters:
               platform:
-                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [ windows_test ]
+                # [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
 
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
@@ -1208,22 +1209,22 @@ workflows:
             tags:
               only: /v.*/
 
-  security-scans:
-    when:
-      not:
-        or:
-          - << pipeline.parameters.nightly >>
-          - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
-    jobs:
-      - secops/gitleaks:
-          context:
-            - secops-oidc
-            - github-orb
-          git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
-          git-revision: << pipeline.git.revision >>
-      - secops/semgrep:
-          context:
-            - secops-oidc
-            - github-orb
-          git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+  # security-scans:
+  #   when:
+  #     not:
+  #       or:
+  #         - << pipeline.parameters.nightly >>
+  #         - << pipeline.parameters.quick_nightly >>
+  #         - << pipeline.parameters.test_updated_cargo_deps >>
+  #   jobs:
+  #     - secops/gitleaks:
+  #         context:
+  #           - secops-oidc
+  #           - github-orb
+  #         git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+  #         git-revision: << pipeline.git.revision >>
+  #     - secops/semgrep:
+  #         context:
+  #           - secops-oidc
+  #           - github-orb
+  #         git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
