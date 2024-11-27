@@ -961,40 +961,40 @@ workflows:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
     jobs:
-      # - lint:
-      #     matrix:
-      #       parameters:
-      #         platform: [ amd_linux_build ]
-      # - check_helm:
-      #     matrix:
-      #       parameters:
-      #         platform: [ amd_linux_helm ]
-      # - check_compliance:
-      #     matrix:
-      #       parameters:
-      #         platform: [ amd_linux_build ]
+      - lint:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [ amd_linux_helm ]
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
 
-      # - test_updated:
-      #     requires:
-      #       - lint
-      #       - check_helm
-      #       - check_compliance
-      #     matrix:
-      #       parameters:
-      #         platform:
-      #           [ amd_linux_test ]
-      - test:
-          # this should be changed back to true on dev after release
-          fuzz: false
-          # requires:
-            # - lint
-            # - check_helm
-            # - check_compliance
+      - test_updated:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
-                [ windows_test ]
-                # [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [ amd_linux_test ]
+
+      - test:
+          # this should be changed back to true on dev after release
+          fuzz: false
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
 
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
