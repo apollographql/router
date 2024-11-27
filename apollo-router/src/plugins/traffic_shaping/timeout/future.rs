@@ -49,7 +49,11 @@ where
         match Pin::new(&mut this.sleep).poll(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(_) => {
-                u64_counter!("apollo_router_timeout", "Number of timed out client requests", 1);
+                u64_counter!(
+                    "apollo_router_timeout",
+                    "Number of timed out client requests",
+                    1
+                );
                 Poll::Ready(Err(Elapsed::new().into()))
             }
         }
