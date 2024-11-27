@@ -144,8 +144,8 @@ fn dev_mode_defaults() -> Vec<Override> {
             .value_type(ValueType::Bool)
             .build(),
         Override::builder()
-            .config_path("include_subgraph_errors.all")
-            .value(true)
+            .config_path("redact_subgraph_errors.all")
+            .value(false)
             .value_type(ValueType::Bool)
             .build(),
         Override::builder()

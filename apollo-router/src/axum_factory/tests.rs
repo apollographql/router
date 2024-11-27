@@ -1844,8 +1844,8 @@ async fn http_compressed_service() -> impl Service<
     let service = TestHarness::builder()
         .configuration_json(json!({
             "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
+                "apollo.redact_subgraph_errors": {
+                    "all": false
                 }
             },
         }))
@@ -1896,8 +1896,8 @@ async fn http_deferred_service() -> impl Service<
     let service = TestHarness::builder()
         .configuration_json(json!({
             "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
+                "apollo.redact_subgraph_errors": {
+                    "all": false
                 }
             }
         }))

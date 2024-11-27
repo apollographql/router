@@ -1485,8 +1485,8 @@ mod tests {
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "authorization": {
                 "directives": {
@@ -1566,8 +1566,8 @@ mod tests {
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "authorization": {
                 "directives": {
@@ -1641,8 +1641,8 @@ mod tests {
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "authorization": {
                 "directives": {

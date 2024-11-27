@@ -73,8 +73,8 @@ async fn _test_type_conditions_enabled(planner_mode: &str) -> Response {
             "plugins": {
                 "experimental.expose_query_plan": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             }
         }},
         &[
@@ -122,8 +122,8 @@ async fn _test_type_conditions_enabled_generate_query_fragments(planner_mode: &s
             "plugins": {
                 "experimental.expose_query_plan": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             }
         }},
         &[
@@ -171,8 +171,8 @@ async fn _test_type_conditions_enabled_list_of_list(planner_mode: &str) -> Respo
             "plugins": {
                 "experimental.expose_query_plan": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             }
         }},
         &[
@@ -221,8 +221,8 @@ async fn _test_type_conditions_enabled_list_of_list_of_list(planner_mode: &str) 
             "plugins": {
                 "experimental.expose_query_plan": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             }
         }},
         &[
@@ -270,8 +270,8 @@ async fn _test_type_conditions_disabled(planner_mode: &str) -> Response {
             "plugins": {
                 "experimental.expose_query_plan": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             }
         }},
         &[
@@ -322,8 +322,8 @@ async fn _test_type_conditions_enabled_shouldnt_make_article_fetch(planner_mode:
             "supergraph": {
                 "generate_query_fragments": false,
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             }
         }},
         &[

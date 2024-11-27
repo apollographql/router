@@ -273,8 +273,8 @@ The gateway propagates subgraph errors to clients, but the router doesn't by def
   ```yaml title="values.yaml"
   router:
     configuration:
-      include_subgraph_errors:
-        all: true
+      redact_subgraph_errors:
+        all: false
   ```
 
 ## Troubleshooting

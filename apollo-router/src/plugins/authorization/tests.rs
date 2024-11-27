@@ -48,8 +48,8 @@ async fn authenticated_request() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "require_authentication": true
@@ -120,8 +120,8 @@ async fn unauthenticated_request() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "require_authentication": true
@@ -251,8 +251,8 @@ async fn authenticated_directive() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "directives": {
@@ -368,8 +368,8 @@ async fn authenticated_directive_reject_unauthorized() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "directives": {
@@ -453,8 +453,8 @@ async fn authenticated_directive_dry_run() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "directives": {
@@ -601,8 +601,8 @@ async fn scopes_directive() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "directives": {
@@ -772,8 +772,8 @@ async fn scopes_directive_reject_unauthorized() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "directives": {
@@ -852,8 +852,8 @@ async fn scopes_directive_dry_run() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "directives": {
@@ -932,8 +932,8 @@ async fn errors_in_extensions() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "authorization": {
             "directives": {
@@ -1051,8 +1051,8 @@ async fn cache_key_metadata() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "authorization": {
                 "directives": {

@@ -485,7 +485,7 @@ async fn test_http_plugin_is_loaded() {
     let started = Arc::new(AtomicBool::new(false));
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(TestPlugin {
@@ -594,7 +594,7 @@ async fn test_unix_socket() {
     });
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(&schema)
         .with_subgraph_network_requests()

@@ -418,8 +418,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     }
                 }
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
@@ -536,8 +536,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     }
                 }
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
@@ -756,8 +756,8 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
                     "enabled": true
                 }
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013

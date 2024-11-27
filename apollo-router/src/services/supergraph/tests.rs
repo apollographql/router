@@ -31,7 +31,7 @@ async fn nullability_formatting() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -68,7 +68,7 @@ async fn root_selection_set_statically_skipped() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -103,7 +103,7 @@ async fn root_selection_set_with_fragment_statically_skipped() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -152,7 +152,7 @@ async fn root_selection_set_with_inline_fragment_statically_skipped() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -199,7 +199,7 @@ async fn root_selection_with_several_fields_statically_skipped() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -263,7 +263,7 @@ async fn root_selection_skipped_with_other_fields() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -299,7 +299,7 @@ async fn root_selection_skipped() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -340,7 +340,7 @@ async fn root_selection_not_skipped() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -376,7 +376,7 @@ async fn root_selection_not_included() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -411,7 +411,7 @@ async fn nullability_bubbling() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -467,7 +467,7 @@ async fn errors_on_deferred_responses() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -565,7 +565,7 @@ async fn errors_from_primary_on_deferred_responses() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -656,7 +656,7 @@ async fn deferred_fragment_bounds_nullability() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -744,7 +744,7 @@ async fn errors_on_incremental_responses() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -822,7 +822,7 @@ async fn root_typename_with_defer() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -886,7 +886,7 @@ async fn subscription_with_callback() {
         ].into_iter().collect());
 
     let mut configuration: Configuration = serde_json::from_value(serde_json::json!({
-        "include_subgraph_errors": { "all": true },
+        "redact_subgraph_errors": { "all": false },
         "subscription": {
             "enabled": true,
             "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}
@@ -972,7 +972,7 @@ async fn subscription_callback_schema_reload() {
         ].into_iter().collect());
 
     let mut configuration: Configuration = serde_json::from_value(serde_json::json!({
-        "include_subgraph_errors": { "all": true },
+        "redact_subgraph_errors": { "all": false },
         "headers": {
             "all": {
                 "request": [{"propagate": {"named": "x-test"}}]
@@ -1057,7 +1057,7 @@ async fn subscription_with_callback_with_limit() {
         ].into_iter().collect());
 
     let mut configuration: Configuration = serde_json::from_value(serde_json::json!({
-        "include_subgraph_errors": { "all": true },
+        "redact_subgraph_errors": { "all": false },
         "subscription": {
             "enabled": true,
             "max_opened_subscriptions": 1,
@@ -1135,7 +1135,7 @@ async fn subscription_with_callback_with_limit() {
 #[tokio::test]
 async fn subscription_without_header() {
     let subgraphs = MockedSubgraphs(HashMap::new());
-    let configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
+    let configuration: Configuration = serde_json::from_value(serde_json::json!({"redact_subgraph_errors": { "all": false }, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
         .schema(SCHEMA)
@@ -1200,7 +1200,7 @@ async fn root_typename_with_defer_and_empty_first_response() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -1315,7 +1315,7 @@ async fn root_typename_with_defer_in_defer() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -1422,7 +1422,7 @@ async fn query_reconstruction() {
     // this test does not need to generate a valid response, it is only here to check
     // that the router does not panic when reconstructing the query for the deferred part
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(schema)
         .build_supergraph()
@@ -1535,7 +1535,7 @@ async fn filter_nullified_deferred_responses() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -1694,7 +1694,7 @@ async fn reconstruct_deferred_query_under_interface() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -1869,7 +1869,7 @@ async fn interface_object_typename_rewrites() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -2013,7 +2013,7 @@ async fn interface_object_response_processing() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -2164,7 +2164,7 @@ async fn only_query_interface_object_subgraph() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -2288,7 +2288,7 @@ async fn aliased_subgraph_data_rewrites_on_root_fetch() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -2434,7 +2434,7 @@ async fn aliased_subgraph_data_rewrites_on_non_root_fetch() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
                 "generate_query_fragments": false,
@@ -2573,7 +2573,7 @@ async fn errors_on_nullified_paths() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -2604,7 +2604,7 @@ async fn missing_entities() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -2639,7 +2639,7 @@ async fn no_typename_on_interface() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
             .unwrap()
             .schema(
                 r#"schema
@@ -2811,7 +2811,7 @@ async fn aliased_typename_on_fragments() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
             .unwrap()
             .schema(
                 r#"schema
@@ -3075,7 +3075,7 @@ async fn multiple_interface_types() {
             ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -3112,7 +3112,7 @@ async fn id_scalar_can_overflow_i32() {
     let schema = SCHEMA.replace("currentUser:", "user(id: ID!):");
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(&schema)
         .subgraph_hook(|_subgraph_name, _service| {
@@ -3285,7 +3285,7 @@ async fn interface_object_typename() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -3413,7 +3413,7 @@ async fn fragment_reuse() {
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
             "supergraph": {
                 "generate_query_fragments": false,
                 "experimental_reuse_query_fragments": true,
@@ -3587,7 +3587,7 @@ async fn abstract_types_in_requires() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -3650,7 +3650,7 @@ const ENUM_SCHEMA: &str = r#"schema
 #[tokio::test]
 async fn invalid_input_enum() {
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(ENUM_SCHEMA)
         //.extra_plugin(subgraphs)

@@ -733,8 +733,8 @@ async fn defer_path_with_disabled_config() {
             "defer_support": false,
         },
         "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
+            "apollo.redact_subgraph_errors": {
+                "all": false
             }
         }
     });
@@ -770,8 +770,8 @@ async fn defer_path_with_disabled_config() {
 async fn defer_path() {
     let config = serde_json::json!({
         "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
+            "apollo.redact_subgraph_errors": {
+                "all": false
             }
         }
     });
@@ -808,8 +808,8 @@ async fn defer_path() {
 async fn defer_path_in_array() {
     let config = serde_json::json!({
         "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
+            "apollo.redact_subgraph_errors": {
+                "all": false
             }
         }
     });
@@ -851,8 +851,8 @@ async fn defer_path_in_array() {
 async fn defer_query_without_accept() {
     let config = serde_json::json!({
         "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
+            "apollo.redact_subgraph_errors": {
+                "all": false
             }
         }
     });
@@ -887,8 +887,8 @@ async fn defer_query_without_accept() {
 async fn defer_empty_primary_response() {
     let config = serde_json::json!({
         "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
+            "apollo.redact_subgraph_errors": {
+                "all": false
             }
         }
     });
@@ -923,8 +923,8 @@ async fn defer_empty_primary_response() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_default_variable() {
     let config = serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         }
     });
 

@@ -277,7 +277,7 @@ mod test {
         .await
         .unwrap();
 
-        plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
+        plugins.insert("apollo.redact_subgraph_errors".to_string(), plugin);
 
         let builder = builder
             .with_plugins(Arc::new(plugins))
@@ -302,7 +302,7 @@ mod test {
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.include_subgraph_errors")
+            .find(|factory| factory.name == "apollo.redact_subgraph_errors")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await

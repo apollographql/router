@@ -473,7 +473,7 @@ impl FetchNode {
             .instrument(tracing::trace_span!("subfetch_stream"))
             .await
             // TODO this is a problem since it restores details about failed service
-            // when errors have been redacted in the include_subgraph_errors module.
+            // when errors have been redacted in the redact_subgraph_errors module.
             // Unfortunately, not easy to fix here, because at this point we don't
             // know if we should be redacting errors for this subgraph...
             .map_err(|e| match e.downcast::<FetchError>() {

@@ -525,7 +525,7 @@ async fn escaped_quotes_in_string_literal() {
         .build()
         .unwrap();
     let config = serde_json::json!({
-        "include_subgraph_errors": {"all": true},
+        "redact_subgraph_errors": {"all": false},
     });
     let subgraph_query_log = Arc::new(Mutex::new(Vec::new()));
     let subgraph_query_log_2 = subgraph_query_log.clone();

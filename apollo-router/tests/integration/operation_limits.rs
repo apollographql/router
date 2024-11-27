@@ -235,7 +235,7 @@ async fn build_test_harness(
     let service = TestHarness::builder()
         .configuration_json(json!({
             "limits": limits_config,
-            "include_subgraph_errors": { "all": true },
+            "redact_subgraph_errors": { "all": false },
         }))
         .unwrap()
         // .log_level("warn")

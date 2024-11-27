@@ -215,7 +215,7 @@ async fn insert() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -246,7 +246,7 @@ async fn insert() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -314,7 +314,7 @@ async fn no_cache_control() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -341,7 +341,7 @@ async fn no_cache_control() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -429,7 +429,7 @@ async fn private() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache.clone())
@@ -458,7 +458,7 @@ async fn private() {
     println!("\nNOW WITHOUT SUBGRAPHS\n");
     // Now testing without any mock subgraphs, all the data should come from the cache
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
