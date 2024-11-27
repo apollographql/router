@@ -3905,7 +3905,9 @@ pub(crate) fn normalize_operation(
         variables: Arc::new(operation.variables.clone()),
         directives: operation.directives.clone().into(),
         selection_set: normalized_selection_set,
-        named_fragments,
+        // fragments were already expanded into selection sets
+        // new ones will be generated when optimizing the final subgraph fetch operations
+        named_fragments: Default::default(),
     };
     Ok(normalized_operation)
 }
