@@ -86,6 +86,10 @@ parameters:
   protoc_version:
     type: string
     default: "21.8"
+  # note the cmake version is only used for manual installs, not for installs from a package manager like apt or homebrew
+  cmake_version:
+    type: string
+    default: "3.31.1"
   nightly:
     type: boolean
     default: false
@@ -249,15 +253,12 @@ commands:
             - run:
                 name: Install CMake
                 command: |
-                  choco install cmake -y
-                  echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
-                  SAVED_EXIT_CODE=$LASTEXITCODE
+                  if [[ ! -f "$HOME/.local/bin/cmake" ]]; then
+                    curl -L https://github.com/Kitware/CMake/releases/download/v<< pipeline.parameters.cmake_version >>/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64.zip  --output cmake.zip
+                    unzip cmake.zip -d $HOME/.local
+                  fi
 
-                  source "$BASH_ENV"
-                  echo "Test CMake -- if this fails, play around with chocolatey, I guess."
                   cmake --version
-
-                  exit $SAVED_EXIT_CODE
       - when:
           condition:
             or:
