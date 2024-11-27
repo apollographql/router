@@ -255,7 +255,8 @@ commands:
                 command: |
                   if [[ ! -f "$HOME/.local/bin/cmake" ]]; then
                     curl -L https://github.com/Kitware/CMake/releases/download/v<< pipeline.parameters.cmake_version >>/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64.zip  --output cmake.zip
-                    unzip cmake.zip -d $HOME/.local
+                    unzip cmake.zip -d /tmp
+                    cp "/tmp/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_x64/bin/*" "$HOME/.local/bin/"
                   fi
 
                   cmake --version
