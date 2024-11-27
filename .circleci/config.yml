@@ -76,13 +76,13 @@ executors:
 parameters:
   toolchain_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v2-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
   xtask_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
   merge_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
   protoc_version:
     type: string
     default: "21.8"
