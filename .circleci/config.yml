@@ -253,10 +253,11 @@ commands:
             - run:
                 name: Install CMake
                 command: |
+                  mkdir -p "$HOME/.local"
                   if [[ ! -f "$HOME/.local/bin/cmake" ]]; then
                     curl -L https://github.com/Kitware/CMake/releases/download/v<< pipeline.parameters.cmake_version >>/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64.zip  --output cmake.zip
                     # The zip file has a root directory, so we put it somewhere else first before placing the files in .local
-                    unzip cmake.zip -d /tmp
+                    unzip cmake.zip -d /tmp > /dev/null
                     cp /tmp/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64/* -R "$HOME/.local"
                   fi
 
