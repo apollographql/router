@@ -2674,7 +2674,7 @@ impl FetchDependencyGraphNode {
             )?
         };
         let operation =
-            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
+            operation_compression.compress(operation)?;
         let operation_document = operation.try_into().map_err(|err| match err {
             FederationError::SingleFederationError {
                 inner: SingleFederationError::InvalidGraphQL { diagnostics },
