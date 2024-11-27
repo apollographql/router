@@ -127,7 +127,7 @@ impl PersistedQueryLayer {
                     .context
                     .get(PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY)
                     .unwrap_or_default()
-                    .or_else(|| request.context.get(CLIENT_NAME).unwrap_or_default())
+                    .or_else(|| request.context.get(CLIENT_NAME).unwrap_or_default()),
             ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
