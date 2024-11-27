@@ -394,7 +394,7 @@ impl Configuration {
 
     pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
         router_bridge::planner::QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments,
+            reuse_query_fragments: None,
             generate_query_fragments: Some(self.supergraph.generate_query_fragments),
             incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
                 enable_defer: Some(self.supergraph.defer_support),
@@ -417,7 +417,6 @@ impl Configuration {
         &self,
     ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
         apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments.unwrap_or(true),
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
             incremental_delivery:
@@ -683,11 +682,6 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
-    /// Enable reuse of query fragments
-    /// Default: depends on the federation version
-    #[serde(rename = "experimental_reuse_query_fragments")]
-    pub(crate) reuse_query_fragments: Option<bool>,
-
     /// Enable QP generation of fragments for subgraph requests
     /// Default: true
     pub(crate) generate_query_fragments: bool,
@@ -745,7 +739,6 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        reuse_query_fragments: Option<bool>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
@@ -756,16 +749,8 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: generate_query_fragments.and_then(|v|
-                if v {
-                    if reuse_query_fragments.is_some_and(|v| v) {
-                        // warn the user that both are enabled and it's overridden
-                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
-                    }
-                    Some(false)
-                } else { reuse_query_fragments }
-            ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -782,7 +767,6 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        reuse_query_fragments: Option<bool>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
@@ -793,16 +777,8 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: generate_query_fragments.and_then(|v|
-                if v {
-                    if reuse_query_fragments.is_some_and(|v| v) {
-                        // warn the user that both are enabled and it's overridden
-                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
-                    }
-                    Some(false)
-                } else { reuse_query_fragments }
-            ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }

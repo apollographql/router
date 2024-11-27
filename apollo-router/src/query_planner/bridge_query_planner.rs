@@ -167,10 +167,6 @@ impl PlannerMode {
         configuration: &Configuration,
     ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
         let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-            reuse_query_fragments: configuration
-                .supergraph
-                .reuse_query_fragments
-                .unwrap_or(true),
             subgraph_graphql_validation: false,
             generate_query_fragments: configuration.supergraph.generate_query_fragments,
             incremental_delivery:
