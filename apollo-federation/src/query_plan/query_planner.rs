@@ -823,36 +823,6 @@ fn generate_condition_nodes<'a>(
     }
 }
 
-/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
-pub(crate) struct RebasedFragments {
-    original_fragments: NamedFragments,
-    /// Map key: subgraph name
-    rebased_fragments: IndexMap<Arc<str>, NamedFragments>,
-}
-
-impl RebasedFragments {
-    fn new(fragments: NamedFragments) -> Self {
-        Self {
-            original_fragments: fragments,
-            rebased_fragments: Default::default(),
-        }
-    }
-
-    fn for_subgraph(
-        &mut self,
-        subgraph_name: impl Into<Arc<str>>,
-        subgraph_schema: &ValidFederationSchema,
-    ) -> &NamedFragments {
-        self.rebased_fragments
-            .entry(subgraph_name.into())
-            .or_insert_with(|| {
-                self.original_fragments
-                    .rebase_on(subgraph_schema)
-                    .unwrap_or_default()
-            })
-    }
-}
-
 pub(crate) enum SubgraphOperationCompression {
     GenerateFragments,
     Disabled,
@@ -860,10 +830,7 @@ pub(crate) enum SubgraphOperationCompression {
 
 impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
-    pub(crate) fn compress(
-        &mut self,
-        operation: Operation,
-    ) -> Result<Operation, FederationError> {
+    pub(crate) fn compress(&mut self, operation: Operation) -> Result<Operation, FederationError> {
         match self {
             Self::GenerateFragments => {
                 let mut operation = operation;
