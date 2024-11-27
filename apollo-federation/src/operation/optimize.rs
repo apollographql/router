@@ -1161,7 +1161,6 @@ impl From<FragmentSelection> for Selection {
     }
 }
 
-
 impl Operation {
     /// Optimize the parsed size of the operation by generating fragments based on the selections
     /// in the operation.
