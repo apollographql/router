@@ -312,7 +312,7 @@ mod test {
     #[tokio::test]
     async fn it_returns_valid_response() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
     }
@@ -320,7 +320,7 @@ mod test {
     #[tokio::test]
     async fn it_redacts_all_subgraphs_explicit_redact() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -345,7 +345,7 @@ mod test {
     async fn it_does_not_redact_all_implicit_redact_product_explict_allow_for_product_query() {
         // Build a redacting plugin
         let plugin =
-            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": false }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -354,7 +354,7 @@ mod test {
     async fn it_does_redact_all_implicit_redact_product_explict_allow_for_review_query() {
         // Build a redacting plugin
         let plugin =
-            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": false }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -363,7 +363,7 @@ mod test {
     async fn it_does_not_redact_all_explicit_allow_review_explict_redact_for_product_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
-            &serde_json::json!({ "all": true, "subgraphs": {"reviews": false }}),
+            &serde_json::json!({ "all": false, "subgraphs": {"reviews": true }}),
         )
         .await;
         let router = build_mock_router(plugin).await;
@@ -374,7 +374,7 @@ mod test {
     async fn it_does_redact_all_explicit_allow_product_explict_redact_for_product_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
-            &serde_json::json!({ "all": true, "subgraphs": {"products": false }}),
+            &serde_json::json!({ "all": false, "subgraphs": {"products": true }}),
         )
         .await;
         let router = build_mock_router(plugin).await;
