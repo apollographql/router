@@ -20,10 +20,15 @@ use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
 
 /// Get a query ID, body, and a PQ manifest with that ID and body.
-pub fn fake_manifest() -> (String, String, HashMap<String, String>) {
+pub fn fake_manifest() -> (String, String, PersistedQueryManifest) {
     let id = "1234".to_string();
     let body = r#"query { typename }"#.to_string();
-    let manifest = hashmap! { id.to_string() => body.to_string() };
+    let manifest = hashmap! {
+      FullPersistedQueryOperationId {
+        operation_id: id.to_string(),
+        client_name: None,
+      } => body.to_string()
+    };
     (id, body, manifest)
 }
 

@@ -706,11 +706,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn pq_layer_freeform_graphql_with_safelist() {
         let manifest = HashMap::from([(
-            "valid-syntax".to_string(),
+            FullPersistedQueryOperationId {
+              operation_id: "valid-syntax".to_string(),
+              client_name: None,
+            },
             "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah"
                 .to_string(),
         ), (
-            "invalid-syntax".to_string(),
+            FullPersistedQueryOperationId {
+              operation_id: "invalid-syntax".to_string(),
+              client_name: None,
+            },
             "}}}".to_string()),
         ]);
 
