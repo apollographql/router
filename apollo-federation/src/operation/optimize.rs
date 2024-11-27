@@ -44,7 +44,6 @@ use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
-use super::DirectiveList;
 use super::Field;
 use super::Fragment;
 use super::FragmentSpreadSelection;
@@ -59,7 +58,6 @@ use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
 use crate::operation::SelectionValue;
-use crate::schema::position::CompositeTypeDefinitionPosition;
 
 #[derive(Debug)]
 struct ReuseContext<'a> {
@@ -338,87 +336,6 @@ impl FieldsConflictValidator {
     }
 }
 
-struct FieldsConflictMultiBranchValidator {
-    validators: Vec<Arc<FieldsConflictValidator>>,
-    used_spread_trimmed_part_at_level: Vec<Arc<FieldsConflictValidator>>,
-}
-
-impl FieldsConflictMultiBranchValidator {
-    fn new(validators: Vec<Arc<FieldsConflictValidator>>) -> Self {
-        Self {
-            validators,
-            used_spread_trimmed_part_at_level: Vec::new(),
-        }
-    }
-
-    fn from_initial_validator(validator: FieldsConflictValidator) -> Self {
-        Self {
-            validators: vec![Arc::new(validator)],
-            used_spread_trimmed_part_at_level: Vec::new(),
-        }
-    }
-
-    fn for_field(&self, field: &Field) -> Self {
-        let for_all_branches = self.validators.iter().flat_map(|v| v.for_field(field));
-        Self::new(for_all_branches.collect())
-    }
-
-    // When this method is used in the context of `try_optimize_with_fragments`, we know that the
-    // fragment, restricted to the current parent type, matches a subset of the sub-selection.
-    // However, there is still one case we we cannot use it that we need to check, and this is if
-    // using the fragment would create a field "conflict" (in the sense of the graphQL spec
-    // [`FieldsInSetCanMerge`](https://spec.graphql.org/draft/#FieldsInSetCanMerge())) and thus
-    // create an invalid selection. To be clear, `at_type.selections` cannot create a conflict,
-    // since it is a subset of the target selection set and it is valid by itself. *But* there may
-    // be some part of the fragment that is not `at_type.selections` due to being "dead branches"
-    // for type `parent_type`. And while those branches _are_ "dead" as far as execution goes, the
-    // `FieldsInSetCanMerge` validation does not take this into account (it's 1st step says
-    // "including visiting fragments and inline fragments" but has no logic regarding ignoring any
-    // fragment that may not apply due to the intersection of runtime types between multiple
-    // fragment being empty).
-    fn check_can_reuse_fragment_and_track_it(
-        &mut self,
-        fragment_restriction: &FragmentRestrictionAtType,
-    ) -> Result<bool, FederationError> {
-        // No validator means that everything in the fragment selection was part of the selection
-        // we're optimizing away (by using the fragment), and we know the original selection was
-        // ok, so nothing to check.
-        let Some(validator) = &fragment_restriction.validator else {
-            return Ok(true); // Nothing to check; Trivially ok.
-        };
-
-        if !validator.do_merge_with_all(self.validators.iter().map(Arc::as_ref))? {
-            return Ok(false);
-        }
-
-        // We need to make sure the trimmed parts of `fragment` merges with the rest of the
-        // selection, but also that it merge with any of the trimmed parts of any fragment we have
-        // added already.
-        // Note: this last condition means that if 2 fragment conflict on their "trimmed" parts,
-        // then the choice of which is used can be based on the fragment ordering and selection
-        // order, which may not be optimal. This feels niche enough that we keep it simple for now,
-        // but we can revisit this decision if we run into real cases that justify it (but making
-        // it optimal would be a involved in general, as in theory you could have complex
-        // dependencies of fragments that conflict, even cycles, and you need to take the size of
-        // fragments into account to know what's best; and even then, this could even depend on
-        // overall usage, as it can be better to reuse a fragment that is used in other places,
-        // than to use one for which it's the only usage. Adding to all that the fact that conflict
-        // can happen in sibling branches).
-        if !validator.do_merge_with_all(
-            self.used_spread_trimmed_part_at_level
-                .iter()
-                .map(Arc::as_ref),
-        )? {
-            return Ok(false);
-        }
-
-        // We're good, but track the fragment.
-        self.used_spread_trimmed_part_at_level
-            .push(validator.clone());
-        Ok(true)
-    }
-}
-
 //=============================================================================
 // Matching fragments with selection set (`try_optimize_with_fragments`)
 
@@ -432,46 +349,6 @@ struct FragmentRestrictionAtType {
     /// - `None` means that there is nothing to check.
     /// - See `check_can_reuse_fragment_and_track_it` for more details.
     validator: Option<Arc<FieldsConflictValidator>>,
-}
-
-#[derive(Default)]
-struct FragmentRestrictionAtTypeCache {
-    map: IndexMap<(Name, CompositeTypeDefinitionPosition), Arc<FragmentRestrictionAtType>>,
-}
-
-impl FragmentRestrictionAtType {
-    fn new(selections: SelectionSet, validator: Option<FieldsConflictValidator>) -> Self {
-        Self {
-            selections,
-            validator: validator.map(Arc::new),
-        }
-    }
-
-    // It's possible that while the fragment technically applies at `parent_type`, it's "rebasing" on
-    // `parent_type` is empty, or contains only `__typename`. For instance, suppose we have
-    // a union `U = A | B | C`, and then a fragment:
-    // ```graphql
-    //   fragment F on U {
-    //     ... on A {
-    //       x
-    //     }
-    //     ... on B {
-    //       y
-    //     }
-    //   }
-    // ```
-    // It is then possible to apply `F` when the parent type is `C`, but this ends up selecting
-    // nothing at all.
-    //
-    // Using `F` in those cases is, while not 100% incorrect, at least not productive, and so we
-    // skip it that case. This is essentially an optimization.
-    fn is_useless(&self) -> bool {
-        let mut iter = self.selections.iter();
-        let Some(first) = iter.next() else {
-            return true;
-        };
-        iter.next().is_none() && first.is_typename_field()
-    }
 }
 
 /// The return type for `SelectionSet::try_optimize_with_fragments`.
