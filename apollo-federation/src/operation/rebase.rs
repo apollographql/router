@@ -54,22 +54,14 @@ impl Selection {
     ) -> Result<Selection, FederationError> {
         match self {
             Selection::Field(field) => field
-                .rebase_inner(
-                    parent_type,
-                    named_fragments,
-                    schema,
-                )
+                .rebase_inner(parent_type, named_fragments, schema)
                 .map(|field| field.into()),
-            Selection::FragmentSpread(spread) => spread.rebase_inner(
-                parent_type,
-                named_fragments,
-                schema,
-            ),
-            Selection::InlineFragment(inline) => inline.rebase_inner(
-                parent_type,
-                named_fragments,
-                schema,
-            ),
+            Selection::FragmentSpread(spread) => {
+                spread.rebase_inner(parent_type, named_fragments, schema)
+            }
+            Selection::InlineFragment(inline) => {
+                inline.rebase_inner(parent_type, named_fragments, schema)
+            }
         }
     }
 
@@ -316,11 +308,8 @@ impl FieldSelection {
             });
         }
 
-        let rebased_selection_set = selection_set.rebase_inner(
-            &rebased_base_type,
-            named_fragments,
-            schema,
-        )?;
+        let rebased_selection_set =
+            selection_set.rebase_inner(&rebased_base_type, named_fragments, schema)?;
         if rebased_selection_set.selections.is_empty() {
             Err(RebaseError::EmptySelectionSet.into())
         } else {
@@ -451,11 +440,9 @@ impl FragmentSpreadSelection {
             // important because the very logic we're hitting here may need to happen inside the rebase on the
             // fragment selection, but that logic would not be triggered if we used the rebased `named_fragment` since
             // `rebase_on_same_schema` would then be 'true'.
-            let expanded_selection_set = self.selection_set.rebase_inner(
-                parent_type,
-                named_fragments,
-                schema,
-            )?;
+            let expanded_selection_set =
+                self.selection_set
+                    .rebase_inner(parent_type, named_fragments, schema)?;
             // In theory, we could return the selection set directly, but making `SelectionSet.rebase_on` sometimes
             // return a `SelectionSet` complicate things quite a bit. So instead, we encapsulate the selection set
             // in an "empty" inline fragment. This make for non-really-optimal selection sets in the (relatively
@@ -604,11 +591,9 @@ impl InlineFragmentSelection {
             // we are within the same schema - selection set does not have to be rebased
             Ok(InlineFragmentSelection::new(rebased_fragment, self.selection_set.clone()).into())
         } else {
-            let rebased_selection_set = self.selection_set.rebase_inner(
-                &rebased_casted_type,
-                named_fragments,
-                schema,
-            )?;
+            let rebased_selection_set =
+                self.selection_set
+                    .rebase_inner(&rebased_casted_type, named_fragments, schema)?;
             if rebased_selection_set.selections.is_empty() {
                 // empty selection set
                 Err(RebaseError::EmptySelectionSet.into())
@@ -681,13 +666,7 @@ impl SelectionSet {
         let rebased_results = self
             .selections
             .values()
-            .map(|selection| {
-                selection.rebase_inner(
-                    parent_type,
-                    named_fragments,
-                    schema,
-                )
-            });
+            .map(|selection| selection.rebase_inner(parent_type, named_fragments, schema));
 
         Ok(SelectionSet {
             schema: schema.clone(),
