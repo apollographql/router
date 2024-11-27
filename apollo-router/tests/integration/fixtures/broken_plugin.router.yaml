@@ -31,8 +31,8 @@ telemetry:
           headers: true
 override_subgraph_url:
   products: http://localhost:4005
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
 plugins:
   experimental.broken:
     enabled: true

@@ -4,8 +4,8 @@ batching:
 rhai:
   scripts: tests/fixtures
   main: test_callbacks.rhai
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
 demand_control:
   mode: measure
   enabled: false

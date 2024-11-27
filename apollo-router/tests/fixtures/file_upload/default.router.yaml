@@ -9,5 +9,5 @@ preview_file_uploads:
       limits:
         max_file_size: 512kb
         max_files: 5
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false

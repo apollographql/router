@@ -1,5 +1,5 @@
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
 rhai:
   scripts: tests/fixtures
   main: test_callbacks.rhai

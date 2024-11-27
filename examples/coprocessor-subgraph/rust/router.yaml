@@ -5,8 +5,8 @@ sandbox:
   enabled: true
 homepage:
   enabled: false
-include_subgraph_errors:
-  all: true # Propagate errors from all subraphs
+redact_subgraph_errors:
+  all: false # Propagate errors from all subraphs
 coprocessor:
   url: http://127.0.0.1:8080 # mandatory URL which is the address of the co-processor
   timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second

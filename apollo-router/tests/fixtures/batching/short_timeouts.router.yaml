@@ -10,5 +10,5 @@ traffic_shaping:
   all:
     timeout: 1s
 
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false

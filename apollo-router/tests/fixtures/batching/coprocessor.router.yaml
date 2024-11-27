@@ -15,5 +15,5 @@ coprocessor:
         service_name: true
         body: true
 
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
