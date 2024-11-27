@@ -348,8 +348,8 @@ homepage:
   enabled: false
 supergraph:
   introspection: true
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
 plugins:
   # Enable with the header, Apollo-Expose-Query-Plan: true
   experimental.expose_query_plan: true
