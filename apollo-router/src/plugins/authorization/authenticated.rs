@@ -1914,8 +1914,8 @@ mod tests {
             "supergraph": {
                 "introspection": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "authorization": {
                 "directives": {
@@ -1972,8 +1972,8 @@ mod tests {
             "supergraph": {
                 "introspection": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "authorization": {
                 "directives": {

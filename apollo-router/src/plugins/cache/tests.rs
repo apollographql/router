@@ -584,7 +584,7 @@ async fn no_data() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -648,7 +648,7 @@ async fn no_data() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -772,7 +772,7 @@ async fn missing_entities() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -833,7 +833,7 @@ async fn missing_entities() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
@@ -896,7 +896,7 @@ async fn invalidate() {
     let mut invalidation = entity_cache.invalidation.clone();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache.clone())
@@ -919,7 +919,7 @@ async fn invalidate() {
 
     // Now testing without any mock subgraphs, all the data should come from the cache
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache.clone())
@@ -950,7 +950,7 @@ async fn invalidate() {
 
     panic!();
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({"redact_subgraph_errors": { "all": false } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)

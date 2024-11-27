@@ -55,8 +55,8 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
         .config(format!(
             r#"
             {PROMETHEUS_CONFIG}
-            include_subgraph_errors:
-                all: true
+            redact_subgraph_errors:
+                all: false
             traffic_shaping:
                 all:
                     timeout: 1ns
@@ -201,8 +201,8 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
         .config(format!(
             r#"
             {PROMETHEUS_CONFIG}
-            include_subgraph_errors:
-                all: true
+            redact_subgraph_errors:
+                all: false
             traffic_shaping:
                 all:
                     global_rate_limit:

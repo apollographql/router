@@ -20,15 +20,15 @@ To help resolve AWS VPC Lattice connection issues, enable subgraph error inclusi
 4. In **Router configuration YAML**, ensure your configuration has the following configuration block:
 
 ```yaml
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
 ```
 
 5. Click the **Save** button in the top right corner of that section.
 
 Configuration changes trigger a new launch. Please wait a few minutes for your cloud router to update with this new configuration. You can track your graph variant's deployment status on its **Launches** page.
 
-Once you've found and resolved the issue, Apollo recommends turning off subgraph error inclusion. To do so, remove the `include_subgraph_errors` configuration. Then, save the router's configuration YAML.
+Once you've found and resolved the issue, Apollo recommends turning off subgraph error inclusion. To do so, remove the `redact_subgraph_errors` configuration. Then, save the router's configuration YAML.
 
 ## Common issues and errors
 

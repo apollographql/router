@@ -795,8 +795,8 @@ mod tests {
         let schema = include_str!("../tests/fixtures/batching/schema.graphql");
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "batching": {
                 "enabled": true,

@@ -183,8 +183,8 @@ async fn make_request(request: Request) -> apollo_router::graphql::Response {
             "supergraph": {
                 "introspection": true,
             },
-            "include_subgraph_errors": {
-                "all": true,
+            "redact_subgraph_errors": {
+                "all": false,
             },
         }))
         .unwrap()

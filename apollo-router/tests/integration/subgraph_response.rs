@@ -5,8 +5,8 @@ use wiremock::ResponseTemplate;
 use crate::integration::IntegrationTest;
 
 const CONFIG: &str = r#"
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
 "#;
 
 #[tokio::test(flavor = "multi_thread")]

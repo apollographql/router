@@ -351,13 +351,13 @@ Subgraph errors redacted
 
 This redaction prevents potential leaks of sensitive information to clients.
 
-If you instead want to propagate subgraph errors to clients, you can add the `include_subgraph_errors` key to your router's YAML configuration, like so:
+If you instead want to propagate subgraph errors to clients, you can add the `redact_subgraph_errors` key to your router's YAML configuration, like so:
 
 ```yaml
-include_subgraph_errors:
-  all: true # Propagate errors from all subraphs
+redact_subgraph_errors:
+  all: false # Propagate errors from all subraphs
   subgraphs:
-    products: false # Do not propagate errors from the products subgraph
+    products: true # Do not propagate errors from the products subgraph
 ```
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, subgraph errors are included from all subgraphs except the `products` subgraph.

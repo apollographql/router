@@ -174,8 +174,8 @@ async fn incorrect_operation_name() {
 async fn make_request(request: Request) -> apollo_router::graphql::Response {
     apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "include_subgraph_errors": {
-                "all": true,
+            "redact_subgraph_errors": {
+                "all": false,
             },
         }))
         .unwrap()

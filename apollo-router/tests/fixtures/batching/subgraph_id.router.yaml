@@ -11,5 +11,5 @@ rhai:
   scripts: ./tests/fixtures/batching
   main: subgraph_id.rhai
 
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false

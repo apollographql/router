@@ -41,8 +41,8 @@ fn get_configuration(rust_qp: bool) -> serde_json::Value {
             "plugins": {
                 "experimental.expose_query_plan": true
             },
-            "include_subgraph_errors": {
-                "all": true
+            "redact_subgraph_errors": {
+                "all": false
             },
             "supergraph": {
                 // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
@@ -56,8 +56,8 @@ fn get_configuration(rust_qp: bool) -> serde_json::Value {
         "plugins": {
             "experimental.expose_query_plan": true
         },
-        "include_subgraph_errors": {
-            "all": true
+        "redact_subgraph_errors": {
+            "all": false
         },
         "supergraph": {
             // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013

@@ -9,5 +9,5 @@ homepage:
 traffic_shaping:
   router: 
     timeout: 300s
-include_subgraph_errors:
-  all: true
+redact_subgraph_errors:
+  all: false
