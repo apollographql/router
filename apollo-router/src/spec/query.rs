@@ -30,7 +30,6 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::QueryHash;
@@ -52,7 +51,6 @@ pub(crate) mod transform;
 pub(crate) mod traverse;
 
 pub(crate) const TYPENAME: &str = "__typename";
-pub(crate) const RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAILED";
 
 /// A GraphQL query.
 #[derive(Derivative, Serialize, Deserialize)]
@@ -145,9 +143,8 @@ impl Query {
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
-                                nullification_errors: Vec::new(),
+                                errors: Vec::new(),
                                 nullified: Vec::new(),
-                                validation_errors: Vec::new(),
                             };
 
                             response.data = Some(
@@ -164,16 +161,10 @@ impl Query {
                                 },
                             );
 
-                            if !parameters.nullification_errors.is_empty() {
-                                if let Ok(value) =
-                                    serde_json_bytes::to_value(&parameters.nullification_errors)
-                                {
+                            if !parameters.errors.is_empty() {
+                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
                                     response.extensions.insert("valueCompletion", value);
                                 }
-                            }
-
-                            if !parameters.validation_errors.is_empty() {
-                                response.errors.append(&mut parameters.validation_errors);
                             }
 
                             return parameters.nullified;
@@ -207,9 +198,8 @@ impl Query {
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
-                        nullification_errors: Vec::new(),
+                        errors: Vec::new(),
                         nullified: Vec::new(),
-                        validation_errors: Vec::new(),
                     };
 
                     response.data = Some(
@@ -225,16 +215,10 @@ impl Query {
                             Err(InvalidValue) => Value::Null,
                         },
                     );
-                    if !parameters.nullification_errors.is_empty() {
-                        if let Ok(value) =
-                            serde_json_bytes::to_value(&parameters.nullification_errors)
-                        {
+                    if !parameters.errors.is_empty() {
+                        if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
                             response.extensions.insert("valueCompletion", value);
                         }
-                    }
-
-                    if !parameters.validation_errors.is_empty() {
-                        response.errors.append(&mut parameters.validation_errors);
                     }
 
                     return parameters.nullified;
@@ -358,7 +342,6 @@ impl Query {
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         parent_type: &executable::Type,
-        field_or_index: FieldOrIndex<'a>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
@@ -379,8 +362,7 @@ impl Query {
                     input,
                     output,
                     path,
-                    parent_type,
-                    field_or_index,
+                    field_type,
                     selection_set,
                 ) {
                     Err(_) => Err(InvalidValue),
@@ -395,7 +377,7 @@ impl Query {
                                 ),
                                 _ => todo!(),
                             };
-                            parameters.nullification_errors.push(Error {
+                            parameters.errors.push(Error {
                                 message,
                                 path: Some(Path::from_response_slice(path)),
                                 ..Error::default()
@@ -435,7 +417,6 @@ impl Query {
                                 &mut output_array[i],
                                 path,
                                 field_type,
-                                FieldOrIndex::Index(i),
                                 selection_set,
                             );
                             path.pop();
@@ -449,22 +430,7 @@ impl Query {
                         Ok(()) => Ok(()),
                     }
                 }
-                Value::Null => Ok(()),
-                v => {
-                    parameters.validation_errors.push(
-                        Error::builder()
-                            .message(format!(
-                                "Invalid non-list value of type {} for list type {field_type}",
-                                v.json_type_name()
-                            ))
-                            .path(Path::from_response_slice(path))
-                            .extension_code(RESPONSE_VALIDATION)
-                            .build(),
-                    );
-
-                    *output = Value::Null;
-                    Ok(())
-                }
+                _ => Ok(()),
             },
             executable::Type::Named(name) if name == "Int" => {
                 let opt = if input.is_i64() {
@@ -480,19 +446,6 @@ impl Query {
                 if opt.is_some() {
                     *output = input.clone();
                 } else {
-                    if !input.is_null() {
-                        parameters.validation_errors.push(
-                            Error::builder()
-                                .message(invalid_value_message(
-                                    parent_type,
-                                    field_type,
-                                    field_or_index,
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .extension_code(RESPONSE_VALIDATION)
-                                .build(),
-                        );
-                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -501,19 +454,6 @@ impl Query {
                 if input.as_f64().is_some() {
                     *output = input.clone();
                 } else {
-                    if !input.is_null() {
-                        parameters.validation_errors.push(
-                            Error::builder()
-                                .message(invalid_value_message(
-                                    parent_type,
-                                    field_type,
-                                    field_or_index,
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .extension_code(RESPONSE_VALIDATION)
-                                .build(),
-                        );
-                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -522,19 +462,6 @@ impl Query {
                 if input.as_bool().is_some() {
                     *output = input.clone();
                 } else {
-                    if !input.is_null() {
-                        parameters.validation_errors.push(
-                            Error::builder()
-                                .message(invalid_value_message(
-                                    parent_type,
-                                    field_type,
-                                    field_or_index,
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .extension_code(RESPONSE_VALIDATION)
-                                .build(),
-                        );
-                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -543,19 +470,6 @@ impl Query {
                 if input.as_str().is_some() {
                     *output = input.clone();
                 } else {
-                    if !input.is_null() {
-                        parameters.validation_errors.push(
-                            Error::builder()
-                                .message(invalid_value_message(
-                                    parent_type,
-                                    field_type,
-                                    field_or_index,
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .extension_code(RESPONSE_VALIDATION)
-                                .build(),
-                        );
-                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -564,19 +478,6 @@ impl Query {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
                     *output = input.clone();
                 } else {
-                    if !input.is_null() {
-                        parameters.validation_errors.push(
-                            Error::builder()
-                                .message(invalid_value_message(
-                                    parent_type,
-                                    field_type,
-                                    field_or_index,
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .extension_code(RESPONSE_VALIDATION)
-                                .build(),
-                        );
-                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -596,31 +497,11 @@ impl Query {
                                     *output = input.clone();
                                     Ok(())
                                 } else {
-                                    parameters.validation_errors.push(
-                                        Error::builder()
-                                            .message(format!(
-                                                "Expected a valid enum value for type {}",
-                                                enum_type.name
-                                            ))
-                                            .path(Path::from_response_slice(path))
-                                            .extension_code(RESPONSE_VALIDATION)
-                                            .build(),
-                                    );
                                     *output = Value::Null;
                                     Ok(())
                                 }
                             }
                             None => {
-                                parameters.validation_errors.push(
-                                    Error::builder()
-                                        .message(format!(
-                                            "Expected a valid enum value for type {}",
-                                            enum_type.name
-                                        ))
-                                        .path(Path::from_response_slice(path))
-                                        .extension_code(RESPONSE_VALIDATION)
-                                        .build(),
-                                );
                                 *output = Value::Null;
                                 Ok(())
                             }
@@ -631,9 +512,6 @@ impl Query {
 
                 match input {
                     Value::Object(ref mut input_object) => {
-                        // FIXME: we should return an error if __typename is not a string
-                        // but this might cause issues for some production deployments where
-                        // __typename might be missing or invalid (cf https://github.com/apollographql/router/commit/4a592f4933b7b9e46f14c7a98404b9e067687f09 )
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
@@ -686,20 +564,8 @@ impl Query {
 
                         Ok(())
                     }
-                    Value::Null => {
-                        *output = Value::Null;
-                        Ok(())
-                    }
-                    v => {
-                        parameters.validation_errors.push(
-                        Error::builder()
-                        .message(format!(
-                            "Invalid non-object value of type {} for composite type {type_name}", v.json_type_name()
-                        ))
-                        .path(Path::from_response_slice(path))
-                        .extension_code(RESPONSE_VALIDATION)
-                        .build(),
-                    );
+                    _ => {
+                        parameters.nullified.push(Path::from_response_slice(path));
                         *output = Value::Null;
                         Ok(())
                     }
@@ -775,7 +641,6 @@ impl Query {
                             output_value,
                             path,
                             current_type,
-                            FieldOrIndex::Field(field_name.as_str()),
                             selection_set,
                         );
                         path.pop();
@@ -785,7 +650,7 @@ impl Query {
                             output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
-                            parameters.nullification_errors.push(Error {
+                            parameters.errors.push(Error {
                                 message: format!(
                                     "Cannot return null for non-nullable field {current_type}.{}",
                                     field_name.as_str()
@@ -907,11 +772,6 @@ impl Query {
                         continue;
                     }
 
-                    let root_type = apollo_compiler::ast::Type::Named(
-                        // Unchecked name instantiation is always safe, and we know the name is
-                        // valid here
-                        apollo_compiler::Name::new_unchecked(root_type_name),
-                    );
                     let field_name = alias.as_ref().unwrap_or(name);
                     let field_name_str = field_name.as_str();
 
@@ -940,14 +800,13 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            &root_type,
-                            FieldOrIndex::Field(field_name_str),
+                            &field_type.0,
                             selection_set,
                         );
                         path.pop();
                         res?
                     } else if field_type.is_non_null() {
-                        parameters.nullification_errors.push(Error {
+                        parameters.errors.push(Error {
                             message: format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
                                 root_type_name
@@ -1155,8 +1014,7 @@ impl Query {
 /// Intermediate structure for arguments passed through the entire formatting
 struct FormatParameters<'a> {
     variables: &'a Object,
-    nullification_errors: Vec<Error>,
-    validation_errors: Vec<Error>,
+    errors: Vec<Error>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
 }
@@ -1174,26 +1032,6 @@ pub(crate) struct Operation {
 pub(crate) struct Variable {
     field_type: FieldType,
     default_value: Option<Value>,
-}
-
-enum FieldOrIndex<'a> {
-    Field(&'a str),
-    Index(usize),
-}
-
-fn invalid_value_message(
-    parent_type: &executable::Type,
-    field_type: &executable::Type,
-    field_or_index: FieldOrIndex,
-) -> String {
-    match field_or_index {
-        FieldOrIndex::Field(field_name) => {
-            format!("Invalid value found for field {parent_type}.{field_name}")
-        }
-        FieldOrIndex::Index(i) => {
-            format!("Invalid value found for array element of type {field_type} at index {i}")
-        }
-    }
 }
 
 impl Operation {
