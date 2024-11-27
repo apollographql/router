@@ -249,9 +249,15 @@ commands:
             - run:
                 name: Install CMake
                 command: |
-                  choco install cmake.install -y
+                  choco install cmake -y
                   echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
-                  exit $LASTEXITCODE
+                  SAVED_EXIT_CODE=$LASTEXITCODE
+
+                  source "$BASH_ENV"
+                  echo "Test CMake -- if this fails, play around with chocolatey, I guess."
+                  cmake --version
+
+                  exit $SAVED_EXIT_CODE
       - when:
           condition:
             or:
@@ -1042,6 +1048,7 @@ workflows:
           matrix:
             parameters:
               platform: [ amd_linux_build ]
+
       - test:
           # this should be changed back to true on dev after release
           fuzz: false
