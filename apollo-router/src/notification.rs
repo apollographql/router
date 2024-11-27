@@ -510,7 +510,7 @@ where
 
         match Pin::new(&mut this.msg_receiver).poll_next(cx) {
             Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {
-                tracing::info!(monotonic_counter.apollo_router_skipped_event_count = 1u64,);
+                u64_counter!("apollo_router_skipped_event_count", "Amount of times the router missed subscription events", 1u64);
                 self.poll_next(cx)
             }
             Poll::Ready(None) => Poll::Ready(None),
