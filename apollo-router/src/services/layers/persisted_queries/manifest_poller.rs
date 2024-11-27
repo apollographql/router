@@ -21,14 +21,18 @@ use crate::uplink::stream_from_uplink_transforming_new_response;
 use crate::uplink::UplinkConfig;
 use crate::Configuration;
 
+/// The full identifier for an operation in a PQ list consists of an operation
+/// ID and an optional client name.
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub(crate) struct FullPersistedQueryOperationId {
-    operation_id: String,
-    client_name: Option<String>,
+pub struct FullPersistedQueryOperationId {
+    /// The operation ID (usually a hash).
+    pub operation_id: String,
+    /// The client name associated with the operation; if None, can be any client.
+    pub client_name: Option<String>,
 }
 
 /// An in memory cache of persisted queries.
-pub(crate) type PersistedQueryManifest = HashMap<FullPersistedQueryOperationId, String>;
+pub type PersistedQueryManifest = HashMap<FullPersistedQueryOperationId, String>;
 
 /// How the router should respond to requests that are not resolved as the IDs
 /// of an operation in the manifest. (For the most part this means "requests

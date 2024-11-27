@@ -14,6 +14,8 @@ use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
+pub use crate::services::layers::persisted_queries::FullPersistedQueryOperationId;
+pub use crate::services::layers::persisted_queries::PersistedQueryManifest;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
 
@@ -32,7 +34,7 @@ pub async fn mock_empty_pq_uplink() -> (UplinkMockGuard, UplinkConfig) {
 
 /// Mocks an uplink server with a persisted query list with a delay.
 pub async fn mock_pq_uplink_with_delay(
-    manifest: &HashMap<String, String>,
+    manifest: &PersistedQueryManifest,
     delay: Duration,
 ) -> (UplinkMockGuard, UplinkConfig) {
     let (guard, url) = mock_pq_uplink_one_endpoint(manifest, Some(delay)).await;
@@ -43,7 +45,7 @@ pub async fn mock_pq_uplink_with_delay(
 }
 
 /// Mocks an uplink server with a persisted query list containing operations passed to this function.
-pub async fn mock_pq_uplink(manifest: &HashMap<String, String>) -> (UplinkMockGuard, UplinkConfig) {
+pub async fn mock_pq_uplink(manifest: &PersistedQueryManifest) -> (UplinkMockGuard, UplinkConfig) {
     let (guard, url) = mock_pq_uplink_one_endpoint(manifest, None).await;
     (
         guard,
@@ -58,22 +60,29 @@ pub struct UplinkMockGuard {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Operation {
     id: String,
     body: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    client_name: Option<String>,
 }
 
 /// Mocks an uplink server; returns a single Url rather than a full UplinkConfig, so you
 /// can combine it with another one to test failover.
 pub async fn mock_pq_uplink_one_endpoint(
-    manifest: &HashMap<String, String>,
+    manifest: &PersistedQueryManifest,
     delay: Option<Duration>,
 ) -> (UplinkMockGuard, Url) {
     let operations: Vec<Operation> = manifest
         // clone the manifest so the caller can still make assertions about it
         .clone()
         .drain()
-        .map(|(id, body)| Operation { id, body })
+        .map(|(full_id, body)| Operation {
+            id: full_id.operation_id,
+            body,
+            client_name: full_id.client_name,
+        })
         .collect();
 
     let mock_gcs_server = MockServer::start().await;

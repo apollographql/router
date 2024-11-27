@@ -67,7 +67,7 @@ pub(crate) struct Config {
     #[schemars(skip)]
     pub(crate) apollo_graph_ref: Option<String>,
 
-    /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
+    /// The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_name_header: HeaderName,
@@ -176,7 +176,7 @@ fn otlp_endpoint_default() -> Url {
     Url::parse(OTLP_ENDPOINT_DEFAULT).expect("must be valid url")
 }
 
-const fn client_name_header_default_str() -> &'static str {
+pub(crate) const fn client_name_header_default_str() -> &'static str {
     "apollographql-client-name"
 }
 

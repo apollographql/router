@@ -8,6 +8,7 @@ use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use apollo_router::_private::create_test_service_factory_from_yaml;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
@@ -17,7 +18,6 @@ use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use apollo_router::Configuration;
 use apollo_router::Context;
-use apollo_router::_private::create_test_service_factory_from_yaml;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -407,33 +407,49 @@ async fn persisted_queries() {
     use serde_json::json;
 
     /// Construct a persisted query request from an ID.
-    fn pq_request(persisted_query_id: &str) -> router::Request {
-        supergraph::Request::fake_builder()
-            .extension(
-                "persistedQuery",
-                json!({
-                    "version": 1,
-                    "sha256Hash": persisted_query_id
-                }),
-            )
+    fn pq_request(persisted_query_id: &str, header: Option<(&str, &str)>) -> router::Request {
+        let mut builder = supergraph::Request::fake_builder().extension(
+            "persistedQuery",
+            json!({
+                "version": 1,
+                "sha256Hash": persisted_query_id
+            }),
+        );
+        if let Some((name, value)) = header {
+            builder = builder.header(name, value);
+        }
+        builder
             .build()
             .expect("expecting valid request")
             .try_into()
             .expect("could not convert supergraph::Request to router::Request")
     }
 
-    // set up a PQM with one query
+    // set up a PQM with one query and one client-specific query
     const PERSISTED_QUERY_ID: &str = "GetMyNameID";
     const PERSISTED_QUERY_BODY: &str = "query GetMyName { me { name } }";
+    const PERSISTED_QUERY_MOBILE_BODY: &str = "query GetMyName { me { aliased: name } }";
     let expected_data = serde_json_bytes::json!({
       "me": {
         "name": "Ada Lovelace"
       }
     });
+    let expected_data_mobile = serde_json_bytes::json!({
+      "me": {
+        "aliased": "Ada Lovelace"
+      }
+    });
 
-    let (_mock_guard, uplink_config) = mock_pq_uplink(
-        &hashmap! { PERSISTED_QUERY_ID.to_string() => PERSISTED_QUERY_BODY.to_string() },
-    )
+    let (_mock_guard, uplink_config) = mock_pq_uplink(&hashmap! {
+        FullPersistedQueryOperationId {
+          operation_id: PERSISTED_QUERY_ID.to_string(),
+          client_name: None,
+        } => PERSISTED_QUERY_BODY.to_string(),
+        FullPersistedQueryOperationId {
+          operation_id: PERSISTED_QUERY_ID.to_string(),
+          client_name: Some("mobile".to_string()),
+       } => PERSISTED_QUERY_MOBILE_BODY.to_string(),
+    })
     .await;
 
     let config = serde_json::json!({
@@ -450,12 +466,62 @@ async fn persisted_queries() {
     let (router, registry) = setup_router_and_registry_with_config(config).await.unwrap();
 
     // Successfully run a persisted query.
-    let actual = query_with_router(router.clone(), pq_request(PERSISTED_QUERY_ID)).await;
+    let actual = query_with_router(router.clone(), pq_request(PERSISTED_QUERY_ID, None)).await;
     assert!(actual.errors.is_empty());
     assert_eq!(actual.data.as_ref(), Some(&expected_data));
-    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 1});
+    assert_eq!(
+        registry.totals_reset(),
+        hashmap! {"accounts".to_string() => 1}
+    );
 
-    // Error on unpersisted query.
+    // Successfully run a persisted query with client name that has its own operation.
+    let actual = query_with_router(
+        router.clone(),
+        pq_request(
+            PERSISTED_QUERY_ID,
+            Some(("apollographql-client-name", "mobile")),
+        ),
+    )
+    .await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data.as_ref(), Some(&expected_data_mobile));
+    assert_eq!(
+        registry.totals_reset(),
+        hashmap! {"accounts".to_string() => 1}
+    );
+
+    // Successfully run a persisted query with client name that has its own operation,
+    // setting the client name via context in a plugin.
+    let actual = query_with_router(
+        router.clone(),
+        pq_request(PERSISTED_QUERY_ID, Some(("pq-client-name", "mobile"))),
+    )
+    .await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data.as_ref(), Some(&expected_data_mobile));
+    assert_eq!(
+        registry.totals_reset(),
+        hashmap! {"accounts".to_string() => 1}
+    );
+
+    // Successfully run a persisted query with random client name falling back
+    // to the version without client name.
+    let actual = query_with_router(
+        router.clone(),
+        pq_request(
+            PERSISTED_QUERY_ID,
+            Some(("apollographql-client-name", "something-not-mobile")),
+        ),
+    )
+    .await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data.as_ref(), Some(&expected_data));
+    assert_eq!(
+        registry.totals_reset(),
+        hashmap! {"accounts".to_string() => 1}
+    );
+
+    // Error on unknown persisted query ID.
     const UNKNOWN_QUERY_ID: &str = "unknown_query";
     const UNPERSISTED_QUERY_BODY: &str = "query GetYourName { you: me { name } }";
     let expected_data = serde_json_bytes::json!({
@@ -463,7 +529,7 @@ async fn persisted_queries() {
         "name": "Ada Lovelace"
       }
     });
-    let actual = query_with_router(router.clone(), pq_request(UNKNOWN_QUERY_ID)).await;
+    let actual = query_with_router(router.clone(), pq_request(UNKNOWN_QUERY_ID, None)).await;
     assert_eq!(
         actual.errors,
         vec![apollo_router::graphql::Error::builder()
@@ -474,7 +540,7 @@ async fn persisted_queries() {
             .build()]
     );
     assert_eq!(actual.data, None);
-    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 1});
+    assert_eq!(registry.totals_reset(), hashmap! {});
 
     // We didn't break normal GETs.
     let actual = query_with_router(
@@ -490,7 +556,10 @@ async fn persisted_queries() {
     .await;
     assert!(actual.errors.is_empty());
     assert_eq!(actual.data.as_ref(), Some(&expected_data));
-    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 2});
+    assert_eq!(
+        registry.totals_reset(),
+        hashmap! {"accounts".to_string() => 1}
+    );
 
     // We didn't break normal POSTs.
     let actual = query_with_router(
@@ -506,7 +575,10 @@ async fn persisted_queries() {
     .await;
     assert!(actual.errors.is_empty());
     assert_eq!(actual.data, Some(expected_data));
-    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 3});
+    assert_eq!(
+        registry.totals_reset(),
+        hashmap! {"accounts".to_string() => 1}
+    );
 
     // Proper error when sending malformed request body
     let actual = query_with_router(
@@ -530,6 +602,7 @@ async fn persisted_queries() {
         actual.errors[0].extensions["code"],
         "INVALID_GRAPHQL_REQUEST"
     );
+    assert_eq!(registry.totals_reset(), hashmap! {});
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1200,6 +1273,7 @@ async fn setup_router_and_registry_with_config(
         .configuration(Arc::new(config))
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
+        .extra_plugin(PQClientNamePlugin)
         .build_router()
         .await?;
     Ok((router, counting_registry))
@@ -1264,6 +1338,15 @@ impl CountingServiceRegistry {
     fn totals(&self) -> HashMap<String, usize> {
         self.counts.lock().unwrap().clone()
     }
+
+    /// Like `totals`, but clears the counters, so that each assertion is
+    /// independent of each other.
+    fn totals_reset(&self) -> HashMap<String, usize> {
+        let mut totals = self.counts.lock().unwrap();
+        let ret = totals.clone();
+        totals.clear();
+        ret
+    }
 }
 
 #[async_trait::async_trait]
@@ -1284,6 +1367,35 @@ impl Plugin for CountingServiceRegistry {
         service
             .map_request(move |request| {
                 counters.increment(&name);
+                request
+            })
+            .boxed()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PQClientNamePlugin;
+
+#[async_trait::async_trait]
+impl Plugin for PQClientNamePlugin {
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+            .map_request(move |request: router::Request| {
+                if let Some(v) = request.router_request.headers().get("pq-client-name") {
+                    request
+                        .context
+                        .insert(
+                            "apollo_persisted_queries::client_name",
+                            v.to_str().unwrap().to_string(),
+                        )
+                        .unwrap();
+                }
                 request
             })
             .boxed()
