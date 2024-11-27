@@ -16,7 +16,6 @@ use tower::BoxError;
 use self::manifest_poller::FreeformGraphQLAction;
 use super::query_analysis::ParsedDocument;
 use crate::graphql::Error as GraphQLError;
-use crate::plugins::telemetry::apollo::client_name_header_default_str;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -121,25 +120,14 @@ impl PersistedQueryLayer {
                 // - The PQL-specific context name entry
                 //   `apollo_persisted_queries::client_name` (which can be set
                 //   by router_service plugins)
-                // - The same name used by telemetry if telemetry is enabled
-                //   (ie, the value of the header named by
-                //   `telemetry.apollo.client_name_header`, which defaults to
-                //   `apollographql-client-name` by default)
-                // - The value in the `apollographql-client-name` header
-                //   (whether or not telemetry is enabled)
+                // - The same name used by telemetry (ie, the value of the
+                //   header named by `telemetry.apollo.client_name_header`,
+                //   which defaults to `apollographql-client-name` by default)
                 request
                     .context
                     .get(PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY)
                     .unwrap_or_default()
                     .or_else(|| request.context.get(CLIENT_NAME).unwrap_or_default())
-                    .or_else(|| {
-                        request
-                            .supergraph_request
-                            .headers()
-                            .get(client_name_header_default_str())
-                            .map(|hv| hv.to_str().unwrap_or_default())
-                            .map(str::to_string)
-                    }),
             ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
