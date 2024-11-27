@@ -7,6 +7,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use serde_json_bytes::Value as JSON;
 use url::Url;
 
@@ -56,25 +57,23 @@ impl URLTemplate {
         self.path_variables().chain(self.query_variables())
     }
 
-    pub fn interpolate_path(&self, vars: &Map<ByteString, JSON>) -> Result<Vec<String>, String> {
+    pub fn interpolate_path(
+        &self,
+        vars: &Map<ByteString, JSON>,
+    ) -> Result<Vec<String>, &'static str> {
         self.path
             .iter()
-            .map(|param_value| {
-                param_value.interpolate(vars).ok_or_else(|| {
-                    format!(
-                        "Path parameter {param_value} was missing one or more values in {vars:?}",
-                    )
-                })
-            })
+            .map(|param_value| param_value.interpolate(vars))
             .collect()
     }
 
-    pub fn interpolate_query(&self, vars: &Map<ByteString, JSON>) -> Vec<(String, String)> {
+    pub fn interpolate_query(
+        &self,
+        vars: &Map<ByteString, JSON>,
+    ) -> Result<Vec<(String, String)>, &'static str> {
         self.query
             .iter()
-            .filter_map(|(key, param_value)| {
-                key.interpolate(vars).zip(param_value.interpolate(vars))
-            })
+            .map(|(key, param_value)| Ok((key.interpolate(vars)?, param_value.interpolate(vars)?)))
             .collect()
     }
 }
@@ -260,7 +259,7 @@ impl Component {
         Ok(Component { parts })
     }
 
-    fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Option<String> {
+    fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<String, &'static str> {
         let mut value = String::new();
 
         for part in &self.parts {
@@ -269,24 +268,24 @@ impl Component {
                     value.push_str(text);
                 }
                 ValuePart::Var(var) => {
-                    if let Some(var_value) = vars.get(var.to_string().as_str()).map(|child_value| {
-                        // Need to remove quotes from string values, since the quotes don't
-                        // belong in the URL.
-                        if let JSON::String(string) = child_value {
-                            string.as_str().to_string()
-                        } else {
-                            child_value.to_string()
+                    // TODO: Allow some difference between explicit `null` and omitted value.
+                    let var_value = vars.get(var.to_string().as_str()).unwrap_or(&JSON::Null);
+                    match var_value {
+                        // Remove extra quotes from strings
+                        JSON::String(string) => value.push_str(string.as_str()),
+                        JSON::Null => {}
+                        JSON::Number(_) | JSON::Bool(_) => value.push_str(&var_value.to_string()),
+                        // TODO: Update these to include JSONSelection or RFC 6570 recommendation
+                        Value::Array(_) => return Err("Arrays are not supported in URI templates"),
+                        Value::Object(_) => {
+                            return Err("Objects are not supported in URI templates")
                         }
-                    }) {
-                        value.push_str(&var_value);
-                    } else {
-                        return None;
                     }
                 }
             }
         }
 
-        Some(value)
+        Ok(value)
     }
 
     #[allow(unused)]
@@ -507,40 +506,79 @@ mod test_interpolate {
     use super::*;
 
     #[test]
-    fn query_key_variable() {
-        let template = URLTemplate::from_str("?{$args.filter.field}={$args.filter.value}").unwrap();
-        let mut vars = Map::new();
+    fn missing_values_render_as_empty_strings() {
+        let template = URLTemplate::from_str(
+            "/something/{$args.id}/blah?{$args.filter.field}={$args.filter.value}",
+        )
+        .unwrap();
+        let vars = Map::new();
         assert_eq!(
-            template.interpolate_query(&vars),
-            Vec::new(),
-            "When there are no variables, there should be no query parameters"
+            template.interpolate_query(&vars).unwrap(),
+            &[("".to_string(), "".to_string())],
         );
+        assert_eq!(
+            template.interpolate_path(&vars).unwrap(),
+            &["something".to_string(), "".to_string(), "blah".to_string()],
+        );
+    }
 
+    #[test]
+    fn nulls_render_as_empty_strings() {
+        let template = URLTemplate::from_str(
+            "/something/{$args.id}/blah?{$args.filter.field}={$args.filter.value}",
+        )
+        .unwrap();
+        let mut vars = Map::new();
+        vars.insert(ByteString::from("$args.filter.field"), JSON::Null);
+        vars.insert(ByteString::from("$args.id"), JSON::Null);
+        assert_eq!(
+            template.interpolate_query(&vars).unwrap(),
+            &[("".to_string(), "".to_string())],
+        );
+        assert_eq!(
+            template.interpolate_path(&vars).unwrap(),
+            &["something".to_string(), "".to_string(), "blah".to_string()]
+        );
+    }
+
+    #[test]
+    fn interpolate_path() {
+        let template = URLTemplate::from_str("/something/{$args.id}/blah").unwrap();
+        let mut vars = Map::new();
+        vars.insert(
+            ByteString::from("$args.id"),
+            JSON::String(ByteString::from("value")),
+        );
+        assert_eq!(
+            template.interpolate_path(&vars).unwrap(),
+            &[
+                "something".to_string(),
+                "value".to_string(),
+                "blah".to_string()
+            ],
+            "Path parameter interpolated"
+        );
+    }
+
+    #[test]
+    fn interpolate_query() {
+        let template = URLTemplate::from_str(
+            "/something/{$args.id}/blah?{$args.filter.field}={$args.filter.value}",
+        )
+        .unwrap();
+        let mut vars = Map::new();
         vars.insert(
             ByteString::from("$args.filter.field"),
             JSON::String(ByteString::from("name")),
         );
-        assert_eq!(
-            template.interpolate_query(&vars),
-            Vec::new(),
-            "When a query param value is missing, the query parameter should be skipped"
-        );
-
         vars.insert(
             ByteString::from("$args.filter.value"),
             JSON::String(ByteString::from("value")),
         );
         assert_eq!(
-            template.interpolate_query(&vars),
-            vec![("name".to_string(), "value".to_string())],
-            "When both variables present, query parameter interpolated"
-        );
-
-        vars.remove("$args.filter.field");
-        assert_eq!(
-            template.interpolate_query(&vars),
-            Vec::new(),
-            "Missing key, query parameter skipped"
+            template.interpolate_query(&vars).unwrap(),
+            &[("name".to_string(), "value".to_string())],
+            "Query parameter interpolated"
         );
     }
 }

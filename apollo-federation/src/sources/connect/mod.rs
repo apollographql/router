@@ -22,6 +22,7 @@ pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use spec::ConnectSpec;
 pub use url_template::URLTemplate;
+pub use variable::Namespace;
 
 pub use self::models::Connector;
 pub use self::models::EntityResolver;

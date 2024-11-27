@@ -12,4 +12,11 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_
             18:9..18:21,
         ],
     },
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.product` contains an invalid expression `{$args.id}` - URI templates can't contain objects.",
+        locations: [
+            16:46..16:54,
+        ],
+    },
 ]

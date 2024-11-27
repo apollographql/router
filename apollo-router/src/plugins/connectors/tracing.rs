@@ -85,6 +85,8 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
         };
 
         let connectors = Connectors {

@@ -89,6 +89,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
+        request_variables: {},
+        response_variables: {},
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
@@ -208,6 +210,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             Explicit,
         ),
         spec: V0_1,
+        request_variables: {
+            $args,
+        },
+        response_variables: {},
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
@@ -320,5 +326,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             Implicit,
         ),
         spec: V0_1,
+        request_variables: {
+            $this,
+        },
+        response_variables: {},
     },
 }

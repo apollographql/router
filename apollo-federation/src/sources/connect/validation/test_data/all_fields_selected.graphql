@@ -40,7 +40,7 @@ type T @key(fields: "id") {
     @requires(fields: "external")
     @connect(
       http: {
-        GET: "http://test/computed?id={$this.id}&external={$this.external}"
+        GET: "http://test/computed?id={$this.id}&external={$this.external.id}"
       }
       selection: "$"
     )
