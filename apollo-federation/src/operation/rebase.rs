@@ -131,18 +131,6 @@ pub(crate) enum RebaseError {
     },
 }
 
-impl FederationError {
-    fn is_rebase_error(&self) -> bool {
-        matches!(
-            self,
-            crate::error::FederationError::SingleFederationError {
-                inner: crate::error::SingleFederationError::InternalRebaseError(_),
-                ..
-            }
-        )
-    }
-}
-
 impl From<RebaseError> for FederationError {
     fn from(value: RebaseError) -> Self {
         crate::error::SingleFederationError::from(value).into()
