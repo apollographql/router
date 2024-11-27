@@ -256,10 +256,6 @@ impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableCounter<T>
             counter.observe(value, attributes)
         }
     }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
-    }
 }
 
 pub(crate) struct AggregateHistogram<T> {
@@ -290,15 +286,11 @@ pub(crate) struct AggregateObservableUpDownCounter<T> {
     delegates: Vec<(ObservableUpDownCounter<T>, Option<DroppingUnregister>)>,
 }
 
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
+impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
         for (counter, _) in &self.delegates {
             counter.observe(value, attributes)
         }
-    }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
     }
 }
 
@@ -306,15 +298,11 @@ pub(crate) struct AggregateObservableGauge<T> {
     delegates: Vec<(ObservableGauge<T>, Option<DroppingUnregister>)>,
 }
 
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {
+impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableGauge<T> {
     fn observe(&self, measurement: T, attributes: &[KeyValue]) {
         for (gauge, _) in &self.delegates {
             gauge.observe(measurement, attributes)
         }
-    }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
     }
 }
 // Observable instruments don't need to have a ton of optimisation because they are only read on demand.

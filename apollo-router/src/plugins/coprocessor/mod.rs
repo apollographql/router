@@ -19,6 +19,7 @@ use http::HeaderValue;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioExecutor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -67,11 +68,31 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
+/*
+                tower::service_fn(move |request: subgraph::Request| {
+                    let subgraph_queries = Arc::clone(&subgraph_queries);
+                    async move {
+                        let query = request
+                            .subgraph_request
+                            .body()
+                            .query
+                            .as_deref()
+                            .unwrap_or_default();
+                        let mut queries = subgraph_queries.lock().await;
+                        queries.push_str(query);
+                        queries.push('\n');
+                        Ok(subgraph::Response::builder()
+                            .extensions(crate::json_ext::Object::new())
+                            .context(request.context)
+                            .build())
+                    }
+                })
+                .boxed()
+*/
 type HTTPClientService = tower::timeout::Timeout<
     hyper_util::client::legacy::Client<
         HttpsConnector<HttpConnector<AsyncHyperResolver>>,
         RouterBody,
-        // >,
     >,
 >;
 
@@ -118,9 +139,10 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         */
 
         let http_client = ServiceBuilder::new()
+            .layer_fn(|svc| http_body_util::combinators::BoxBody::new(svc.call()))
             .layer(TimeoutLayer::new(init.config.timeout))
             .service(
-                hyper_util::client::legacy::Client::builder()
+                hyper_util::client::legacy::Client::builder(TokioExecutor::new())
                     .http2_only(experimental_http2 == Http2Config::Http2Only)
                     .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                     .build(connector),
@@ -765,7 +787,7 @@ where
         None => router::body::full(bytes),
     };
 
-    request.router_request = http::Request::from_parts(parts, new_body.into_inner());
+    request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
         for (key, value) in context.try_into_iter()? {
@@ -880,7 +902,7 @@ where
         None => router::body::full(bytes),
     };
 
-    response.response = http::Response::from_parts(parts, new_body.into_inner());
+    response.response = http::Response::from_parts(parts, new_body);
 
     if let Some(control) = co_processor_output.control {
         *response.response.status_mut() = control.get_http_status()?
