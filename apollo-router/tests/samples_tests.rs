@@ -488,7 +488,7 @@ impl TestExecution {
             }
         }
 
-        writeln!(out, "").unwrap();
+        writeln!(out).unwrap();
         if let Some(description) = description {
             writeln!(out, "description: {description}").unwrap();
         }
