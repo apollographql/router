@@ -38,13 +38,10 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
-use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
-use super::Field;
 use super::Fragment;
 use super::FragmentSpreadSelection;
 use super::HasSelectionKey;
@@ -58,32 +55,6 @@ use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
 use crate::operation::SelectionValue;
-
-#[derive(Debug)]
-struct ReuseContext<'a> {
-    fragments: &'a NamedFragments,
-    operation_variables: Option<IndexSet<&'a Name>>,
-}
-
-impl<'a> ReuseContext<'a> {
-    fn for_fragments(fragments: &'a NamedFragments) -> Self {
-        Self {
-            fragments,
-            operation_variables: None,
-        }
-    }
-
-    // Taking two separate parameters so the caller can still mutate the operation's selection set.
-    fn for_operation(
-        fragments: &'a NamedFragments,
-        operation_variables: &'a [Node<VariableDefinition>],
-    ) -> Self {
-        Self {
-            fragments,
-            operation_variables: Some(operation_variables.iter().map(|var| &var.name).collect()),
-        }
-    }
-}
 
 //=============================================================================
 // Selection/SelectionSet intersection/minus operations
@@ -187,169 +158,7 @@ impl SelectionSet {
 }
 
 //=============================================================================
-// Field validation
-
-// PORT_NOTE: Not having a validator and having a FieldsConflictValidator with empty
-// `by_response_name` map has no difference in behavior. So, we could drop the `Option` from
-// `Option<FieldsConflictValidator>`. However, `None` validator makes it clearer that validation is
-// unnecessary.
-struct FieldsConflictValidator {
-    by_response_name: IndexMap<Name, IndexMap<Field, Option<Arc<FieldsConflictValidator>>>>,
-}
-
-impl FieldsConflictValidator {
-    /// Build a field merging validator for a selection set.
-    ///
-    /// # Preconditions
-    /// The selection set must not contain named fragment spreads.
-    fn from_selection_set(selection_set: &SelectionSet) -> Self {
-        Self::for_level(&[selection_set])
-    }
-
-    fn for_level<'a>(level: &[&'a SelectionSet]) -> Self {
-        // Group `level`'s fields by the response-name/field
-        let mut at_level: IndexMap<Name, IndexMap<Field, Vec<&'a SelectionSet>>> =
-            IndexMap::default();
-        for selection_set in level {
-            for field_selection in selection_set.field_selections() {
-                let response_name = field_selection.field.response_name();
-                let at_response_name = at_level.entry(response_name.clone()).or_default();
-                let entry = at_response_name
-                    .entry(field_selection.field.clone())
-                    .or_default();
-                if let Some(ref field_selection_set) = field_selection.selection_set {
-                    entry.push(field_selection_set);
-                }
-            }
-        }
-
-        // Collect validators per response-name/field
-        let mut by_response_name = IndexMap::default();
-        for (response_name, fields) in at_level {
-            let mut at_response_name: IndexMap<Field, Option<Arc<FieldsConflictValidator>>> =
-                IndexMap::default();
-            for (field, selection_sets) in fields {
-                if selection_sets.is_empty() {
-                    at_response_name.insert(field, None);
-                } else {
-                    let validator = Arc::new(Self::for_level(&selection_sets));
-                    at_response_name.insert(field, Some(validator));
-                }
-            }
-            by_response_name.insert(response_name, at_response_name);
-        }
-        Self { by_response_name }
-    }
-
-    fn for_field<'v>(&'v self, field: &Field) -> impl Iterator<Item = Arc<Self>> + 'v {
-        self.by_response_name
-            .get(field.response_name())
-            .into_iter()
-            .flat_map(|by_response_name| by_response_name.values())
-            .flatten()
-            .cloned()
-    }
-
-    fn has_same_response_shape(
-        &self,
-        other: &FieldsConflictValidator,
-    ) -> Result<bool, FederationError> {
-        for (response_name, self_fields) in self.by_response_name.iter() {
-            let Some(other_fields) = other.by_response_name.get(response_name) else {
-                continue;
-            };
-
-            for (self_field, self_validator) in self_fields {
-                for (other_field, other_validator) in other_fields {
-                    if !self_field.types_can_be_merged(other_field)? {
-                        return Ok(false);
-                    }
-
-                    if let Some(self_validator) = self_validator {
-                        if let Some(other_validator) = other_validator {
-                            if !self_validator.has_same_response_shape(other_validator)? {
-                                return Ok(false);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(true)
-    }
-
-    fn do_merge_with(&self, other: &FieldsConflictValidator) -> Result<bool, FederationError> {
-        for (response_name, self_fields) in self.by_response_name.iter() {
-            let Some(other_fields) = other.by_response_name.get(response_name) else {
-                continue;
-            };
-
-            // We're basically checking
-            // [FieldsInSetCanMerge](https://spec.graphql.org/draft/#FieldsInSetCanMerge()), but
-            // from 2 set of fields (`self_fields` and `other_fields`) of the same response that we
-            // know individually merge already.
-            for (self_field, self_validator) in self_fields {
-                for (other_field, other_validator) in other_fields {
-                    if !self_field.types_can_be_merged(other_field)? {
-                        return Ok(false);
-                    }
-
-                    let p1 = self_field.parent_type_position();
-                    let p2 = other_field.parent_type_position();
-                    if p1 == p2 || !p1.is_object_type() || !p2.is_object_type() {
-                        // Additional checks of `FieldsInSetCanMerge` when same parent type or one
-                        // isn't object
-                        if self_field.name() != other_field.name()
-                            || self_field.arguments != other_field.arguments
-                        {
-                            return Ok(false);
-                        }
-                        if let (Some(self_validator), Some(other_validator)) =
-                            (self_validator, other_validator)
-                        {
-                            if !self_validator.do_merge_with(other_validator)? {
-                                return Ok(false);
-                            }
-                        }
-                    } else {
-                        // Otherwise, the sub-selection must pass
-                        // [SameResponseShape](https://spec.graphql.org/draft/#SameResponseShape()).
-                        if let (Some(self_validator), Some(other_validator)) =
-                            (self_validator, other_validator)
-                        {
-                            if !self_validator.has_same_response_shape(other_validator)? {
-                                return Ok(false);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(true)
-    }
-
-    fn do_merge_with_all<'a>(
-        &self,
-        mut iter: impl Iterator<Item = &'a FieldsConflictValidator>,
-    ) -> Result<bool, FederationError> {
-        iter.try_fold(true, |acc, v| Ok(acc && v.do_merge_with(self)?))
-    }
-}
-
-//=============================================================================
 // Matching fragments with selection set (`try_optimize_with_fragments`)
-
-/// Return type for `expanded_selection_set_at_type` method.
-struct FragmentRestrictionAtType {
-    /// Selections that are expanded from a given fragment at a given type and then normalized.
-    /// - This represents the part of given type's sub-selections that are covered by the fragment.
-    selections: SelectionSet,
-
-    /// A runtime validator to check the fragment selections against other fields.
-    /// - `None` means that there is nothing to check.
-    /// - See `check_can_reuse_fragment_and_track_it` for more details.
-    validator: Option<Arc<FieldsConflictValidator>>,
-}
 
 /// The return type for `SelectionSet::try_optimize_with_fragments`.
 #[derive(derive_more::From)]
