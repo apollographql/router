@@ -53,7 +53,7 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
                     if withdrew.is_err() {
                         u64_counter!(
                             "apollo_router_http_request_retry_total",
-                            "Number of retry for an http request to a subgraph",
+                            "Number of retries for an http request to a subgraph",
                             1u64,
                             status = "aborted",
                             subgraph = subgraph_name
@@ -68,7 +68,7 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
 
                     u64_counter!(
                         "apollo_router_http_request_retry_total",
-                        "Number of retry for an http request to a subgraph",
+                        "Number of retries for an http request to a subgraph",
                         1u64,
                         subgraph = subgraph_name
                     );
@@ -90,7 +90,7 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
                 if withdrew.is_err() {
                     u64_counter!(
                         "apollo_router_http_request_retry_total",
-                        "Number of retry for an http request to a subgraph",
+                        "Number of retries for an http request to a subgraph",
                         1u64,
                         status = "aborted",
                         subgraph = subgraph_name
@@ -100,7 +100,7 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
                 }
                 u64_counter!(
                     "apollo_router_http_request_retry_total",
-                    "Number of retry for an http request to a subgraph",
+                    "Number of retries for an http request to a subgraph",
                     1u64,
                     subgraph = subgraph_name
                 );
