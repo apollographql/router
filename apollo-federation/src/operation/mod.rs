@@ -3393,49 +3393,6 @@ impl Operation {
     }
 }
 
-// Collect fragment usages from operation types.
-
-impl Selection {
-    fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        match self {
-            Selection::Field(field_selection) => {
-                if let Some(s) = &field_selection.selection_set {
-                    s.collect_used_fragment_names(aggregator)
-                }
-            }
-            Selection::InlineFragment(inline) => {
-                inline.selection_set.collect_used_fragment_names(aggregator);
-            }
-            Selection::FragmentSpread(fragment) => {
-                let current_count = aggregator
-                    .entry(fragment.spread.fragment_name.clone())
-                    .or_default();
-                *current_count += 1;
-            }
-        }
-    }
-}
-
-impl SelectionSet {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        for s in self.selections.values() {
-            s.collect_used_fragment_names(aggregator);
-        }
-    }
-
-    pub(crate) fn used_fragments(&self) -> IndexMap<Name, u32> {
-        let mut usages = IndexMap::default();
-        self.collect_used_fragment_names(&mut usages);
-        usages
-    }
-}
-
-impl Fragment {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        self.selection_set.collect_used_fragment_names(aggregator)
-    }
-}
-
 // Collect used variables from operation types.
 
 pub(crate) struct VariableCollector<'s> {
@@ -3530,16 +3487,6 @@ impl<'s> VariableCollector<'s> {
     /// Consume the collector and return the collected names.
     pub(crate) fn into_inner(self) -> IndexSet<&'s Name> {
         self.variables
-    }
-}
-
-impl Fragment {
-    /// Returns the variable names that are used by this fragment.
-    pub(crate) fn used_variables(&self) -> IndexSet<&'_ Name> {
-        let mut collector = VariableCollector::new();
-        collector.visit_directive_list(&self.directives);
-        collector.visit_selection_set(&self.selection_set);
-        collector.into_inner()
     }
 }
 
