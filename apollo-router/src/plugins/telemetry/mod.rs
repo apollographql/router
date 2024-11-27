@@ -93,8 +93,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -133,7 +133,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATI
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
-use crate::register_plugin;
+use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -280,7 +280,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 }
 
 #[async_trait::async_trait]
-impl Plugin for Telemetry {
+impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -1979,7 +1979,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
     }
 }
 
-register_plugin!("apollo", "telemetry", Telemetry);
+register_private_plugin!("apollo", "telemetry", Telemetry);
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     if req

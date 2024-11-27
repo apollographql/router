@@ -7,6 +7,7 @@ use serde_json_bytes::path::JsonPathInst;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
+use super::attributes::SubgraphRequestResendCountKey;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -525,6 +526,12 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseStatus {
         /// The subgraph http response status code.
         subgraph_response_status: ResponseStatus,
+    },
+    SubgraphResendCount {
+        /// The subgraph http resend count
+        subgraph_resend_count: bool,
+        /// Optional default value.
+        default: Option<AttributeValue>,
     },
     SupergraphOperationName {
         /// The supergraph query operation name.
@@ -1577,6 +1584,18 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::OnGraphQLError {
                 subgraph_on_graphql_error: on_graphql_error,
             } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
+            SubgraphSelector::SubgraphResendCount {
+                subgraph_resend_count,
+                default,
+            } if *subgraph_resend_count => {
+                response
+                    .context
+                    .get::<_, usize>(SubgraphRequestResendCountKey::new(&response.id))
+                    .ok()
+                    .flatten()
+                    .map(|v| opentelemetry::Value::from(v as i64))
+            }
+            .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::Cache { cache, entity_type } => {

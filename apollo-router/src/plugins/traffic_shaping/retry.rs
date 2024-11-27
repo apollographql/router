@@ -64,7 +64,9 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
 
                     let _ = req
                         .context
-                        .upsert::<_, usize>(SubgraphRequestResendCountKey::new(req), |val| val + 1);
+                        .upsert::<_, usize>(SubgraphRequestResendCountKey::new(&req.id), |val| {
+                            val + 1
+                        });
 
                     u64_counter!(
                         "apollo_router_http_request_retry_total",
@@ -107,7 +109,7 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
 
                 let _ = req
                     .context
-                    .upsert::<_, usize>(SubgraphRequestResendCountKey::new(req), |val| val + 1);
+                    .upsert::<_, usize>(SubgraphRequestResendCountKey::new(&req.id), |val| val + 1);
 
                 Some(future::ready(self.clone()))
             }
