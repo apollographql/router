@@ -14,63 +14,116 @@ use crate::services::SubgraphResponse;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
-register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
+register_plugin!("apollo", "redact_subgraph_errors", RedactSubgraphErrors);
 
 /// Configuration for exposing errors that originate from subgraphs
 #[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct Config {
-    /// Include errors from all subgraphs
+    /// Redact all subgraphs errors by default
+    #[serde(default = "default_enabled")]
     all: bool,
 
-    /// Include errors from specific subgraphs
-    subgraphs: HashMap<String, bool>,
+    /// Default keys to remove from error extensions for all subgraphs.
+    redact_extensions_keys: Vec<String>,
+
+    /// Override default configuration for specific subgraphs
+    subgraphs: HashMap<String, SubgraphConfig>,
 }
 
-struct IncludeSubgraphErrors {
+fn default_enabled() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(deny_unknown_fields, untagged)]
+enum SubgraphConfig {
+    /// Enable or disable redaction for a subgraph
+    Enabled { enabled: bool },
+    /// Override default keys in redact_extensions_keys for a subgraph
+    ExtensionsKeysOverride(Vec<String>),
+}
+
+struct RedactSubgraphErrors {
     config: Config,
 }
 
 #[async_trait::async_trait]
-impl Plugin for IncludeSubgraphErrors {
+impl Plugin for RedactSubgraphErrors {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(IncludeSubgraphErrors {
+        Ok(RedactSubgraphErrors {
             config: init.config,
         })
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        // Search for subgraph in our configured subgraph map. If we can't find it, use the "all" value
-        let include_subgraph_errors = *self.config.subgraphs.get(name).unwrap_or(&self.config.all);
+        let subgraph_config = self.config.subgraphs.get(name).cloned();
+        let redact_extensions_keys = self.config.redact_extensions_keys.clone();
+
+        let redact_errors = match subgraph_config {
+            Some(SubgraphConfig::Enabled { enabled }) => enabled,
+            Some(SubgraphConfig::ExtensionsKeysOverride { .. }) => true,
+            None => self.config.all,
+        };
 
         let sub_name_response = name.to_string();
         let sub_name_error = name.to_string();
+
         return service
             .map_response(move |mut response: SubgraphResponse| {
                 let errors = &mut response.response.body_mut().errors;
+
                 if !errors.is_empty() {
-                    if include_subgraph_errors {
+                    if !redact_errors {
                         for error in errors.iter_mut() {
                             error
                                 .extensions
                                 .entry("service")
                                 .or_insert(sub_name_response.clone().into());
                         }
+                        return response;
                     } else {
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
-                        for error in errors.iter_mut() {
+
+                        for error in response.response.body_mut().errors.iter_mut() {
+                            let mut new_extensions = error.extensions.clone();
+                            match subgraph_config.clone() {
+                                Some(SubgraphConfig::ExtensionsKeysOverride(keys)) => {
+                                    // Remove default redact_extensions_keys, but reveal keys in subgraph
+                                    for key in &redact_extensions_keys {
+                                        if !keys.contains(key) {
+                                            new_extensions.remove(key.as_str());
+                                        }
+                                    }
+                                }
+                                Some(SubgraphConfig::Enabled { enabled }) if enabled => {
+                                    // Remove all default redact_extensions_keys
+                                    for key in &redact_extensions_keys {
+                                        new_extensions.remove(key.as_str());
+                                    }
+                                }
+                                _ => {
+                                    if redact_extensions_keys.is_empty() {
+                                        new_extensions = Object::default();
+                                    } else {
+                                        for key in &redact_extensions_keys {
+                                            new_extensions.remove(key.as_str());
+                                        }
+                                    }
+                                }
+                            }
+
                             error.message = REDACTED_ERROR_MESSAGE.to_string();
-                            error.extensions = Object::default();
+                            error.extensions = new_extensions;
                         }
                     }
                 }
-
                 response
             })
             .map_err(move |error: BoxError| {
-                if include_subgraph_errors {
+                if redact_errors {
                     error
                 } else {
                     // Create a redacted error to replace whatever error we have
@@ -111,24 +164,22 @@ mod test {
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
-    use crate::spec::Schema;
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR","service":"products"}}]}"#.as_bytes())
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(
-            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted","path":[]}]}"#
+            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted"}]}"#
                 .as_bytes(),
         )
     });
 
     static REDACTED_ACCOUNT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(
-            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted","path":[]}]}"#
-                .as_bytes(),
+            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted"}]}"#.as_bytes(),
         )
     });
 
@@ -138,7 +189,7 @@ mod test {
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    static ERROR_PRODUCT_QUERY: &str = r#"query ErrorTopProducts($first: Int) { topProducts(first: $first) { upc reviews { id product { name } author { id name } } } }"#;
+    static ERROR_PRODUCT_QUERY: &str = r#"query ErrorTopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
     static ERROR_ACCOUNT_QUERY: &str = r#"query Query { me { name }}"#;
 
@@ -202,19 +253,11 @@ mod test {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
-        let mut configuration = Configuration::default();
-        // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
-        configuration.supergraph.generate_query_fragments = false;
-        let configuration = Arc::new(configuration);
-
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Schema::parse(schema, &configuration).unwrap();
-
         let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.into(),
-            Arc::clone(&configuration),
+            schema.to_string(),
+            Default::default(),
             NonZeroUsize::new(1).unwrap(),
         )
         .await
@@ -224,9 +267,15 @@ mod test {
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let mut plugins = create_plugins(&configuration, &schema, subgraph_schemas, None, None)
-            .await
-            .unwrap();
+        let mut plugins = create_plugins(
+            &Configuration::default(),
+            &schema,
+            subgraph_schemas,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
@@ -239,10 +288,10 @@ mod test {
         let supergraph_creator = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
-            Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
             Arc::new(supergraph_creator),
-            configuration,
+            Arc::new(Configuration::default()),
         )
         .await
         .unwrap()
