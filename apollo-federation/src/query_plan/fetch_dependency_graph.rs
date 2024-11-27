@@ -2673,8 +2673,7 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation =
-            operation_compression.compress(operation)?;
+        let operation = operation_compression.compress(operation)?;
         let operation_document = operation.try_into().map_err(|err| match err {
             FederationError::SingleFederationError {
                 inner: SingleFederationError::InvalidGraphQL { diagnostics },

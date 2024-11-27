@@ -9,7 +9,6 @@ use itertools::Itertools;
 use super::runtime_types_intersect;
 use super::Field;
 use super::FieldSelection;
-use super::Fragment;
 use super::FragmentSpread;
 use super::FragmentSpreadSelection;
 use super::InlineFragment;
@@ -46,23 +45,12 @@ fn print_possible_runtimes(
         )
 }
 
-/// Options for handling rebasing errors.
-#[derive(Clone, Copy, Default)]
-enum OnNonRebaseableSelection {
-    /// Drop the selection that can't be rebased and continue.
-    Drop,
-    /// Propagate the rebasing error.
-    #[default]
-    Error,
-}
-
 impl Selection {
     fn rebase_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<Selection, FederationError> {
         match self {
             Selection::Field(field) => field
@@ -70,20 +58,17 @@ impl Selection {
                     parent_type,
                     named_fragments,
                     schema,
-                    on_non_rebaseable_selection,
                 )
                 .map(|field| field.into()),
             Selection::FragmentSpread(spread) => spread.rebase_inner(
                 parent_type,
                 named_fragments,
                 schema,
-                on_non_rebaseable_selection,
             ),
             Selection::InlineFragment(inline) => inline.rebase_inner(
                 parent_type,
                 named_fragments,
                 schema,
-                on_non_rebaseable_selection,
             ),
         }
     }
@@ -94,7 +79,7 @@ impl Selection {
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<Selection, FederationError> {
-        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
+        self.rebase_inner(parent_type, named_fragments, schema)
     }
 
     fn can_add_to(
@@ -311,7 +296,6 @@ impl FieldSelection {
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<FieldSelection, FederationError> {
         if &self.field.schema == schema && &self.field.field_position.parent() == parent_type {
             // we are rebasing field on the same parent within the same schema - we can just return self
@@ -348,7 +332,6 @@ impl FieldSelection {
             &rebased_base_type,
             named_fragments,
             schema,
-            on_non_rebaseable_selection,
         )?;
         if rebased_selection_set.selections.is_empty() {
             Err(RebaseError::EmptySelectionSet.into())
@@ -433,7 +416,6 @@ impl FragmentSpreadSelection {
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<Selection, FederationError> {
         // We preserve the parent type here, to make sure we don't lose context, but we actually don't
         // want to expand the spread as that would compromise the code that optimize subgraph fetches to re-use named
@@ -485,7 +467,6 @@ impl FragmentSpreadSelection {
                 parent_type,
                 named_fragments,
                 schema,
-                on_non_rebaseable_selection,
             )?;
             // In theory, we could return the selection set directly, but making `SelectionSet.rebase_on` sometimes
             // return a `SelectionSet` complicate things quite a bit. So instead, we encapsulate the selection set
@@ -523,7 +504,7 @@ impl FragmentSpreadSelection {
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<Selection, FederationError> {
-        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
+        self.rebase_inner(parent_type, named_fragments, schema)
     }
 }
 
@@ -619,7 +600,6 @@ impl InlineFragmentSelection {
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<Selection, FederationError> {
         if &self.inline_fragment.schema == schema
             && self.inline_fragment.parent_type_position == *parent_type
@@ -640,7 +620,6 @@ impl InlineFragmentSelection {
                 &rebased_casted_type,
                 named_fragments,
                 schema,
-                on_non_rebaseable_selection,
             )?;
             if rebased_selection_set.selections.is_empty() {
                 // empty selection set
@@ -710,7 +689,6 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<SelectionSet, FederationError> {
         let rebased_results = self
             .selections
@@ -720,13 +698,7 @@ impl SelectionSet {
                     parent_type,
                     named_fragments,
                     schema,
-                    on_non_rebaseable_selection,
                 )
-            })
-            // Remove selections with rebase errors if requested
-            .filter(|result| {
-                matches!(on_non_rebaseable_selection, OnNonRebaseableSelection::Error)
-                    || !result.as_ref().is_err_and(|err| err.is_rebase_error())
             });
 
         Ok(SelectionSet {
@@ -747,7 +719,7 @@ impl SelectionSet {
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<SelectionSet, FederationError> {
-        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
+        self.rebase_inner(parent_type, named_fragments, schema)
     }
 
     /// Returns true if the selection set would select cleanly from the given type in the given
@@ -760,643 +732,5 @@ impl SelectionSet {
         self.selections
             .values()
             .fallible_all(|selection| selection.can_add_to(parent_type, schema))
-    }
-}
-
-impl NamedFragments {
-    pub(crate) fn rebase_on(
-        &self,
-        schema: &ValidFederationSchema,
-    ) -> Result<NamedFragments, FederationError> {
-        let mut rebased_fragments = NamedFragments::default();
-        for fragment in self.fragments.values() {
-            if let Some(rebased_type) = schema
-                .get_type(fragment.type_condition_position.type_name().clone())
-                .ok()
-                .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())
-            {
-                if let Ok(mut rebased_selection) = fragment.selection_set.rebase_inner(
-                    &rebased_type,
-                    &rebased_fragments,
-                    schema,
-                    OnNonRebaseableSelection::Drop,
-                ) {
-                    // Rebasing can leave some inefficiencies in some case (particularly when a spread has to be "expanded", see `FragmentSpreadSelection.rebaseOn`),
-                    // so we do a top-level normalization to keep things clean.
-                    rebased_selection = rebased_selection.flatten_unnecessary_fragments(
-                        &rebased_type,
-                        &rebased_fragments,
-                        schema,
-                    )?;
-                    if NamedFragments::is_selection_set_worth_using(&rebased_selection) {
-                        let fragment = Fragment {
-                            schema: schema.clone(),
-                            name: fragment.name.clone(),
-                            type_condition_position: rebased_type.clone(),
-                            directives: fragment.directives.clone(),
-                            selection_set: rebased_selection,
-                        };
-                        rebased_fragments.insert(fragment);
-                    }
-                }
-            }
-        }
-        Ok(rebased_fragments)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use apollo_compiler::collections::IndexSet;
-    use apollo_compiler::name;
-
-    use crate::operation::normalize_operation;
-    use crate::operation::tests::parse_schema_and_operation;
-    use crate::operation::tests::parse_subgraph;
-    use crate::operation::NamedFragments;
-    use crate::schema::position::InterfaceTypeDefinitionPosition;
-
-    #[test]
-    fn skips_unknown_fragment_fields() {
-        let operation_fragments = r#"
-query TestQuery {
-  t {
-    ...FragOnT
-  }
-}
-
-fragment FragOnT on T {
-  v0
-  v1
-  v2
-  u1 {
-    v3
-    v4
-    v5
-  }
-  u2 {
-    v4
-    v5
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v0: Int
-  v1: Int
-  v2: Int
-  u1: U
-  u2: U
-}
-
-type U {
-  v3: Int
-  v4: Int
-  v5: Int
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-        assert!(
-            !executable_document.fragments.is_empty(),
-            "operation should have some fragments"
-        );
-
-        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::default(),
-            )
-            .unwrap();
-
-            let subgraph_schema = r#"type Query {
-  _: Int
-}
-
-type T {
-  v1: Int
-  u1: U
-}
-
-type U {
-  v3: Int
-  v5: Int
-}"#;
-            let subgraph = parse_subgraph("A", subgraph_schema);
-            let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-            assert!(rebased_fragments.is_ok());
-            let rebased_fragments = rebased_fragments.unwrap();
-            assert!(!rebased_fragments.is_empty());
-            assert!(rebased_fragments.contains(&name!("FragOnT")));
-            let rebased_fragment = rebased_fragments.fragments.get("FragOnT").unwrap();
-
-            insta::assert_snapshot!(rebased_fragment, @r###"
-                    fragment FragOnT on T {
-                      v1
-                      u1 {
-                        v3
-                        v5
-                      }
-                    }
-                "###);
-        }
-    }
-
-    #[test]
-    fn skips_unknown_fragment_on_condition() {
-        let operation_fragments = r#"
-query TestQuery {
-  t {
-    ...FragOnT
-  }
-  u {
-    ...FragOnU
-  }
-}
-
-fragment FragOnT on T {
-  x
-  y
-}
-
-fragment FragOnU on U {
-  x
-  y
-}
-
-type Query {
-  t: T
-  u: U
-}
-
-type T {
-  x: Int
-  y: Int
-}
-
-type U {
-  x: Int
-  y: Int
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-        assert!(
-            !executable_document.fragments.is_empty(),
-            "operation should have some fragments"
-        );
-        assert_eq!(2, executable_document.fragments.len());
-
-        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::default(),
-            )
-            .unwrap();
-
-            let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  x: Int
-  y: Int
-}"#;
-            let subgraph = parse_subgraph("A", subgraph_schema);
-            let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-            assert!(rebased_fragments.is_ok());
-            let rebased_fragments = rebased_fragments.unwrap();
-            assert!(!rebased_fragments.is_empty());
-            assert!(rebased_fragments.contains(&name!("FragOnT")));
-            assert!(!rebased_fragments.contains(&name!("FragOnU")));
-            let rebased_fragment = rebased_fragments.fragments.get("FragOnT").unwrap();
-
-            let expected = r#"fragment FragOnT on T {
-  x
-  y
-}"#;
-            let actual = rebased_fragment.to_string();
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    fn skips_unknown_type_within_fragment() {
-        let operation_fragments = r#"
-query TestQuery {
-  i {
-    ...FragOnI
-  }
-}
-
-fragment FragOnI on I {
-  id
-  otherId
-  ... on T1 {
-    x
-  }
-  ... on T2 {
-    y
-  }
-}
-
-type Query {
-  i: I
-}
-
-interface I {
-  id: ID!
-  otherId: ID!
-}
-
-type T1 implements I {
-  id: ID!
-  otherId: ID!
-  x: Int
-}
-
-type T2 implements I {
-  id: ID!
-  otherId: ID!
-  y: Int
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-        assert!(
-            !executable_document.fragments.is_empty(),
-            "operation should have some fragments"
-        );
-
-        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::default(),
-            )
-            .unwrap();
-
-            let subgraph_schema = r#"type Query {
-  i: I
-}
-
-interface I {
-  id: ID!
-}
-
-type T2 implements I {
-  id: ID!
-  y: Int
-}
-"#;
-            let subgraph = parse_subgraph("A", subgraph_schema);
-            let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-            assert!(rebased_fragments.is_ok());
-            let rebased_fragments = rebased_fragments.unwrap();
-            assert!(!rebased_fragments.is_empty());
-            assert!(rebased_fragments.contains(&name!("FragOnI")));
-            let rebased_fragment = rebased_fragments.fragments.get("FragOnI").unwrap();
-
-            let expected = r#"fragment FragOnI on I {
-  id
-  ... on T2 {
-    y
-  }
-}"#;
-            let actual = rebased_fragment.to_string();
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    fn skips_typename_on_possible_interface_objects_within_fragment() {
-        let operation_fragments = r#"
-query TestQuery {
-  i {
-    ...FragOnI
-  }
-}
-
-fragment FragOnI on I {
-  __typename
-  id
-  x
-}
-
-type Query {
-  i: I
-}
-
-interface I {
-  id: ID!
-  x: String!
-}
-
-type T implements I {
-  id: ID!
-  x: String!
-}
-"#;
-
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-        assert!(
-            !executable_document.fragments.is_empty(),
-            "operation should have some fragments"
-        );
-
-        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-            let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> =
-                IndexSet::default();
-            interface_objects.insert(InterfaceTypeDefinitionPosition {
-                type_name: name!("I"),
-            });
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &interface_objects,
-            )
-            .unwrap();
-
-            let subgraph_schema = r#"extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.5", import: [{ name: "@interfaceObject" }, { name: "@key" }])
-
-directive @link(url: String, as: String, import: [link__Import]) repeatable on SCHEMA
-
-directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-directive @interfaceObject on OBJECT
-
-type Query {
-  i: I
-}
-
-type I @interfaceObject @key(fields: "id") {
-  id: ID!
-  x: String!
-}
-
-scalar link__Import
-
-scalar federation__FieldSet
-"#;
-            let subgraph = parse_subgraph("A", subgraph_schema);
-            let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-            assert!(rebased_fragments.is_ok());
-            let rebased_fragments = rebased_fragments.unwrap();
-            assert!(!rebased_fragments.is_empty());
-            assert!(rebased_fragments.contains(&name!("FragOnI")));
-            let rebased_fragment = rebased_fragments.fragments.get("FragOnI").unwrap();
-
-            let expected = r#"fragment FragOnI on I {
-  id
-  x
-}"#;
-            let actual = rebased_fragment.to_string();
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    fn skips_fragments_with_trivial_selections() {
-        let operation_fragments = r#"
-query TestQuery {
-  t {
-    ...F1
-    ...F2
-    ...F3
-  }
-}
-
-fragment F1 on T {
-  a
-  b
-}
-
-fragment F2 on T {
-  __typename
-  a
-  b
-}
-
-fragment F3 on T {
-  __typename
-  a
-  b
-  c
-  d
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  a: Int
-  b: Int
-  c: Int
-  d: Int
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-        assert!(
-            !executable_document.fragments.is_empty(),
-            "operation should have some fragments"
-        );
-
-        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::default(),
-            )
-            .unwrap();
-
-            let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  c: Int
-  d: Int
-}
-"#;
-            let subgraph = parse_subgraph("A", subgraph_schema);
-            let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-            assert!(rebased_fragments.is_ok());
-            let rebased_fragments = rebased_fragments.unwrap();
-            // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.len());
-            assert!(rebased_fragments.contains(&name!("F3")));
-            let rebased_fragment = rebased_fragments.fragments.get("F3").unwrap();
-
-            let expected = r#"fragment F3 on T {
-  __typename
-  c
-  d
-}"#;
-            let actual = rebased_fragment.to_string();
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    fn handles_skipped_fragments_within_fragments() {
-        let operation_fragments = r#"
-query TestQuery {
-  ...TheQuery
-}
-
-fragment TheQuery on Query {
-  t {
-    x
-    ... GetU
-  }
-}
-
-fragment GetU on T {
-  u {
-    y
-    z
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  x: Int
-  u: U
-}
-
-type U {
-  y: Int
-  z: Int
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-        assert!(
-            !executable_document.fragments.is_empty(),
-            "operation should have some fragments"
-        );
-
-        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::default(),
-            )
-            .unwrap();
-
-            let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  x: Int
-}"#;
-            let subgraph = parse_subgraph("A", subgraph_schema);
-            let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-            assert!(rebased_fragments.is_ok());
-            let rebased_fragments = rebased_fragments.unwrap();
-            // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.len());
-            assert!(rebased_fragments.contains(&name!("TheQuery")));
-            let rebased_fragment = rebased_fragments.fragments.get("TheQuery").unwrap();
-
-            let expected = r#"fragment TheQuery on Query {
-  t {
-    x
-  }
-}"#;
-            let actual = rebased_fragment.to_string();
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    fn handles_subtypes_within_subgraphs() {
-        let operation_fragments = r#"
-query TestQuery {
-  ...TQuery
-}
-
-fragment TQuery on Query {
-  t {
-    x
-    y
-    ... on T {
-      z
-    }
-  }
-}
-
-type Query {
-  t: I
-}
-
-interface I {
-  x: Int
-  y: Int
-}
-
-type T implements I {
-  x: Int
-  y: Int
-  z: Int
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-        assert!(
-            !executable_document.fragments.is_empty(),
-            "operation should have some fragments"
-        );
-
-        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::default(),
-            )
-            .unwrap();
-
-            let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  x: Int
-  y: Int
-  z: Int
-}
-"#;
-
-            let subgraph = parse_subgraph("A", subgraph_schema);
-            let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-            assert!(rebased_fragments.is_ok());
-            let rebased_fragments = rebased_fragments.unwrap();
-            // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.len());
-            assert!(rebased_fragments.contains(&name!("TQuery")));
-            let rebased_fragment = rebased_fragments.fragments.get("TQuery").unwrap();
-
-            let expected = r#"fragment TQuery on Query {
-  t {
-    x
-    y
-    z
-  }
-}"#;
-            let actual = rebased_fragment.to_string();
-            assert_eq!(actual, expected);
-        }
     }
 }
