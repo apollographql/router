@@ -239,7 +239,7 @@ impl Response {
 
         // let response = builder.body(once(ready(res)).boxed())?;
 
-        let response = builder.body(self::body::full(serde_json::to_vec(&res)?).into_inner())?;
+        let response = builder.body(self::body::full(serde_json::to_vec(&res)?))?;
 
         Ok(Self { response, context })
     }
@@ -302,7 +302,9 @@ impl Response {
         }
 
         let response = builder
-            .body(self::body::full(serde_json::to_vec(&res).expect("can't fail")).into_inner())
+            .body(self::body::full(
+                serde_json::to_vec(&res).expect("can't fail"),
+            ))
             .expect("can't fail");
 
         Self { response, context }

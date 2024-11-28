@@ -16,6 +16,7 @@ use http::header;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http_body_util::BodyExt;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -147,7 +148,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             .map_response(
                 |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
                     let (parts, body) = http_response.into_parts();
-                    http::Response::from_parts(parts, RouterBody::from(body))
+                    http::Response::from_parts(parts, http_body_util::combinators::BoxBody::new(body))
                 } as MapFn,
             )
             .layer(TimeoutLayer::new(init.config.timeout))
@@ -842,13 +843,21 @@ where
 
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
+    /*
     let (first, rest): (
         Option<Result<Bytes, hyper::Error>>,
         crate::services::router::Body,
     ) = body.into_future().await;
+        */
+    let stream = body.into_data_stream();
+
+    let mut first = stream.take(1).collect::<Vec<_>>().await;
+    let rest = stream;
+
+    let opt_first: Option<Bytes> = first.pop().transpose().expect("XXX FIX LATER");
 
     // If first is None, or contains an error we return an error
-    let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
+    // let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
     let bytes = match opt_first {
         Some(b) => b,
         None => {
@@ -1010,7 +1019,7 @@ where
         context,
         response: http::Response::from_parts(
             parts,
-            RouterBody::wrap_stream(final_stream).into_inner(),
+            http_body_util::BodyDataStream::new(final_stream), // RouterBody::wrap_stream(final_stream).into_inner(),
         ),
     })
 }

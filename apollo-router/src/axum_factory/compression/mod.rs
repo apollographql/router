@@ -70,11 +70,12 @@ impl Compressor {
 
     pub(crate) fn process(
         mut self,
-        mut stream: RouterBody,
+        body: RouterBody,
     ) -> impl Stream<Item = Result<Bytes, BoxError>>
 where {
         let (tx, rx) = mpsc::channel(10);
 
+        let mut stream = http_body_util::BodyDataStream::new(body);
         tokio::task::spawn(
             async move {
                 while let Some(data) = stream.next().await {

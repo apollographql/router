@@ -180,8 +180,10 @@ where
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder().status(status_code).body::<Body>(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                            response: http::Response::builder().status(status_code).body(
+                                crate::services::router::body::full(
+                                    serde_json::to_vec(&health).map_err(BoxError::from)?,
+                                ),
                             )?,
                             context: req.context,
                         })
@@ -622,7 +624,8 @@ async fn handle_graphql(
 
     let (parts, body) = http_request.into_parts();
 
-    let http_request = http::Request::from_parts(parts, Body::wrap_stream(BodyStream::new(body)));
+    let http_request = http::Request::from_parts(parts, http_body_util::BodyStream::new(body));
+    // let http_request = http::Request::from_parts(parts, Body::wrap_stream(BodyStream::new(body)));
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -672,13 +675,16 @@ async fn handle_graphql(
                 .and_then(|value| value.to_str().ok())
                 .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
             let body = match opt_compressor {
-                None => body,
+                // None => http_body_util::BodyDataStream::new(body),
+                None => futures::stream::once(async { body }),
                 Some(compressor) => {
                     parts.headers.insert(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    Body::wrap_stream(compressor.process(body.into()))
+                    // http_body_util::BodyStream::new(compressor.process(body))
+                    compressor.process(body)
+                    // Body::wrap_stream(compressor.process(body.into()))
                 }
             };
 
