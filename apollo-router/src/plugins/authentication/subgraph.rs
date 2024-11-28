@@ -411,7 +411,7 @@ impl SigningParamsConfig {
 fn increment_success_counter(subgraph_name: &str) {
     u64_counter!(
         "apollo.router.operations.authentication.aws.sigv4",
-        "",
+        "Number of subgraph requests signed with AWS SigV4",
         1,
         authentication.aws.sigv4.failed = false,
         subgraph.service.name = subgraph_name.to_string()
@@ -420,7 +420,7 @@ fn increment_success_counter(subgraph_name: &str) {
 fn increment_failure_counter(subgraph_name: &str) {
     u64_counter!(
         "apollo.router.operations.authentication.aws.sigv4",
-        "",
+        "Number of subgraph requests signed with AWS SigV4",
         1,
         authentication.aws.sigv4.failed = true,
         subgraph.service.name = subgraph_name.to_string()
