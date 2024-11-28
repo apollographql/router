@@ -125,4 +125,8 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 The following metrics have been deprecated and should not be used.
 
-- `apollo_router_span` - **Deprecated**—use `apollo_router_processing_time` instead.
+- `apollo_router_span` - **Deprecated**: use `apollo_router_processing_time` instead.
+- `apollo_router_deduplicated_subscriptions_total` - **Deprecated**: use the `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated` attribute.
+- `apollo_authentication_failure_count` - **Deprecated**: use the `apollo.router.operations.authentication.jwt` metric's `authentication.jwt.failed` attribute.
+- `apollo_authentication_success_count` - **Deprecated**: use the `apollo.router.operations.authentication.jwt` metric instead. If the `authentication.jwt.failed` attribute is *absent* or `false`, the authentication succeeded.
+- `apollo_require_authentication_failure_count` - **Deprecated**: TODO @goto-bus-stop: no replacement?
