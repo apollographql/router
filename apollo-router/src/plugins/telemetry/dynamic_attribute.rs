@@ -1,6 +1,6 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_api::OrderMap;
+use opentelemetry::OrderMap;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;

@@ -1,7 +1,7 @@
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::NamedType;
 use opentelemetry::Key;
-use opentelemetry::KeyValue;
+use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;

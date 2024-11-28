@@ -708,7 +708,7 @@ where
     pub(super) message: Arc<String>,
     pub(super) selectors: Option<Arc<Extendable<A, T>>>,
     pub(super) condition: Condition<T>,
-    pub(super) attributes: Vec<opentelemetry::KeyValue>,
+    pub(super) attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomEvent<Request, Response, A, T>

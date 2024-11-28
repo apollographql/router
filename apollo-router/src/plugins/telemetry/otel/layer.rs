@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use once_cell::unsync;
 use opentelemetry::trace::noop;
+use opentelemetry::trace::OrderMap;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::{self as otel};
 use opentelemetry::Context as OtelContext;
@@ -15,7 +16,6 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
-use opentelemetry_api::trace::OrderMap;
 use rand::thread_rng;
 use rand::Rng;
 use tracing_core::field;

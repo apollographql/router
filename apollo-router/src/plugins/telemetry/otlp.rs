@@ -6,10 +6,11 @@ use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
 use lazy_static::lazy_static;
+use opentelemetry::sdk::metrics::reader::TemporalitySelector;
+use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::InstrumentKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -79,7 +80,7 @@ impl Config {
             Protocol::Grpc => {
                 let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
                 let grpc = self.grpc.clone();
-                let exporter = T::builder()
+                let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with(&endpoint, |b, endpoint| {
@@ -100,7 +101,7 @@ impl Config {
                         .map(|e| e.into_parts()),
                 )?;
                 let http = self.http.clone();
-                let exporter = T::builder()
+                let exporter = opentelemetry_otlp::new_exporter()
                     .http()
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with(&endpoint, |b, endpoint| {
@@ -255,22 +256,24 @@ pub(crate) enum Temporality {
     Delta,
 }
 
-pub(crate) struct CustomTemporalitySelector(pub(crate) opentelemetry_sdk::metrics::Temporality);
+pub(crate) struct CustomTemporalitySelector(
+    pub(crate) opentelemetry::sdk::metrics::data::Temporality,
+);
 
-impl CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::Temporality {
+impl TemporalitySelector for CustomTemporalitySelector {
+    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry::sdk::metrics::data::Temporality {
         self.0
     }
 }
 
-impl From<&Temporality> for Box<CustomTemporalitySelector> {
+impl From<&Temporality> for Box<dyn TemporalitySelector> {
     fn from(value: &Temporality) -> Self {
         Box::new(match value {
-            Temporality::Cumulative => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::Temporality::Cumulative)
-            }
+            Temporality::Cumulative => CustomTemporalitySelector(
+                opentelemetry::sdk::metrics::data::Temporality::Cumulative,
+            ),
             Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::Temporality::Delta)
+                CustomTemporalitySelector(opentelemetry::sdk::metrics::data::Temporality::Delta)
             }
         })
     }

@@ -3,9 +3,9 @@ use std::fmt::Debug;
 
 use http::Uri;
 use lazy_static::lazy_static;
-use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry::runtime;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -103,9 +103,9 @@ impl TracingConfigurator for Config {
                 let exporter = opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(common.into())
                     .with(&agent.endpoint.to_socket(), |b, s| b.with_endpoint(s))
-                    .build_async_agent_exporter(opentelemetry_sdk::runtime::Tokio)?;
+                    .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(
-                    BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
+                    BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
                         .with_batch_config(batch_processor.clone().into())
                         .build()
                         .filtered(),

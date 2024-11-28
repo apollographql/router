@@ -3,12 +3,12 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use opentelemetry::metrics::Unit;
 use opentelemetry_api::metrics::Counter;
 use opentelemetry_api::metrics::Histogram;
 use opentelemetry_api::metrics::MeterProvider;
-use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
+use opentelemetry_api::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
 use opentelemetry_semantic_conventions::trace::SERVER_PORT;
@@ -1125,21 +1125,21 @@ where
     type Response = Response;
     type EventResponse = EventResponse;
 
-    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry::KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry::KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response(response),
         }
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_error(error, ctx),
@@ -1247,11 +1247,11 @@ where
     type Response = Response;
     type EventResponse = EventResponse;
 
-    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry::KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_request(request)
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry::KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_response(response)
     }
 
@@ -1259,11 +1259,11 @@ where
         &self,
         response: &Self::EventResponse,
         ctx: &Context,
-    ) -> Vec<opentelemetry::KeyValue> {
+    ) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_response_event(response, ctx)
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_error(error, ctx)
     }
 }
@@ -1395,7 +1395,7 @@ impl Selectors for SubgraphInstrumentsConfig {
     type Response = subgraph::Response;
     type EventResponse = ();
 
-    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry::KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
         attrs.extend(self.http_client_request_duration.on_request(request));
         attrs.extend(self.http_client_response_body_size.on_request(request));
@@ -1403,7 +1403,7 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry::KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_response(response);
         attrs.extend(self.http_client_request_duration.on_response(response));
         attrs.extend(self.http_client_response_body_size.on_response(response));
@@ -1411,7 +1411,7 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_error(error, ctx);
         attrs.extend(self.http_client_request_duration.on_error(error, ctx));
         attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
@@ -1888,7 +1888,7 @@ where
     pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
     pub(crate) counter: Option<Counter<f64>>,
     pub(crate) condition: Condition<T>,
-    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
+    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
     pub(crate) incremented: bool,
 }
@@ -2213,7 +2213,7 @@ struct ActiveRequestsCounter {
 struct ActiveRequestsCounterInner {
     counter: Option<UpDownCounter<i64>>,
     attrs_config: Arc<ActiveRequestsAttributes>,
-    attributes: Vec<opentelemetry::KeyValue>,
+    attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
 impl Instrumented for ActiveRequestsCounter {
@@ -2308,7 +2308,7 @@ where
     pub(crate) selector: Option<Arc<T>>,
     pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
     pub(crate) histogram: Option<Histogram<f64>>,
-    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
+    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's an histogram on events to know if we have to count for an event or not
     pub(crate) updated: bool,
 }

@@ -16,6 +16,10 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
+use opentelemetry::sdk::export::trace::ExportResult;
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
@@ -24,9 +28,6 @@ use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
@@ -160,9 +161,9 @@ const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
 const OTLP_EXT_INCLUDE_ATTRS: [Key; 13] = [
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
-    opentelemetry_semantic_conventions::attribute::HTTP_REQUEST_BODY_SIZE,
-    opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_BODY_SIZE,
-    opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE,
+    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
+    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
+    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
     APOLLO_CONNECTOR_TYPE,
     APOLLO_CONNECTOR_DETAIL,
     APOLLO_CONNECTOR_SELECTION,
@@ -219,7 +220,7 @@ pub(crate) struct LightSpanData {
     pub(crate) name: Cow<'static, str>,
     pub(crate) start_time: SystemTime,
     pub(crate) end_time: SystemTime,
-    pub(crate) attributes: Vec<KeyValue>,
+    pub(crate) attributes: EvictedHashMap,
     pub(crate) status: Status,
 }
 
@@ -234,10 +235,13 @@ impl LightSpanData {
                 // when attributes are stored as Vec<KeyValue>.
                 // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
                 let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
-                let mut new_attrs = vec![];
+                let mut new_attrs = EvictedHashMap::new(
+                    max_attr_len.try_into().expect("expected usize -> u32"),
+                    max_attr_len,
+                );
                 value.attributes.into_iter().for_each(|(key, value)| {
                     if attr_names.contains(&key) {
-                        new_attrs.push(KeyValue::new(key, value))
+                        new_attrs.insert(KeyValue::new(key, value))
                     }
                 });
                 new_attrs
@@ -1228,8 +1232,9 @@ impl ChildNodes for Vec<TreeData> {
 mod test {
     use std::time::SystemTime;
     use opentelemetry::Value;
-    use opentelemetry::KeyValue;
+    use opentelemetry_api::KeyValue;
     use opentelemetry_api::trace::{SpanId, SpanKind, TraceId};
+    use opentelemetry_sdk::trace::EvictedHashMap;
     use serde_json::json;
     use crate::plugins::telemetry::apollo::ErrorConfiguration;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
@@ -1588,7 +1593,7 @@ mod test {
             name: Default::default(),
             start_time: SystemTime::now(),
             end_time: SystemTime::now(),
-            attributes: vec![],
+            attributes: EvictedHashMap::new(10, 10),
             status: Default::default(),
         };
 

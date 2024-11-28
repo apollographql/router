@@ -4,14 +4,14 @@ use std::sync::atomic::AtomicU64;
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
+use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::Context;
 use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceFlags;
 use opentelemetry_api::trace::TraceState;
-use opentelemetry_sdk::trace::Tracer;
+use opentelemetry_api::Context;
 use tower::BoxError;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
@@ -46,7 +46,7 @@ pub(super) type LayeredTracer =
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
+    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
 > = OnceCell::new();
 
 static FMT_LAYER_HANDLE: OnceCell<
@@ -62,7 +62,7 @@ pub(crate) fn metrics_layer() -> &'static MetricsLayer {
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::TracerProvider::default().versioned_tracer(
+        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer(
             "noop",
             None::<String>,
             None::<String>,

@@ -3,12 +3,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use opentelemetry::KeyValue;
-use opentelemetry_otlp::MetricExporter;
+use opentelemetry::runtime;
+use opentelemetry::sdk::metrics::PeriodicReader;
+use opentelemetry::sdk::Resource;
+use opentelemetry_api::KeyValue;
+use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::Resource;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
@@ -107,21 +107,24 @@ impl Config {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
-        let exporter = opentelemetry_otlp::MetricExporter::builder()
-            .tonic()
-            .with_endpoint(endpoint.as_str())
-            .with_timeout(batch_processor.max_export_timeout)
-            .with_metadata(metadata)
-            .build_metrics_exporter(
-                Box::new(CustomTemporalitySelector(
-                    opentelemetry_sdk::metrics::Temporality::Delta,
-                )),
-                Box::new(
-                    CustomAggregationSelector::builder()
-                        .boundaries(default_buckets())
-                        .build(),
-                ),
-            )?;
+        let exporter = MetricsExporterBuilder::Tonic(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_processor.max_export_timeout)
+                .with_metadata(metadata)
+                .with_compression(opentelemetry_otlp::Compression::Gzip),
+        )
+        .build_metrics_exporter(
+            Box::new(CustomTemporalitySelector(
+                opentelemetry::sdk::metrics::data::Temporality::Delta,
+            )),
+            Box::new(
+                CustomAggregationSelector::builder()
+                    .boundaries(default_buckets())
+                    .build(),
+            ),
+        )?;
         let reader = PeriodicReader::builder(exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
             .build();

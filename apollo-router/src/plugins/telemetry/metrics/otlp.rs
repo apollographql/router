@@ -1,6 +1,7 @@
-use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::metrics::View;
-use opentelemetry_sdk::runtime;
+use opentelemetry::runtime;
+use opentelemetry::sdk::metrics::PeriodicReader;
+use opentelemetry::sdk::metrics::View;
+use opentelemetry_otlp::MetricsExporterBuilder;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::MetricsCommon;
@@ -22,7 +23,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
         if !self.enabled {
             return Ok(builder);
         }
-        let exporter_builder = self.exporter(TelemetryDataKind::Metrics)?;
+        let exporter_builder: MetricsExporterBuilder = self.exporter(TelemetryDataKind::Metrics)?;
         let exporter = exporter_builder.build_metrics_exporter(
             (&self.temporality).into(),
             Box::new(

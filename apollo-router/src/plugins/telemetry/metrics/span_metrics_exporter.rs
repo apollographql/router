@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
+use opentelemetry_api::KeyValue;
+use opentelemetry_api::Value;
 use tracing_core::field::Visit;
 use tracing_core::span;
 use tracing_core::Field;

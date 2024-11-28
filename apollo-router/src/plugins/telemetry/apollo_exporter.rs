@@ -17,7 +17,7 @@ use http::header::CONTENT_TYPE;
 use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
 use http::StatusCode;
-use opentelemetry::trace::ExportError;
+use opentelemetry::ExportError;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;

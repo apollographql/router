@@ -5,8 +5,8 @@ use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry_api::OrderMap;
-use opentelemetry_sdk::Resource;
+use opentelemetry::sdk::Resource;
+use opentelemetry::OrderMap;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Field;
