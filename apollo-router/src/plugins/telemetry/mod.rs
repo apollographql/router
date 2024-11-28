@@ -1746,44 +1746,32 @@ impl Telemetry {
     }
 
     fn plugin_metrics(config: &Arc<Conf>) {
-        let metrics_prom_used = config.exporters.metrics.prometheus.enabled;
-        let metrics_otlp_used = MetricsConfigurator::enabled(&config.exporters.metrics.otlp);
-        let tracing_otlp_used = TracingConfigurator::enabled(&config.exporters.tracing.otlp);
-        let tracing_datadog_used = config.exporters.tracing.datadog.enabled();
-        let tracing_jaeger_used = config.exporters.tracing.jaeger.enabled();
-        let tracing_zipkin_used = config.exporters.tracing.zipkin.enabled();
+        let mut attributes = Vec::new();
+        if MetricsConfigurator::enabled(&config.exporters.metrics.otlp) {
+            attributes.push(KeyValue::new("telemetry.metrics.otlp", true));
+        }
+        if config.exporters.metrics.prometheus.enabled {
+            attributes.push(KeyValue::new("telemetry.metrics.prometheus", true));
+        }
+        if TracingConfigurator::enabled(&config.exporters.tracing.otlp) {
+            attributes.push(KeyValue::new("telemetry.tracing.otlp", true));
+        }
+        if config.exporters.tracing.datadog.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
+        }
+        if config.exporters.tracing.jaeger.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.jaeger", true));
+        }
+        if config.exporters.tracing.zipkin.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
+        }
 
-        if metrics_prom_used
-            || metrics_otlp_used
-            || tracing_jaeger_used
-            || tracing_otlp_used
-            || tracing_zipkin_used
-            || tracing_datadog_used
-        {
-            let mut attributes = Vec::new();
-            if metrics_otlp_used {
-                attributes.push(KeyValue::new("telemetry.metrics.otlp", true));
-            }
-            if metrics_prom_used {
-                attributes.push(KeyValue::new("telemetry.metrics.prometheus", true));
-            }
-            if tracing_otlp_used {
-                attributes.push(KeyValue::new("telemetry.tracing.otlp", true));
-            }
-            if tracing_datadog_used {
-                attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
-            }
-            if tracing_jaeger_used {
-                attributes.push(KeyValue::new("telemetry.tracing.jaeger", true));
-            }
-            if tracing_zipkin_used {
-                attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
-            }
+        if !attributes.is_empty() {
             u64_counter!(
                 "apollo.router.operations.telemetry",
                 "Telemetry systems in use",
                 1,
-                &attributes
+                attributes
             );
         }
     }
