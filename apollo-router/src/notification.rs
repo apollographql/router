@@ -512,7 +512,7 @@ where
             Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {
                 u64_counter!(
                     "apollo_router_skipped_event_count",
-                    "Amount of times the router missed subscription events",
+                    "Amount of events dropped from the internal message queue",
                     1u64
                 );
                 self.poll_next(cx)
