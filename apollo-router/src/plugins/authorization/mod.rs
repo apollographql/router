@@ -592,7 +592,7 @@ impl Plugin for AuthorizationPlugin {
                 if needs_authenticated || needs_requires_scopes {
                     u64_counter!(
                         "apollo.router.operations.authorization",
-                        "",
+                        "Number of subgraph requests requiring authorization",
                         1,
                         authorization.filtered = filtered,
                         authorization.needs_authenticated = needs_authenticated,
