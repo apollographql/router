@@ -89,11 +89,16 @@ const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZAT
                 })
                 .boxed()
 */
-type HTTPClientService = tower::timeout::Timeout<
-    hyper_util::client::legacy::Client<
-        HttpsConnector<HttpConnector<AsyncHyperResolver>>,
-        RouterBody,
+type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
+
+type HTTPClientService = tower::util::MapResponse<
+    tower::timeout::Timeout<
+        hyper_util::client::legacy::Client<
+            HttpsConnector<HttpConnector<AsyncHyperResolver>>,
+            RouterBody,
+        >,
     >,
+    MapFn,
 >;
 
 #[async_trait::async_trait]
@@ -139,7 +144,12 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         */
 
         let http_client = ServiceBuilder::new()
-            .layer_fn(|svc| http_body_util::combinators::BoxBody::new(svc.call()))
+            .map_response(
+                |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
+                    let (parts, body) = http_response.into_parts();
+                    http::Response::from_parts(parts, RouterBody::from(body))
+                } as MapFn,
+            )
             .layer(TimeoutLayer::new(init.config.timeout))
             .service(
                 hyper_util::client::legacy::Client::builder(TokioExecutor::new())
