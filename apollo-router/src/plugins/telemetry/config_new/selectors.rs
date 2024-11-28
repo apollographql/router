@@ -1790,12 +1790,14 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SubgraphQuery;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphRequestResendCountKey;
     use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::spec::operation_limits::OperationLimits;
 
@@ -2493,6 +2495,41 @@ mod test {
                     .build()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn subgraph_resend_count() {
+        let selector = SubgraphSelector::SubgraphResendCount {
+            subgraph_resend_count: true,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        let subgraph_req_id = SubgraphRequestId(String::from("test"));
+        let _ = context.insert(SubgraphRequestResendCountKey::new(&subgraph_req_id), 2usize);
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context.clone())
+                        .id(subgraph_req_id)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            2i64.into()
         );
     }
 
