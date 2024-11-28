@@ -1769,7 +1769,7 @@ impl Telemetry {
         if !attributes.is_empty() {
             u64_counter!(
                 "apollo.router.operations.telemetry",
-                "Telemetry systems in use",
+                "Telemetry exporters enabled",
                 1,
                 attributes
             );
