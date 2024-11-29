@@ -267,8 +267,10 @@ pub(super) fn serve_router_on_listen_addr(
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
-                                        let connection = Builder::new(TokioExecutor::new())
-                                            .http1()
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let mut http_connection = builder
+                                            .http1();
+                                        let connection = http_connection
                                             .keep_alive(true)
                                             .header_read_timeout(Duration::from_secs(10))
                                             .serve_connection(tokio_stream, hyper_service);
@@ -303,8 +305,10 @@ pub(super) fn serve_router_on_listen_addr(
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
-                                        let connection = Builder::new(TokioExecutor::new())
-                                            .http1()
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let mut http_connection = builder
+                                            .http1();
+                                        let connection = http_connection
                                             .keep_alive(true)
                                             .serve_connection(tokio_stream, hyper_service);
 
@@ -343,18 +347,19 @@ pub(super) fn serve_router_on_listen_addr(
                                         let protocol = stream.get_ref().1.alpn_protocol();
                                         let http2 = protocol == Some(&b"h2"[..]);
 
+                                        let tokio_stream = TokioIo::new(stream);
+                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                            app.clone().call(request)
+                                        });
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         builder = if http2 {
                                             builder.http2_only()
                                         } else {
                                             builder
                                         };
-                                        let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
-                                        let connection = builder
-                                            .http1()
+                                        let mut http_connection = builder
+                                            .http1();
+                                        let connection = http_connection
                                             .keep_alive(true)
                                             .header_read_timeout(Duration::from_secs(10))
                                             .serve_connection(tokio_stream, hyper_service);
