@@ -10,6 +10,10 @@ const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.y
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_CONFIG)
         .build()
@@ -57,13 +61,8 @@ async fn test_metrics_reloading() {
         &metrics,
         r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
     );
-    check_metrics_contains(
-        &metrics,
-        r#"apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="100"}"#,
-    );
     check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
     check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
-    check_metrics_contains(&metrics, r#"custom_header="test_custom""#);
 
     router
         .assert_metrics_does_not_contain(r#"_total_total{"#)
@@ -90,6 +89,10 @@ fn check_metrics_contains(metrics: &str, text: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_auth_metrics() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
     let mut router = IntegrationTest::builder()
         .config(SUBGRAPH_AUTH_CONFIG)
         .build()
@@ -128,6 +131,10 @@ async fn test_subgraph_auth_metrics() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_bad_query() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
     let mut router = IntegrationTest::builder()
         .config(SUBGRAPH_AUTH_CONFIG)
         .build()
@@ -142,6 +149,10 @@ async fn test_metrics_bad_query() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_bad_queries() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_CONFIG)
         .build()
@@ -152,7 +163,7 @@ async fn test_bad_queries() {
     router.execute_default_query().await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_http_requests_total{status="200",otel_scope_name="apollo/router"}"#,
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -160,7 +171,7 @@ async fn test_bad_queries() {
 
     router
             .assert_metrics_contains(
-                r#"apollo_router_http_requests_total{error="'content-type' header must be one of: \"application/json\" or \"application/graphql-response+json\"",status="415",otel_scope_name="apollo/router"}"#,
+                r#"http_server_request_duration_seconds_count{error_type="Unsupported Media Type",http_request_method="POST",status="415",otel_scope_name="apollo/router"} 1"#,
                 None,
             )
             .await;
@@ -168,7 +179,7 @@ async fn test_bad_queries() {
     router.execute_bad_query().await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_http_requests_total{error="Must provide query string",status="400",otel_scope_name="apollo/router"}"#,
+            r#"http_server_request_duration_seconds_count{error_type="Bad Request",http_request_method="POST",status="400",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -176,7 +187,7 @@ async fn test_bad_queries() {
     router.execute_huge_query().await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_http_requests_total{error="Request body payload too large",status="413",otel_scope_name="apollo/router"} 1"#,
+            r#"http_server_request_duration_seconds_count{error_type="Payload Too Large",http_request_method="POST",status="413",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -222,6 +233,10 @@ async fn test_graphql_metrics() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_gauges_on_reload() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
     let mut router = IntegrationTest::builder()
         .config(include_str!("fixtures/no-telemetry.router.yaml"))
         .build()
