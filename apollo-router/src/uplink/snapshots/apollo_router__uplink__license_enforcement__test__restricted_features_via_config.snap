@@ -55,7 +55,7 @@ Configuration yaml:
   .preview_file_uploads
 
 * Demand control plugin
-  .preview_demand_control
+  .demand_control
 
 * Apollo metrics extended references
-  .telemetry.apollo.experimental_apollo_metrics_reference_mode
+  .telemetry.apollo.metrics_reference_mode

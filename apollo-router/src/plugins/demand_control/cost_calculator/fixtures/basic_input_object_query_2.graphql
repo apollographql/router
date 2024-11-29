@@ -1,0 +1,8 @@
+query BasicInputObjectQuery2 {
+  getObjectsByObject(
+    args: { inner: { id: 1 }, listOfInner: [{ id: 2 }, { id: 3 }] }
+  ) {
+    field1
+    field2
+  }
+}

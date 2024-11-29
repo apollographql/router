@@ -133,7 +133,7 @@ impl PersistedQueryLayer {
             } else {
                 tracing::info!(
                     monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
-                    persisted_quieries.not_found = true
+                    persisted_queries.not_found = true
                 );
                 // if APQ is not enabled, return an error indicating the query was not found
                 Err(supergraph_err_operation_not_found(
@@ -200,7 +200,8 @@ impl PersistedQueryLayer {
         if self.introspection_enabled
             && doc
                 .executable
-                .all_operations()
+                .operations
+                .iter()
                 .all(|op| op.is_introspection(&doc.executable))
         {
             return Ok(request);
@@ -699,7 +700,7 @@ mod tests {
         let pq_layer = PersistedQueryLayer::new(&config).await.unwrap();
 
         let schema = Arc::new(
-            Schema::parse_test(
+            Schema::parse(
                 include_str!("../../../testdata/supergraph.graphql"),
                 &Default::default(),
             )

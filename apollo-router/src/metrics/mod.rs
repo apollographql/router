@@ -60,7 +60,7 @@ pub(crate) mod test_utils {
         pub(crate) static AGGREGATE_METER_PROVIDER_ASYNC: OnceLock<(AggregateMeterProvider, ClonableManualReader)>;
     }
     thread_local! {
-        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = OnceLock::new();
+        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = const { OnceLock::new() };
     }
 
     #[derive(Debug, Clone, Default)]
@@ -120,17 +120,11 @@ pub(crate) mod test_utils {
     }
     pub(crate) fn meter_provider_and_readers() -> (AggregateMeterProvider, ClonableManualReader) {
         if tokio::runtime::Handle::try_current().is_ok() {
-            if let Ok(task_local) = AGGREGATE_METER_PROVIDER_ASYNC
+            AGGREGATE_METER_PROVIDER_ASYNC
                 .try_with(|cell| cell.get_or_init(create_test_meter_provider).clone())
-            {
-                task_local
-            } else {
-                // We need to silently fail here. Otherwise we fail every multi-threaded test that touches metrics
-                (
-                    AggregateMeterProvider::default(),
-                    ClonableManualReader::default(),
-                )
-            }
+                // We need to silently fail here.
+                // Otherwise we fail every multi-threaded test that touches metrics
+                .unwrap_or_default()
         } else {
             AGGREGATE_METER_PROVIDER
                 .with(|cell| cell.get_or_init(create_test_meter_provider).clone())
@@ -335,12 +329,12 @@ pub(crate) mod test_utils {
         }
     }
 
-    #[derive(Serialize, Eq, PartialEq, Default)]
+    #[derive(Clone, Serialize, Eq, PartialEq, Default)]
     pub(crate) struct SerdeMetricData {
         pub(crate) datapoints: Vec<SerdeMetricDataPoint>,
     }
 
-    #[derive(Serialize, Eq, PartialEq)]
+    #[derive(Clone, Serialize, Eq, PartialEq)]
     pub(crate) struct SerdeMetricDataPoint {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub(crate) value: Option<serde_json::Value>,
@@ -427,14 +421,14 @@ pub(crate) mod test_utils {
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::to_value(v)))
+                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
                     .collect(),
             }
         }
     }
 
     impl SerdeMetricDataPoint {
-        pub(crate) fn to_value(v: &Value) -> serde_json::Value {
+        pub(crate) fn convert(v: &Value) -> serde_json::Value {
             match v.clone() {
                 Value::Bool(v) => v.into(),
                 Value::I64(v) => v.into(),
@@ -461,7 +455,7 @@ pub(crate) mod test_utils {
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::to_value(v)))
+                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
                     .collect(),
             }
         }
@@ -506,30 +500,32 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! u64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(u64, counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, counter, add, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(u64, counter, add, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -545,30 +541,32 @@ macro_rules! u64_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, counter, add, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, counter, add, $name, $description, $value, attributes);
     };
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
         metric!(f64, counter, add, $name, $description, $value, $attrs);
@@ -583,31 +581,33 @@ macro_rules! f64_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, up_down_counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(i64, up_down_counter, add, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, up_down_counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(i64, up_down_counter, add, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -623,30 +623,32 @@ macro_rules! i64_up_down_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, up_down_counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, up_down_counter, add, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, up_down_counter, add, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, up_down_counter, add, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -662,30 +664,32 @@ macro_rules! f64_up_down_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, histogram, record, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, histogram, record, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, histogram, record, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, histogram, record, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -701,30 +705,32 @@ macro_rules! f64_histogram {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! u64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, histogram, record, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, histogram, record, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, histogram, record, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(u64, histogram, record, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -740,30 +746,32 @@ macro_rules! u64_histogram {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! i64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(i64, histogram, record, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, &attributes);
+        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(i64, histogram, record, $name, $description, $value, attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -847,7 +855,7 @@ macro_rules! assert_metric {
                 description: "".to_string(),
                 unit: "".to_string(),
                 data: crate::metrics::test_utils::SerdeMetricData {
-                    datapoints: vec![crate::metrics::test_utils::SerdeMetricDataPoint {
+                    datapoints: [crate::metrics::test_utils::SerdeMetricDataPoint {
                         value: $value,
                         sum: $sum,
                         attributes: $attrs
@@ -855,13 +863,14 @@ macro_rules! assert_metric {
                             .map(|kv: &opentelemetry::KeyValue| {
                                 (
                                     kv.key.to_string(),
-                                    crate::metrics::test_utils::SerdeMetricDataPoint::to_value(
+                                    crate::metrics::test_utils::SerdeMetricDataPoint::convert(
                                         &kv.value,
                                     ),
                                 )
                             })
-                            .collect(),
-                    }],
+                            .collect::<std::collections::BTreeMap<_, _>>(),
+                    }]
+                    .to_vec(),
                 },
             };
             panic!(
@@ -877,28 +886,28 @@ macro_rules! assert_metric {
 macro_rules! assert_counter {
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let name = stringify!($($name).+);
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
         assert_metric!(result, name, Some($value.into()), None, &attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let name = stringify!($($name).+);
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
         assert_metric!(result, name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
         assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
     ($name:literal, $value: expr) => {
@@ -911,27 +920,27 @@ macro_rules! assert_counter {
 macro_rules! assert_up_down_counter {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr) => {
@@ -944,27 +953,27 @@ macro_rules! assert_up_down_counter {
 macro_rules! assert_gauge {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr) => {
@@ -977,27 +986,27 @@ macro_rules! assert_gauge {
 macro_rules! assert_histogram_sum {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
-        assert_metric!(result, $name, None, Some($value.into()), &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
-        assert_metric!(result, $name, None, Some($value.into()), &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
-        assert_metric!(result, $name, None, Some($value.into()), &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
-        assert_metric!(result, $name, None, Some($value.into()), &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), attributes);
     };
 
     ($name:literal, $value: expr) => {
@@ -1010,27 +1019,27 @@ macro_rules! assert_histogram_sum {
 macro_rules! assert_histogram_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(result, $name, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(result, $name, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(result, $name, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(result, $name, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
@@ -1043,27 +1052,27 @@ macro_rules! assert_histogram_exists {
 macro_rules! assert_histogram_not_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(!result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(!result, $name, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(!result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(!result, $name, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(!result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(!result, $name, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &attributes);
-        assert_metric!(!result, $name, None, None, &attributes);
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        assert_metric!(!result, $name, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {

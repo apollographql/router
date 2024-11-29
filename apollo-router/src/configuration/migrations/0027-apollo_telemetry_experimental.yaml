@@ -1,0 +1,10 @@
+description: Some Apollo telemetry options are no longer experimental
+actions:
+  - type: delete
+    path: experimental_apollo_metrics_generation_mode
+  - type: move
+    from: telemetry.apollo.experimental_apollo_signature_normalization_algorithm
+    to: telemetry.apollo.signature_normalization_algorithm
+  - type: move
+    from: telemetry.apollo.experimental_apollo_metrics_reference_mode
+    to: telemetry.apollo.metrics_reference_mode

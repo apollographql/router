@@ -1,7 +1,6 @@
-use std::collections::HashSet;
 use std::fmt::Display;
 
-use indexmap::IndexMap;
+use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -80,7 +79,7 @@ impl URLPathTemplate {
             }
         }
 
-        let mut query = IndexMap::new();
+        let mut query = IndexMap::default();
 
         if let Some(query_suffix) = query_suffix {
             for query_part in query_suffix.split('&') {
@@ -188,7 +187,7 @@ impl URLPathTemplate {
     }
 
     pub fn required_parameters(&self) -> Vec<String> {
-        let mut parameters = HashSet::new();
+        let mut parameters = IndexSet::default();
         for param_value in &self.path {
             parameters.extend(param_value.required_parameters());
         }

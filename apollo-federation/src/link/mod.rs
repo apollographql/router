@@ -1,14 +1,16 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::str;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use thiserror::Error;
 
 use crate::error::FederationError;
@@ -20,6 +22,8 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
+pub(crate) mod context_spec_definition;
+pub(crate) mod cost_spec_definition;
 pub mod database;
 pub(crate) mod federation_spec_definition;
 pub(crate) mod graphql_definition;
@@ -41,6 +45,8 @@ pub enum LinkError {
     InvalidName(#[from] InvalidNameError),
     #[error("Invalid use of @link in schema: {0}")]
     BootstrapError(String),
+    #[error("Unknown import: {0}")]
+    InvalidImport(String),
 }
 
 // TODO: Replace LinkError usages with FederationError.
@@ -272,9 +278,9 @@ impl Link {
     }
 
     pub fn from_directive_application(directive: &Node<Directive>) -> Result<Link, LinkError> {
-        let (url, is_link) = if let Some(value) = directive.argument_by_name("url") {
+        let (url, is_link) = if let Some(value) = directive.specified_argument_by_name("url") {
             (value, true)
-        } else if let Some(value) = directive.argument_by_name("feature") {
+        } else if let Some(value) = directive.specified_argument_by_name("feature") {
             // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
             // removed when those are updated.
             (value, false)
@@ -300,11 +306,11 @@ impl Link {
         })?;
 
         let spec_alias = directive
-            .argument_by_name("as")
+            .specified_argument_by_name("as")
             .and_then(|arg| arg.as_str())
             .map(Name::new)
             .transpose()?;
-        let purpose = if let Some(value) = directive.argument_by_name("for") {
+        let purpose = if let Some(value) = directive.specified_argument_by_name("for") {
             Some(Purpose::from_value(value)?)
         } else {
             None
@@ -312,7 +318,7 @@ impl Link {
 
         let imports = if is_link {
             directive
-                .argument_by_name("import")
+                .specified_argument_by_name("import")
                 .and_then(|arg| arg.as_list())
                 .unwrap_or(&[])
                 .iter()
@@ -328,6 +334,24 @@ impl Link {
             imports,
             purpose,
         })
+    }
+
+    pub fn for_identity<'schema>(
+        schema: &'schema Schema,
+        identity: &Identity,
+    ) -> Option<(Self, &'schema Component<Directive>)> {
+        schema
+            .schema_definition
+            .directives
+            .iter()
+            .find_map(|directive| {
+                let link = Link::from_directive_application(directive).ok()?;
+                if link.url.identity == *identity {
+                    Some((link, directive))
+                } else {
+                    None
+                }
+            })
     }
 }
 
@@ -366,10 +390,10 @@ pub struct LinkedElement {
 #[derive(Default, Eq, PartialEq, Debug)]
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
-    pub(crate) by_identity: HashMap<Identity, Arc<Link>>,
-    pub(crate) by_name_in_schema: HashMap<Name, Arc<Link>>,
-    pub(crate) types_by_imported_name: HashMap<Name, (Arc<Link>, Arc<Import>)>,
-    pub(crate) directives_by_imported_name: HashMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) by_identity: IndexMap<Identity, Arc<Link>>,
+    pub(crate) by_name_in_schema: IndexMap<Name, Arc<Link>>,
+    pub(crate) types_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) directives_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
 }
 
 impl LinksMetadata {

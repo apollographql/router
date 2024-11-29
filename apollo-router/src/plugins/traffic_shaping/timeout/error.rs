@@ -3,8 +3,7 @@
 use std::error;
 use std::fmt;
 
-use axum::response::IntoResponse;
-use http::StatusCode;
+use crate::graphql;
 
 /// The timeout elapsed.
 #[derive(Debug, Default)]
@@ -23,9 +22,12 @@ impl fmt::Display for Elapsed {
     }
 }
 
-impl IntoResponse for Elapsed {
-    fn into_response(self) -> axum::response::Response {
-        (StatusCode::GATEWAY_TIMEOUT, self.to_string()).into_response()
+impl From<Elapsed> for graphql::Error {
+    fn from(_: Elapsed) -> Self {
+        graphql::Error::builder()
+            .message(String::from("Request timed out"))
+            .extension_code("REQUEST_TIMEOUT")
+            .build()
     }
 }
 

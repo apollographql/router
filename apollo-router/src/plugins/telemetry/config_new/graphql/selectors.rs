@@ -13,6 +13,7 @@ use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::StandardUnit;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Stage;
 use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -134,13 +135,13 @@ impl Selector for GraphQLSelector {
             },
             GraphQLSelector::FieldName { .. } => match value {
                 Value::Null => None,
-                _ => Some(field.name.to_string().into()),
+                _ => Some(name_to_otel_string(&field.name).into()),
             },
             GraphQLSelector::FieldType {
                 field_type: FieldType::Name,
             } => match value {
                 Value::Null => None,
-                _ => Some(field.definition.ty.inner_named_type().to_string().into()),
+                _ => Some(name_to_otel_string(field.definition.ty.inner_named_type()).into()),
             },
             GraphQLSelector::FieldType {
                 field_type: FieldType::Type,
@@ -152,7 +153,7 @@ impl Selector for GraphQLSelector {
             },
             GraphQLSelector::TypeName { .. } => match value {
                 Value::Null => None,
-                _ => Some(ty.to_string().into()),
+                _ => Some(name_to_otel_string(ty).into()),
             },
             GraphQLSelector::StaticField { r#static } => Some(r#static.clone().into()),
             GraphQLSelector::OperationName {
@@ -172,6 +173,23 @@ impl Selector for GraphQLSelector {
                 .map(opentelemetry::Value::from)
             }
         }
+    }
+
+    fn is_active(&self, stage: Stage) -> bool {
+        matches!(stage, Stage::ResponseField)
+    }
+}
+
+fn name_to_otel_string(name: &apollo_compiler::Name) -> opentelemetry::StringValue {
+    if let Some(static_str) = name.as_static_str() {
+        static_str.into()
+    } else {
+        name.to_cloned_arc()
+            .expect(
+                "expected `apollo_compiler::Name` to always contain \
+                 either `&'static str` or `Arc<str>` but both conversions failed",
+            )
+            .into()
     }
 }
 

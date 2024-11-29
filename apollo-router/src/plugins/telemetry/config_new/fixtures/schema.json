@@ -373,6 +373,12 @@
                   "type": "integer",
                   "format": "uint16",
                   "minimum": 0.0
+                },
+                "subgraph_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "additionalProperties": false

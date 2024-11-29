@@ -3,8 +3,7 @@
 use std::error;
 use std::fmt;
 
-use axum::response::IntoResponse;
-use http::StatusCode;
+use crate::graphql;
 
 /// The rate limit error.
 #[derive(Debug, Default)]
@@ -23,9 +22,12 @@ impl fmt::Display for RateLimited {
     }
 }
 
-impl IntoResponse for RateLimited {
-    fn into_response(self) -> axum::response::Response {
-        (StatusCode::TOO_MANY_REQUESTS, self.to_string()).into_response()
+impl From<RateLimited> for graphql::Error {
+    fn from(_: RateLimited) -> Self {
+        graphql::Error::builder()
+            .message(String::from("Your request has been rate limited"))
+            .extension_code("REQUEST_RATE_LIMITED")
+            .build()
     }
 }
 

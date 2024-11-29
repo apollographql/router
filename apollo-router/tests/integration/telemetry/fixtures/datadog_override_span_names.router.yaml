@@ -1,0 +1,23 @@
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+        format: datadog
+      common:
+        service_name: router
+      datadog:
+        enabled: true
+        # Span mapping will always override the span name as far as the test agent is concerned
+        enable_span_mapping: false
+        batch_processor:
+          scheduled_delay: 100ms
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          otel.name: overridden
+
+

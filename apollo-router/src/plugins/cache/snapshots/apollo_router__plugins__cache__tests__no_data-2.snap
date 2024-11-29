@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/plugins/cache/tests.rs
+expression: response
+---
+{
+  "data": {
+    "currentUser": {
+      "allOrganizations": [
+        {
+          "id": "1",
+          "name": "Organization 1"
+        },
+        {
+          "id": "3",
+          "name": "Organization 3"
+        }
+      ]
+    }
+  }
+}

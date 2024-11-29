@@ -26,7 +26,6 @@ use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
-use crate::query_planner::BridgeQueryPlanner;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::services::SubgraphResponse;
@@ -88,6 +87,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             referenced_fields_by_type: Default::default(),
         }
         .into(),
+        estimated_size: Default::default(),
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
@@ -116,7 +116,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
@@ -143,6 +143,7 @@ async fn fetch_includes_operation_name() {
         .into(),
         query: Arc::new(Query::empty()),
         query_metrics: Default::default(),
+        estimated_size: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -179,7 +180,7 @@ async fn fetch_includes_operation_name() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
@@ -203,6 +204,7 @@ async fn fetch_makes_post_requests() {
         .into(),
         query: Arc::new(Query::empty()),
         query_metrics: Default::default(),
+        estimated_size: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -239,7 +241,7 @@ async fn fetch_makes_post_requests() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
@@ -330,7 +332,8 @@ async fn defer() {
                 referenced_fields_by_type: Default::default(),
             }.into(),
             query: Arc::new(Query::empty()),
-            query_metrics: Default::default()
+            query_metrics: Default::default(),
+            estimated_size: Default::default(),
         };
 
     let mut mock_x_service = plugin::test::MockSubgraphService::new();
@@ -373,7 +376,7 @@ async fn defer() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
-    let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([
             (
@@ -432,14 +435,13 @@ async fn defer_if_condition() {
             }
           }"#;
 
-    let schema = include_str!("testdata/defer_clause.graphql");
-    // we need to use the planner here instead of Schema::parse_test because that one uses the router bridge's api_schema function
-    // does not keep the defer directive definition
-    let planner =
-        BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()), None)
-            .await
-            .unwrap();
-    let schema = planner.schema();
+    let schema = Arc::new(
+        Schema::parse(
+            include_str!("testdata/defer_clause.graphql"),
+            &Configuration::default(),
+        )
+        .unwrap(),
+    );
 
     let root: Arc<PlanNode> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -462,6 +464,7 @@ async fn defer_if_condition() {
         ),
         formatted_query_plan: None,
         query_metrics: Default::default(),
+        estimated_size: Default::default(),
     };
 
     let mocked_accounts = MockSubgraph::builder()
@@ -572,34 +575,7 @@ async fn defer_if_condition() {
 
 #[tokio::test]
 async fn dependent_mutations() {
-    let schema = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1"),
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-      {
-        query: Query
-        mutation: Mutation
-      }
-
-      directive @core(feature: String!) repeatable on SCHEMA
-      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-      directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-      directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-      scalar join__FieldSet
-
-      enum join__Graph {
-        A @join__graph(name: "A" url: "http://localhost:4001")
-        B @join__graph(name: "B" url: "http://localhost:4004")
-      }
-
-      type Mutation {
-          mutationA: Mutation @join__field(graph: A)
-          mutationB: Boolean @join__field(graph: B)
-      }
-
-      type Query {
-          query: Boolean @join__field(graph: A)
-      }"#;
+    let schema = include_str!("../testdata/a_b_supergraph.graphql");
 
     let query_plan: QueryPlan = QueryPlan {
         // generated from:
@@ -644,6 +620,7 @@ async fn dependent_mutations() {
         .into(),
         query: Arc::new(Query::empty()),
         query_metrics: Default::default(),
+        estimated_size: Default::default(),
     };
 
     let mut mock_a_service = plugin::test::MockSubgraphService::new();
@@ -681,7 +658,7 @@ async fn dependent_mutations() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(schema, &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
@@ -844,7 +821,13 @@ async fn alias_renaming() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1287,7 +1270,13 @@ async fn missing_typename_and_fragments_in_requires2() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1574,7 +1563,13 @@ async fn typename_propagation() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)
@@ -1671,7 +1666,13 @@ async fn typename_propagation2() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)
@@ -1769,7 +1770,13 @@ async fn typename_propagation3() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)
@@ -1828,6 +1835,7 @@ fn broken_plan_does_not_panic() {
         .into(),
         query: Arc::new(Query::empty()),
         query_metrics: Default::default(),
+        estimated_size: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::new();

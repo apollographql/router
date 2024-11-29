@@ -11,3 +11,5 @@ telemetry:
           attributes:
             on.graphql.error:
               on_graphql_error: true
+            operation:
+              response_context: "operation_name"

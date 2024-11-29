@@ -31,9 +31,10 @@ pub(crate) enum Compressor {
 }
 
 impl Compressor {
-    pub(crate) fn new<'a, It: 'a>(it: It) -> Option<Self>
+    pub(crate) fn new<'a, It>(it: It) -> Option<Self>
     where
         It: Iterator<Item = &'a str>,
+        It: 'a,
     {
         for s in it {
             match s {

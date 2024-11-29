@@ -15,6 +15,7 @@ use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::once;
 use futures::stream::StreamExt;
+use futures::TryFutureExt;
 use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use http::request::Parts;
@@ -33,6 +34,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
+use super::Body;
 use super::ClientRequestAccepts;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
@@ -94,7 +96,6 @@ pub(crate) struct RouterService {
     apq_layer: APQLayer,
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    http_max_request_bytes: usize,
     batching: Batching,
 }
 
@@ -104,7 +105,6 @@ impl RouterService {
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
-        http_max_request_bytes: usize,
         batching: Batching,
     ) -> Self {
         RouterService {
@@ -112,7 +112,6 @@ impl RouterService {
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
-            http_max_request_bytes,
             batching,
         }
     }
@@ -215,6 +214,11 @@ impl Service<RouterRequest> for RouterService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // This service eventually calls `QueryAnalysisLayer::parse_document()`
+        // which calls `compute_job::execute()`
+        if crate::compute_job::is_full() {
+            return Poll::Pending;
+        }
         Poll::Ready(Ok(()))
     }
 
@@ -408,9 +412,14 @@ impl RouterService {
     }
 
     async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
-        let context = req.context.clone();
+        let context = req.context;
+        let (parts, body) = req.router_request.into_parts();
+        let requests = self.get_graphql_requests(&parts, body).await?;
 
-        let (supergraph_requests, is_batch) = match self.translate_request(req).await {
+        let (supergraph_requests, is_batch) = match futures::future::ready(requests)
+            .and_then(|r| self.translate_request(&context, parts, r))
+            .await
+        {
             Ok(requests) => requests,
             Err(err) => {
                 u64_counter!(
@@ -647,67 +656,11 @@ impl RouterService {
 
     async fn translate_request(
         &self,
-        req: RouterRequest,
+        context: &Context,
+        parts: Parts,
+        graphql_requests: (Vec<graphql::Request>, bool),
     ) -> Result<(Vec<SupergraphRequest>, bool), TranslateError> {
-        let RouterRequest {
-            router_request,
-            context,
-        } = req;
-
-        let (parts, body) = router_request.into_parts();
-
-        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> = if parts
-            .method
-            == Method::GET
-        {
-            self.translate_query_request(&parts).await
-        } else {
-            // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
-            let content_length = (|| {
-                parts
-                    .headers
-                    .get(http::header::CONTENT_LENGTH)?
-                    .to_str()
-                    .ok()?
-                    .parse()
-                    .ok()
-            })();
-            if content_length.unwrap_or(0) > self.http_max_request_bytes {
-                Err(TranslateError {
-                    status: StatusCode::PAYLOAD_TOO_LARGE,
-                    error: "payload too large for the `http_max_request_bytes` configuration",
-                    extension_code: "INVALID_GRAPHQL_REQUEST",
-                    extension_details: "payload too large".to_string(),
-                })
-            } else {
-                let body = http_body::Limited::new(body, self.http_max_request_bytes);
-                get_body_bytes(body)
-                    .instrument(tracing::debug_span!("receive_body"))
-                    .await
-                    .map_err(|e| {
-                        if e.is::<http_body::LengthLimitError>() {
-                            TranslateError {
-                                status: StatusCode::PAYLOAD_TOO_LARGE,
-                                error: "payload too large for the `http_max_request_bytes` configuration",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
-                                extension_details: "payload too large".to_string(),
-                            }
-                        } else {
-                            TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                error: "failed to get the request body",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
-                                extension_details: format!("failed to get the request body: {e}"),
-                            }
-                        }
-                    })
-                    .and_then(|bytes| {
-                        self.translate_bytes_request(&bytes)
-                    })
-            }
-        };
-
-        let (ok_results, is_batch) = graphql_requests?;
+        let (ok_results, is_batch) = graphql_requests;
         let mut results = Vec::with_capacity(ok_results.len());
         let batch_size = ok_results.len();
 
@@ -759,7 +712,7 @@ impl RouterService {
             *new.body_mut() = graphql_request;
             // XXX Lose some private entries, is that ok?
             let new_context = Context::new();
-            new_context.extend(&context);
+            new_context.extend(context);
             let client_request_accepts_opt = context
                 .extensions()
                 .with_lock(|lock| lock.get::<ClientRequestAccepts>().cloned());
@@ -811,11 +764,28 @@ impl RouterService {
             0,
             SupergraphRequest {
                 supergraph_request: sg,
-                context,
+                context: context.clone(),
             },
         );
 
         Ok((results, is_batch))
+    }
+
+    async fn get_graphql_requests(
+        &self,
+        parts: &Parts,
+        body: Body,
+    ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
+        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> =
+            if parts.method == Method::GET {
+                self.translate_query_request(parts).await
+            } else {
+                let bytes = get_body_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
+                    .await?;
+                self.translate_bytes_request(&bytes)
+            };
+        Ok(graphql_requests)
     }
 
     fn count_errors(errors: &[graphql::Error]) {
@@ -865,7 +835,6 @@ pub(crate) struct RouterCreator {
     apq_layer: APQLayer,
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    http_max_request_bytes: usize,
     batching: Batching,
 }
 
@@ -909,13 +878,20 @@ impl RouterCreator {
         } else {
             APQLayer::disabled()
         };
+        // There is a problem here.
+        // APQ isn't a plugin and so cannot participate in plugin lifecycle events.
+        // After telemetry `activate` NO part of the pipeline can fail as globals have been interacted with.
+        // However, the APQLayer uses DeduplicatingCache which is fallible. So if this fails on hot reload the router will be
+        // left in an inconsistent state and all metrics will likely stop working.
+        // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
+        // For now just call activate to make the gauges work on the happy path.
+        apq_layer.activate();
 
         Ok(Self {
             supergraph_creator,
             static_page,
             apq_layer,
             query_analysis_layer,
-            http_max_request_bytes: configuration.limits.http_max_request_bytes,
             persisted_query_layer,
             batching: configuration.batching.clone(),
         })
@@ -934,7 +910,6 @@ impl RouterCreator {
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
-            self.http_max_request_bytes,
             self.batching.clone(),
         ));
 

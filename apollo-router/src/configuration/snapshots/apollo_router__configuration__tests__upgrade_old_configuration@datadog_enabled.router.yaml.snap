@@ -9,4 +9,3 @@ telemetry:
       datadog:
         endpoint: default
         enabled: true
-

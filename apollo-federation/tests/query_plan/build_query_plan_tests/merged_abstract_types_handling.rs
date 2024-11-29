@@ -632,8 +632,6 @@ fn handles_spread_unions_correctly() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (reverse order of parallel fetches)
 fn handles_case_of_key_chains_in_parallel_requires() {
     let planner = planner!(
         Subgraph1: r#"
@@ -706,6 +704,22 @@ fn handles_case_of_key_chains_in_parallel_requires() {
             }
           },
           Parallel {
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph3") {
+                {
+                  ... on T2 {
+                    __typename
+                    id
+                    y
+                  }
+                } =>
+                {
+                  ... on T2 {
+                    z
+                  }
+                }
+              },
+            },
             Sequence {
               Flatten(path: "t") {
                 Fetch(service: "Subgraph2") {
@@ -736,22 +750,6 @@ fn handles_case_of_key_chains_in_parallel_requires() {
                     }
                   }
                 },
-              },
-            },
-            Flatten(path: "t") {
-              Fetch(service: "Subgraph3") {
-                {
-                  ... on T2 {
-                    __typename
-                    id
-                    y
-                  }
-                } =>
-                {
-                  ... on T2 {
-                    z
-                  }
-                }
               },
             },
           },

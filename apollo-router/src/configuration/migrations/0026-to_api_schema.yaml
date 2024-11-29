@@ -1,0 +1,4 @@
+description: experimental_api_schema_generation_mode is no longer supported
+actions:
+  - type: delete
+    path: experimental_api_schema_generation_mode

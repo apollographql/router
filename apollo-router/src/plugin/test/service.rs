@@ -95,7 +95,7 @@ macro_rules! mock_async_service {
 impl HasSchema for MockSupergraphService {
     fn schema(&self) -> Arc<crate::spec::Schema> {
         Arc::new(
-            Schema::parse_test(
+            Schema::parse(
                 include_str!("../../testdata/supergraph.graphql"),
                 &Default::default(),
             )

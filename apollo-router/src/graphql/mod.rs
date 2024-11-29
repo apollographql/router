@@ -7,6 +7,8 @@ mod visitor;
 use std::fmt;
 use std::pin::Pin;
 
+use apollo_compiler::execution::GraphQLError as CompilerExecutionError;
+use apollo_compiler::execution::ResponseDataPathElement;
 use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
@@ -123,29 +125,30 @@ impl Error {
         let mut object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
-                reason: error.to_string(),
+                reason: format!("invalid error within `errors`: {}", error),
             })?;
 
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
                 .map_err(|err| FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
-                    reason: err.to_string(),
+                    reason: format!("invalid `extensions` within error: {}", err),
                 })?
                 .unwrap_or_default();
         let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
-                reason: err.to_string(),
+                reason: format!("invalid `message` within error: {}", err),
             })?
             .map(|s| s.as_str().to_string())
             .unwrap_or_default();
         let locations = extract_key_value_from_object!(object, "locations")
+            .map(skip_invalid_locations)
             .map(serde_json_bytes::from_value)
             .transpose()
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
-                reason: err.to_string(),
+                reason: format!("invalid `locations` within error: {}", err),
             })?
             .unwrap_or_default();
         let path = extract_key_value_from_object!(object, "path")
@@ -153,7 +156,7 @@ impl Error {
             .transpose()
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
-                reason: err.to_string(),
+                reason: format!("invalid `path` within error: {}", err),
             })?;
 
         Ok(Error {
@@ -163,6 +166,20 @@ impl Error {
             extensions,
         })
     }
+}
+
+/// GraphQL spec require that both "line" and "column" are positive numbers.
+/// However GraphQL Java and GraphQL Kotlin return `{ "line": -1, "column": -1 }`
+/// if they can't determine error location inside query.
+/// This function removes such locations from suplied value.
+fn skip_invalid_locations(mut value: Value) -> Value {
+    if let Some(array) = value.as_array_mut() {
+        array.retain(|location| {
+            location.get("line") != Some(&Value::from(-1))
+                || location.get("column") != Some(&Value::from(-1))
+        })
+    }
+    value
 }
 
 /// Displays (only) the error message.
@@ -257,6 +274,44 @@ impl From<WorkerError> for Error {
             locations: err.locations.into_iter().map(Location::from).collect(),
             extensions,
             ..Default::default()
+        }
+    }
+}
+
+impl From<CompilerExecutionError> for Error {
+    fn from(error: CompilerExecutionError) -> Self {
+        let CompilerExecutionError {
+            message,
+            locations,
+            path,
+            extensions,
+        } = error;
+        let locations = locations
+            .into_iter()
+            .map(|location| Location {
+                line: location.line as u32,
+                column: location.column as u32,
+            })
+            .collect::<Vec<_>>();
+        let path = if !path.is_empty() {
+            let elements = path
+                .into_iter()
+                .map(|element| match element {
+                    ResponseDataPathElement::Field(name) => {
+                        JsonPathElement::Key(name.as_str().to_owned(), None)
+                    }
+                    ResponseDataPathElement::ListIndex(i) => JsonPathElement::Index(i),
+                })
+                .collect();
+            Some(Path(elements))
+        } else {
+            None
+        };
+        Self {
+            message,
+            locations,
+            path,
+            extensions,
         }
     }
 }

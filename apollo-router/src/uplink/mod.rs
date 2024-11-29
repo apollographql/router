@@ -118,9 +118,8 @@ impl Endpoints {
                     urls.iter()
                         .cycle()
                         .skip(*current)
-                        .map(|url| {
+                        .inspect(|_| {
                             *current += 1;
-                            url
                         })
                         .take(urls.len()),
                 )
@@ -415,7 +414,7 @@ where
                 tracing::info!(
                     histogram.apollo_router_uplink_fetch_duration_seconds =
                         now.elapsed().as_secs_f64(),
-                    query = std::any::type_name::<Query>(),
+                    query,
                     url = url.to_string(),
                     "kind" = "http_error",
                     error = e.to_string(),
@@ -442,7 +441,7 @@ fn query_name<Query>() -> &'static str {
     let mut query = std::any::type_name::<Query>();
     query = query
         .strip_suffix("Query")
-        .expect("Uplink structs mut be named xxxQuery")
+        .expect("Uplink structs must be named xxxQuery")
         .get(query.rfind("::").map(|index| index + 2).unwrap_or_default()..)
         .expect("cannot fail");
     query
@@ -467,7 +466,7 @@ where
         .json(request_body)
         .send()
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             if let Some(hyper_err) = e.source() {
                 if let Some(os_err) = hyper_err.source() {
                     if os_err.to_string().contains("tcp connect error: Cannot assign requested address (os error 99)") {
@@ -475,7 +474,6 @@ where
                     }
                 }
             }
-            e
         })?;
     tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;

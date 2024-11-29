@@ -9,6 +9,8 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -21,8 +23,6 @@ use apollo_compiler::ty;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use lazy_static::lazy_static;
 use thiserror::Error;
 
@@ -38,9 +38,11 @@ use crate::subgraph::spec::FederationSpecError::UnsupportedFederationDirective;
 use crate::subgraph::spec::FederationSpecError::UnsupportedVersionError;
 
 pub const COMPOSE_DIRECTIVE_NAME: Name = name!("composeDirective");
+pub const CONTEXT_DIRECTIVE_NAME: Name = name!("context");
 pub const KEY_DIRECTIVE_NAME: Name = name!("key");
 pub const EXTENDS_DIRECTIVE_NAME: Name = name!("extends");
 pub const EXTERNAL_DIRECTIVE_NAME: Name = name!("external");
+pub const FROM_CONTEXT_DIRECTIVE_NAME: Name = name!("fromContext");
 pub const INACCESSIBLE_DIRECTIVE_NAME: Name = name!("inaccessible");
 pub const INTF_OBJECT_DIRECTIVE_NAME: Name = name!("interfaceObject");
 pub const OVERRIDE_DIRECTIVE_NAME: Name = name!("override");
@@ -66,11 +68,13 @@ pub const FEDERATION_V1_DIRECTIVE_NAMES: [Name; 5] = [
     REQUIRES_DIRECTIVE_NAME,
 ];
 
-pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 11] = [
+pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
     COMPOSE_DIRECTIVE_NAME,
+    CONTEXT_DIRECTIVE_NAME,
     KEY_DIRECTIVE_NAME,
     EXTENDS_DIRECTIVE_NAME,
     EXTERNAL_DIRECTIVE_NAME,
+    FROM_CONTEXT_DIRECTIVE_NAME,
     INACCESSIBLE_DIRECTIVE_NAME,
     INTF_OBJECT_DIRECTIVE_NAME,
     OVERRIDE_DIRECTIVE_NAME,
@@ -80,13 +84,17 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 11] = [
     TAG_DIRECTIVE_NAME,
 ];
 
+pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 1] = [FIELDSET_SCALAR_NAME];
+
 // This type and the subsequent IndexMap exist purely so we can use match with Names; see comment
 // in FederationSpecDefinitions.directive_definition() for more information.
 enum FederationDirectiveName {
     Compose,
+    Context,
     Key,
     Extends,
     External,
+    FromContext,
     Inaccessible,
     IntfObject,
     Override,
@@ -98,11 +106,16 @@ enum FederationDirectiveName {
 
 lazy_static! {
     static ref FEDERATION_DIRECTIVE_NAMES_TO_ENUM: IndexMap<Name, FederationDirectiveName> = {
-        IndexMap::from([
+        IndexMap::from_iter([
             (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
+            (CONTEXT_DIRECTIVE_NAME, FederationDirectiveName::Context),
             (KEY_DIRECTIVE_NAME, FederationDirectiveName::Key),
             (EXTENDS_DIRECTIVE_NAME, FederationDirectiveName::Extends),
             (EXTERNAL_DIRECTIVE_NAME, FederationDirectiveName::External),
+            (
+                FROM_CONTEXT_DIRECTIVE_NAME,
+                FederationDirectiveName::FromContext,
+            ),
             (
                 INACCESSIBLE_DIRECTIVE_NAME,
                 FederationDirectiveName::Inaccessible,
@@ -135,13 +148,13 @@ pub enum FederationSpecError {
     },
     #[error("Unsupported federation directive import {0}")]
     UnsupportedFederationDirective(String),
-    #[error("Invalid GraphQL name {0}")]
-    InvalidGraphQLName(String),
+    #[error(transparent)]
+    InvalidGraphQLName(InvalidNameError),
 }
 
 impl From<InvalidNameError> for FederationSpecError {
     fn from(err: InvalidNameError) -> Self {
-        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", err.name))
+        FederationSpecError::InvalidGraphQLName(err)
     }
 }
 
@@ -283,9 +296,11 @@ impl FederationSpecDefinitions {
         };
         Ok(match enum_name {
             FederationDirectiveName::Compose => self.compose_directive_definition(alias),
+            FederationDirectiveName::Context => self.context_directive_definition(alias),
             FederationDirectiveName::Key => self.key_directive_definition(alias)?,
             FederationDirectiveName::Extends => self.extends_directive_definition(alias),
             FederationDirectiveName::External => self.external_directive_definition(alias),
+            FederationDirectiveName::FromContext => self.from_context_directive_definition(alias),
             FederationDirectiveName::Inaccessible => self.inaccessible_directive_definition(alias),
             FederationDirectiveName::IntfObject => {
                 self.interface_object_directive_definition(alias)
@@ -337,6 +352,28 @@ impl FederationSpecDefinitions {
         }
     }
 
+    /// directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+    fn context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
+        DirectiveDefinition {
+            description: None,
+            name: alias.clone().unwrap_or(CONTEXT_DIRECTIVE_NAME),
+            arguments: vec![InputValueDefinition {
+                description: None,
+                name: name!("name"),
+                ty: ty!(String!).into(),
+                default_value: None,
+                directives: Default::default(),
+            }
+            .into()],
+            repeatable: true,
+            locations: vec![
+                DirectiveLocation::Interface,
+                DirectiveLocation::Object,
+                DirectiveLocation::Union,
+            ],
+        }
+    }
+
     /// directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
     fn key_directive_definition(
         &self,
@@ -383,6 +420,29 @@ impl FederationSpecDefinitions {
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
             ],
+        }
+    }
+
+    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive definition.
+    /// directive @fromContext(field: String!) on ARGUMENT_DEFINITION
+    #[allow(clippy::wrong_self_convention)]
+    fn from_context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
+        DirectiveDefinition {
+            description: None,
+            name: alias.clone().unwrap_or(FROM_CONTEXT_DIRECTIVE_NAME),
+            arguments: vec![InputValueDefinition {
+                description: None,
+                name: name!("field"),
+                ty: ty!(String!).into(),
+                default_value: None,
+                directives: Default::default(),
+            }
+            .into()],
+            repeatable: false,
+            locations: vec![DirectiveLocation::ArgumentDefinition],
         }
     }
 
@@ -554,8 +614,8 @@ impl FederationSpecDefinitions {
             description: None,
             name: SERVICE_TYPE,
             directives: Default::default(),
-            fields: IndexMap::new(),
-            implements_interfaces: IndexSet::new(),
+            fields: IndexMap::default(),
+            implements_interfaces: IndexSet::default(),
         };
         service_type.fields.insert(
             name!("_sdl"),
@@ -648,7 +708,8 @@ impl LinkSpecDefinitions {
                     .into(),
                 ),
             ]
-            .into(),
+            .into_iter()
+            .collect(),
         }
     }
 
@@ -719,7 +780,17 @@ impl Default for LinkSpecDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::database::federation_link_identity;
+    use crate::link::spec::Identity;
+    use crate::link::spec::APOLLO_SPEC_DOMAIN;
+
+    // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
+    // to define the ground work for that in `apollo-at-link` first.
+    fn federation_link_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("federation"),
+        }
+    }
 
     #[test]
     fn handle_unsupported_federation_version() {

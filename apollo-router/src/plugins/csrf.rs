@@ -1,5 +1,6 @@
 //! Cross Site Request Forgery (CSRF) plugin.
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use http::header;
 use http::HeaderMap;
@@ -34,15 +35,15 @@ pub(crate) struct CSRFConfig {
     /// and make sure you either:
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
     /// - added your required headers to the allow_headers list, as shown in the
-    /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    required_headers: Vec<String>,
+    ///   `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    required_headers: Arc<Vec<String>>,
 }
 
-fn apollo_custom_preflight_headers() -> Vec<String> {
-    vec![
+fn apollo_custom_preflight_headers() -> Arc<Vec<String>> {
+    Arc::new(vec![
         "x-apollo-operation-name".to_string(),
         "apollo-require-preflight".to_string(),
-    ]
+    ])
 }
 
 impl Default for CSRFConfig {

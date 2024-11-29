@@ -48,6 +48,8 @@ impl Clone for CloneSubgraphResponse {
         Self(SubgraphResponse {
             response: http_ext::Response::from(&self.0.response).inner,
             context: self.0.context.clone(),
+            subgraph_name: self.0.subgraph_name.clone(),
+            id: self.0.id.clone(),
         })
     }
 }
@@ -96,6 +98,7 @@ where
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
 
+                    let _guard = request.context.enter_active_request();
                     match receiver.recv().await {
                         Ok(value) => {
                             return value
@@ -103,6 +106,8 @@ where
                                     SubgraphResponse::new_from_response(
                                         response.0.response,
                                         request.context,
+                                        request.subgraph_name.unwrap_or_default(),
+                                        request.id,
                                     )
                                 })
                                 .map_err(|e| e.into())
@@ -119,6 +124,7 @@ where
 
                     let context = request.context.clone();
                     let authorization_cache_key = request.authorization.clone();
+                    let id = request.id.clone();
                     let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
@@ -140,6 +146,9 @@ where
                     };
 
                     // Let our waiters know
+
+                    // Clippy is wrong, the suggestion adds a useless clone of the error
+                    #[allow(clippy::useless_asref)]
                     let broadcast_value = res
                         .as_ref()
                         .map(|response| response.clone())
@@ -153,7 +162,12 @@ where
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
                     return res.map(|response| {
-                        SubgraphResponse::new_from_response(response.0.response, context)
+                        SubgraphResponse::new_from_response(
+                            response.0.response,
+                            context,
+                            response.0.subgraph_name.unwrap_or_default(),
+                            id,
+                        )
                     });
                 }
             }

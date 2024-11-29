@@ -14,7 +14,9 @@ use self::storage::ValueType;
 use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
+mod size_estimation;
 pub(crate) mod storage;
+pub(crate) use size_estimation::estimate_size;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
 pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
@@ -37,7 +39,7 @@ where
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
         redis: Option<RedisCache>,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
@@ -47,7 +49,7 @@ where
 
     pub(crate) async fn from_configuration(
         config: &crate::configuration::Cache,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
@@ -134,6 +136,10 @@ where
 
     pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
         self.storage.in_memory_cache()
+    }
+
+    pub(crate) fn activate(&self) {
+        self.storage.activate()
     }
 }
 

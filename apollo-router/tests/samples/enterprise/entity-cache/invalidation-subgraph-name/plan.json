@@ -1,0 +1,133 @@
+{
+    "enterprise": true,
+    "redis": true,
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "invalidation-subgraph-name-accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{me{name}}"}
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {"data": { "me": { "name": "invalidation-subgraph" } } }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query InvalidationSubgraphName { me { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "me":{
+                        "name":"invalidation-subgraph"
+                    }
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "invalidation-subgraph-name-accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"mutation InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{updateMyAccount{name}}"}
+                            },
+                            "response": {
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {
+                                    "data": { "updateMyAccount": { "name": "invalidation-subgraph2" } },
+                                    "extensions": {
+                                        "invalidation": [{
+                                            "kind": "subgraph",
+                                            "subgraph": "invalidation-subgraph-name-accounts"
+                                        }]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query InvalidationSubgraphName { me { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "me":{
+                        "name":"invalidation-subgraph"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "mutation InvalidationSubgraphName { updateMyAccount { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "updateMyAccount":{
+                        "name":"invalidation-subgraph2"
+                    }
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "invalidation-subgraph-name-accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{me{name}}"}
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "no-store, max-age=0",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {"data": { "me": { "name": "invalidation-subgraph2" } } }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query InvalidationSubgraphName{ me { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "me":{
+                        "name":"invalidation-subgraph2"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

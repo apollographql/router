@@ -13,7 +13,6 @@ use opentelemetry_api::trace::TraceFlags;
 use opentelemetry_api::trace::TraceState;
 use opentelemetry_api::Context;
 use tower::BoxError;
-use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
@@ -190,17 +189,5 @@ where
                 trace_id.clone()
             }
         })
-    }
-}
-/// prevents span fields from being formatted to a string when writing logs
-pub(crate) struct NullFieldFormatter;
-
-impl<'writer> FormatFields<'writer> for NullFieldFormatter {
-    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
-        &self,
-        _writer: tracing_subscriber::fmt::format::Writer<'writer>,
-        _fields: R,
-    ) -> std::fmt::Result {
-        Ok(())
     }
 }

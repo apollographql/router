@@ -29,7 +29,7 @@ pub(crate) const LABELS_TO_OVERRIDE_KEY: &str = "apollo_override::labels_to_over
 
 pub(crate) const JOIN_FIELD_DIRECTIVE_NAME: &str = "join__field";
 pub(crate) const JOIN_SPEC_BASE_URL: &str = "https://specs.apollo.dev/join";
-pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4.0, <=0.4.0";
+pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4";
 pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 /// Configuration for the progressive override plugin
@@ -91,7 +91,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
         .flatten()
         .filter_map(|join_directive| {
             if let Some(override_label_arg) =
-                join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
+                join_directive.specified_argument_by_name(OVERRIDE_LABEL_ARG_NAME)
             {
                 override_label_arg
                     .as_str()

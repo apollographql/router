@@ -3,11 +3,11 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use indexmap::IndexSet;
 use referencer::Referencers;
 
 use crate::error::FederationError;
@@ -135,12 +135,18 @@ impl FederationSchema {
         self.get_type(type_name).ok()
     }
 
+    /// Return the possible runtime types for a definition.
+    ///
+    /// For a union, the possible runtime types are its members.
+    /// For an interface, the possible runtime types are its implementers.
+    ///
+    /// Note this always allocates a set for the result. Avoid calling it frequently.
     pub(crate) fn possible_runtime_types(
         &self,
         composite_type_definition_position: CompositeTypeDefinitionPosition,
     ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
         Ok(match composite_type_definition_position {
-            CompositeTypeDefinitionPosition::Object(pos) => IndexSet::from([pos]),
+            CompositeTypeDefinitionPosition::Object(pos) => IndexSet::from_iter([pos]),
             CompositeTypeDefinitionPosition::Interface(pos) => self
                 .referencers()
                 .get_interface_type(&pos.type_name)?
@@ -155,10 +161,6 @@ impl FederationSchema {
                 })
                 .collect::<IndexSet<_>>(),
         })
-    }
-
-    pub(crate) fn validate(self) -> Result<ValidFederationSchema, FederationError> {
-        self.validate_or_return_self().map_err(|e| e.1)
     }
 
     /// Similar to `Self::validate` but returns `self` as part of the error should it be needed by
@@ -226,10 +228,6 @@ impl ValidFederationSchema {
         Self::new_assume_valid(schema).map_err(|(_schema, error)| error)
     }
 
-    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.schema, &other.schema)
-    }
-
     /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
     fn new_assume_valid(
         mut schema: FederationSchema,
@@ -277,13 +275,12 @@ impl ValidFederationSchema {
             return Ok(name);
         }
 
-        // TODO: this otherwise needs to check for a type name in schema based
+        // TODO for composition: this otherwise needs to check for a type name in schema based
         // on the latest federation version.
-        // FED-311
-        Err(SingleFederationError::Internal {
-            message: String::from("typename should have been looked in a federation feature"),
-        }
-        .into())
+        // This code path is not hit during planning.
+        Err(FederationError::internal(
+            "typename should have been looked in a federation feature",
+        ))
     }
 
     pub(crate) fn is_interface_object_type(

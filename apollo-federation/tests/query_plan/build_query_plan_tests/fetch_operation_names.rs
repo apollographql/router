@@ -253,7 +253,9 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
         "operation.graphql",
     )
     .unwrap();
-    let plan = planner.build_query_plan(&document, None).unwrap();
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .unwrap();
 
     // Note: The way the code that handle multiple plans currently work, it mess up the order of fields a bit. It's not a
     // big deal in practice cause everything gets re-order in practice during actual execution, but this means it's a tad
@@ -265,7 +267,7 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
     assert_eq!(fetch.subgraph_name.as_ref(), "S1");
     assert!(fetch.requires.is_none());
     assert!(fetch.operation_document.fragments.is_empty());
-    let mut operations = fetch.operation_document.all_operations();
+    let mut operations = fetch.operation_document.operations.iter();
     let operation = operations.next().unwrap();
     assert!(operations.next().is_none());
     // operation is essentially:

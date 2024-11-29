@@ -1,0 +1,21 @@
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+
+rhai:
+  scripts: "tests/samples/enterprise/entity-cache/private"
+  main: "private.rhai"
+
+preview_entity_cache:
+  enabled: true
+  redis:
+    urls:
+      ["redis://localhost:6379",]
+  subgraph:
+    all:
+      enabled: true
+      ttl: 10s
+    subgraphs:
+      accounts:
+        private_id: "user"

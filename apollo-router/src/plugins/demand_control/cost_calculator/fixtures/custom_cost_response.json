@@ -1,0 +1,24 @@
+{
+    "data": {
+        "fieldWithCost": 1,
+        "argWithCost": 2,
+        "enumWithCost": "A",
+        "inputWithCost": 3,
+        "scalarWithCost": 4,
+        "objectWithCost": {
+            "id": 5
+        },
+        "fieldWithListSize": [
+            "first",
+            "second",
+            "third"
+        ],
+        "fieldWithDynamicListSize": {
+            "items": [
+                { "id": 6 },
+                { "id": 7 },
+                { "id": 8 }
+            ]
+        }
+    }
+}

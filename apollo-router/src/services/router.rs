@@ -1,5 +1,8 @@
 #![allow(missing_docs)] // FIXME
 
+use std::any::Any;
+use std::mem;
+
 use bytes::Bytes;
 use futures::future::Either;
 use futures::Stream;
@@ -24,6 +27,7 @@ use super::supergraph;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
+use crate::services;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 use crate::Context;
@@ -51,15 +55,6 @@ pub struct Request {
 
     /// Context for extension
     pub context: Context,
-}
-
-impl From<http::Request<Body>> for Request {
-    fn from(router_request: http::Request<Body>) -> Self {
-        Self {
-            router_request,
-            context: Context::new(),
-        }
-    }
 }
 
 impl From<(http::Request<Body>, Context)> for Request {
@@ -185,15 +180,6 @@ assert_impl_all!(Response: Send);
 pub struct Response {
     pub response: http::Response<Body>,
     pub context: Context,
-}
-
-impl From<http::Response<Body>> for Response {
-    fn from(response: http::Response<Body>) -> Self {
-        Self {
-            response,
-            context: Context::new(),
-        }
-    }
 }
 
 #[buildstructor::buildstructor]
@@ -397,4 +383,129 @@ pub(crate) struct ClientRequestAccepts {
     pub(crate) multipart_subscription: bool,
     pub(crate) json: bool,
     pub(crate) wildcard: bool,
+}
+
+impl<T> From<http::Response<T>> for Response
+where
+    T: http_body::Body<Data = Bytes> + Send + 'static,
+    <T as http_body::Body>::Error: Into<BoxError>,
+{
+    fn from(response: http::Response<T>) -> Self {
+        let context: Context = response.extensions().get().cloned().unwrap_or_default();
+
+        Self {
+            response: response.map(convert_to_body),
+            context,
+        }
+    }
+}
+
+impl From<Response> for http::Response<Body> {
+    fn from(mut response: Response) -> Self {
+        response.response.extensions_mut().insert(response.context);
+        response.response
+    }
+}
+
+impl<T> From<http::Request<T>> for Request
+where
+    T: http_body::Body<Data = Bytes> + Send + 'static,
+
+    <T as http_body::Body>::Error: Into<BoxError>,
+{
+    fn from(request: http::Request<T>) -> Self {
+        let context: Context = request.extensions().get().cloned().unwrap_or_default();
+
+        Self {
+            router_request: request.map(convert_to_body),
+            context,
+        }
+    }
+}
+
+impl From<Request> for http::Request<Body> {
+    fn from(mut request: Request) -> Self {
+        request
+            .router_request
+            .extensions_mut()
+            .insert(request.context);
+        request.router_request
+    }
+}
+
+/// This function is used to convert a `http_body::Body` into a `Body`.
+/// It does a downcast check to see if the body is already a `Body` and if it is then it just returns it.
+/// There is zero overhead if the body is already a `Body`.
+/// Note that ALL graphql responses are already a stream as they may be part of a deferred or stream response,
+/// therefore if a body has to be wrapped the cost is minimal.
+fn convert_to_body<T>(mut b: T) -> Body
+where
+    T: http_body::Body<Data = Bytes> + Send + 'static,
+
+    <T as http_body::Body>::Error: Into<BoxError>,
+{
+    let val_any = &mut b as &mut dyn Any;
+    match val_any.downcast_mut::<Body>() {
+        Some(body) => mem::take(body),
+        None => Body::wrap_stream(services::http::body_stream::BodyStream::new(
+            b.map_err(Into::into),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::pin::Pin;
+    use std::task::Context;
+    use std::task::Poll;
+
+    use http::HeaderMap;
+    use tower::BoxError;
+
+    use crate::services::router::body::get_body_bytes;
+    use crate::services::router::convert_to_body;
+
+    struct MockBody {
+        data: Option<&'static str>,
+    }
+    impl http_body::Body for MockBody {
+        type Data = bytes::Bytes;
+        type Error = BoxError;
+
+        fn poll_data(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+            if let Some(data) = self.data.take() {
+                Poll::Ready(Some(Ok(bytes::Bytes::from(data))))
+            } else {
+                Poll::Ready(None)
+            }
+        }
+
+        fn poll_trailers(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
+            Poll::Ready(Ok(None))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_convert_from_http_body() {
+        let body = convert_to_body(MockBody { data: Some("test") });
+        assert_eq!(
+            &String::from_utf8(get_body_bytes(body).await.unwrap().to_vec()).unwrap(),
+            "test"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_convert_from_hyper_body() {
+        let body = convert_to_body(hyper::Body::from("test"));
+        assert_eq!(
+            &String::from_utf8(get_body_bytes(body).await.unwrap().to_vec()).unwrap(),
+            "test"
+        );
+    }
 }

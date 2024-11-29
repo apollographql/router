@@ -19,7 +19,6 @@ use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
-use jsonpath_lib::Selector;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
@@ -34,6 +33,7 @@ use opentelemetry::sdk::trace::TracerProvider;
 use opentelemetry::sdk::Resource;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
 use opentelemetry_api::KeyValue;
@@ -53,7 +53,6 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time::Instant;
-use tower::BoxError;
 use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_core::LevelFilter;
@@ -81,7 +80,6 @@ pub struct IntegrationTest {
     _subgraphs: wiremock::MockServer,
     telemetry: Telemetry,
 
-    // Don't remove these, there is a weak reference to the tracer provider from a tracer and if the provider is dropped then no export will happen.
     pub _tracer_provider_client: TracerProvider,
     pub _tracer_provider_subgraph: TracerProvider,
     subscriber_client: Dispatch,
@@ -89,6 +87,7 @@ pub struct IntegrationTest {
     _subgraph_overrides: HashMap<String, String>,
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
+    log: String,
 }
 
 impl IntegrationTest {
@@ -104,6 +103,7 @@ struct TracedResponder {
     response_template: ResponseTemplate,
     telemetry: Telemetry,
     subscriber_subgraph: Dispatch,
+    subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Respond for TracedResponder {
@@ -113,6 +113,9 @@ impl Respond for TracedResponder {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
             let _span_guard = span.enter();
+            if let Some(callback) = &self.subgraph_callback {
+                callback();
+            }
             self.response_template.clone()
         })
     }
@@ -175,6 +178,7 @@ impl Telemetry {
                 .with_span_processor(
                     BatchSpanProcessor::builder(
                         opentelemetry_datadog::new_pipeline()
+                            .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
                         opentelemetry::runtime::Tokio,
@@ -279,6 +283,8 @@ impl IntegrationTest {
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
+        log: Option<String>,
+        subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -312,6 +318,7 @@ impl IntegrationTest {
                 ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
                 telemetry: telemetry.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
+                subgraph_callback
             })
             .mount(&subgraphs)
             .await;
@@ -347,6 +354,7 @@ impl IntegrationTest {
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
             redis_namespace,
+            log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
         }
     }
 
@@ -381,15 +389,15 @@ impl IntegrationTest {
         }
 
         router
-            .args([
+            .args(dbg!([
                 "--hr",
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
                 &self.test_schema_location.to_string_lossy(),
                 "--log",
-                "error,apollo_router=info",
-            ])
+                &self.log,
+            ]))
             .stdout(Stdio::piped());
 
         let mut router = router.spawn().expect("router should start");
@@ -481,6 +489,11 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub fn update_subgraph_overrides(&mut self, overrides: HashMap<String, String>) {
+        self._subgraph_overrides = overrides;
+    }
+
+    #[allow(dead_code)]
     pub async fn update_schema(&self, supergraph_path: &PathBuf) {
         fs::copy(supergraph_path, &self.test_schema_location).expect("could not write schema");
     }
@@ -488,9 +501,10 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn execute_default_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query_internal(
             &json!({"query":"query {topProducts{name}}","variables":{}}),
+            None,
             None,
         )
     }
@@ -499,36 +513,46 @@ impl IntegrationTest {
     pub fn execute_query(
         &self,
         query: &Value,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(query, None)
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(query, None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), None)
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}), None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_huge_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None)
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_content_type(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"))
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"), None)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_query_with_headers(
+        &self,
+        query: &Value,
+        headers: HashMap<String, String>,
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(query, None, Some(headers))
     }
 
     fn execute_query_internal(
         &self,
         query: &Value,
         content_type: Option<&'static str>,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        headers: Option<HashMap<String, String>>,
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -540,12 +564,11 @@ impl IntegrationTest {
 
         async move {
             let span = info_span!("client_request");
-            let span_id = span.context().span().span_context().trace_id().to_string();
-
+            let span_id = span.context().span().span_context().trace_id();
             async move {
                 let client = reqwest::Client::new();
 
-                let mut request = client
+                let mut builder = client
                     .post(url)
                     .header(
                         CONTENT_TYPE,
@@ -554,12 +577,16 @@ impl IntegrationTest {
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
                     .header("x-my-header", "test")
-                    .header("head", "test")
-                    .json(&query)
-                    .build()
-                    .unwrap();
+                    .header("head", "test");
+
+                if let Some(headers) = headers {
+                    for (name, value) in headers {
+                        builder = builder.header(name, value);
+                    }
+                }
+
+                let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
-                request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {
@@ -577,7 +604,7 @@ impl IntegrationTest {
     pub fn execute_untraced_query(
         &self,
         query: &Value,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -600,14 +627,16 @@ impl IntegrationTest {
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
                 Ok(response) => (
-                    response
-                        .headers()
-                        .get("apollo-custom-trace-id")
-                        .cloned()
-                        .unwrap_or(HeaderValue::from_static("no-trace-id"))
-                        .to_str()
-                        .unwrap_or_default()
-                        .to_string(),
+                    TraceId::from_hex(
+                        response
+                            .headers()
+                            .get("apollo-custom-trace-id")
+                            .cloned()
+                            .unwrap_or(HeaderValue::from_static("no-trace-id"))
+                            .to_str()
+                            .unwrap_or_default(),
+                    )
+                    .unwrap_or(TraceId::INVALID),
                     response,
                 ),
                 Err(err) => {
@@ -1028,20 +1057,6 @@ impl Drop for IntegrationTest {
         if let Some(child) = &mut self.router {
             let _ = child.start_kill();
         }
-    }
-}
-
-pub trait ValueExt {
-    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError>;
-    fn as_string(&self) -> Option<String>;
-}
-
-impl ValueExt for Value {
-    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError> {
-        Ok(Selector::new().str_path(path)?.value(self).select()?)
-    }
-    fn as_string(&self) -> Option<String> {
-        self.as_str().map(|s| s.to_string())
     }
 }
 

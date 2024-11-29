@@ -198,7 +198,7 @@ impl MarkedEventReceiver for MarkedYaml {
                 let current_label = self.current_label.take();
                 self.object_stack.push((
                     current_label.clone(),
-                    Value::Mapping(current_label, IndexMap::new(), marker),
+                    Value::Mapping(current_label, IndexMap::default(), marker),
                     id,
                 ));
             }

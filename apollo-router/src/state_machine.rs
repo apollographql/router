@@ -308,7 +308,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         server_handle: &mut Option<HttpServerHandle>,
         previous_router_service_factory: Option<&FA::RouterFactory>,
         configuration: Arc<Configuration>,
-        schema: Arc<String>,
+        sdl: Arc<String>,
         license: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
@@ -317,12 +317,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
-        let report = {
-            let ast = Schema::parse_ast(&schema)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?;
-            // Check the license
-            LicenseEnforcementReport::build(&configuration, &ast)
-        };
+        let schema = Arc::new(
+            Schema::parse_arc(sdl.clone(), &configuration)
+                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
+        );
+        // Check the license
+        let report = LicenseEnforcementReport::build(&configuration, &schema);
 
         match license {
             LicenseState::Licensed => {
@@ -362,7 +362,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             .create(
                 state_machine.is_telemetry_disabled,
                 configuration.clone(),
-                schema.to_string(),
+                schema,
                 previous_router_service_factory,
                 None,
             )
@@ -422,7 +422,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         Ok(Running {
             configuration,
             _metrics: metrics,
-            schema,
+            schema: sdl,
             license,
             server_handle: Some(server_handle),
             router_service_factory,
@@ -1119,7 +1119,7 @@ mod tests {
                 &'a mut self,
                 is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
-                schema: String,
+                schema: Arc<Schema>,
                 previous_router_service_factory: Option<&'a MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
             ) -> Result<MockMyRouterFactory, BoxError>;

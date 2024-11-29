@@ -10,7 +10,10 @@ expression: response
       "path": [
         "t",
         "u"
-      ]
+      ],
+      "extensions": {
+        "service": "Subgraph2"
+      }
     }
   ],
   "extensions": {
@@ -34,7 +37,7 @@ expression: response
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "1813ba1c272be0201096b4c4c963a07638e4f4b4ac1b97e0d90d634f2fcbac11",
+              "schemaAwareHash": "d321568b33e32986df6d30a82443ebb919949617ffc33affe8b413658af52b8a",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -73,7 +76,7 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "1fdff97ad7facf07690c3e75e3dc7f1b11ff509268ef999250912a728e7a94c9",
+                    "schemaAwareHash": "a9aa68bb30f2040298629fc2fe72dc8438ce16bcdfdbe1a16ff088cf61d38719",
                     "serviceName": "Subgraph2",
                     "variableUsages": []
                   },
@@ -125,7 +128,7 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "c9c571eac5df81ff34e5e228934d029ed322640c97ab6ad061cbee3cd81040dc",
+                    "schemaAwareHash": "da0e31f9990723a68dbd1e1bb164a068342da5561db1a28679693a406429d09a",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_0"

@@ -11,6 +11,7 @@ use tower::BoxError;
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::document;
+use crate::spec::query::transform::TransformState;
 use crate::spec::query::transform::Visitor;
 
 const LABEL_NAME: Name = name!("label");
@@ -25,12 +26,14 @@ pub(crate) fn add_defer_labels(
     let mut visitor = Labeler {
         next_label: 0,
         schema,
+        state: TransformState::new(),
     };
     document(&mut visitor, doc)
 }
 
 pub(crate) struct Labeler<'a> {
     schema: &'a Schema,
+    state: TransformState,
     next_label: u32,
 }
 
@@ -64,6 +67,10 @@ impl Visitor for Labeler<'_> {
 
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
+    }
+
+    fn state(&mut self) -> &mut TransformState {
+        &mut self.state
     }
 }
 

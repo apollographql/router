@@ -32,12 +32,6 @@ pub(crate) struct SingleStats {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct Stats {
-    pub(crate) stats_with_context: ContextualizedStats,
-    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
-}
-
-#[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleContextualizedStats {
     pub(crate) context: StatsContext,
     pub(crate) query_latency_stats: SingleQueryLatencyStats,

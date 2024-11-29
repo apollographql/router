@@ -11,3 +11,11 @@ services:
       - 6832:6832/udp
       - 16686:16686
       - 14268:14268
+  zipkin:
+    image: openzipkin/zipkin:latest
+    ports:
+      - 9411:9411
+  datadog:
+    image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:latest
+    ports:
+      - 8126:8126

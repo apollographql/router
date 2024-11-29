@@ -1,10 +1,10 @@
 <img src="https://raw.githubusercontent.com/apollographql/space-kit/main/src/illustrations/svgs/astronaut1.svg" width="100%" height="144">
 
-# Contributing to Apollo Router
+# Contributing to Apollo Router Core
 
-## Before you contribute!
+## Before you contribute
 
-> The Apollo Router is a project by [Apollo GraphQL] and is not currently ready for
+> The Apollo Router Core is a project by [Apollo GraphQL] and is not currently ready for
 > external feature contributors, though some documentation contributions may be
 > accepted. We will try to publish a roadmap as soon as possible.
 
@@ -14,10 +14,10 @@ That will allow us to figure out a way to solve the issue together, and possibly
 
 ## Setting up the project
 
-The Apollo Router is written in [Rust]. In order to contribute, you'll need to have Rust installed. To install Rust,
+The Apollo Router Core is written in [Rust]. In order to contribute, you'll need to have Rust installed. To install Rust,
 visit [https://www.rust-lang.org/tools/install].
 
-Rust has a build tool and package manager called [`cargo`] that you'll use to interact with the Apollo Router's code.
+Rust has a build tool and package manager called [`cargo`] that you'll use to interact with the router's code.
 
 To build the CLI:
 
@@ -29,7 +29,7 @@ To run the CLI:
 
 ```bash
 cargo run -- <args>
-# e.g. 'cargo run -- --help' will run the Apollo Router's help command
+# e.g. 'cargo run -- --help' will run the router's help command
 ```
 
 Refer to [the README file](README.md) or run `cargo run --help` for more information.
@@ -41,7 +41,7 @@ Refer to [the README file](README.md) or run `cargo run --help` for more informa
 
 ## Project Structure
 
-- `crates/apollo-router`: the web `Apollo Router` sources. This includes everything required to expose Apollo Router's functionality as a web server, such as serialization / deserialization, configuration management, web server set up, logging configuration etc. As well as everything required to handle graphql queries:
+- `crates/apollo-router`: the web `Apollo Router` sources. This includes everything required to expose Apollo Router Core's functionality as a web server, such as serialization / deserialization, configuration management, web server set up, logging configuration etc. As well as everything required to handle graphql queries:
 
   - query plan building
   - query plan execution
@@ -55,15 +55,15 @@ Some of the functionalities rely on the current Javascript / TypeScript implemen
 
 ## Documentation
 
-Documentation for using and contributing to the Apollo Router is built using Gatsby
+Documentation for using and contributing to the Apollo Router Core is built using Gatsby
 and [Apollo's Docs Theme for Gatsby](https://github.com/apollographql/gatsby-theme-apollo/tree/master/packages/gatsby-theme-apollo-docs)
 .
 
 To contribute to these docs, you can add or edit the markdown & MDX files in the `docs/source` directory.
 
-To build and run the documentation site locally, you'll also need a clone of 
+To build and run the documentation site locally, you'll also need a clone of
 the [apollographql/docs](https://github.com/apollographql/docs/) repository
-and run `npm run start:router` from there, after following 
+and run `npm run start:router` from there, after following
 [installation instructions](https://github.com/apollographql/docs/#developing-locally).
 
 This will start up a development server with live reload enabled. You can see the docs by
@@ -87,7 +87,7 @@ XTASKs:
 
 - **Tests**: The CI will run `cargo xtask test` which will test each relevant permutation of the available features and run the demo subgraphs.
 - **Lints**: The CI will check for lints and clippy compliance.
-- **Checks**: The CI will run cargo-deny to make sure the Apollo Router doesn't suffer an existing CVE, and that each dependency used by the Apollo Router is compatible with our license.
+- **Checks**: The CI will run cargo-deny to make sure the router doesn't suffer an existing CVE, and that each dependency used by the router is compatible with our license.
 
 After you have opened your PR and all of the status checks are passing, please assign it to one of the maintainers (found in the bottom of [the README](./README.md#contributing) who will review it and give feedback.
 

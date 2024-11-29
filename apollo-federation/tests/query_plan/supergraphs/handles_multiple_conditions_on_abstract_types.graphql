@@ -1,0 +1,119 @@
+# Composed from subgraphs with hash: ef4b999f84fcdb4baba65f1a44c84d1e4267d948
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type Book implements Product
+  @join__implements(graph: PRODUCTS, interface: "Product")
+  @join__implements(graph: REVIEWS, interface: "Product")
+  @join__type(graph: BOOKS, key: "id")
+  @join__type(graph: PRODUCTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id")
+{
+  id: ID!
+  title: String @join__field(graph: BOOKS)
+  sku: String @join__field(graph: PRODUCTS)
+  dimensions: ProductDimension @join__field(graph: PRODUCTS)
+  reviews: [Review!]! @join__field(graph: REVIEWS)
+}
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+enum join__Graph {
+  BOOKS @join__graph(name: "books", url: "none")
+  MAGAZINES @join__graph(name: "magazines", url: "none")
+  PRODUCTS @join__graph(name: "products", url: "none")
+  REVIEWS @join__graph(name: "reviews", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Magazine implements Product
+  @join__implements(graph: PRODUCTS, interface: "Product")
+  @join__implements(graph: REVIEWS, interface: "Product")
+  @join__type(graph: MAGAZINES, key: "id")
+  @join__type(graph: PRODUCTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id")
+{
+  id: ID!
+  title: String @join__field(graph: MAGAZINES)
+  sku: String @join__field(graph: PRODUCTS)
+  dimensions: ProductDimension @join__field(graph: PRODUCTS)
+  reviews: [Review!]! @join__field(graph: REVIEWS)
+}
+
+interface Product
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS)
+{
+  id: ID!
+  sku: String @join__field(graph: PRODUCTS)
+  dimensions: ProductDimension @join__field(graph: PRODUCTS)
+  reviews: [Review!]! @join__field(graph: REVIEWS)
+}
+
+type ProductDimension
+  @join__type(graph: PRODUCTS)
+{
+  size: String
+  weight: Float
+}
+
+type Query
+  @join__type(graph: BOOKS)
+  @join__type(graph: MAGAZINES)
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS)
+{
+  products: [Product] @join__field(graph: PRODUCTS)
+}
+
+type Review
+  @join__type(graph: REVIEWS)
+{
+  id: Int!
+  body: String!
+  product: Product
+}

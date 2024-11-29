@@ -123,13 +123,10 @@ impl ExecutionService {
         let context = req.context;
         let ctx = context.clone();
         let variables = req.supergraph_request.body().variables.clone();
-        let operation_name = req.supergraph_request.body().operation_name.clone();
 
         let (sender, receiver) = mpsc::channel(10);
-        let is_deferred = req
-            .query_plan
-            .is_deferred(operation_name.as_deref(), &variables);
-        let is_subscription = req.query_plan.is_subscription(operation_name.as_deref());
+        let is_deferred = req.query_plan.is_deferred(&variables);
+        let is_subscription = req.query_plan.is_subscription();
         let mut claims = None;
         if is_deferred {
             claims = context.get(APOLLO_AUTHENTICATION_JWT_CLAIMS).ok().flatten()
@@ -190,7 +187,7 @@ impl ExecutionService {
         let mut nullified_paths: Vec<Path> = vec![];
 
         let metrics_ref_mode = match &self.apollo_telemetry_config {
-            Some(conf) => conf.experimental_apollo_metrics_reference_mode,
+            Some(conf) => conf.metrics_reference_mode,
             _ => ApolloMetricsReferenceMode::default(),
         };
 
@@ -240,7 +237,6 @@ impl ExecutionService {
                 ready(execution_span.in_scope(|| {
                     Self::process_graphql_response(
                         &query,
-                        operation_name.as_deref(),
                         &variables,
                         is_deferred,
                         &schema,
@@ -259,7 +255,6 @@ impl ExecutionService {
     #[allow(clippy::too_many_arguments)]
     fn process_graphql_response(
         query: &Arc<Query>,
-        operation_name: Option<&str>,
         variables: &Object,
         is_deferred: bool,
         schema: &Arc<Schema>,
@@ -295,7 +290,7 @@ impl ExecutionService {
         }
 
         let has_next = response.has_next.unwrap_or(true);
-        let variables_set = query.defer_variables_set(operation_name, variables);
+        let variables_set = query.defer_variables_set(variables);
 
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
@@ -332,7 +327,6 @@ impl ExecutionService {
             if let Some(filtered_query) = query.filtered_query.as_ref() {
                 paths = filtered_query.format_response(
                     &mut response,
-                    operation_name,
                     variables.clone(),
                     schema.api_schema(),
                     variables_set,
@@ -343,7 +337,6 @@ impl ExecutionService {
                 query
                     .format_response(
                         &mut response,
-                        operation_name,
                         variables.clone(),
                         schema.api_schema(),
                         variables_set,
@@ -353,16 +346,19 @@ impl ExecutionService {
 
             nullified_paths.extend(paths);
 
-            let referenced_enums = if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
+            let mut referenced_enums = context
+                .extensions()
+                .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                .unwrap_or_default();
+            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
                 extract_enums_from_response(
                     query.clone(),
-                    operation_name,
                     schema.api_schema(),
                     response_body,
+                    &mut referenced_enums,
                 )
-            } else {
-                ReferencedEnums::new()
             };
+
             context
                     .extensions()
                     .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
@@ -376,12 +372,9 @@ impl ExecutionService {
 
                 response.errors.retain(|error| match &error.path {
                     None => true,
-                    Some(error_path) => query.contains_error_path(
-                        operation_name,
-                        &response.label,
-                        error_path,
-                        variables_set,
-                    ),
+                    Some(error_path) => {
+                        query.contains_error_path(&response.label, error_path, variables_set)
+                    }
                 });
 
                 response.label = rewrite_defer_label(&response);
@@ -429,7 +422,6 @@ impl ExecutionService {
 
                 Self::split_incremental_response(
                     query,
-                    operation_name,
                     has_next,
                     variables_set,
                     response,
@@ -441,7 +433,6 @@ impl ExecutionService {
 
     fn split_incremental_response(
         query: &Arc<Query>,
-        operation_name: Option<&str>,
         has_next: bool,
         variables_set: BooleanValues,
         response: Response,
@@ -460,12 +451,8 @@ impl ExecutionService {
                     .filter(|error| match &error.path {
                         None => false,
                         Some(error_path) => {
-                            query.contains_error_path(
-                                operation_name,
-                                &response.label,
-                                error_path,
-                                variables_set,
-                            ) && error_path.starts_with(&path)
+                            query.contains_error_path(&response.label, error_path, variables_set)
+                                && error_path.starts_with(&path)
                         }
                     })
                     .cloned()

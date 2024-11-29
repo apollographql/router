@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -9,15 +10,18 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
+use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::PlannerMode;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spec::Schema;
 use crate::Configuration;
 use crate::Notify;
 
@@ -88,17 +92,24 @@ impl<T: Plugin> PluginTestHarness<T> {
             .unwrap_or(Value::Object(Default::default()));
 
         let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
-            let planner = BridgeQueryPlanner::new(schema.to_string(), Arc::new(config), None)
-                .await
-                .unwrap();
-            (
-                schema.to_string(),
-                planner.schema().supergraph_schema().clone(),
-                planner.subgraph_schemas(),
+            let schema = Schema::parse(schema, &config).unwrap();
+            let sdl = schema.raw_sdl.clone();
+            let supergraph = schema.supergraph_schema().clone();
+            let rust_planner = PlannerMode::maybe_rust(&schema, &config).unwrap();
+            let introspection = Arc::new(IntrospectionCache::new(&config));
+            let planner = BridgeQueryPlanner::new(
+                schema.into(),
+                Arc::new(config),
+                None,
+                rust_planner,
+                introspection,
             )
+            .await
+            .unwrap();
+            (sdl, supergraph, planner.subgraph_schemas())
         } else {
             (
-                "".to_string(),
+                "".to_string().into(),
                 Valid::assume_valid(apollo_compiler::Schema::new()),
                 Default::default(),
             )
@@ -106,7 +117,8 @@ impl<T: Plugin> PluginTestHarness<T> {
 
         let plugin_init = PluginInit::builder()
             .config(config_for_plugin.clone())
-            .supergraph_sdl(Arc::new(supergraph_sdl))
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
             .notify(Notify::default())
@@ -124,14 +136,17 @@ impl<T: Plugin> PluginTestHarness<T> {
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn call_router(
+    pub(crate) async fn call_router<F>(
         &self,
         request: router::Request,
-        response_fn: fn(router::Request) -> router::Response,
-    ) -> Result<router::Response, BoxError> {
+        response_fn: fn(router::Request) -> F,
+    ) -> Result<router::Response, BoxError>
+    where
+        F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
+    {
         let service: router::BoxService = router::BoxService::new(
             ServiceBuilder::new()
-                .service_fn(move |req: router::Request| async move { Ok((response_fn)(req)) }),
+                .service_fn(move |req: router::Request| async move { (response_fn)(req).await }),
         );
 
         self.plugin.router_service(service).call(request).await

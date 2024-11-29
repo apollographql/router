@@ -686,7 +686,6 @@ mod tests {
     use super::*;
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
-    use crate::configuration::PersistedQueriesSafelist;
     use crate::test_harness::mocks::persisted_queries::*;
     use crate::uplink::Endpoints;
 
@@ -783,15 +782,14 @@ mod tests {
         let manifest_manager = PersistedQueryManifestPoller::new(
             Configuration::fake_builder()
                 .apq(Apq::fake_new(Some(false)))
-                .persisted_query(PersistedQueries::new(
-                    Some(true),
-                    Some(false),
-                    Some(PersistedQueriesSafelist::default()),
-                    Some(false),
-                    Some(vec![
-                        "tests/fixtures/persisted-queries-manifest.json".to_string()
-                    ]),
-                ))
+                .persisted_query(
+                    PersistedQueries::builder()
+                        .enabled(true)
+                        .experimental_local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        ])
+                        .build(),
+                )
                 .build()
                 .unwrap(),
         )

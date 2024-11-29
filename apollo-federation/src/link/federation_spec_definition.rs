@@ -12,7 +12,10 @@ use lazy_static::lazy_static;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
+use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
+use crate::link::cost_spec_definition::CostSpecDefinition;
+use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -29,11 +32,16 @@ pub(crate) const FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC: Name = name!("requi
 pub(crate) const FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC: Name = name!("provides");
 pub(crate) const FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("shareable");
 pub(crate) const FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC: Name = name!("override");
+pub(crate) const FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
+pub(crate) const FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("fromContext");
 
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
+pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
+pub(crate) const FEDERATION_NAME_ARGUMENT_NAME: Name = name!("name");
+pub(crate) const FEDERATION_FIELD_ARGUMENT_NAME: Name = name!("field");
 
 pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
@@ -46,6 +54,19 @@ pub(crate) struct RequiresDirectiveArguments<'doc> {
 
 pub(crate) struct ProvidesDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
+}
+
+pub(crate) struct ContextDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
+}
+
+pub(crate) struct FromContextDirectiveArguments<'doc> {
+    pub(crate) field: &'doc str,
+}
+
+pub(crate) struct OverrideDirectiveArguments<'doc> {
+    pub(crate) from: &'doc str,
+    pub(crate) label: Option<&'doc str>,
 }
 
 #[derive(Debug)]
@@ -358,23 +379,175 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn override_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC
+                ))
+            })
+    }
+
     pub(crate) fn override_directive(
         &self,
         schema: &FederationSchema,
         from: String,
+        label: &Option<&str>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
             .directive_name_in_schema(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
+
+        let mut arguments = vec![Node::new(Argument {
+            name: FEDERATION_FROM_ARGUMENT_NAME,
+            value: Node::new(Value::String(from)),
+        })];
+
+        if let Some(label) = label {
+            arguments.push(Node::new(Argument {
+                name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+                value: Node::new(Value::String(label.to_string())),
+            }));
+        }
         Ok(Directive {
             name: name_in_schema,
-            arguments: vec![Node::new(Argument {
-                name: FEDERATION_FROM_ARGUMENT_NAME,
-                value: Node::new(Value::String(from)),
-            })],
+            arguments,
         })
+    }
+
+    pub(crate) fn override_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<OverrideDirectiveArguments<'doc>, FederationError> {
+        Ok(OverrideDirectiveArguments {
+            from: directive_required_string_argument(application, &FEDERATION_FROM_ARGUMENT_NAME)?,
+            label: directive_optional_string_argument(
+                application,
+                &FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
+    pub(crate) fn context_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                ))
+            })
+    }
+
+    pub(crate) fn context_directive(
+        &self,
+        schema: &FederationSchema,
+        name: String,
+    ) -> Result<Directive, FederationError> {
+        let name_in_schema = self
+            .directive_name_in_schema(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find federation spec in schema".to_owned(),
+            })?;
+
+        let arguments = vec![Node::new(Argument {
+            name: FEDERATION_NAME_ARGUMENT_NAME,
+            value: Node::new(Value::String(name)),
+        })];
+
+        Ok(Directive {
+            name: name_in_schema,
+            arguments,
+        })
+    }
+
+    pub(crate) fn context_directive_arguments(
+        application: &Node<Directive>,
+    ) -> Result<ContextDirectiveArguments, FederationError> {
+        Ok(ContextDirectiveArguments {
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
+        })
+    }
+
+    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive definition.
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn from_context_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                ))
+            })
+    }
+
+    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive arguments.
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn from_context_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
+        Ok(FromContextDirectiveArguments {
+            field: directive_required_string_argument(
+                application,
+                &FEDERATION_FIELD_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
+    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive.
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn from_context_directive(
+        &self,
+        schema: &FederationSchema,
+        name: String,
+    ) -> Result<Directive, FederationError> {
+        let name_in_schema = self
+            .directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find federation spec in schema".to_owned(),
+            })?;
+
+        let arguments = vec![Node::new(Argument {
+            name: FEDERATION_FIELD_ARGUMENT_NAME,
+            value: Node::new(Value::String(name)),
+        })];
+
+        Ok(Directive {
+            name: name_in_schema,
+            arguments,
+        })
+    }
+
+    pub(crate) fn get_cost_spec_definition(
+        &self,
+        schema: &FederationSchema,
+    ) -> Option<&'static CostSpecDefinition> {
+        schema
+            .metadata()
+            .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()))
+            .and_then(|link| COST_VERSIONS.find(&link.url.version))
+            .or_else(|| COST_VERSIONS.find_for_federation_version(self.version()))
     }
 }
 
@@ -414,6 +587,22 @@ lazy_static! {
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 5,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 6,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 7,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 8,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 9,
         }));
         definitions
     };

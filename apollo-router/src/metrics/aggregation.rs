@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::mem;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -25,7 +24,6 @@ use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::AsyncInstrument;
 use opentelemetry_api::metrics::CallbackRegistration;
-use opentelemetry_api::metrics::MetricsError;
 use opentelemetry_api::metrics::Observer;
 
 use crate::metrics::filter::FilterMeterProvider;
@@ -76,16 +74,31 @@ pub(crate) struct Inner {
     registered_instruments: Vec<InstrumentWrapper>,
 }
 
+/// Fields are never used directly but strong references here
+/// keep weak references elsewhere upgradable.
 #[derive(From)]
 pub(crate) enum InstrumentWrapper {
-    U64Counter(Arc<Counter<u64>>),
-    F64Counter(Arc<Counter<f64>>),
-    I64UpDownCounter(Arc<UpDownCounter<i64>>),
-    F64UpDownCounter(Arc<UpDownCounter<f64>>),
-    I64Histogram(Arc<Histogram<i64>>),
-    U64Histogram(Arc<Histogram<u64>>),
-    F64Histogram(Arc<Histogram<f64>>),
-    U64Gauge(Arc<ObservableGauge<u64>>),
+    U64Counter {
+        _keep_alive: Arc<Counter<u64>>,
+    },
+    F64Counter {
+        _keep_alive: Arc<Counter<f64>>,
+    },
+    I64UpDownCounter {
+        _keep_alive: Arc<UpDownCounter<i64>>,
+    },
+    F64UpDownCounter {
+        _keep_alive: Arc<UpDownCounter<f64>>,
+    },
+    I64Histogram {
+        _keep_alive: Arc<Histogram<i64>>,
+    },
+    U64Histogram {
+        _keep_alive: Arc<Histogram<u64>>,
+    },
+    F64Histogram {
+        _keep_alive: Arc<Histogram<f64>>,
+    },
 }
 
 #[derive(Eq, PartialEq, Hash)]
@@ -136,7 +149,6 @@ impl AggregateMeterProvider {
     }
 
     /// Create a registered instrument. This enables caching at callsites and invalidation at the meter provider via weak reference.
-    #[allow(dead_code)]
     pub(crate) fn create_registered_instrument<T>(
         &self,
         create_fn: impl Fn(&mut Inner) -> T,
@@ -466,24 +478,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
     ) -> opentelemetry_api::metrics::Result<Box<dyn CallbackRegistration>> {
         // We may implement this in future, but for now we don't need it and it's a pain to implement because we need to unwrap the aggregate instruments and pass them to the meter provider that owns them.
         unimplemented!("register_callback is not supported on AggregateInstrumentProvider");
-    }
-}
-
-struct AggregatedCallbackRegistrations(Vec<Box<dyn CallbackRegistration>>);
-impl CallbackRegistration for AggregatedCallbackRegistrations {
-    fn unregister(&mut self) -> opentelemetry_api::metrics::Result<()> {
-        let mut errors = vec![];
-        for mut registration in mem::take(&mut self.0) {
-            if let Err(err) = registration.unregister() {
-                errors.push(err);
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(MetricsError::Other(format!("{errors:?}")))
-        }
     }
 }
 

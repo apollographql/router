@@ -1,0 +1,2 @@
+limits:
+  http_max_request_bytes: 10

@@ -1,11 +1,13 @@
 ---
 source: apollo-federation/tests/composition_tests.rs
-expression: print_sdl(&supergraph.to_api_schema())
+expression: "print_sdl(supergraph.to_api_schema(Default::default()).unwrap().schema())"
 ---
 enum E {
   V1
   V2
 }
+
+scalar Import
 
 type Query {
   t: T
@@ -22,4 +24,3 @@ type T {
 }
 
 union U = S | T
-

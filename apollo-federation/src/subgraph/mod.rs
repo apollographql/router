@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
@@ -10,8 +12,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use indexmap::map::Entry;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::link::spec::Identity;
@@ -28,6 +28,7 @@ use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
 use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
 use crate::subgraph::spec::SERVICE_SDL_QUERY;
 use crate::subgraph::spec::SERVICE_TYPE;
+use crate::ValidFederationSubgraph;
 
 mod database;
 pub mod spec;
@@ -235,8 +236,8 @@ impl Subgraph {
                 description: None,
                 name: query_type_name.name.clone(),
                 directives: Default::default(),
-                fields: IndexMap::new(),
-                implements_interfaces: IndexSet::new(),
+                fields: IndexMap::default(),
+                implements_interfaces: IndexSet::default(),
             })))
         {
             let query_type = query_type.make_mut();
@@ -324,6 +325,16 @@ pub struct ValidSubgraph {
 impl std::fmt::Debug for ValidSubgraph {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, r#"name: {}, url: {}"#, self.name, self.url)
+    }
+}
+
+impl From<ValidFederationSubgraph> for ValidSubgraph {
+    fn from(value: ValidFederationSubgraph) -> Self {
+        Self {
+            name: value.name,
+            url: value.url,
+            schema: value.schema.schema().clone(),
+        }
     }
 }
 

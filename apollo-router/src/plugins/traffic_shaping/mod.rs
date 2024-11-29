@@ -17,13 +17,13 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
+use futures::FutureExt;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
+use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::retry::Retry;
 use tower::util::Either;
-use tower::util::Oneshot;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -31,11 +31,14 @@ use tower::ServiceExt;
 
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
-pub(crate) use self::rate::RateLimited;
+use self::rate::RateLimited;
 pub(crate) use self::retry::RetryPolicy;
-pub(crate) use self::timeout::Elapsed;
+use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
+use crate::configuration::shared::DnsResolutionStrategy;
 use crate::error::ConfigurationError;
+use crate::graphql;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
@@ -70,6 +73,8 @@ struct Shaping {
     experimental_retry: Option<RetryConfig>,
     /// Enable HTTP2 for subgraphs
     experimental_http2: Option<Http2Config>,
+    /// DNS resolution strategy for subgraphs
+    dns_resolution_strategy: Option<DnsResolutionStrategy>,
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -106,6 +111,11 @@ impl Merge for Shaping {
                     .experimental_http2
                     .as_ref()
                     .or(fallback.experimental_http2.as_ref())
+                    .cloned(),
+                dns_resolution_strategy: self
+                    .dns_resolution_strategy
+                    .as_ref()
+                    .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
             },
         }
@@ -266,15 +276,7 @@ impl Plugin for TrafficShaping {
 pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
     Either<
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-        timeout::future::ResponseFuture<
-            Oneshot<
-                Either<
-                    Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
-                    Either<rate::service::RateLimit<S>, S>,
-                >,
-                subgraph::Request,
-            >,
-        >,
+        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
     >,
     <S as Service<subgraph::Request>>::Future,
 >;
@@ -295,9 +297,7 @@ impl TrafficShaping {
         supergraph::Request,
         Response = supergraph::Response,
         Error = BoxError,
-        Future = timeout::future::ResponseFuture<
-            Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, supergraph::Request>,
-        >,
+        Future = BoxFuture<'static, Result<supergraph::Response, BoxError>>,
     > + Clone
            + Send
            + Sync
@@ -311,6 +311,32 @@ impl TrafficShaping {
         <S as Service<supergraph::Request>>::Future: std::marker::Send,
     {
         ServiceBuilder::new()
+            .map_future_with_request_data(
+                |req: &supergraph::Request| req.context.clone(),
+                move |ctx, future| {
+                    async {
+                        let response: Result<supergraph::Response, BoxError> = future.await;
+                        match response {
+                            Err(error) if error.is::<Elapsed>() => {
+                                supergraph::Response::error_builder()
+                                    .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                    .error::<graphql::Error>(Elapsed::new().into())
+                                    .context(ctx)
+                                    .build()
+                            }
+                            Err(error) if error.is::<RateLimited>() => {
+                                supergraph::Response::error_builder()
+                                    .status_code(StatusCode::TOO_MANY_REQUESTS)
+                                    .error::<graphql::Error>(RateLimited::new().into())
+                                    .context(ctx)
+                                    .build()
+                            }
+                            _ => response,
+                        }
+                    }
+                    .boxed()
+                },
+            )
             .layer(TimeoutLayer::new(
                 self.config
                     .router
@@ -380,6 +406,31 @@ impl TrafficShaping {
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
+                    .map_future_with_request_data(
+                        |req: &subgraph::Request| req.context.clone(),
+                        move |ctx, future| {
+                            async {
+                                let response: Result<subgraph::Response, BoxError> = future.await;
+                                match response {
+                                    Err(error) if error.is::<Elapsed>() => {
+                                        subgraph::Response::error_builder()
+                                            .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                            .error::<graphql::Error>(Elapsed::new().into())
+                                            .context(ctx)
+                                            .build()
+                                    }
+                                    Err(error) if error.is::<RateLimited>() => {
+                                        subgraph::Response::error_builder()
+                                            .status_code(StatusCode::TOO_MANY_REQUESTS)
+                                            .error::<graphql::Error>(RateLimited::new().into())
+                                            .context(ctx)
+                                            .build()
+                                    }
+                                    _ => response,
+                                }
+                            }.boxed()
+                        },
+                    )
                     .layer(TimeoutLayer::new(
                         config.shaping
                         .timeout
@@ -401,13 +452,19 @@ impl TrafficShaping {
         }
     }
 
-    pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> Http2Config {
+    pub(crate) fn subgraph_client_config(
+        &self,
+        service_name: &str,
+    ) -> crate::configuration::shared::Client {
         Self::merge_config(
             self.config.all.as_ref(),
             self.config.subgraphs.get(service_name),
         )
-        .and_then(|config| config.shaping.experimental_http2)
-        .unwrap_or(Http2Config::Enable)
+        .map(|config| crate::configuration::shared::Client {
+            experimental_http2: config.shaping.experimental_http2,
+            dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -419,6 +476,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -440,6 +498,7 @@ mod test {
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
+    use crate::spec::Schema;
     use crate::Configuration;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -519,19 +578,23 @@ mod test {
             r#"
         traffic_shaping:
             deduplicate_variables: true
+        supergraph:
+            # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            generate_query_fragments: false
         "#,
         )
         .unwrap();
 
         let config = Arc::new(config);
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         let planner = BridgeQueryPlannerPool::new(
-            schema.to_string(),
+            Vec::new(),
+            schema.clone(),
             config.clone(),
             NonZeroUsize::new(1).unwrap(),
         )
         .await
         .unwrap();
-        let schema = planner.schema();
         let subgraph_schemas = planner.subgraph_schemas();
 
         let mut builder =
@@ -703,16 +766,19 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_enable_subgraph_http2() {
+    async fn test_subgraph_client_config() {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
           experimental_http2: disable
+          dns_resolution_strategy: ipv6_only
         subgraphs: 
           products:
             experimental_http2: enable
+            dns_resolution_strategy: ipv6_then_ipv4
           reviews:
             experimental_http2: disable
+            dns_resolution_strategy: ipv4_only
         router:
           timeout: 65s
         "#,
@@ -723,9 +789,27 @@ mod test {
             .await
             .unwrap();
 
-        assert!(shaping_config.enable_subgraph_http2("products") == Http2Config::Enable);
-        assert!(shaping_config.enable_subgraph_http2("reviews") == Http2Config::Disable);
-        assert!(shaping_config.enable_subgraph_http2("this_doesnt_exist") == Http2Config::Disable);
+        assert_eq!(
+            shaping_config.subgraph_client_config("products"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Enable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
+            },
+        );
+        assert_eq!(
+            shaping_config.subgraph_client_config("reviews"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Disable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
+            },
+        );
+        assert_eq!(
+            shaping_config.subgraph_client_config("this_doesnt_exist"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Disable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
+            },
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -744,41 +828,64 @@ mod test {
 
         let plugin = get_traffic_shaping_plugin(&config).await;
 
-        let test_service = MockSubgraph::new(HashMap::new());
+        let test_service = MockSubgraph::new(hashmap! {
+            graphql::Request::default() => graphql::Response::default()
+        });
 
-        let _response = plugin
+        assert!(&plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
             .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
-            .unwrap();
-        let _response = plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
             .unwrap()
-            .subgraph_service_internal("test", test_service.clone())
-            .oneshot(SubgraphRequest::fake_builder().build())
-            .await
-            .expect_err("should be in error due to a timeout and rate limit");
-        let _response = plugin
+            .response
+            .body()
+            .errors
+            .is_empty());
+        assert_eq!(
+            plugin
+                .as_any()
+                .downcast_ref::<TrafficShaping>()
+                .unwrap()
+                .subgraph_service_internal("test", test_service.clone())
+                .oneshot(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors[0]
+                .extensions
+                .get("code")
+                .unwrap(),
+            "REQUEST_RATE_LIMITED"
+        );
+        assert!(plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
             .subgraph_service_internal("another", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
-            .unwrap();
+            .unwrap()
+            .response
+            .body()
+            .errors
+            .is_empty());
         tokio::time::sleep(Duration::from_millis(300)).await;
-        let _response = plugin
+        assert!(plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
             .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
-            .unwrap();
+            .unwrap()
+            .response
+            .body()
+            .errors
+            .is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -812,18 +919,6 @@ mod test {
             mock_service
         });
 
-        let _response = plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .supergraph_service_internal(mock_service.clone())
-            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
-
         assert!(plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
@@ -831,9 +926,33 @@ mod test {
             .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
-            .is_err());
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .errors
+            .is_empty());
+
+        assert_eq!(
+            plugin
+                .as_any()
+                .downcast_ref::<TrafficShaping>()
+                .unwrap()
+                .supergraph_service_internal(mock_service.clone())
+                .oneshot(SupergraphRequest::fake_builder().build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .errors[0]
+                .extensions
+                .get("code")
+                .unwrap(),
+            "REQUEST_RATE_LIMITED"
+        );
         tokio::time::sleep(Duration::from_millis(300)).await;
-        let _response = plugin
+        assert!(plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
@@ -843,6 +962,8 @@ mod test {
             .unwrap()
             .next_response()
             .await
-            .unwrap();
+            .unwrap()
+            .errors
+            .is_empty());
     }
 }

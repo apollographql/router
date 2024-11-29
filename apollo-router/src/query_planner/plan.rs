@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
@@ -9,6 +11,7 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::cache::estimate_size;
 use crate::configuration::Batching;
 use crate::error::CacheResolverError;
 use crate::error::ValidationErrors;
@@ -42,6 +45,10 @@ pub struct QueryPlan {
     pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) query: Arc<Query>,
     pub(crate) query_metrics: OperationLimits<u32>,
+
+    /// The estimated size in bytes of the query plan
+    #[serde(default)]
+    pub(crate) estimated_size: Arc<AtomicUsize>,
 }
 
 /// This default impl is useful for test users
@@ -64,30 +71,35 @@ impl QueryPlan {
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
             query_metrics: Default::default(),
+            estimated_size: Default::default(),
         }
     }
 }
 
 impl QueryPlan {
-    pub(crate) fn is_deferred(&self, operation: Option<&str>, variables: &Object) -> bool {
-        self.root.is_deferred(operation, variables, &self.query)
+    pub(crate) fn is_deferred(&self, variables: &Object) -> bool {
+        self.root.is_deferred(variables, &self.query)
     }
 
-    pub(crate) fn is_subscription(&self, operation: Option<&str>) -> bool {
-        match self.query.operation(operation) {
-            Some(op) => matches!(op.kind(), OperationKind::Subscription),
-            None => false,
-        }
+    pub(crate) fn is_subscription(&self) -> bool {
+        matches!(self.query.operation.kind(), OperationKind::Subscription)
     }
 
     pub(crate) fn query_hashes(
         &self,
         batching_config: Batching,
-        operation: Option<&str>,
         variables: &Object,
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
         self.root
-            .query_hashes(batching_config, operation, variables, &self.query)
+            .query_hashes(batching_config, variables, &self.query)
+    }
+
+    pub(crate) fn estimated_size(&self) -> usize {
+        if self.estimated_size.load(Ordering::SeqCst) == 0 {
+            self.estimated_size
+                .store(estimate_size(self), Ordering::SeqCst);
+        }
+        self.estimated_size.load(Ordering::SeqCst)
     }
 }
 
@@ -164,20 +176,11 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn is_deferred(
-        &self,
-        operation: Option<&str>,
-        variables: &Object,
-        query: &Query,
-    ) -> bool {
+    pub(crate) fn is_deferred(&self, variables: &Object, query: &Query) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes
-                .iter()
-                .any(|n| n.is_deferred(operation, variables, query)),
-            Self::Parallel { nodes } => nodes
-                .iter()
-                .any(|n| n.is_deferred(operation, variables, query)),
-            Self::Flatten(node) => node.node.is_deferred(operation, variables, query),
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
+            Self::Flatten(node) => node.node.is_deferred(variables, query),
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
             Self::Subscription { .. } => false,
@@ -187,19 +190,19 @@ impl PlanNode {
                 condition,
             } => {
                 if query
-                    .variable_value(operation, condition.as_str(), variables)
+                    .variable_value(condition.as_str(), variables)
                     .map(|v| *v == Value::Bool(true))
                     .unwrap_or(true)
                 {
                     // right now ConditionNode is only used with defer, but it might be used
                     // in the future to implement @skip and @include execution
                     if let Some(node) = if_clause {
-                        if node.is_deferred(operation, variables, query) {
+                        if node.is_deferred(variables, query) {
                             return true;
                         }
                     }
                 } else if let Some(node) = else_clause {
-                    if node.is_deferred(operation, variables, query) {
+                    if node.is_deferred(variables, query) {
                         return true;
                     }
                 }
@@ -224,7 +227,6 @@ impl PlanNode {
     pub(crate) fn query_hashes(
         &self,
         batching_config: Batching,
-        operation: Option<&str>,
         variables: &Object,
         query: &Query,
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
@@ -270,7 +272,7 @@ impl PlanNode {
                         condition,
                     } => {
                         if query
-                            .variable_value(operation, condition.as_str(), variables)
+                            .variable_value(condition.as_str(), variables)
                             .map(|v| *v == Value::Bool(true))
                             .unwrap_or(true)
                         {
@@ -606,4 +608,18 @@ pub(crate) struct DeferredNode {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
     pub(crate) id: String,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::query_planner::QueryPlan;
+
+    #[test]
+    fn test_estimated_size() {
+        let query_plan = QueryPlan::fake_builder().build();
+        let size1 = query_plan.estimated_size();
+        let size2 = query_plan.estimated_size();
+        assert!(size1 > 0);
+        assert_eq!(size1, size2);
+    }
 }

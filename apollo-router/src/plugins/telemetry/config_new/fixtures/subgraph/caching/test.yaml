@@ -1,0 +1,47 @@
+description: Custom counter using cache selector
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: "custom_value"
+        body: |
+          hello
+    - context:
+        map:
+          "operation_name": "Test"
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: custom_value
+        query: "query Test { hello }"
+    - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+        headers:
+          custom_header: custom_value
+    - context:
+        map:
+          "apollo::router::entity_cache_info_subgraph_products":
+            Product:
+              hit: 3
+              miss: 0
+            Review:
+              hit: 5
+              miss: 0
+    - subgraph_response:
+        status: 200
+        subgraph_name: "products"
+        data:
+          hello: "world"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - router_response:
+        body: |
+          hello
+        status: 200

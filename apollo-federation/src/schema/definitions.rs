@@ -4,35 +4,8 @@ use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::position::UnionTypeDefinitionPosition;
 
-#[derive(derive_more::From)]
-pub(crate) enum AbstractType {
-    Interface(InterfaceTypeDefinitionPosition),
-    Union(UnionTypeDefinitionPosition),
-}
-
-impl From<AbstractType> for CompositeTypeDefinitionPosition {
-    fn from(value: AbstractType) -> Self {
-        match value {
-            AbstractType::Interface(x) => Self::Interface(x),
-            AbstractType::Union(x) => Self::Union(x),
-        }
-    }
-}
-
-pub(crate) fn is_abstract_type(ty: TypeDefinitionPosition) -> bool {
-    matches!(
-        ty,
-        crate::schema::position::TypeDefinitionPosition::Interface(_)
-            | crate::schema::position::TypeDefinitionPosition::Union(_)
-    )
-}
-
-pub(crate) fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, FederationError> {
+fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, FederationError> {
     Ok(matches!(
         schema
             .types

@@ -1,22 +1,24 @@
-use std::sync::Arc;
-
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
-use indexmap::IndexSet;
 
 use super::normalize_operation;
+use super::Field;
 use super::Name;
 use super::NamedFragments;
 use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
+use crate::error::FederationError;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::Subgraph;
+
+mod defer;
 
 pub(super) fn parse_schema_and_operation(
     schema_and_operation: &str,
@@ -40,27 +42,27 @@ pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
 }
 
 pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
-    let executable_document = apollo_compiler::ExecutableDocument::parse_and_validate(
+    Operation::parse(schema.clone(), query, "query.graphql", None).unwrap()
+}
+
+pub(super) fn parse_and_expand(
+    schema: &ValidFederationSchema,
+    query: &str,
+) -> Result<Operation, FederationError> {
+    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
         schema.schema(),
         query,
         "query.graphql",
-    )
-    .unwrap();
-    let operation = executable_document.get_operation(None).unwrap();
-    let named_fragments = NamedFragments::new(&executable_document.fragments, schema);
-    let selection_set =
-        SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
-            .unwrap();
+    )?;
 
-    Operation {
-        schema: schema.clone(),
-        root_kind: operation.operation_type.into(),
-        name: operation.name.clone(),
-        variables: Arc::new(operation.variables.clone()),
-        directives: Arc::new(operation.directives.clone()),
-        selection_set,
-        named_fragments,
-    }
+    let operation = doc
+        .operations
+        .anonymous
+        .as_ref()
+        .expect("must have anonymous operation");
+    let fragments = NamedFragments::new(&doc.fragments, schema);
+
+    normalize_operation(operation, fragments, schema, &Default::default())
 }
 
 /// Parse and validate the query similarly to `parse_operation`, but does not construct the
@@ -102,14 +104,15 @@ type Foo {
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_named_fragment);
     if let Some(operation) = executable_document
-        .named_operations
+        .operations
+        .named
         .get_mut("NamedFragmentQuery")
     {
         let mut normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         normalized_operation.named_fragments = Default::default();
@@ -158,12 +161,12 @@ type Foo {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_named_fragment);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let mut normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         normalized_operation.named_fragments = Default::default();
@@ -197,14 +200,15 @@ type Query {
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_introspection);
     if let Some(operation) = executable_document
-        .named_operations
+        .operations
+        .named
         .get_mut("TestIntrospectionQuery")
     {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
 
@@ -234,12 +238,12 @@ type T {
 }
 "#;
     let (schema, mut executable_document) = parse_schema_and_operation(operation_string);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test {
@@ -277,12 +281,12 @@ type T {
 }
 "#;
     let (schema, mut executable_document) = parse_schema_and_operation(operation_with_directives);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -323,12 +327,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_directives_different_arg_order);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -367,12 +371,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_one_field_with_directives);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -413,12 +417,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_different_directives);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
@@ -464,12 +468,12 @@ type T {
 }
 "#;
     let (schema, mut executable_document) = parse_schema_and_operation(operation_defer_fields);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test {
@@ -530,12 +534,12 @@ type V {
 }
 "#;
     let (schema, mut executable_document) = parse_schema_and_operation(nested_operation);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test {
@@ -589,12 +593,12 @@ type T {
 }
 "#;
     let (schema, mut executable_document) = parse_schema_and_operation(operation_with_fragments);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test {
@@ -635,12 +639,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_fragments_with_directives);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -685,12 +689,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_fragments_with_directives_args_order);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -733,12 +737,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_one_fragment_with_directive);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -781,12 +785,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_fragments_with_different_directive);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
@@ -833,12 +837,12 @@ type T {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_fragments_with_defer);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test {
@@ -901,12 +905,12 @@ type V {
 }
 "#;
     let (schema, mut executable_document) = parse_schema_and_operation(operation_nested_fragments);
-    if let Some((_, operation)) = executable_document.named_operations.first_mut() {
+    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query Test {
@@ -947,12 +951,12 @@ type Foo {
 }
 "#;
     let (schema, mut executable_document) = parse_schema_and_operation(operation_with_typename);
-    if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+    if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -986,12 +990,12 @@ type Foo {
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_single_typename);
-    if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+    if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1031,8 +1035,8 @@ scalar FieldSet
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_intf_object_typename);
-    if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-        let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::new();
+    if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
+        let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::default();
         interface_objects.insert(InterfaceTypeDefinitionPosition {
             type_name: name!("Foo"),
         });
@@ -1117,13 +1121,13 @@ fn converting_operation_types() {
 }
 
 fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
-    ss.selections.contains_key(&SelectionKey::Field {
-        response_name: field_name,
-        directives: Default::default(),
+    ss.selections.contains_key(SelectionKey::Field {
+        response_name: &field_name,
+        directives: &Default::default(),
     })
 }
 
-fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
+fn is_named_field(sk: SelectionKey, name: Name) -> bool {
     matches!(sk,
             SelectionKey::Field { response_name, directives: _ }
                 if *response_name == name)
@@ -1134,20 +1138,13 @@ fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Sele
         // Error: empty path
         return None;
     };
-    let result = ss.selections.get(&SelectionKey::Field {
-        response_name: (*first).clone(),
-        directives: Default::default(),
-    });
-    let Some(value) = result else {
-        // Error: No matching field found.
-        return None;
-    };
+    let value = ss.selections.get(SelectionKey::field_name(first))?;
     if rest.is_empty() {
         // Base case => We are done.
         Some(value)
     } else {
         // Recursive case
-        match value.selection_set().unwrap() {
+        match value.selection_set() {
             None => None, // Error: Sub-selection expected, but not found.
             Some(ss) => get_value_at_path(ss, rest),
         }
@@ -1184,7 +1181,7 @@ mod make_selection_tests {
     fn test_make_selection_order() {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
-            executable_document.get_operation(None).unwrap(),
+            executable_document.operations.get(None).unwrap(),
             Default::default(),
             &schema,
             &Default::default(),
@@ -1197,7 +1194,7 @@ mod make_selection_tests {
 
         // Create a new foo with a different selection order using `make_selection`.
         let clone_selection_at_path = |base: &Selection, path: &[Name]| {
-            let base_selection_set = base.selection_set().unwrap().unwrap();
+            let base_selection_set = base.selection_set().unwrap();
             let selection = get_value_at_path(base_selection_set, path).expect("path should exist");
             let subselections = SelectionSet::from_selection(
                 base_selection_set.type_position.clone(),
@@ -1235,7 +1232,7 @@ mod lazy_map_tests {
             if !pred(s) {
                 return Ok(SelectionMapperReturn::None);
             }
-            match s.selection_set()? {
+            match s.selection_set() {
                 // Base case: leaf field
                 None => Ok(s.clone().into()),
 
@@ -1283,7 +1280,7 @@ mod lazy_map_tests {
     fn test_lazy_map() {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
-            executable_document.get_operation(None).unwrap(),
+            executable_document.operations.get(None).unwrap(),
             Default::default(),
             &schema,
             &Default::default(),
@@ -1302,14 +1299,14 @@ mod lazy_map_tests {
 
         // Remove `foo`
         let remove_foo =
-            filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("foo"))).unwrap();
+            filter_rec(&selection_set, &|s| !is_named_field(s.key(), name!("foo"))).unwrap();
         assert!(contains_field(&remove_foo, name!("some_int")));
         assert!(contains_field(&remove_foo, name!("foo2")));
         assert!(!contains_field(&remove_foo, name!("foo")));
 
         // Remove `bar`
         let remove_bar =
-            filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("bar"))).unwrap();
+            filter_rec(&selection_set, &|s| !is_named_field(s.key(), name!("bar"))).unwrap();
         // "foo2" should be removed, since it has no sub-selections left.
         assert!(!contains_field(&remove_bar, name!("foo2")));
     }
@@ -1341,7 +1338,7 @@ mod lazy_map_tests {
     fn test_lazy_map2() {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
-            executable_document.get_operation(None).unwrap(),
+            executable_document.operations.get(None).unwrap(),
             Default::default(),
             &schema,
             &Default::default(),
@@ -1352,7 +1349,7 @@ mod lazy_map_tests {
 
         // Add __typename next to any "id" field.
         let result =
-            add_typename_if(&selection_set, &|s| is_named_field(&s.key(), name!("id"))).unwrap();
+            add_typename_if(&selection_set, &|s| is_named_field(s.key(), name!("id"))).unwrap();
 
         // The top level won't have __typename, since it doesn't have "id".
         assert!(!contains_field(&result, name!("__typename")));
@@ -1363,12 +1360,8 @@ mod lazy_map_tests {
     }
 }
 
-fn field_element(
-    schema: &ValidFederationSchema,
-    object: apollo_compiler::Name,
-    field: apollo_compiler::Name,
-) -> OpPathElement {
-    OpPathElement::Field(super::Field::new(super::FieldData {
+fn field_element(schema: &ValidFederationSchema, object: Name, field: Name) -> OpPathElement {
+    OpPathElement::Field(Field {
         schema: schema.clone(),
         field_position: ObjectTypeDefinitionPosition::new(object)
             .field(field)
@@ -1377,7 +1370,7 @@ fn field_element(
         arguments: Default::default(),
         directives: Default::default(),
         sibling_typename: None,
-    }))
+    })
 }
 
 const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
@@ -1503,7 +1496,10 @@ fn add_at_path_collapses_unnecessary_fragments() {
             Some(
                 &SelectionSet::parse(
                     schema.clone(),
-                    InterfaceTypeDefinitionPosition::new(name!("X")).into(),
+                    InterfaceTypeDefinitionPosition {
+                        type_name: name!("X"),
+                    }
+                    .into(),
                     "... on C { d }",
                 )
                 .unwrap()
@@ -1551,12 +1547,12 @@ fn test_expand_all_fragments1() {
           }
         "#;
     let (schema, executable_document) = parse_schema_and_operation(operation_with_named_fragment);
-    if let Ok(operation) = executable_document.get_operation(None) {
+    if let Ok(operation) = executable_document.operations.get(None) {
         let mut normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
-            &IndexSet::new(),
+            &IndexSet::default(),
         )
         .unwrap();
         normalized_operation.named_fragments = Default::default();
@@ -1575,4 +1571,136 @@ fn test_expand_all_fragments1() {
             }
             "###);
     }
+}
+
+#[test]
+fn used_variables() {
+    let schema = r#"
+        input Ints { a: Int }
+        input LInts { a: [Int], b: LInts }
+        type Query {
+            f(ints: [Int]): Int
+            g(ints: Ints): Int
+            h(ints: LInts): Int
+            subquery: Query
+        }
+    "#;
+    let query = r#"
+        query ($a: Int, $b: Int, $c: Int, $d: Int) {
+            f(ints: [1, $a, 2])
+            g(ints: { a: $b })
+            subquery {
+                h(ints: {
+                    b: {
+                        a: [$d, $d]
+                        b: {
+                            a: [$c, 3, 4]
+                        }
+                    }
+                })
+            }
+        }
+    "#;
+
+    let valid = parse_schema(schema);
+    let operation = Operation::parse(valid, query, "used_variables.graphql", None).unwrap();
+
+    let mut variables = operation
+        .selection_set
+        .used_variables()
+        .into_iter()
+        .collect::<Vec<_>>();
+    variables.sort();
+    assert_eq!(variables, ["a", "b", "c", "d"]);
+
+    let Selection::Field(subquery) = operation
+        .selection_set
+        .selections
+        .get(SelectionKey::field_name(&name!("subquery")))
+        .unwrap()
+    else {
+        unreachable!();
+    };
+    let mut variables = subquery
+        .selection_set
+        .as_ref()
+        .unwrap()
+        .used_variables()
+        .into_iter()
+        .collect::<Vec<_>>();
+    variables.sort();
+    assert_eq!(variables, ["c", "d"], "works for a subset of the query");
+}
+
+#[test]
+fn directive_propagation() {
+    let schema_doc = r#"
+        type Query {
+          t1: T
+          t2: T
+          t3: T
+        }
+
+        type T {
+          a: Int
+          b: Int
+          c: Int
+          d: Int
+        }
+
+        directive @fragDefOnly on FRAGMENT_DEFINITION
+        directive @fragSpreadOnly on FRAGMENT_SPREAD
+        directive @fragInlineOnly on INLINE_FRAGMENT
+        directive @fragAll on FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
+    "#;
+
+    let schema = parse_schema(schema_doc);
+
+    let query = parse_and_expand(
+        &schema,
+        r#"
+        fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
+        query {
+          t2 {
+            ... on T @fragInlineOnly @fragAll { a }
+          }
+          t3 {
+            ...DirectiveOnDef @fragAll
+          }
+        }
+    "#,
+    )
+    .expect("directive applications to be valid");
+    insta::assert_snapshot!(query, @r###"
+    fragment DirectiveOnDef on T @fragDefOnly @fragAll {
+      a
+    }
+
+    {
+      t2 {
+        ... on T @fragInlineOnly @fragAll {
+          a
+        }
+      }
+      t3 {
+        ... on T @fragAll {
+          a
+        }
+      }
+    }
+    "###);
+
+    let err = parse_and_expand(
+        &schema,
+        r#"
+        fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
+        query {
+          t1 {
+            ...DirectiveOnDef @fragSpreadOnly @fragAll
+          }
+        }
+    "#,
+    )
+    .expect_err("directive @fragSpreadOnly to be rejected");
+    insta::assert_snapshot!(err, @"Unsupported custom directive @fragSpreadOnly on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.");
 }

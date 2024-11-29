@@ -28,7 +28,6 @@ use http::Uri;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
 use serde_json_bytes::json;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 use walkdir::DirEntry;
@@ -468,7 +467,7 @@ async fn persisted_queries() {
     assert_eq!(
         actual.errors,
         vec![apollo_router::graphql::Error::builder()
-            .message(&format!(
+            .message(format!(
                 "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
             ))
             .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
@@ -1291,52 +1290,6 @@ impl Plugin for CountingServiceRegistry {
     }
 }
 
-trait ValueExt {
-    fn eq_and_ordered(&self, other: &Self) -> bool;
-}
-
-impl ValueExt for Value {
-    fn eq_and_ordered(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Value::Object(a), Value::Object(b)) => {
-                let mut it_a = a.iter();
-                let mut it_b = b.iter();
-
-                loop {
-                    match (it_a.next(), it_b.next()) {
-                        (Some(_), None) | (None, Some(_)) => break false,
-                        (None, None) => break true,
-                        (Some((field_a, value_a)), Some((field_b, value_b)))
-                            if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
-                        {
-                            continue
-                        }
-                        (Some(_), Some(_)) => break false,
-                    }
-                }
-            }
-            (Value::Array(a), Value::Array(b)) => {
-                let mut it_a = a.iter();
-                let mut it_b = b.iter();
-
-                loop {
-                    match (it_a.next(), it_b.next()) {
-                        (Some(_), None) | (None, Some(_)) => break false,
-                        (None, None) => break true,
-                        (Some(value_a), Some(value_b))
-                            if ValueExt::eq_and_ordered(value_a, value_b) =>
-                        {
-                            continue
-                        }
-                        (Some(_), Some(_)) => break false,
-                    }
-                }
-            }
-            (a, b) => a == b,
-        }
-    }
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn all_stock_router_example_yamls_are_valid() {
     let example_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples");
@@ -1432,4 +1385,38 @@ async fn test_telemetry_doesnt_hang_with_invalid_schema() {
 "#,
     )
     .await;
+}
+
+// Ensure that, on unix, the router won't start with wrong file permissions
+#[cfg(unix)]
+#[test]
+fn it_will_not_start_with_loose_file_permissions() {
+    use std::os::fd::AsRawFd;
+    use std::process::Command;
+
+    use crate::integration::IntegrationTest;
+
+    let mut router = Command::new(IntegrationTest::router_location());
+
+    let tester = tempfile::NamedTempFile::new().expect("it created a temporary test file");
+    let fd = tester.as_file().as_raw_fd();
+    let path = tester.path().to_str().expect("got the tempfile path");
+
+    // Modify our temporary file permissions so that they are definitely too loose.
+    unsafe {
+        libc::fchmod(fd, 0o777);
+    }
+
+    let output = router
+        .args(["--apollo-key-path", path])
+        .output()
+        .expect("router could not start");
+
+    // Assert that our router executed unsuccessfully
+    assert!(!output.status.success());
+    // It may have been unsuccessful for a variety of reasons, is it the right reason?
+    assert_eq!(
+        std::str::from_utf8(&output.stderr).expect("output is a string"),
+        "Apollo key file permissions (0o777) are too permissive\n"
+    )
 }

@@ -37,14 +37,15 @@ use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
+use crate::services::hickory_dns_connector::new_async_http_connector;
+use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router::body::RouterBody;
-use crate::services::trust_dns_connector::new_async_http_connector;
-use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::Configuration;
 use crate::Context;
 
@@ -56,8 +57,6 @@ type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, RouterBody>>;
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
 type MixedClient = HTTPClient;
-
-pub(crate) const HTTP_REQUEST_SPAN_NAME: &str = "http_request";
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -104,7 +103,7 @@ impl HttpClientService {
         service: impl Into<String>,
         configuration: &Configuration,
         tls_root_store: &RootCertStore,
-        http2: Http2Config,
+        client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
         let tls_cert_store = configuration
@@ -132,15 +131,16 @@ impl HttpClientService {
 
         let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
 
-        HttpClientService::new(name, http2, tls_client_config)
+        HttpClientService::new(name, tls_client_config, client_config)
     }
 
     pub(crate) fn new(
         service: impl Into<String>,
-        http2: Http2Config,
         tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        let mut http_connector = new_async_http_connector()?;
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -150,6 +150,7 @@ impl HttpClientService {
             .https_or_http()
             .enable_http1();
 
+        let http2 = client_config.experimental_http2.unwrap_or_default();
         let connector = if http2 != Http2Config::Disable {
             builder.enable_http2().wrap_connector(http_connector)
         } else {

@@ -294,7 +294,7 @@ impl Variables {
             }));
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
-            let mut values: IndexSet<Value> = IndexSet::new();
+            let mut values: IndexSet<Value> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
                 if let Some(context) = subgraph_context.as_mut() {
@@ -582,6 +582,7 @@ impl FetchNode {
                         errors.push(error);
                     }
                 } else {
+                    error.path = Some(current_dir.clone());
                     errors.push(error);
                 }
             }
@@ -639,13 +640,17 @@ impl FetchNode {
                 .errors
                 .into_iter()
                 .map(|error| {
-                    let path = error.path.as_ref().map(|path| {
-                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
-                    });
+                    let path = error
+                        .path
+                        .as_ref()
+                        .map(|path| {
+                            Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
+                        })
+                        .unwrap_or_else(|| current_dir.clone());
 
                     Error {
                         locations: error.locations,
-                        path,
+                        path: Some(path),
                         message: error.message,
                         extensions: error.extensions,
                     }

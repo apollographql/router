@@ -371,7 +371,7 @@ impl AuthorizationPlugin {
             Some((filtered_doc, paths)) => {
                 unauthorized_paths.extend(paths);
 
-                // FIXME: consider only `filtered_doc.get_operation(key.operation_name)`?
+                // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
@@ -389,7 +389,7 @@ impl AuthorizationPlugin {
             Some((filtered_doc, paths)) => {
                 unauthorized_paths.extend(paths);
 
-                // FIXME: consider only `filtered_doc.get_operation(key.operation_name)`?
+                // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
@@ -407,7 +407,7 @@ impl AuthorizationPlugin {
             Some((filtered_doc, paths)) => {
                 unauthorized_paths.extend(paths);
 
-                // FIXME: consider only `filtered_doc.get_operation(key.operation_name)`?
+                // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
@@ -437,7 +437,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = AuthenticatedVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             dry_run,
         ) {
@@ -475,7 +474,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = ScopeFilteringVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             scopes.iter().cloned().collect(),
             dry_run,
@@ -510,7 +508,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = PolicyFilteringVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             policies.iter().cloned().collect(),
             dry_run,

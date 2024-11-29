@@ -145,24 +145,21 @@ pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
     let data = if url.scheme() == "file" {
         let path = url
             .to_file_path()
-            .map_err(|e| {
+            .inspect_err(|_| {
                 tracing::error!("url cannot be converted to filesystem path");
-                e
             })
             .ok()?;
         read_to_string(path)
             .await
-            .map_err(|e| {
+            .inspect_err(|e| {
                 tracing::error!(%e, "could not read JWKS path");
-                e
             })
             .ok()?
     } else {
         let my_client = CLIENT
             .as_ref()
-            .map_err(|e| {
+            .inspect_err(|e| {
                 tracing::error!(%e, "could not activate authentication feature");
-                e
             })
             .ok()?
             .clone();
