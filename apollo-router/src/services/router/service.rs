@@ -380,7 +380,7 @@ impl RouterService {
                 } else {
                     u64_counter!(
                         "apollo.router.graphql_error",
-                        "Number of GraphQL error responses returned by the router (deprecated)",
+                        "Number of GraphQL error responses returned by the router",
                         1,
                         code = "INVALID_ACCEPT_HEADER"
                     );
@@ -803,14 +803,14 @@ impl RouterService {
                 None => {
                     u64_counter!(
                         "apollo.router.graphql_error",
-                        "Number of GraphQL error responses returned by the router (deprecated)",
+                        "Number of GraphQL error responses returned by the router",
                         count
                     );
                 }
                 Some(code) => {
                     u64_counter!(
                         "apollo.router.graphql_error",
-                        "Number of GraphQL error responses returned by the router (deprecated)",
+                        "Number of GraphQL error responses returned by the router",
                         count,
                         code = code.to_string()
                     );
