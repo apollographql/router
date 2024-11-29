@@ -6,6 +6,7 @@ info:
   telemetry:
     instrumentation:
       instruments:
+        default_requirement_level: none
         connector:
           http.client.request.duration:
             attributes:
@@ -29,6 +30,7 @@ info:
   data:
     datapoints:
       - sum: 0.1
+        count: 1
         attributes:
           connector.http.method: GET
           connector.source: posts_api

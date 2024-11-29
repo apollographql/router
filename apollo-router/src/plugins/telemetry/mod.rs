@@ -2179,13 +2179,12 @@ mod tests {
             make_supergraph_request(plugin.as_ref()).await;
 
             assert_counter!(
-                "apollo_router_http_requests_total",
+                "http.request",
                 1,
                 "another_test" = "my_default_value",
                 "my_value" = 2,
                 "myname" = "label_value",
                 "renamed_value" = "my_value_set",
-                "status" = "200",
                 "x-custom" = "coming_from_header"
             );
         }
@@ -2206,7 +2205,10 @@ mod tests {
                     Ok(SupergraphResponse::fake_builder()
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
-                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .errors(vec![crate::graphql::Error::builder()
+                            .message("nope")
+                            .extension_code("NOPE")
+                            .build()])
                         .build()
                         .unwrap())
                 },
@@ -2226,13 +2228,12 @@ mod tests {
                 .unwrap();
 
             assert_counter!(
-                "apollo_router_http_requests_total",
+                "http.request",
                 1,
                 "another_test" = "my_default_value",
-                "error" = "400 Bad Request",
+                "error" = "nope",
                 "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "400"
+                "renamed_value" = "my_value_set"
             );
         }
         .with_metrics()
@@ -2759,6 +2760,7 @@ mod tests {
                         .build()
                         .unwrap(),
                 )
+                .subgraph_name("my_subgraph_name")
                 .build();
             let _subgraph_response = subgraph_service
                 .ready()
@@ -2768,15 +2770,15 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_counter!(
-                "apollo_router_http_requests_total",
+            assert_histogram_count!(
+                "http.client.request.duration",
                 1,
                 "error" = "custom_error_for_propagation",
                 "my_key" = "my_custom_attribute_from_context",
                 "query_from_request" = "query { test }",
-                "status" = "200",
+                "status" = 200,
                 "subgraph" = "my_subgraph_name",
-                "unknown_data" = "default_value"
+                "subgraph_error_extended_code" = "FETCH_ERROR"
             );
         }
         .with_metrics()
@@ -2819,6 +2821,7 @@ mod tests {
                         .build()
                         .unwrap(),
                 )
+                .subgraph_name("my_subgraph_name_error")
                 .build();
             let _subgraph_response = subgraph_service
                 .ready()
@@ -2828,62 +2831,13 @@ mod tests {
                 .await
                 .expect_err("should be an error");
 
-            assert_counter!(
-                "apollo_router_http_requests_total",
+            assert_histogram_count!(
+                "http.client.request.duration",
                 1,
-                "message" = "cannot contact the subgraph",
-                "status" = "500",
+                "message" =
+                    "HTTP fetch failed from 'my_subgraph_name_error': cannot contact the subgraph",
                 "subgraph" = "my_subgraph_name_error",
-                "subgraph_error_extended_code" = "SUBREQUEST_HTTP_ERROR"
-            );
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_subgraph_metrics_bad_request() {
-        async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
-
-            let mut mock_bad_request_service = MockSupergraphService::new();
-            mock_bad_request_service.expect_call().times(1).returning(
-                move |req: SupergraphRequest| {
-                    Ok(SupergraphResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .data(json!({"errors": [{"message": "nope"}]}))
-                        .build()
-                        .unwrap())
-                },
-            );
-
-            let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
-
-            let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
-
-            let _router_response = bad_request_supergraph_service
-                .ready()
-                .await
-                .unwrap()
-                .call(router_req.build().unwrap())
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
-
-            assert_counter!(
-                "apollo_router_http_requests_total",
-                1,
-                "another_test" = "my_default_value",
-                "error" = "400 Bad Request",
-                "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "400"
+                "query_from_request" = "query { test }"
             );
         }
         .with_metrics()
@@ -2929,6 +2883,8 @@ mod tests {
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+
             make_supergraph_request(plugin.as_ref()).await;
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
             assert_snapshot!(prometheus_metrics);
@@ -2944,6 +2900,8 @@ mod tests {
                 "testdata/prometheus_custom_buckets.router.yaml"
             ))
             .await;
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+
             make_supergraph_request(plugin.as_ref()).await;
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
@@ -2961,6 +2919,7 @@ mod tests {
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
             assert_snapshot!(prometheus_metrics);
