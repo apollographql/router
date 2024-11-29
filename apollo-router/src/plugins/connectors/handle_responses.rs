@@ -384,7 +384,9 @@ async fn deserialize_response<T: HttpBody>(
         .add_subgraph_name(&connector.id.subgraph_name)
     };
 
-    let body = &axum::body::to_bytes(body).await.map_err(|_| make_err())?;
+    let body = &crate::services::router::body::get_body_bytes(body)
+        .await
+        .map_err(|_| make_err())?;
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {
@@ -465,7 +467,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"world"}"#).into())
+            .body(crate::services::router::body::full(r#"{"data":"world"}"#).into())
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -475,7 +477,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"world"}"#).into())
+            .body(crate::services::router::body::full(r#"{"data":"world"}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::RootField {
             name: "hello2".to_string(),
@@ -563,7 +565,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
+            .body(crate::services::router::body::full(r#"{"data":{"id": "1"}}"#).into())
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 0,
@@ -573,7 +575,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#).into())
+            .body(crate::services::router::body::full(r#"{"data":{"id": "2"}}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 1,
@@ -673,7 +675,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"value1"}"#).into())
+            .body(crate::services::router::body::full(r#"{"data":"value1"}"#).into())
             .unwrap();
         let response_key1 = ResponseKey::EntityField {
             index: 0,
@@ -684,7 +686,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"value2"}"#).into())
+            .body(crate::services::router::body::full(r#"{"data":"value2"}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::EntityField {
             index: 1,
@@ -785,7 +787,7 @@ mod tests {
         };
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"plain text"#).into())
+            .body(crate::services::router::body::full(r#"plain text"#).into())
             .unwrap();
         let response_key_plaintext = ResponseKey::Entity {
             index: 0,
@@ -796,7 +798,7 @@ mod tests {
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .status(404)
-            .body(hyper::Body::from(r#"{"error":"not found"}"#).into())
+            .body(crate::services::router::body::full(r#"{"error":"not found"}"#).into())
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 1,
@@ -806,7 +808,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":{"id":"2"}}"#).into())
+            .body(crate::services::router::body::full(r#"{"data":{"id":"2"}}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 2,
@@ -817,7 +819,7 @@ mod tests {
 
         let response3 = http::Response::builder()
             .status(500)
-            .body(hyper::Body::from(r#"{"error":"whoops"}"#).into())
+            .body(crate::services::router::body::full(r#"{"error":"whoops"}"#).into())
             .unwrap();
         let response_key3 = ResponseKey::Entity {
             index: 3,
@@ -991,7 +993,7 @@ mod tests {
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .status(201)
-            .body(hyper::Body::from(r#"{}"#).into())
+            .body(crate::services::router::body::full(r#"{}"#).into())
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),

@@ -69,27 +69,6 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-/*
-                tower::service_fn(move |request: subgraph::Request| {
-                    let subgraph_queries = Arc::clone(&subgraph_queries);
-                    async move {
-                        let query = request
-                            .subgraph_request
-                            .body()
-                            .query
-                            .as_deref()
-                            .unwrap_or_default();
-                        let mut queries = subgraph_queries.lock().await;
-                        queries.push_str(query);
-                        queries.push('\n');
-                        Ok(subgraph::Response::builder()
-                            .extensions(crate::json_ext::Object::new())
-                            .context(request.context)
-                            .build())
-                    }
-                })
-                .boxed()
-*/
 type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
 
 type HTTPClientService = tower::util::MapResponse<
@@ -1017,10 +996,7 @@ where
     // Finally, return a response which has a Body that wraps our stream of response chunks.
     Ok(router::Response {
         context,
-        response: http::Response::from_parts(
-            parts,
-            http_body_util::BodyDataStream::new(final_stream), // RouterBody::wrap_stream(final_stream).into_inner(),
-        ),
+        response: http::Response::from_parts(parts, final_stream),
     })
 }
 // -----------------------------------------------------------------------------------------------------
