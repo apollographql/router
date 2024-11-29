@@ -1,6 +1,7 @@
 #![allow(deprecated)]
 use std::fmt::Debug;
 
+use bytes::Buf;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -25,7 +26,7 @@ pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Err
 }
 
 // We create some utility functions to make Empty and Full bodies
-// fit our broadened Response body type.
+// and convert types
 pub(crate) fn empty() -> BoxBody<Bytes, hyper::Error> {
     Empty::<Bytes>::new()
         .map_err(|never| match never {})
@@ -36,6 +37,18 @@ pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed()
+}
+
+pub(crate) fn wrap_body_as_data_stream(body: RouterBody) -> http_body_util::BodyDataStream<Bytes> {
+    http_body_util::BodyDataStream::new(body)
+}
+
+pub(crate) fn wrap_stream_as_stream_body<S, D, E>(stream: S) -> http_body_util::StreamBody<D>
+where
+    S: Stream<Item = Result<http_body::Frame<D>, E>>,
+    D: Buf,
+{
+    http_body_util::StreamBody::new(stream)
 }
 
 // pub struct RouterBody(super::Body);

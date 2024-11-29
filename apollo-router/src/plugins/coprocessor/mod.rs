@@ -127,7 +127,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             .map_response(
                 |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
                     let (parts, body) = http_response.into_parts();
-                    http::Response::from_parts(parts, http_body_util::combinators::BoxBody::new(body))
+                    http::Response::from_parts(parts, body.boxed())
                 } as MapFn,
             )
             .layer(TimeoutLayer::new(init.config.timeout))

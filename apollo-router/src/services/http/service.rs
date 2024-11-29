@@ -253,8 +253,8 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
-            Some("unix") => Either::B(self.unix_client.clone()),
-            _ => Either::A(self.http_client.clone()),
+            Some("unix") => Either::Right(self.unix_client.clone()),
+            _ => Either::Left(self.http_client.clone()),
         };
         #[cfg(not(unix))]
         let client = self.http_client.clone();
