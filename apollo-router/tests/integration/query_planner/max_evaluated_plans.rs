@@ -7,7 +7,8 @@ fn assert_evaluated_plans(prom: &str, expected: u64) {
         .lines()
         .find(|line| line.starts_with("apollo_router_query_planning_plan_evaluated_plans_sum"))
         .expect("apollo.router.query_planning.plan.evaluated_plans metric is missing");
-    let (_, num) = line.split_once(' ')
+    let (_, num) = line
+        .split_once(' ')
         .expect("apollo.router.query_planning.plan.evaluated_plans metric has unexpected shape");
     assert_eq!(num, format!("{expected}"));
 }
@@ -15,22 +16,26 @@ fn assert_evaluated_plans(prom: &str, expected: u64) {
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_evaluated_plans() {
     let mut router = IntegrationTest::builder()
-        .config(r#"
+        .config(
+            r#"
             telemetry:
               exporters:
                 metrics:
                   prometheus:
                     enabled: true
-        "#)
+        "#,
+        )
         .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
-    router.execute_query(&json!({
-        "query": r#"{ t { v1 v2 v3 v4 } }"#,
-        "variables": {},
-    })).await;
+    router
+        .execute_query(&json!({
+            "query": r#"{ t { v1 v2 v3 v4 } }"#,
+            "variables": {},
+        }))
+        .await;
 
     let metrics = router
         .get_metrics_response()
@@ -47,7 +52,8 @@ async fn reports_evaluated_plans() {
 #[tokio::test(flavor = "multi_thread")]
 async fn does_not_exceed_max_evaluated_plans_legacy() {
     let mut router = IntegrationTest::builder()
-        .config(r#"
+        .config(
+            r#"
             experimental_query_planner_mode: legacy
             telemetry:
               exporters:
@@ -57,16 +63,19 @@ async fn does_not_exceed_max_evaluated_plans_legacy() {
             supergraph:
               query_planning:
                 experimental_plans_limit: 4
-        "#)
+        "#,
+        )
         .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
-    router.execute_query(&json!({
-        "query": r#"{ t { v1 v2 v3 v4 } }"#,
-        "variables": {},
-    })).await;
+    router
+        .execute_query(&json!({
+            "query": r#"{ t { v1 v2 v3 v4 } }"#,
+            "variables": {},
+        }))
+        .await;
 
     let metrics = router
         .get_metrics_response()
@@ -83,7 +92,8 @@ async fn does_not_exceed_max_evaluated_plans_legacy() {
 #[tokio::test(flavor = "multi_thread")]
 async fn does_not_exceed_max_evaluated_plans() {
     let mut router = IntegrationTest::builder()
-        .config(r#"
+        .config(
+            r#"
             experimental_query_planner_mode: new
             telemetry:
               exporters:
@@ -93,16 +103,19 @@ async fn does_not_exceed_max_evaluated_plans() {
             supergraph:
               query_planning:
                 experimental_plans_limit: 4
-        "#)
+        "#,
+        )
         .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
-    router.execute_query(&json!({
-        "query": r#"{ t { v1 v2 v3 v4 } }"#,
-        "variables": {},
-    })).await;
+    router
+        .execute_query(&json!({
+            "query": r#"{ t { v1 v2 v3 v4 } }"#,
+            "variables": {},
+        }))
+        .await;
 
     let metrics = router
         .get_metrics_response()
@@ -115,4 +128,3 @@ async fn does_not_exceed_max_evaluated_plans() {
 
     router.graceful_shutdown().await;
 }
-
