@@ -1,0 +1,420 @@
+---
+title: File uploads
+subtitle: Receive files uploaded by clients with the GraphOS Router
+description: Configure the GraphOS Router to receive file uploads using the GraphQL multipart request spec.
+minVersion: 1.41.1
+noIndex: true
+---
+
+<PreviewFeature>
+
+This feature is in invite-only [preview](/resources/product-launch-stages/#product-launch-stages) for organization with an Enterprise plan. Get in touch with your Apollo contact to request access.
+
+</PreviewFeature>
+
+Learn how to configure the GraphOS Router to receive file uploads in client requests using the [GraphQL multipart request specification](https://github.com/jaydenseric/graphql-multipart-request-spec).
+
+## About file uploads using multipart requests
+
+A [multipart HTTP request](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html) lets you efficiently send multiple files of various data formats&mdash;such as text, binary, and JSON objects&mdash;in a single HTTP request. The [GraphQL multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec) uses multipart requests to upload files using arguments in a GraphQL mutation.
+
+### Example usage
+
+Imagine you're building a platform where users can create posts with a title and an image file.
+Your subgraph schema may include something like this:
+
+```graphql showLineNumbers=false  disableCopy
+type Post {
+  id: ID!
+  title: String!
+  image: Upload!
+}
+
+type Mutation {
+  createPost(title: String!, image: Upload!): Post!
+}
+```
+
+<Note>
+
+Some GraphQL server implementations provide built-in support for handling file uploads, including an `Upload` scalar type.
+For others, including the latest version of [Apollo Server](/apollo-server/), you must use external packages, such as [`graphql-upload`](https://www.npmjs.com/package/graphql-upload).
+Refer to your subgraph library or package documentation for further information, including writing resolvers for uploaded files.
+
+</Note>
+
+When a client calls the `createPost` mutation, it can use variables to include the actual image file to upload:
+
+```graphql showLineNumbers=false  disableCopy
+{
+  query: `
+    mutation CreatePost($title: String!, $image: Upload!) {
+      createPost(title: $title, image: $image) {
+        id
+        title
+        image
+      }
+    }
+  `,
+  variables: {
+    title: "My first post",
+    image: File // image.png
+  }
+}
+```
+
+A request using the GraphQL multipart request spec would include the following as separate parts in a multipart request:
+
+- the above operation definition
+- the image file to upload
+- a map between variables and files to upload
+
+The exact requirements are documented in [Client usage requirements](#client-usage-requirements).
+
+## File upload configuration and usage
+
+To enable file uploads from clients, you must both [configure support in the GraphOS Router](#configure-file-upload-support-in-the-router) and [ensure client usage conforms to requirements](#client-usage-requirements).
+
+### Configure file upload support in the router
+
+By default, receiving client file uploads isn't enabled in the GraphOS Router.
+To enable file upload support, set the following fields in your `router.yaml` configuration file:
+
+```yaml title="router.yaml"
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 1mb
+        max_files: 10
+```
+
+#### Mode
+
+The only supported `mode` is `stream`.
+That means the router doesn't retain uploaded files in memory during a request.
+Streaming file uploads can be more memory-efficient, especially for large files, since it avoids loading the entire file into memory.
+
+To ensure your operation is streamable, avoid nesting file uploads.
+For example, the following `nestedUpload` operation attempting to upload `$file3` would not be streamable:
+
+```graphql title="❌" disableCopy=true showLineNumbers=false
+mutation uploadFiles($file1: Upload, $file3: Upload, $file3: Upload ) {
+  upload(data: $file1) { 
+    __typename
+  }
+  upload(data: $file2) {
+    __typename
+  }
+  
+  nestedUpload {
+    upload(data: $file3) {
+      __typename
+    }
+  }
+}
+```
+
+If a request cannot be fulfilled in a streaming fashion, the router returns the [`UPLOADS_OPERATION_CANNOT_STREAM`](#uploads_operation_cannot_stream) error.
+
+#### Limits
+
+The router includes default limits for file uploads to prevent denial-of-service attacks.
+You can configure both the maximum file size and number of files to accept.
+If a request exceeds a limit, the router rejects the request.
+
+#### Configuration reference
+
+The following are attributes of the root [`preview_file_uploads`](#configure-file-upload-support-in-the-router) configuration.
+
+<table class="field-table">
+<thead>
+<tr>
+<th>Attribute/ <br/> Description</th>
+<th>Default value</th>
+<th>Valid Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+
+##### `enabled`
+
+Flag to enable reception of client file uploads
+
+
+</td>
+<td>
+
+`false`
+
+</td>
+<td>boolean</td>
+
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.enabled`
+
+Flag to enable reception of multipart file uploads
+
+</td>
+<td>
+
+`false`
+
+</td>
+<td>boolean</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.mode`
+
+Supported file upload mode
+
+</td>
+<td>
+
+`stream`
+
+</td>
+<td> 
+
+`stream`
+
+</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.limits.max_file_size`
+
+The maximum file size to accept.
+If this limit is exceeded, the router rejects the entire request.
+
+</td>
+<td>
+
+`512kb`
+
+</td>
+<td>
+
+values in a [human-readable format](https://crates.io/crates/bytesize), for example, `5kb` and `99mb`
+
+</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.limits.max_files`
+
+The maximum number of files to accept.
+If this limit is exceeded, the router rejects the entire request.
+
+</td>
+<td>
+
+`5`
+
+</td>
+<td>integer</td>
+</tr>
+</tbody>
+</table>
+
+
+### Client usage requirements
+
+When calling a mutation with file uploads, the client must send the following HTTP parts in the following order:
+
+1. The raw GraphQL operation
+1. A map of file(s) to variable name(s)
+1. The files to be uploaded, one HTTP request part per file
+
+#### Example request payload
+
+The following is an example of a multipart HTTP request payload that builds off the [example scenario](#example-usage):
+
+```http disableCopy showLineNumbers=false title="Request payload"
+--------------------------gc0p4Jq0M2Yt08jU534c0p
+Content-Disposition: form-data; name="operations"
+
+{ "query": "mutation CreatePost($title: String!, $image: Upload!) { createPost(title: $title, image: $image) { id } }", "variables": { "title": "My first post", "image": null } }
+--------------------------gc0p4Jq0M2Yt08jU534c0p
+Content-Disposition: form-data; name="map"
+
+{ "0": ["variables.image"] }
+--------------------------gc0p4Jq0M2Yt08jU534c0p
+Content-Disposition: form-data; name="0"; filename="image.png"
+Content-Type: image/png
+
+[Binary image content here]
+--------------------------gc0p4Jq0M2Yt08jU534c0p--
+```
+
+See below for an explanation of each part of the request payload:
+
+- **`Content-Disposition: form-data; name="operations"`**
+  - The first part of the request must include the operation definition. This example specifies a mutation named `CreatePost` that accepts variables for a `title` and `image`.
+  - The `variables` object includes the title for the post and sets the `image` variable to `null` as the [multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec) requires for any variables that represent files to be uploaded.
+- **`Content-Disposition: form-data; name="map"`**
+  - The second part of the request must include the mapping between the files to upload and the variables in the GraphQL operation.
+  - In this case, it maps the file in the request part with `name="0"` to `variables.image`. The map can use any key names you like&mdash;for example, `file1` instead of `0`&mdash;as long as the keys match the `name`s of the following request parts. 
+- **`Content-Disposition: form-data; name="0"; filename="image.png"`**
+  - The following part(s) contain the actual file(s) to be uploaded, with one file per part. The order of the files must match the order they're declared in the map in the second part of the request.
+  - In this case, there is only one file to upload, which has the name `image.png` and the appropriate content type (`image/png`)
+  - These parts also include actual file content&mdash;in this case, an image binary.
+
+Each part of the request payload is separated by a boundary string (`gc0p4Jq0M2Yt08jU534c0p`) per the [multipart request format](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html).
+
+Refer to the docs for your client library for further instructions.
+
+- [Apollo Client (web)](/react/data/file-uploads/)
+- [Apollo iOS](/ios/file-uploads/)
+- [Apollo Kotlin](/kotlin/advanced/upload/)
+
+Custom clients can be implemented following the [spec documentation](https://github.com/jaydenseric/graphql-multipart-request-spec).
+
+## Security
+
+Without additional security, HTTP multipart requests can be exploited as part of [cross-site request forgery](https://owasp.org/www-community/attacks/csrf) (CSRF) attacks.
+
+The GraphOS Router already has a mechanism to prevent these types of attacks, which is enabled by default. You should verify that your router hasn't disabled this mechanism before using file uploads. See [Cross-Site Request Forgery Prevention](/router/configuration/csrf) for details.
+
+## Metrics for file uploads
+
+Metrics in the GraphOS Router for file uploads:
+
+<table class="field-table metrics">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr>
+<td>
+
+##### `apollo.router.operations.file_uploads`
+
+</td>
+<td>
+
+Counter for the number of file uploads
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `apollo.router.operations.file_uploads.file_size`
+
+</td>
+<td>
+
+Histogram for the size of uploaded files
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `apollo.router.operations.file_uploads.files`
+
+</td>
+<td>
+
+Histogram for the number of uploaded files
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+## Error codes for file uploads
+
+A file upload request may receive the following error responses:
+
+<table class="field-table metrics">
+<tr>
+<th>Error Code</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_LIMITS_MAX_FILES_EXCEEDED`
+
+</td>
+<td>The number of files in the request exceeded the configured limit</td>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_LIMITS_MAX_FILE_SIZE_EXCEEDED`
+
+</td>
+<td>A file exceeded the maximum configured file size</td>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_FILE_MISSING`
+
+</td>
+<td>The operation specified a file that was missing from the request</td>
+</tr>
+<tr>
+<td>
+
+##### `UPLOADS_OPERATION_CANNOT_STREAM`
+
+</td>
+<td>The request was invalid as it couldn't be streamed to the client</td>
+</tr>
+</table>
+
+
+## Known limitations
+
+While in private preview, Apollo recommends using file uploads only in development and testing environments, not in production.
+
+### Unsupported query modes
+
+The router rejects operations that use file upload variables on or inside fields using [`@defer`](/graphos/operations/defer/).
+
+<CodeColumns>
+
+```graphql title="❌ Unsupported usage" disableCopy=true showLineNumbers=false
+query ($file: Upload) {
+  someField {
+    ... @defer {
+      anotherField(file: $file)
+    }
+  }
+}
+```
+
+```graphql title="✅ Supported usage" disableCopy=true showLineNumbers=false
+query ($file: Upload) {
+  someField(file: $file) {
+    ... @defer {
+      anotherField
+    }
+  }
+}
+```
+
+</CodeColumns>

@@ -2,7 +2,7 @@
     "mocks": [
         {
             "request": {
-                "query":"query Search__searchSubgraph__0{search{__typename ...on MovieResult{sections{__typename ...on EntityCollectionSection{__typename id}...on GallerySection{__typename id}}id}...on ArticleResult{id sections{__typename ...on GallerySection{__typename id}...on EntityCollectionSection{__typename id}}}}}",
+                "query":"query Search__searchSubgraph__0{search{__typename ..._generated_onMovieResult2_0 ..._generated_onArticleResult2_0}}fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection{__typename id}fragment _generated_onGallerySection2_0 on GallerySection{__typename id}fragment _generated_onMovieResult2_0 on MovieResult{sections{__typename ..._generated_onEntityCollectionSection2_0 ..._generated_onGallerySection2_0}id}fragment _generated_onArticleResult2_0 on ArticleResult{id sections{__typename ..._generated_onGallerySection2_0 ..._generated_onEntityCollectionSection2_0}}",
                 "operationName":"Search__searchSubgraph__0"
             },
             "response": {

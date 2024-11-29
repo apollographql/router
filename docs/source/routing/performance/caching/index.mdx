@@ -1,0 +1,16 @@
+---
+title: Caching
+subtitle: Accelerate query retrieval with GraphOS caching.
+---
+
+By default, GraphOS Router stores the following data in its in-memory cache to improve performance:
+
+- Generated query plans
+- Automatic persisted queries (APQ)
+- Introspection responses
+
+You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see In-memory caching in the Apollo Router.
+
+If you have a GraphOS Enterprise plan, you can configure a Redis-backed distributed cache that enables multiple router instances to share cached values. For details, see Distributed caching in GraphOS Router.
+
+You can configure a Redis-backed entity cache that enables a client query to retrieve cached entity data split between subgraph responses. For details, see subgraph entity caching in GraphOS Router.

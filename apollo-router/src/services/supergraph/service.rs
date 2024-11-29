@@ -171,11 +171,7 @@ async fn service_call(
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
 
-    let QueryPlannerResponse {
-        content,
-        context,
-        errors,
-    } = match plan_query(
+    let QueryPlannerResponse { content, errors } = match plan_query(
         planning,
         body.operation_name.clone(),
         context.clone(),
@@ -210,7 +206,8 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Response { response }) => Ok(
+        Some(QueryPlannerContent::Response { response })
+        | Some(QueryPlannerContent::CachedIntrospectionResponse { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
@@ -233,9 +230,8 @@ async fn service_call(
                 let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
             });
 
-            let operation_name = body.operation_name.clone();
-            let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-            let is_subscription = plan.is_subscription(operation_name.as_deref());
+            let is_deferred = plan.is_deferred(&variables);
+            let is_subscription = plan.is_subscription();
 
             if let Some(batching) = context
                 .extensions()
@@ -266,8 +262,7 @@ async fn service_call(
                     .extensions()
                     .with_lock(|lock| lock.get::<BatchQuery>().cloned());
                 if let Some(batch_query) = batch_query_opt {
-                    let query_hashes =
-                        plan.query_hashes(batching, operation_name.as_deref(), &variables)?;
+                    let query_hashes = plan.query_hashes(batching, &variables)?;
                     batch_query
                         .set_query_hashes(query_hashes)
                         .await

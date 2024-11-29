@@ -223,20 +223,17 @@ pub(crate) fn generate_extended_references(
 
 pub(crate) fn extract_enums_from_response(
     query: Arc<Query>,
-    operation_name: Option<&str>,
     schema: &Valid<Schema>,
     response_body: &Object,
     existing_refs: &mut ReferencedEnums,
 ) {
-    if let Some(operation) = query.operation(operation_name) {
-        extract_enums_from_selection_set(
-            &operation.selection_set,
-            &query.fragments,
-            schema,
-            response_body,
-            existing_refs,
-        );
-    }
+    extract_enums_from_selection_set(
+        &query.operation.selection_set,
+        &query.fragments,
+        schema,
+        response_body,
+        existing_refs,
+    );
 }
 
 fn add_enum_value_to_map(

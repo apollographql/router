@@ -202,6 +202,27 @@ async fn test_graphql_metrics() {
     router.assert_started().await;
     router.execute_default_query().await;
     router
+        .assert_log_not_contains("this is a bug and should not happen")
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"oplimits_aliases_sum{otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"oplimits_root_fields_sum{otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"oplimits_depth_sum{otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+    router
             .assert_metrics_contains(r#"graphql_field_list_length_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
             .await;
     router
@@ -278,7 +299,7 @@ async fn test_gauges_on_reload() {
         .await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 3"#,
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;

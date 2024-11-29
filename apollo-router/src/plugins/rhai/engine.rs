@@ -692,6 +692,13 @@ mod router_plugin {
         *obj.uri_mut() = uri;
         Ok(())
     }
+
+    #[rhai_fn(get = "subgraph_request_id", pure, return_raw)]
+    pub(crate) fn get_subgraph_id(
+        obj: &mut SharedMut<subgraph::Request>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|request| request.id.to_string()))
+    }
     // End of SubgraphRequest specific section
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -788,6 +795,13 @@ mod router_plugin {
         obj: &mut SharedMut<subgraph::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
+    }
+
+    #[rhai_fn(get = "subgraph_request_id", pure, return_raw)]
+    pub(crate) fn get_subgraph_id_response(
+        obj: &mut SharedMut<subgraph::Response>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.id.to_string()))
     }
 
     /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
@@ -1147,6 +1161,32 @@ mod router_plugin {
         Ok(())
     }
 
+    // Uri.port
+    #[rhai_fn(get = "port", pure, return_raw)]
+    pub(crate) fn uri_port_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.port().map(|p| p.as_u16()))
+    }
+
+    #[rhai_fn(set = "port", return_raw)]
+    pub(crate) fn uri_port_set(x: &mut Uri, value: i64) -> Result<(), Box<EvalAltResult>> {
+        // Because there is no simple way to update parts on an existing
+        // Uri (no parts_mut()), then we need to create a new Uri from our
+        // existing parts, preserving any port, and update our existing
+        // Uri.
+        let mut parts: Parts = x.clone().into_parts();
+        match parts.authority {
+            Some(old_authority) => {
+                let host = old_authority.host();
+                let new_authority = Authority::from_maybe_shared(format!("{host}:{value}"))
+                    .map_err(|e| e.to_string())?;
+                parts.authority = Some(new_authority);
+                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+                Ok(())
+            }
+            None => Err("invalid URI; unable to set port".into()),
+        }
+    }
+
     // Response.label
     #[rhai_fn(get = "label", pure)]
     pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
@@ -1487,11 +1527,30 @@ macro_rules! register_rhai_router_interface {
 
             $engine.register_get(
                 "uri",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Uri, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.uri().clone()))
+                }
+            ).register_get(
+                "uri",
                 |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.router_request.uri().clone()))
                 }
             );
+
             $engine.register_set(
+                "uri",
+                |obj: &mut SharedMut<$base::FirstRequest>, uri: Uri| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, headers);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            obj.with_mut(|request| *request.request.uri_mut() = uri);
+                            Ok(())
+                        }
+                    }
+                }
+            ).register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
                     if_subgraph! {
@@ -1503,6 +1562,13 @@ macro_rules! register_rhai_router_interface {
                             Ok(())
                         }
                     }
+                }
+            );
+
+            $engine.register_get(
+                "method",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Method, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.method().clone()))
                 }
             );
         )*

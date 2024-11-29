@@ -1,0 +1,128 @@
+---
+title: Router Instruments
+subtitle: Standard metric instruments for the router's request lifecycle
+description: Reference of standard metric instruments for the request lifecycle of GraphOS Router and Apollo Router Core. Consumable via the router's metrics exporters. 
+---
+
+## Standard metric instruments
+
+GraphOS Router and Apollo Router Core provide a set of non-configurable metric instruments that expose detailed information about the router's request lifecycle.
+
+These instruments can be consumed by configuring a [metrics exporter](/router/configuration/telemetry/exporters/metrics/overview).
+
+### HTTP
+
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
+  - `subgraph`: (Optional) The subgraph being queried
+- `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status
+- `apollo_router_timeout` - Number of triggered timeouts
+- `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
+  - `subgraph`: The subgraph being queried
+  - `status` : If the retry was aborted (`aborted`)
+
+### GraphQL
+
+- `apollo_router_graphql_error` - counts GraphQL errors in responses, attributes:
+  - `code`: error code
+
+### Session
+
+- `apollo_router_session_count_total` - Number of currently connected clients
+- `apollo_router_session_count_active` - Number of in-flight GraphQL requests
+
+### Cache
+
+- `apollo_router_cache_size` — Number of entries in the cache
+- `apollo_router_cache_hit_count` - Number of cache hits
+- `apollo_router_cache_miss_count` - Number of cache misses
+- `apollo_router_cache_hit_time` - Time to hit the cache in seconds
+- `apollo_router_cache_miss_time` - Time to miss the cache in seconds
+- `apollo.router.cache.storage.estimated_size` - The estimated storage size of the cache in bytes (query planner in memory only).
+
+All cache metrics listed above have the following attributes:
+
+- `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
+- `storage`: The backend storage of the cache (`memory`, `redis`)
+
+### Coprocessor
+
+- `apollo_router_operations_coprocessor_total` - Total operations with coprocessors enabled.
+- `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
+
+The coprocessor operations metric has the following attributes:
+
+- `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
+- `coprocessor.succeeded`: bool
+
+### Performance
+
+- `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
+- `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
+
+### Query planning
+
+- `apollo_router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
+- `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
+- `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
+- `apollo.router.query_planning.queued` - When the legacy planner is used, a gauge of the number of queued plans requests.
+- `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
+- `apollo.router.v8.heap.used` - heap memory used by V8, in bytes.
+- `apollo.router.v8.heap.total` - total heap allocated by V8, in bytes.
+
+### Compute jobs
+
+- `apollo.router.compute_jobs.queued` - A gauge of the number of jobs queued for the thread pool dedicated to CPU-heavy components like GraphQL parsing and validation, and the (new) query planner.
+
+### Uplink
+
+<Tip>
+
+[Learn more about Apollo Uplink.](/federation/managed-federation/uplink/)
+
+</Tip>
+
+- `apollo_router_uplink_fetch_duration_seconds` - Uplink request duration, attributes:
+  - `url`: The Uplink URL that was polled
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
+  - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
+  - `code`: The error code depending on type (if an error occurred)
+  - `error`: The error message (if an error occurred)
+- `apollo_router_uplink_fetch_count_total`
+  - `status`: (`success`, `failure`)
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
+
+<Note>
+
+The initial call to Uplink during router startup is not reflected in metrics.
+
+</Note>
+
+### Subscriptions
+
+<Tip>
+
+[Learn more about subscriptions.](/router/executing-operations/subscription-support/)
+
+</Tip>
+
+- `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
+- `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
+- `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
+
+### Batching
+
+- `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
+- `apollo.router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
+
+### GraphOS Studio
+
+- `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
+  - `report.type`: The type of report submitted: "traces" or "metrics"
+  - `report.protocol`: Either "apollo" or "otlp", depending on the experimental_otlp_tracing_sampler configuration.
+
+### Deprecated
+
+The following metrics have been deprecated and should not be used.
+
+- `apollo_router_span` - **Deprecated**—use `apollo_router_processing_time` instead.

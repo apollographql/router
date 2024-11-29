@@ -1,0 +1,103 @@
+---
+title: Configuring a Router
+subtitle: Learn to configure cloud-hosted and self-hosted routers
+description: Learn how to configure the Apollo GraphOS Router with environment variables, command-line options and commands, and YAML configuration files.
+redirectFrom:
+  - /router/configuration/overview/
+---
+
+You can configure a router in multiple ways. Because cloud-hosted and self-hosted routers share the common foundation of Apollo Router Core, all routers support declarative configuration with a YAML file, usually named `router.yaml`. Differences between configuring cloud-hosted and self-hosted routers:
+
+- A cloud-hosted router is managed by Apollo and fully integrated with GraphOS, so its configuration is provided via the GraphOS Studio IDE.
+- A self-hosted router is launched via command line, so its configuration includes command-line options and environment variables.
+
+|   | Cloud-Hosted Router   | Self-Hosted Router  |
+| --- | :---: | :---: |
+| Studio IDE | &#x2705; | &#x274C; |  
+| YAML file | &#x2705; | &#x2705; |
+| Command-line options | &#x274C; | &#x2705; |
+| Environment variables | &#x274C; | &#x2705; |
+
+
+## YAML file-based configuration
+
+Both cloud-hosted and self-hosted routers support YAML file-based configuration. You can edit a YAML file named `router.yaml` to declaratively configure your router. 
+
+- For cloud-hosted routers, use GraphOS Studio to edit `router.yaml`.
+- For self-hosted routers, edit a local `router.yaml` and run your router with the `--config` flag:
+
+  ```bash
+  ./router --config router.yaml
+  ```
+
+<Tip>
+
+For self-hosted routers, run `router config schema` to print a JSON schema of all configuration options supported by your router.
+
+</Tip>
+
+To learn more about router configuration options, go to [router configuration reference docs](/graphos/reference/router/configuration).
+
+
+## Configuring a self-hosted router
+
+You provide the configuration for a self-hosted router when you run a router binary or deploy a router image. 
+
+From a command line, the router accepts configuration flags and environment variables.
+
+The `--config` flag sets a path to a YAML configuration file. Use this flag to customize non-default settings for your router.
+
+  ```bash
+  ./router --config router.yaml
+  ```
+
+GraphOS Routers must set the following environment variables so that they can fetch their supergraph schemas from GraphOS:
+  - `APOLLO_KEY` sets the graph API key to use for authenticating with GraphOS
+  - `APOLLO_GRAPH_REF` sets the graph ref of the graph and variant in GraphOS 
+
+You can run your router from the command line with these environment variables:
+
+  ```bash
+  APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+  ```
+
+To learn more about configuration options available to self-hosted routers, go to [router configuration reference docs](/graphos/reference/router/configuration).
+
+## Configuring a cloud-hosted router
+
+You can manage a cloud router's configuration from [GraphOS Studio](https://studio.apollographql.com?referrer=docs-content):
+
+- Open Studio and go to the **Cloud Router** page
+- In the **General** tab, you can view: 
+
+  - The URL of your router's GraphQL API endpoint. Every cloud router URL is on a subdomain of `apollographos.net`
+  - Your router's status and launch history 
+
+In the **Configuration** tab, you can manage:
+
+  - Secrets
+  - Your router's YAML-base configuration
+
+    - A router on the **Serverless** plan has the following options available:
+        - HTTP headers
+        - CORS rules
+        - Subgraph error inclusion
+        - Introspection
+
+## Next steps
+
+Browse this section to learn how to configure various features of the router:
+
+- **Real-Time Operations** sets up a router to support various real-time operations
+
+- **Security** protects a router from malicious or malformed requests and operations
+
+- **Performance and Scaling** optimize a router's response latency and throughput
+
+- **Router Customization** can add custom functionality to a router with scripts and coprocessors that can hook into a router's request-handling pipeline.
+
+
+> Haven't run a router with GraphOS yet? Try the [quickstart](/graphos/get-started/guides/quickstart)
+
+> Learn more about configuration options available to cloud-hosted routers, go to [router configuration reference docs](/graphos/reference/router/configuration).
+

@@ -7,6 +7,8 @@ mod visitor;
 use std::fmt;
 use std::pin::Pin;
 
+use apollo_compiler::execution::GraphQLError as CompilerExecutionError;
+use apollo_compiler::execution::ResponseDataPathElement;
 use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
@@ -272,6 +274,44 @@ impl From<WorkerError> for Error {
             locations: err.locations.into_iter().map(Location::from).collect(),
             extensions,
             ..Default::default()
+        }
+    }
+}
+
+impl From<CompilerExecutionError> for Error {
+    fn from(error: CompilerExecutionError) -> Self {
+        let CompilerExecutionError {
+            message,
+            locations,
+            path,
+            extensions,
+        } = error;
+        let locations = locations
+            .into_iter()
+            .map(|location| Location {
+                line: location.line as u32,
+                column: location.column as u32,
+            })
+            .collect::<Vec<_>>();
+        let path = if !path.is_empty() {
+            let elements = path
+                .into_iter()
+                .map(|element| match element {
+                    ResponseDataPathElement::Field(name) => {
+                        JsonPathElement::Key(name.as_str().to_owned(), None)
+                    }
+                    ResponseDataPathElement::ListIndex(i) => JsonPathElement::Index(i),
+                })
+                .collect();
+            Some(Path(elements))
+        } else {
+            None
+        };
+        Self {
+            message,
+            locations,
+            path,
+            extensions,
         }
     }
 }
