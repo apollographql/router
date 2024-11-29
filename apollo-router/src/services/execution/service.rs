@@ -344,6 +344,25 @@ impl ExecutionService {
                     ,
             );
 
+            for error in response.errors.iter_mut() {
+                if let Some(path) = &mut error.path {
+                    // Check if path can be matched to the supergraph query and truncate if not
+                    let matching_len = query.matching_error_path_length(path);
+                    if path.len() != matching_len {
+                        let truncated_path = path.0.split_off(matching_len);
+                        if let Ok(truncated_path) = serde_json_bytes::to_value(truncated_path) {
+                            // Save truncated part into extensions
+                            error.extensions
+                                .entry("truncatedPath")
+                                .or_insert(truncated_path);
+                        }
+
+                        // if path was invalid that means we can't trust locations either
+                        error.locations.clear();
+                    }
+                }
+            }
+
             nullified_paths.extend(paths);
 
             let mut referenced_enums = context

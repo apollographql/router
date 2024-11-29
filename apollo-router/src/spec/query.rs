@@ -1122,9 +1122,21 @@ impl Query {
             Some(subselection) => &subselection.selection_set,
             None => &self.operation.selection_set,
         };
-        selection_set
+        let match_length = selection_set
             .iter()
-            .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
+            .map(|selection| selection.matching_error_path_length(&path.0, &self.fragments))
+            .max()
+            .unwrap_or(0);
+        path.len() == match_length
+    }
+
+    pub(crate) fn matching_error_path_length(&self, path: &Path) -> usize {
+        self.operation
+            .selection_set
+            .iter()
+            .map(|selection| selection.matching_error_path_length(&path.0, &self.fragments))
+            .max()
+            .unwrap_or(0)
     }
 
     pub(crate) fn defer_variables_set(&self, variables: &Object) -> BooleanValues {
