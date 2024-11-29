@@ -325,7 +325,10 @@ impl Response {
                         || *value == MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE
                 })
             {
-                let multipart = Multipart::new(self.response.into_body(), "graphql");
+                let multipart = Multipart::new(
+                    http_body_util::BodyDataStream::new(self.response.into_body()),
+                    "graphql",
+                );
 
                 Either::Left(futures::stream::unfold(multipart, |mut m| async {
                     if let Ok(Some(response)) = m.next_field().await {
@@ -339,7 +342,7 @@ impl Response {
                     None
                 }))
             } else {
-                let mut body = self.response.into_body();
+                let mut body = http_body_util::BodyDataStream::new(self.response.into_body());
                 let res = body.next().await.and_then(|res| res.ok());
 
                 Either::Right(

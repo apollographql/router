@@ -265,7 +265,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             );
                                         let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.call(request)
+                                            app.clone().call(request)
                                         });
                                         let connection = Builder::new(TokioExecutor::new())
                                             .http1()
@@ -301,7 +301,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
                                         let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.call(request)
+                                            app.clone().call(request)
                                         });
                                         let connection = Builder::new(TokioExecutor::new())
                                             .http1()
@@ -351,7 +351,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         };
                                         let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.call(request)
+                                            app.clone().call(request)
                                         });
                                         let connection = builder
                                             .http1()
@@ -474,12 +474,13 @@ pub(super) fn serve_router_on_listen_addr(
     (server, shutdown_sender)
 }
 
+#[derive(Clone)]
 struct IdleConnectionChecker<S> {
     received_request: Arc<AtomicBool>,
     inner: S,
 }
 
-impl<S> IdleConnectionChecker<S> {
+impl<S: Clone> IdleConnectionChecker<S> {
     fn new(b: Arc<AtomicBool>, service: S) -> Self {
         IdleConnectionChecker {
             received_request: b,

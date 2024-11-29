@@ -62,6 +62,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct InjectConnectionInfo<S> {
     inner: S,
     connection_info: ConnectionInfo,
