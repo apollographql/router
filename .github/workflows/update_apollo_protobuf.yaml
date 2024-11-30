@@ -15,7 +15,7 @@ jobs:
           curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto > ./apollo-router/src/plugins/telemetry/proto/reports.proto
       - name: Create Pull Request
         id: cpr
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v7
         with:
           commit-message: Update Apollo Protobuf schema
           committer: GitHub <noreply@github.com>
