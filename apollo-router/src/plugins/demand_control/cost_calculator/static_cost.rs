@@ -188,7 +188,7 @@ impl StaticCostCalculator {
         // because `field.definition` was generated from the API schema, which strips off the directives we need.
         let definition = ctx
             .schema
-            .ahashed_type_field(parent_type, &field.name)
+            .type_field(parent_type, &field.name)
             .ok_or_else(|| {
                 DemandControlError::QueryParseFailure(format!(
                     "Field {} was found in query, but its type is missing from the schema.",
@@ -562,7 +562,7 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
     ) {
         self.visit_list_item(request, variables, parent_ty, field, value);
 
-        if let Some(definition) = self.schema.ahashed_type_field(parent_ty, &field.name) {
+        if let Some(definition) = self.schema.type_field(parent_ty, &field.name) {
             for argument in &field.arguments {
                 if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
                     if let Ok(score) =
