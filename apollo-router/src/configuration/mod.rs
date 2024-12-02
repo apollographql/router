@@ -225,7 +225,7 @@ pub(crate) enum QueryPlannerMode {
     /// (such as using legacy Apollo Federation 1)
     BothBestEffort,
     /// Use the new Rust-based implementation but fall back to the legacy one
-    /// for supergraph schemas using legacy Apollo Federation 1.
+    /// for supergraph schemas composed with legacy Apollo Federation 1.
     #[default]
     NewBestEffort,
 }
