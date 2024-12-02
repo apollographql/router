@@ -3,13 +3,8 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashMapExt;
-use apollo_compiler::ast::DirectiveList;
-use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
-use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -20,23 +15,17 @@ use apollo_federation::schema::ValidFederationSchema;
 
 use super::directives::RequiresDirective;
 use crate::plugins::demand_control::DemandControlError;
-use crate::spec::TYPENAME;
 
 pub(crate) struct DemandControlledSchema {
     inner: ValidFederationSchema,
-    types: HashMap<Name, ExtendedType>,
-    type_fields: HashMap<Name, HashMap<Name, Component<FieldDefinition>>>,
     type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>>,
     type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>>,
     type_field_requires_directives: HashMap<Name, HashMap<Name, RequiresDirective>>,
-    typename_component: Component<FieldDefinition>,
 }
 
 impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
         let fed_schema = ValidFederationSchema::new((*schema).clone())?;
-        let mut type_fields: HashMap<Name, HashMap<Name, Component<FieldDefinition>>> =
-            HashMap::new();
         let mut type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>> =
             HashMap::new();
         let mut type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>> =
@@ -45,7 +34,6 @@ impl DemandControlledSchema {
             HashMap::new();
 
         for (type_name, type_) in &schema.types {
-            let fields = type_fields.entry(type_name.clone()).or_default();
             let field_cost_directives = type_field_cost_directives
                 .entry(type_name.clone())
                 .or_default();
@@ -66,8 +54,6 @@ impl DemandControlledSchema {
                                 field_name
                             ))
                         })?;
-
-                        fields.insert(field_name.clone(), field_definition.clone());
 
                         if let Some(cost_directive) = CostSpecDefinition::cost_directive_from_field(
                             &fed_schema,
@@ -108,8 +94,6 @@ impl DemandControlledSchema {
                             ))
                         })?;
 
-                        fields.insert(field_name.clone(), field_definition.clone());
-
                         if let Some(cost_directive) = CostSpecDefinition::cost_directive_from_field(
                             &fed_schema,
                             field_definition,
@@ -145,51 +129,12 @@ impl DemandControlledSchema {
             }
         }
 
-        let typename_component = Component::new(FieldDefinition {
-            description: None,
-            name: name!("__typename"),
-            arguments: Vec::new(),
-            ty: ty!(String!),
-            directives: DirectiveList::new(),
-        });
-
         Ok(Self {
             inner: fed_schema,
-            types: schema
-                .types
-                .iter()
-                .map(|(name, ty)| (name.clone(), ty.clone()))
-                .collect(),
-            type_fields,
             type_field_cost_directives,
             type_field_list_size_directives,
             type_field_requires_directives,
-            typename_component,
         })
-    }
-
-    pub(in crate::plugins::demand_control) fn get_type(
-        &self,
-        name: &Name,
-    ) -> Result<&ExtendedType, DemandControlError> {
-        self.types.get(name).ok_or_else(|| {
-            DemandControlError::QueryParseFailure(format!(
-                "Type {} was not found in the schema",
-                name
-            ))
-        })
-    }
-
-    pub(in crate::plugins::demand_control) fn type_field(
-        &self,
-        type_name: &Name,
-        field_name: &Name,
-    ) -> Option<&Component<FieldDefinition>> {
-        if field_name == TYPENAME {
-            Some(&self.typename_component)
-        } else {
-            self.type_fields.get(type_name)?.get(field_name)
-        }
     }
 
     pub(in crate::plugins::demand_control) fn type_field_cost_directive(
