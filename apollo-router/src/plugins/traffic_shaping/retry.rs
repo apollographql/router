@@ -36,9 +36,13 @@ impl RetryPolicy {
 }
 
 impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
-    type Future = future::Ready<Self>;
+    type Future = future::Ready<()>;
 
-    fn retry(&self, req: &subgraph::Request, result: Result<&Res, &E>) -> Option<Self::Future> {
+    fn retry(
+        &mut self,
+        req: &mut subgraph::Request,
+        result: &mut Result<Res, E>,
+    ) -> Option<Self::Future> {
         match result {
             Ok(_) => {
                 // Treat all `Response`s as success,
@@ -67,12 +71,12 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                     subgraph = %self.subgraph_name,
                 );
 
-                Some(future::ready(self.clone()))
+                Some(future::ready(()))
             }
         }
     }
 
-    fn clone_request(&self, req: &subgraph::Request) -> Option<subgraph::Request> {
+    fn clone_request(&mut self, req: &subgraph::Request) -> Option<subgraph::Request> {
         Some(req.clone())
     }
 }

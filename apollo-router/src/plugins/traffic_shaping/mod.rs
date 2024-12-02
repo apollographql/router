@@ -28,6 +28,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::util::future::EitherResponseFuture;
 
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
@@ -273,8 +274,8 @@ impl Plugin for TrafficShaping {
     }
 }
 
-pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
-    Either<
+pub(crate) type TrafficShapingSubgraphFuture<S> = EitherResponseFuture<
+    EitherResponseFuture<
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
     >,
@@ -401,8 +402,7 @@ impl TrafficShaping {
                 tower::retry::RetryLayer::new(retry_policy)
             });
 
-            Either::A(ServiceBuilder::new()
-
+            Either::Left(ServiceBuilder::new()
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
@@ -448,7 +448,7 @@ impl TrafficShaping {
                     req
                 }))
         } else {
-            Either::B(service)
+            Either::Right(service)
         }
     }
 
