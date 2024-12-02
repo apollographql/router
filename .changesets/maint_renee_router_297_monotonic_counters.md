@@ -1,6 +1,6 @@
 ### Docs-deprecate several metrics ([PR #6350](https://github.com/apollographql/router/pull/6350))
 
-These metrics are deprecated in favour of better, OTel-compatible alternatives:
+These metrics are deprecated in favor of better, OTel-compatible alternatives:
 
 - `apollo_router_deduplicated_subscriptions_total` - use the `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated` attribute.
 - `apollo_authentication_failure_count` - use the `apollo.router.operations.authentication.jwt` metric's `authentication.jwt.failed` attribute.
