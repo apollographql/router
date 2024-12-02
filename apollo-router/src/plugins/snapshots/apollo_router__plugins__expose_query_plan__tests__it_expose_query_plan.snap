@@ -69,7 +69,7 @@ expression: "serde_json::to_value(response).unwrap()"
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "4d7744c8b45e9ab9ae0b4b739335904878872023793c7e269b7649ddac90a189",
+              "schemaAwareHash": "2504c66db02c170d0040785e0ac3455155db03beddcb7cc4d16f08ca02201fac",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -109,7 +109,7 @@ expression: "serde_json::to_value(response).unwrap()"
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "34900a19d589dbe2f15802a7ff36d198752af04d44ba6150fa226443871df07c",
+                "schemaAwareHash": "0f8abdb350d59e86567b72717be114a465c59ac4e6027d7179de6448b0fbc5a4",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -120,6 +120,50 @@ expression: "serde_json::to_value(response).unwrap()"
             {
               "kind": "Parallel",
               "nodes": [
+                {
+                  "kind": "Flatten",
+                  "path": [
+                    "topProducts",
+                    "@",
+                    "reviews",
+                    "@",
+                    "product"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "products",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "Product",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "upc"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [],
+                    "operation": "query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}",
+                    "operationName": "TopProducts__products__2",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "contextRewrites": null,
+                    "schemaAwareHash": "a1e19c2c170464974293f946f09116216e71424a821908beb0062091475dad11",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                },
                 {
                   "kind": "Flatten",
                   "path": [
@@ -156,51 +200,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "aafe1a73eaeec767664030cf6d0b9a385a4075ac74c992027c4293139afdb29c",
-                    "authorization": {
-                      "is_authenticated": false,
-                      "scopes": [],
-                      "policies": []
-                    }
-                  }
-                },
-                {
-                  "kind": "Flatten",
-                  "path": [
-                    "topProducts",
-                    "@",
-                    "reviews",
-                    "@",
-                    "product"
-                  ],
-                  "node": {
-                    "kind": "Fetch",
-                    "serviceName": "products",
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "Product",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "upc"
-                          }
-                        ]
-                      }
-                    ],
-                    "variableUsages": [],
-                    "operation": "query TopProducts__products__3($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { name } } }",
-                    "operationName": "TopProducts__products__3",
-                    "operationKind": "query",
-                    "id": null,
-                    "inputRewrites": null,
-                    "outputRewrites": null,
-                    "contextRewrites": null,
-                    "schemaAwareHash": "a76da96c78b57941fcedf7536d2f8b7b8a7241f0e90be0f802271ca0c788d3db",
+                    "schemaAwareHash": "466ef25e373cf367e18ed264f76c7c4b2f27fe2ef105cb39d8528320addaedc7",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],

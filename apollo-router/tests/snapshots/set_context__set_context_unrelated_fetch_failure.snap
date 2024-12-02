@@ -37,13 +37,55 @@ expression: response
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "d3f1ad875170d008059583ca6074e732a178f74474ac31de3bb4397c5080020d",
+              "schemaAwareHash": "d321568b33e32986df6d30a82443ebb919949617ffc33affe8b413658af52b8a",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
             {
               "kind": "Parallel",
               "nodes": [
+                {
+                  "kind": "Flatten",
+                  "node": {
+                    "authorization": {
+                      "is_authenticated": false,
+                      "policies": [],
+                      "scopes": []
+                    },
+                    "contextRewrites": null,
+                    "id": null,
+                    "inputRewrites": null,
+                    "kind": "Fetch",
+                    "operation": "query Query_fetch_failure__Subgraph2__1($representations:[_Any!]!){_entities(representations:$representations){...on U{b}}}",
+                    "operationKind": "query",
+                    "operationName": "Query_fetch_failure__Subgraph2__1",
+                    "outputRewrites": null,
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ],
+                        "typeCondition": "U"
+                      }
+                    ],
+                    "schemaAwareHash": "a9aa68bb30f2040298629fc2fe72dc8438ce16bcdfdbe1a16ff088cf61d38719",
+                    "serviceName": "Subgraph2",
+                    "variableUsages": []
+                  },
+                  "path": [
+                    "",
+                    "t",
+                    "u"
+                  ]
+                },
                 {
                   "kind": "Flatten",
                   "node": {
@@ -86,7 +128,7 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "05dc59a826cec26ad8263101508c298dd8d31d79d36f18194dd4cf8cd5f02dc3",
+                    "schemaAwareHash": "da0e31f9990723a68dbd1e1bb164a068342da5561db1a28679693a406429d09a",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_0"
