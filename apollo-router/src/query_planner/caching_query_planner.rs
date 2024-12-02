@@ -5,6 +5,9 @@ use std::sync::Arc;
 use std::task;
 
 use apollo_compiler::validation::Valid;
+/// Update this key every time the cache key or the query plan format has to change.
+/// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
+use apollo_federation::CACHE_KEY_VERSION;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
@@ -632,11 +635,6 @@ pub(crate) struct CachingQueryKey {
     pub(crate) config_mode: Arc<QueryHash>,
 }
 
-// Update this key every time the cache key or the query plan format has to change.
-// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 1;
-const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
-
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut hasher = Sha256::new();
@@ -654,8 +652,8 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
-            CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
+            "plan:cache:{}:{}:opname:{}:metadata:{}",
+            CACHE_KEY_VERSION, self.hash, operation, metadata,
         )
     }
 }

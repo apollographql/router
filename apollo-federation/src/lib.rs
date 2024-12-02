@@ -59,6 +59,19 @@ use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;
 
+/// Part of the key for distributed query plan cache.
+///
+/// Update this every time the cache key or the query plan format has to change,
+/// specifically if an old serialized query plan cannot always be deserialized and used correctly
+/// in the current Router version.
+///
+/// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
+///
+/// Historically this was based in part on the federation version extracted from the build metadata
+/// in the router-bridge crate version number (e.g. `0.6.4+v2.9.3`) but any arbitrary string works.
+/// The next version can be "2", and this paragraph removed.
+pub const CACHE_KEY_VERSION: &str = "1:federation:v2.9.3";
+
 pub(crate) type SupergraphSpecs = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
 
 pub(crate) fn validate_supergraph_for_query_planning(
