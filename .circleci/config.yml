@@ -26,7 +26,7 @@ executors:
       - image: cimg/base:stable
       - image: cimg/redis:7.4.1
       - image: jaegertracing/all-in-one:1.54.0
-      - image: openzipkin/zipkin:2.23.2
+      - image: openzipkin/zipkin:3.4.2
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
     resource_class: xlarge
     environment:
