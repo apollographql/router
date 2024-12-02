@@ -256,20 +256,26 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFa
         requires,
         variable_usages,
         operation,
-        operation_name: _, // ignored (reordered parallel fetches may have different names)
+        // ignored:
+        // reordered parallel fetches may have different names
+        operation_name: _,
         operation_kind,
         id,
         input_rewrites,
         output_rewrites,
         context_rewrites,
-        schema_aware_hash: _, // ignored
-        authorization,
+        // ignored
+        schema_aware_hash: _,
+        // ignored:
+        // when running in comparison mode, the rust plan node does not have
+        // the attached cache key metadata for authorisation, since the rust plan is
+        // not going to be the one being executed.
+        authorization: _,
     } = this;
 
     check_match_eq!(*service_name, other.service_name);
     check_match_eq!(*operation_kind, other.operation_kind);
     check_match_eq!(*id, other.id);
-    check_match_eq!(*authorization, other.authorization);
     check_match!(same_requires(requires, &other.requires));
     check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
     check_match!(same_rewrites(input_rewrites, &other.input_rewrites));

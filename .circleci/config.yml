@@ -1,6 +1,6 @@
 version: 2.1
 
-# Cache key bump: 1
+# Cache key bump: 2
 
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
@@ -49,7 +49,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "15.4.0"
-    resource_class: macos.m1.medium.gen1
+    resource_class: macos.m1.large.gen1
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -60,7 +60,7 @@ executors:
       # once we update to Xcode >= 15.1.0
       # See: https://github.com/apollographql/router/pull/5462
       xcode: "15.4.0"
-    resource_class: macos.m1.medium.gen1
+    resource_class: macos.m1.large.gen1
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
@@ -76,21 +76,28 @@ executors:
 parameters:
   toolchain_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v2-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
   xtask_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
   merge_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
   protoc_version:
     type: string
     default: "21.8"
+  # note the cmake version is only used for manual installs, not for installs from a package manager like apt or homebrew
+  cmake_version:
+    type: string
+    default: "3.31.1"
   nightly:
     type: boolean
     default: false
   # quick_nightly will skip testing and only build the release artifacts.
   quick_nightly:
+    type: boolean
+    default: false
+  test_updated_cargo_deps:
     type: boolean
     default: false
 
@@ -246,9 +253,15 @@ commands:
             - run:
                 name: Install CMake
                 command: |
-                  choco install cmake.install -y
-                  echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
-                  exit $LASTEXITCODE
+                  mkdir -p "$HOME/.local"
+                  if [[ ! -f "$HOME/.local/bin/cmake" ]]; then
+                    curl -L https://github.com/Kitware/CMake/releases/download/v<< pipeline.parameters.cmake_version >>/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64.zip  --output cmake.zip
+                    # The zip file has a root directory, so we put it somewhere else first before placing the files in .local
+                    unzip cmake.zip -d /tmp > /dev/null
+                    cp /tmp/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64/* -R "$HOME/.local"
+                  fi
+
+                  cmake --version
       - when:
           condition:
             or:
@@ -503,11 +516,7 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
-            # Temporary disable lib backtrace since it crashing on MacOS
-            # TODO: remove this workaround once we update to Xcode >= 15.1.0
-            # See: https://github.com/apollographql/router/pull/5462
-            RUST_LIB_BACKTRACE: 0
-          command: xtask test --workspace --locked --features ci
+          command: xtask test --workspace --locked --features ci,hyper_header_limits
       - run:
           name: Delete large files from cache
           command: |
@@ -599,6 +608,10 @@ jobs:
     parameters:
       platform:
         type: executor
+        default: amd_linux_test
+      from_test_updated_cargo_deps_workflow:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -611,6 +624,67 @@ jobs:
             cargo fetch
       - xtask_test:
           variant: "updated"
+
+      - when:
+          condition:
+            equal: [ true, << parameters.from_test_updated_cargo_deps_workflow >> ]
+          steps:
+            - slack/notify:
+                event: fail
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: The `test_updated_cargo_deps` workflow has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+            - slack/notify:
+                event: pass
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":white_check_mark: The `test_updated_cargo_deps` workflow has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
   pre_verify_release:
     environment:
       <<: *common_job_environment
@@ -655,10 +729,10 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist --target aarch64-apple-darwin
+                  cargo xtask dist --target aarch64-apple-darwin --features hyper_header_limits
             - run:
                 command: >
-                  cargo xtask dist --target x86_64-apple-darwin
+                  cargo xtask dist --target x86_64-apple-darwin --features hyper_header_limits
             - run:
                 command: >
                   mkdir -p artifacts
@@ -718,7 +792,7 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --features hyper_header_limits
             - run:
                 command: >
                   mkdir -p artifacts
@@ -948,12 +1022,19 @@ jobs:
                   helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
 workflows:
+  test_updated_cargo_deps:
+    when: << pipeline.parameters.test_updated_cargo_deps >>
+    jobs:
+      - test_updated:
+          platform: amd_linux_test
+          from_test_updated_cargo_deps_workflow: true
   ci_checks:
     when:
       not:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
+          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - lint:
           matrix:
@@ -968,15 +1049,6 @@ workflows:
             parameters:
               platform: [ amd_linux_build ]
 
-      - test_updated:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
-          matrix:
-            parameters:
-              platform:
-                [ amd_linux_test ]
       - test:
           # this should be changed back to true on dev after release
           fuzz: false
@@ -1016,21 +1088,9 @@ workflows:
           matrix:
             parameters:
               platform: [ amd_linux_build ]
-
-      - test_updated:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
-          matrix:
-            parameters:
-              platform:
-                [ amd_linux_test ]
       - test:
           requires:
             - lint
-            - check_helm
-            - check_compliance
           matrix:
             parameters:
               platform:
@@ -1038,7 +1098,8 @@ workflows:
       - build_release:
           requires:
             - test
-            - test_updated
+            - check_helm
+            - check_compliance
           nightly: true
           context:
             - router
@@ -1073,6 +1134,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
+          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - pre_verify_release:
           matrix:
@@ -1110,16 +1172,6 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
-      - test_updated:
-          matrix:
-            parameters:
-              platform:
-                [ amd_linux_test ]
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v.*/
       - test:
           matrix:
             parameters:
@@ -1148,7 +1200,6 @@ workflows:
             - check_compliance
             - pre_verify_release
             - test
-            - test_updated
           filters:
             branches:
               ignore: /.*/
@@ -1161,6 +1212,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
+          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - secops/gitleaks:
           context:
