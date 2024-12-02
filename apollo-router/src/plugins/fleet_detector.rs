@@ -22,6 +22,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
@@ -81,7 +82,7 @@ impl GaugeStore {
                 ));
             }
             // Compute Environment
-            if let Some(env) = apollo_environment_detector::detect_one(24576) {
+            if let Some(env) = apollo_environment_detector::detect_one(COMPUTE_DETECTOR_THRESHOLD) {
                 attributes.push(KeyValue::new("cloud.platform", env.platform_code()));
                 if let Some(cloud_provider) = env.cloud_provider() {
                     attributes.push(KeyValue::new("cloud.provider", cloud_provider.code()));
