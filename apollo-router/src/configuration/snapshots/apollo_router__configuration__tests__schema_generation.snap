@@ -6642,6 +6642,12 @@ expression: "&schema"
           "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
           "type": "boolean"
         },
+        "experimental_reuse_query_fragments": {
+          "default": null,
+          "description": "Enable reuse of query fragments\n\nThis feature is deprecated and will be removed in next release. It is only available in JS QP. Use generate_query_fragments instead.",
+          "nullable": true,
+          "type": "boolean"
+        },
         "generate_query_fragments": {
           "default": true,
           "description": "Enable QP generation of fragments for subgraph requests Default: true",
