@@ -319,7 +319,7 @@ dependencies = [
  "memchr",
  "mime",
  "mockall",
- "multer 2.1.0",
+ "multer 3.1.0",
  "multimap 0.9.1",
  "notify",
  "nu-ansi-term 0.50.1",
