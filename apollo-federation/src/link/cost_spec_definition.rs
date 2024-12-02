@@ -13,6 +13,7 @@ use apollo_compiler::Node;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -122,8 +123,10 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
-        // TODO: Handle no directive name
-        let name = Self::cost_directive_name(schema)?.expect("has name");
+        let name =
+            Self::cost_directive_name(schema)?.ok_or_else(|| SingleFederationError::Internal {
+                message: "The \"@cost\" directive is undefined in the target schema".to_string(),
+            })?;
 
         Ok(Directive { name, arguments })
     }
@@ -132,8 +135,12 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
-        // TODO: Handle no directive name
-        let name = Self::list_size_directive_name(schema)?.expect("has name");
+        let name = Self::list_size_directive_name(schema)?.ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "The \"@listSize\" directive is undefined in the target schema"
+                    .to_string(),
+            }
+        })?;
 
         Ok(Directive { name, arguments })
     }
@@ -159,27 +166,19 @@ impl CostSpecDefinition {
         ScalarTypeDefinitionPosition
     );
 
-    fn for_federation_schema(
-        schema: &FederationSchema,
-    ) -> Result<Option<&'static Self>, FederationError> {
-        let cost_link = schema
-            .metadata()
-            .as_ref()
-            .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()));
-        let cost_spec = cost_link.and_then(|link| COST_VERSIONS.find(&link.url.version));
-        Ok(cost_spec)
+    fn for_federation_schema(schema: &FederationSchema) -> Option<&'static Self> {
+        let link = schema
+            .metadata()?
+            .for_identity(&Identity::cost_identity())?;
+        COST_VERSIONS.find(&link.url.version)
     }
 
     /// Returns the name of the `@cost` directive in the given schema, accounting for import aliases or specification name
     /// prefixes such as `@federation__cost`. This checks the linked cost specification, if there is one, and falls back
     /// to the federation spec.
     fn cost_directive_name(schema: &FederationSchema) -> Result<Option<Name>, FederationError> {
-        if let Some(name) = Self::for_federation_schema(schema)?.and_then(|spec| {
+        if let Some(spec) = Self::for_federation_schema(schema) {
             spec.directive_name_in_schema(schema, &COST_DIRECTIVE_NAME)
-                .ok()
-                .flatten()
-        }) {
-            Ok(Some(name))
         } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
             fed_spec.directive_name_in_schema(schema, &COST_DIRECTIVE_NAME)
         } else {
@@ -193,12 +192,8 @@ impl CostSpecDefinition {
     fn list_size_directive_name(
         schema: &FederationSchema,
     ) -> Result<Option<Name>, FederationError> {
-        if let Some(name) = Self::for_federation_schema(schema)?.and_then(|spec| {
+        if let Some(spec) = Self::for_federation_schema(schema) {
             spec.directive_name_in_schema(schema, &LIST_SIZE_DIRECTIVE_NAME)
-                .ok()
-                .flatten()
-        }) {
-            Ok(Some(name))
         } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
             fed_spec.directive_name_in_schema(schema, &LIST_SIZE_DIRECTIVE_NAME)
         } else {
@@ -210,30 +205,40 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         argument: &InputValueDefinition,
         ty: &ExtendedType,
-    ) -> Option<CostDirective> {
-        let directive_name = Self::cost_directive_name(schema).ok().flatten()?;
-        CostDirective::from_directives(&directive_name, &argument.directives).or(
-            CostDirective::from_schema_directives(&directive_name, ty.directives()),
-        )
+    ) -> Result<Option<CostDirective>, FederationError> {
+        let directive_name = Self::cost_directive_name(schema)?;
+        if let Some(name) = directive_name.as_ref() {
+            Ok(CostDirective::from_directives(name, &argument.directives)
+                .or(CostDirective::from_schema_directives(name, ty.directives())))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn cost_directive_from_field(
         schema: &FederationSchema,
         field: &FieldDefinition,
         ty: &ExtendedType,
-    ) -> Option<CostDirective> {
-        let directive_name = Self::cost_directive_name(schema).ok().flatten()?;
-        CostDirective::from_directives(&directive_name, &field.directives).or(
-            CostDirective::from_schema_directives(&directive_name, ty.directives()),
-        )
+    ) -> Result<Option<CostDirective>, FederationError> {
+        let directive_name = Self::cost_directive_name(schema)?;
+        if let Some(name) = directive_name.as_ref() {
+            Ok(CostDirective::from_directives(name, &field.directives)
+                .or(CostDirective::from_schema_directives(name, ty.directives())))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn list_size_directive_from_field_definition(
         schema: &FederationSchema,
         field: &FieldDefinition,
-    ) -> Option<ListSizeDirective> {
-        let directive_name = Self::list_size_directive_name(schema).ok().flatten()?;
-        ListSizeDirective::from_field_definition(&directive_name, field)
+    ) -> Result<Option<ListSizeDirective>, FederationError> {
+        let directive_name = Self::list_size_directive_name(schema)?;
+        if let Some(name) = directive_name.as_ref() {
+            Ok(ListSizeDirective::from_field_definition(name, field))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -269,9 +274,9 @@ impl CostDirective {
 
     fn from_directives(directive_name: &Name, directives: &DirectiveList) -> Option<Self> {
         directives
-            .get(directive_name)
-            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
-            .and_then(|weight| weight.to_i32())
+            .get(directive_name)?
+            .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
+            .to_i32()
             .map(|weight| Self { weight })
     }
 
@@ -280,9 +285,9 @@ impl CostDirective {
         directives: &apollo_compiler::schema::DirectiveList,
     ) -> Option<Self> {
         directives
-            .get(directive_name)
-            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
-            .and_then(|weight| weight.to_i32())
+            .get(directive_name)?
+            .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
+            .to_i32()
             .map(|weight| Self { weight })
     }
 }
@@ -299,46 +304,54 @@ impl ListSizeDirective {
         directive_name: &Name,
         definition: &FieldDefinition,
     ) -> Option<Self> {
-        let directive = definition.directives.get(directive_name);
-        if let Some(directive) = directive {
-            let assumed_size = directive
-                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
-                .and_then(|arg| arg.to_i32());
-            let slicing_argument_names = directive
-                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
-                .and_then(|arg| arg.as_list())
-                .map(|arg_list| {
-                    arg_list
-                        .iter()
-                        .flat_map(|arg| arg.as_str())
-                        .map(String::from)
-                        .collect()
-                });
-            let sized_fields = directive
-                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
-                .and_then(|arg| arg.as_list())
-                .map(|arg_list| {
-                    arg_list
-                        .iter()
-                        .flat_map(|arg| arg.as_str())
-                        .map(String::from)
-                        .collect()
-                });
-            let require_one_slicing_argument = directive
-                .specified_argument_by_name(
-                    &LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME,
-                )
-                .and_then(|arg| arg.to_bool())
-                .unwrap_or(true);
+        let directive = definition.directives.get(directive_name)?;
+        let assumed_size = Self::assumed_size(directive);
+        let slicing_argument_names = Self::slicing_argument_names(directive);
+        let sized_fields = Self::sized_fields(directive);
+        let require_one_slicing_argument =
+            Self::require_one_slicing_argument(directive).unwrap_or(true);
 
-            Some(Self {
-                assumed_size,
-                slicing_argument_names,
-                sized_fields,
-                require_one_slicing_argument,
-            })
-        } else {
-            None
-        }
+        Some(Self {
+            assumed_size,
+            slicing_argument_names,
+            sized_fields,
+            require_one_slicing_argument,
+        })
+    }
+
+    fn assumed_size(directive: &Directive) -> Option<i32> {
+        directive
+            .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)?
+            .to_i32()
+    }
+
+    fn slicing_argument_names(directive: &Directive) -> Option<HashSet<String>> {
+        let names = directive
+            .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)?
+            .as_list()?
+            .iter()
+            .flat_map(|arg| arg.as_str())
+            .map(String::from)
+            .collect();
+        Some(names)
+    }
+
+    fn sized_fields(directive: &Directive) -> Option<HashSet<String>> {
+        let fields = directive
+            .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)?
+            .as_list()?
+            .iter()
+            .flat_map(|arg| arg.as_str())
+            .map(String::from)
+            .collect();
+        Some(fields)
+    }
+
+    fn require_one_slicing_argument(directive: &Directive) -> Option<bool> {
+        directive
+            .specified_argument_by_name(
+                &LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME,
+            )?
+            .to_bool()
     }
 }

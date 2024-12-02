@@ -59,7 +59,7 @@ impl DemandControlledSchema {
                             &fed_schema,
                             field_definition,
                             field_type,
-                        ) {
+                        )? {
                             field_cost_directives.insert(field_name.clone(), cost_directive);
                         }
 
@@ -67,13 +67,13 @@ impl DemandControlledSchema {
                             CostSpecDefinition::list_size_directive_from_field_definition(
                                 &fed_schema,
                                 field_definition,
-                            )
+                            )?
                         {
                             field_list_size_directives
                                 .insert(field_name.clone(), list_size_directive);
                         }
 
-                        // TODO: Need to handle renaming for @requires also
+                        // TODO: We should also handle renaming for @requires
                         if let Some(requires_directive) = RequiresDirective::from_field_definition(
                             field_definition,
                             type_name,
@@ -98,7 +98,7 @@ impl DemandControlledSchema {
                             &fed_schema,
                             field_definition,
                             field_type,
-                        ) {
+                        )? {
                             field_cost_directives.insert(field_name.clone(), cost_directive);
                         }
 
@@ -106,13 +106,13 @@ impl DemandControlledSchema {
                             CostSpecDefinition::list_size_directive_from_field_definition(
                                 &fed_schema,
                                 field_definition,
-                            )
+                            )?
                         {
                             field_list_size_directives
                                 .insert(field_name.clone(), list_size_directive);
                         }
 
-                        // TODO: Need to handle renaming for @requires also
+                        // TODO: We should also handle renaming for @requires
                         if let Some(requires_directive) = RequiresDirective::from_field_definition(
                             field_definition,
                             type_name,
@@ -172,7 +172,12 @@ impl DemandControlledSchema {
         definition: &InputValueDefinition,
         ty: &ExtendedType,
     ) -> Option<CostDirective> {
+        // For now, we ignore FederationError and return None because this should not block the whole scoring
+        // process at runtime. Later, this should be pushed into the constructor and propagate any federation
+        // errors encountered when parsing.
         CostSpecDefinition::cost_directive_from_argument(&self.inner, definition, ty)
+            .ok()
+            .flatten()
     }
 }
 
