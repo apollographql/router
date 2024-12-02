@@ -401,8 +401,7 @@ impl TrafficShaping {
                 tower::retry::RetryLayer::new(retry_policy)
             });
 
-            Either::A(ServiceBuilder::new()
-
+            Either::Left(ServiceBuilder::new()
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
@@ -448,7 +447,7 @@ impl TrafficShaping {
                     req
                 }))
         } else {
-            Either::B(service)
+            Either::Right(service)
         }
     }
 
