@@ -8,9 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::Method;
-use http::Request;
-use http::Uri;
+use http_0_2 as http;
+
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
@@ -74,7 +73,7 @@ impl Mapping {
 /// Datadog span exporter
 pub struct DatadogExporter {
     client: Arc<dyn HttpClient>,
-    request_url: Uri,
+    request_url: http::Uri,
     model_config: ModelConfig,
     api_version: ApiVersion,
     mapping: Mapping,
@@ -84,7 +83,7 @@ pub struct DatadogExporter {
 impl DatadogExporter {
     fn new(
         model_config: ModelConfig,
-        request_url: Uri,
+        request_url: http::Uri,
         api_version: ApiVersion,
         client: Arc<dyn HttpClient>,
         mapping: Mapping,
@@ -112,8 +111,8 @@ impl DatadogExporter {
             &self.mapping,
             &self.unified_tags,
         )?;
-        let req = Request::builder()
-            .method(Method::POST)
+        let req = http::Request::builder()
+            .method(http::Method::POST)
             .uri(self.request_url.clone())
             .header(http::header::CONTENT_TYPE, self.api_version.content_type())
             .header(DATADOG_TRACE_COUNT_HEADER, trace_count)
@@ -255,7 +254,7 @@ impl DatadogPipelineBuilder {
 
     // parse the endpoint and append the path based on versions.
     // keep the query and host the same.
-    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<Uri, TraceError> {
+    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<http::Uri, TraceError> {
         // build agent endpoint based on version
         let mut endpoint = agent_endpoint
             .parse::<Url>()
@@ -528,7 +527,7 @@ mod tests {
     impl HttpClient for DummyClient {
         async fn send(
             &self,
-            _request: Request<Vec<u8>>,
+            _request: http::Request<Vec<u8>>,
         ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
             Ok(http::Response::new("dummy response".into()))
         }
