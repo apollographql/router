@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
 
+mod max_evaluated_plans;
+
 const PROMETHEUS_METRICS_CONFIG: &str = include_str!("telemetry/fixtures/prometheus.router.yaml");
 const LEGACY_QP: &str = "experimental_query_planner_mode: legacy";
 const NEW_QP: &str = "experimental_query_planner_mode: new";
