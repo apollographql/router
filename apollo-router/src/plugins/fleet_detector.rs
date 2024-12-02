@@ -172,9 +172,11 @@ impl PluginPrivate for FleetDetector {
 
     async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
-        if env::var(APOLLO_TELEMETRY_DISABLED).is_ok() {
-            debug!("fleet detection disabled, no telemetry will be sent");
-            return Ok(FleetDetector::default());
+        if let Ok(val) = env::var(APOLLO_TELEMETRY_DISABLED) {
+            if val == "true" {
+                debug!("fleet detection disabled, no telemetry will be sent");
+                return Ok(FleetDetector::default());
+            }
         }
 
         Ok(FleetDetector {
