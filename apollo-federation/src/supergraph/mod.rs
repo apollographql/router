@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::ops::Not;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
