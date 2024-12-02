@@ -166,7 +166,10 @@ impl IntoGraphQLErrors for DemandControlError {
                 .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
-            DemandControlError::FederationError(_) => todo!("fed error to gql errors"),
+            DemandControlError::FederationError(_) => Ok(vec![graphql::Error::builder()
+                .extension_code(self.code())
+                .message(self.to_string())
+                .build()]),
         }
     }
 }

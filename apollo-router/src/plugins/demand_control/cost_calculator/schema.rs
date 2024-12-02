@@ -73,7 +73,6 @@ impl DemandControlledSchema {
                                 .insert(field_name.clone(), list_size_directive);
                         }
 
-                        // TODO: We should also handle renaming for @requires
                         if let Some(requires_directive) = RequiresDirective::from_field_definition(
                             field_definition,
                             type_name,
@@ -112,7 +111,6 @@ impl DemandControlledSchema {
                                 .insert(field_name.clone(), list_size_directive);
                         }
 
-                        // TODO: We should also handle renaming for @requires
                         if let Some(requires_directive) = RequiresDirective::from_field_definition(
                             field_definition,
                             type_name,
