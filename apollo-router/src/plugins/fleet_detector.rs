@@ -1,5 +1,6 @@
 use std::env;
 use std::env::consts::ARCH;
+use std::env::consts::OS;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -21,6 +22,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
@@ -65,7 +67,37 @@ impl GaugeStore {
     fn active() -> GaugeStore {
         let system_getter = Arc::new(Mutex::new(SystemGetter::new()));
         let meter = meter_provider().meter("apollo/router");
+
         let mut gauges = Vec::new();
+        {
+            let mut attributes = Vec::new();
+            // CPU architecture
+            attributes.push(KeyValue::new("host.arch", get_otel_arch()));
+            // Operating System
+            attributes.push(KeyValue::new("os.type", get_otel_os()));
+            if OS == "linux" {
+                attributes.push(KeyValue::new(
+                    "linux.distribution",
+                    System::distribution_id(),
+                ));
+            }
+            // Compute Environment
+            if let Some(env) = apollo_environment_detector::detect_one(COMPUTE_DETECTOR_THRESHOLD) {
+                attributes.push(KeyValue::new("cloud.platform", env.platform_code()));
+                if let Some(cloud_provider) = env.cloud_provider() {
+                    attributes.push(KeyValue::new("cloud.provider", cloud_provider.code()));
+                }
+            }
+            gauges.push(
+                meter
+                    .u64_observable_gauge("apollo.router.instance")
+                    .with_description("The number of instances the router is running on")
+                    .with_callback(move |i| {
+                        i.observe(1, &attributes);
+                    })
+                    .init(),
+            );
+        }
         {
             let system_getter = system_getter.clone();
             gauges.push(
@@ -243,6 +275,16 @@ fn get_otel_arch() -> &'static str {
         "arm" => "arm32",
         "powerpc" => "ppc32",
         "powerpc64" => "ppc64",
+        a => a,
+    }
+}
+
+fn get_otel_os() -> &'static str {
+    match OS {
+        "apple" => "darwin",
+        "dragonfly" => "dragonflybsd",
+        "macos" => "darwin",
+        "ios" => "darwin",
         a => a,
     }
 }
