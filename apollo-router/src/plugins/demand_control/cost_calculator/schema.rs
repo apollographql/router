@@ -180,7 +180,7 @@ impl DemandControlledSchema {
         })
     }
 
-    pub(in crate::plugins::demand_control) fn type_field(
+    pub(in crate::plugins::demand_control) fn ahashed_type_field(
         &self,
         type_name: &Name,
         field_name: &Name,
