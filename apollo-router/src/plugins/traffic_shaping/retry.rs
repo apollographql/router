@@ -36,7 +36,7 @@ impl RetryPolicy {
 }
 
 impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
-    type Future = future::Ready<Self>;
+    type Future = future::Ready<()>;
 
     fn retry(
         &mut self,
@@ -71,7 +71,7 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                     subgraph = %self.subgraph_name,
                 );
 
-                Some(future::ready(self.clone()))
+                Some(future::ready(()))
             }
         }
     }
