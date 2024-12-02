@@ -1,0 +1,25 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  something: T
+    # bug fix
+    @connect(http: { GET: "http://127.0.0.1/something" }, selection: "foo\nbar")
+    # this always worked
+    @connect(
+      http: { GET: "http://127.0.0.1/something" }
+      selection: """
+      foo
+      bar
+      """
+    )
+    @connect(
+      http: { GET: "http://127.0.0.1/something" }
+      selection: "foo\nbar." # will error
+    )
+}
+
+type T {
+  foo: String
+  bar: String
+}

@@ -23,6 +23,12 @@ pub(crate) struct GraphQLString<'schema> {
     offset: usize,
 }
 
+const TRIPLE_QUOTE: &str = r#"""""#;
+
+fn is_block_string(input: &str) -> bool {
+    input.starts_with(TRIPLE_QUOTE)
+}
+
 impl<'schema> GraphQLString<'schema> {
     /// Get the raw string value of this GraphQL string literal
     ///
@@ -38,6 +44,22 @@ impl<'schema> GraphQLString<'schema> {
         let start_of_quotes = source_span.offset();
         let end_of_quotes = source_span.end_offset();
         let value_with_quotes = source_text.get(start_of_quotes..end_of_quotes).ok_or(())?;
+
+        // If the value is not a block string, it may include escaped characters
+        // like newlines. We need to use the "unescaped" value because our parsers
+        // like JSONSelection will puke on doubly-escaped characters like `\\n`.
+        // This is to avoid issues if the SDL content is reformatted by a tool
+        // that collapses block strings into single-quoted strings.
+        //
+        // BUG: Offsets will be wrong for non-block strings with escaped characters
+        // but manually writing \n will be uncommon (especially in JSONSelection
+        // where all whitespace is insignificant).
+        if !is_block_string(value_with_quotes) {
+            return Ok(Self {
+                raw_string: value_without_quotes,
+                offset: start_of_quotes + 1, // for the quote
+            });
+        }
 
         // On each line, the whitespace gets messed up for multi-line strings
         // So we find the first and last lines of the parsed value (no whitespace) within
