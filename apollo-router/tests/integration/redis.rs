@@ -1034,6 +1034,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
     .await;
 }
 
+// TODO drop this test once we remove the JS QP
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_reuse_query_fragments() {
     // If this test fails and the cache key format changed you'll need to update
