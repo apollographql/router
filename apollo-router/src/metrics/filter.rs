@@ -94,7 +94,7 @@ impl FilterMeterProvider {
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
+                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|connectors))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
                 )
                 .expect("regex should have been valid"),
             )
@@ -105,8 +105,10 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
-                Regex::new(r"apollo\.router\.(config|entities|operations.connectors|schema.connectors)(\..*|$)")
-                    .expect("regex should have been valid"),
+                Regex::new(
+                    r"apollo\.router\.(config|entities|operations.connectors|connectors)(\..*|$)",
+                )
+                .expect("regex should have been valid"),
             )
             .build()
     }
@@ -295,7 +297,7 @@ mod test {
             .init()
             .add(1, &[]);
         filtered
-            .u64_observable_gauge("apollo.router.schema.connectors")
+            .u64_observable_gauge("apollo.router.connectors.schema")
             .with_callback(move |observer| observer.observe(1, &[]))
             .init();
         meter_provider.force_flush(&cx).unwrap();
@@ -330,7 +332,7 @@ mod test {
             .any(|m| m.name == "apollo.router.operations.connectors"));
         assert!(metrics
             .iter()
-            .any(|m| m.name == "apollo.router.schema.connectors"));
+            .any(|m| m.name == "apollo.router.connectors.schema"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -417,7 +419,7 @@ mod test {
             .init()
             .add(1, &[]);
         filtered
-            .u64_observable_gauge("apollo.router.schema.connectors")
+            .u64_observable_gauge("apollo.router.connectors.schema")
             .with_callback(move |observer| observer.observe(1, &[]))
             .init();
         meter_provider.force_flush(&cx).unwrap();
@@ -443,6 +445,6 @@ mod test {
             .any(|m| m.name == "apollo.router.operations.connectors"));
         assert!(!metrics
             .iter()
-            .any(|m| m.name == "apollo.router.schema.connectors"));
+            .any(|m| m.name == "apollo.router.connectors.schema"));
     }
 }

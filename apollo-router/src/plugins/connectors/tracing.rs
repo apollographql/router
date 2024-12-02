@@ -17,7 +17,7 @@ pub(crate) fn connect_spec_version_instrument(
         let spec_counts = connect_spec_counts(connectors);
         meter_provider()
             .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.schema.connectors")
+            .u64_observable_gauge("apollo.router.connectors.schema")
             .with_description("Number connect directives in the supergraph")
             .with_callback(move |observer| {
                 spec_counts.iter().for_each(|(spec, &count)| {
@@ -123,7 +123,7 @@ mod tests {
             );
 
             assert_gauge!(
-                "apollo.router.schema.connectors",
+                "apollo.router.connectors.schema",
                 6,
                 connect.spec.version = "0.1"
             );
