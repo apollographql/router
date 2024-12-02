@@ -413,6 +413,11 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
+                #[cfg(not(feature = "hyper_header_limits"))]
+                if yaml.contains("http1_max_request_headers") {
+                    continue;
+                }
+
                 if let Err(e) = validate_yaml_configuration(
                     &yaml,
                     Expansion::default().unwrap(),
