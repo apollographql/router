@@ -2,6 +2,7 @@ use std::future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tower::retry::budget::Budget as _;
 use tower::retry::budget::TpsBudget;
 use tower::retry::Policy;
 
