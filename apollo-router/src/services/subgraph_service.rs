@@ -182,21 +182,21 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: Option<RootCertStore>,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    let tls_builder = rustls::ClientConfig::builder();
     Ok(match (tls_cert_store, client_cert_config) {
-        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+        (None, None) => tls_builder.with_native_roots()?.with_no_client_auth(),
         (Some(store), None) => tls_builder
             .with_root_certificates(store)
             .with_no_client_auth(),
-        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
+        (None, Some(client_auth_config)) => tls_builder.with_native_roots()?.with_client_auth_cert(
             client_auth_config.certificate_chain.clone(),
-            client_auth_config.key.clone(),
+            client_auth_config.key.clone_key(),
         )?,
         (Some(store), Some(client_auth_config)) => tls_builder
             .with_root_certificates(store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
-                client_auth_config.key.clone(),
+                client_auth_config.key.clone_key(),
             )?,
     })
 }

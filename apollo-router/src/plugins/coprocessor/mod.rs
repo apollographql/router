@@ -94,8 +94,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         http_connector.enforce_http(false);
 
         let tls_config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
+            .with_native_roots()?
             .with_no_client_auth();
 
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
