@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
+use std::str::FromStr;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::HeaderMap;
+use http::{HeaderMap, HeaderName};
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -297,10 +298,18 @@ where
             )?))?;
 
         get_text_map_propagator(|propagator| {
+            // Otel is not upgraded yet, so we need to convert the request headers into http 0.2 format rather than passing in the request directly.
+            let mut headers = http_0_2::HeaderMap::new();
             propagator.inject_context(
                 &prepare_context(tracing::span::Span::current().context()),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                &mut opentelemetry_http::HeaderInjector(&mut headers),
             );
+            for (name, value) in headers {
+                if let Some(name) = name {
+                    request.headers_mut().insert(HeaderName::from_str(name.as_str()).expect("header name should already have been validated"), HeaderValue::from_bytes(value.as_bytes()).expect("header value should already have been validated"));
+                }
+            }
+
         });
 
         let response = client.call(request).await?;
