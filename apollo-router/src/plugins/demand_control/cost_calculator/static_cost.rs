@@ -64,7 +64,13 @@ fn score_input_object(
             for (arg_name, arg_val) in inner_args {
                 let arg_meta = schema
                     .type_input_metadata(meta.ty.name(), arg_name)
-                    .expect("has meta");
+                    .ok_or_else(|| {
+                        DemandControlError::QueryParseFailure(format!(
+                            "Type metadata is missing for {}.{}",
+                            meta.ty.name(),
+                            arg_name,
+                        ))
+                    })?;
                 cost += score_input_object(arg_val, variables, arg_meta, schema)?;
             }
             Ok(cost)
@@ -116,7 +122,13 @@ fn score_variable(
             for (arg_name, arg_val) in inner_args {
                 let arg_meta = schema
                     .type_input_metadata(meta.ty.name(), arg_name.as_str())
-                    .expect("has meta");
+                    .ok_or_else(|| {
+                        DemandControlError::QueryParseFailure(format!(
+                            "Type metadata is missing for {}.{}",
+                            meta.ty.name(),
+                            arg_name.as_str(),
+                        ))
+                    })?;
                 cost += score_variable(arg_val, arg_meta, schema)?;
             }
             Ok(cost)
@@ -557,15 +569,18 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         self.visit_list_item(request, variables, parent_ty, field, value);
         if let Some(field_metadata) = self.schema.type_field_metadata(parent_ty, &field.name) {
             for argument in &field.arguments {
-                // TODO: Remove expectations
-                let argument_metadata = field_metadata
+                if let Some(argument_metadata) = field_metadata
                     .argument_directive_metadata
                     .get(&argument.name)
-                    .expect("has arg metadata");
-                if let Ok(argument_cost) =
-                    score_input_object(&argument.value, variables, argument_metadata, &self.schema)
                 {
-                    self.cost += argument_cost;
+                    if let Ok(argument_cost) = score_input_object(
+                        &argument.value,
+                        variables,
+                        argument_metadata,
+                        self.schema,
+                    ) {
+                        self.cost += argument_cost;
+                    }
                 }
             }
         }

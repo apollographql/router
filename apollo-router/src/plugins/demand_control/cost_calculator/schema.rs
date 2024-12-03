@@ -189,7 +189,7 @@ impl DemandControlledSchema {
                                 ty: field_type.clone(),
                                 cost_directive: CostSpecDefinition::cost_directive_from_argument(
                                     &fed_schema,
-                                    &field_definition,
+                                    field_definition,
                                     field_type,
                                 )?,
                             },
