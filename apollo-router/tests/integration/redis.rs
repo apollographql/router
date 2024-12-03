@@ -51,7 +51,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     }
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
-    let known_cache_key = "plan:cache:1:federation:v2.9.3:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734";
+    let known_cache_key = "plan:cache:1:federation:v2.9.3:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -448,14 +448,15 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
+    // if this is failing due to a cache key change, hook up redis-cli with the MONITOR command to see the keys being set
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:ff69b4487720d4776dd85eef89ca7a077bbed2f37bbcec6252905cc701415728:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:ea227d6d9f1e595fe4aa16ab7f90e7d3b7676bb065cd836d960e99e1edf94bef:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -567,7 +568,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:ea227d6d9f1e595fe4aa16ab7f90e7d3b7676bb065cd836d960e99e1edf94bef:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -796,7 +797,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:ff69b4487720d4776dd85eef89ca7a077bbed2f37bbcec6252905cc701415728:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -817,7 +818,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:ea227d6d9f1e595fe4aa16ab7f90e7d3b7676bb065cd836d960e99e1edf94bef:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -861,7 +862,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:f7d6d3af2706afe346e3d5fd353e61bd186d2fc64cb7b3c13a62162189519b5f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:00a80cad9114a41b85ea6df444a905f65e12ed82aba261d1716c71863608da35:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -976,7 +977,7 @@ async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         // This configuration turns the fragment generation option *off*.
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0ade8e18db172d9d51b36a2112513c15032d103100644df418a50596de3adfba",
+        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0ade8e18db172d9d51b36a2112513c15032d103100644df418a50596de3adfba",
     )
     .await;
 }
@@ -1006,7 +1007,7 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:066f41523274aed2428e0f08c9de077ee748a1d8470ec31edb5224030a198f3b",
+        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:066f41523274aed2428e0f08c9de077ee748a1d8470ec31edb5224030a198f3b",
     )
     .await;
 }
@@ -1028,7 +1029,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:b31d320db1af4015998cc89027f0ede2305dcc61724365e9b76d4252f90c7677",
+        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:b31d320db1af4015998cc89027f0ede2305dcc61724365e9b76d4252f90c7677",
     )
     .await;
 }
@@ -1050,7 +1051,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d54414eeede3a1bf631d88a84a1e3a354683be87746e79a69769cf18d919cc01",
+        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d54414eeede3a1bf631d88a84a1e3a354683be87746e79a69769cf18d919cc01",
     )
     .await;
 }
@@ -1074,7 +1075,8 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734";
+    // If the tests above are failing, this is the key that needs to be changed first.
+    let starting_key = "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734";
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
     router.execute_default_query().await;

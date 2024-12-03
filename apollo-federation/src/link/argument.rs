@@ -5,6 +5,7 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
@@ -130,5 +131,22 @@ pub(crate) fn directive_optional_variable_boolean_argument(
             ))),
         },
         None => Ok(None),
+    }
+}
+
+pub(crate) fn directive_optional_list_argument<'a>(
+    application: &'a Node<Directive>,
+    name: &'_ Name,
+) -> Result<Option<&'a [Node<Value>]>, FederationError> {
+    match application.specified_argument_by_name(name) {
+        None => Ok(None),
+        Some(value) => match value.as_ref() {
+            Value::Null => Ok(None),
+            Value::List(values) => Ok(Some(values.as_slice())),
+            _ => bail!(
+                r#"Argument "{name}" of directive "@{}" must be a boolean."#,
+                application.name
+            ),
+        },
     }
 }
