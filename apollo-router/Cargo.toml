@@ -240,6 +240,13 @@ tonic = { version = "0.12.3", features = [
     "tls-roots",
     "gzip",
 ] }
+
+tonic-0_9 = { version = "0.9.0", features = [
+    "transport",
+    "tls",
+    "tls-roots",
+    "gzip",
+], package = "tonic" }
 # tower.workspace = true
 tower = { version = "0.5.1", features = ["full"] }
 

@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
+use http_0_2 as http;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
@@ -15,6 +16,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+
+use tonic_0_9 as tonic;
 use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
@@ -78,7 +81,7 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
+                let endpoint = self.endpoint.to_uri_0_2(&DEFAULT_GRPC_ENDPOINT);
                 let grpc = self.grpc.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
@@ -97,7 +100,7 @@ impl Config {
                 let endpoint = add_missing_path(
                     kind,
                     self.endpoint
-                        .to_uri(&DEFAULT_HTTP_ENDPOINT)
+                        .to_uri_0_2(&DEFAULT_HTTP_ENDPOINT)
                         .map(|e| e.into_parts()),
                 )?;
                 let http = self.http.clone();
