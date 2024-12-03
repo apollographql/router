@@ -859,9 +859,6 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-
     use serde_json::json;
     use test_log::test;
     use tower::Service;
