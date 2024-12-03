@@ -26,7 +26,8 @@ expression: parts
           "@"
         ],
         "extensions": {
-          "code": "FETCH_ERROR"
+          "code": "FETCH_ERROR",
+          "service": "reviews"
         }
       }
     ],
