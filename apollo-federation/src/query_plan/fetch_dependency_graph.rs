@@ -213,9 +213,10 @@ impl FetchIdGenerator {
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
     pub(crate) selection_set: Arc<SelectionSet>,
-    /// The conditions determining whether the fetch should be executed (which must be recomputed
-    /// from the selection set when it changes).
-    pub(crate) conditions: Conditions,
+    /// The conditions determining whether the fetch should be executed, derived from the selection
+    /// set.
+    #[serde(skip)]
+    conditions: OnceLock<Conditions>,
 }
 
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
@@ -1781,7 +1782,7 @@ impl FetchDependencyGraph {
             .ok_or_else(|| FederationError::internal("Node unexpectedly missing"))?;
         let conditions = node
             .selection_set
-            .conditions
+            .conditions()?
             .update_with(&handled_conditions);
         let new_handled_conditions = conditions.clone().merge(handled_conditions);
 
@@ -3181,9 +3182,8 @@ impl FetchSelectionSet {
         type_position: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
         let selection_set = Arc::new(SelectionSet::empty(schema, type_position));
-        let conditions = selection_set.conditions()?;
         Ok(Self {
-            conditions,
+            conditions: OnceLock::new(),
             selection_set,
         })
     }
@@ -3194,18 +3194,34 @@ impl FetchSelectionSet {
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
-        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
-        // Or make it lazily-initialized and computed on demand?
-        self.conditions = self.selection_set.conditions()?;
+        self.conditions.take();
         Ok(())
     }
 
     fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
-        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
-        // Or make it lazily-initialized and computed on demand?
-        self.conditions = self.selection_set.conditions()?;
+        self.conditions.take();
         Ok(())
+    }
+
+    /// The conditions determining whether the fetch should be executed.
+    fn conditions(&self) -> Result<&Conditions, FederationError> {
+        // This is a bit inefficient, because `get_or_try_init` is unstable.
+        // https://github.com/rust-lang/rust/issues/109737
+        //
+        // Essentially we do `.get()` twice. This is still much better than eagerly recomputing the
+        // selection set all the time, though :)
+        if let Some(conditions) = self.conditions.get() {
+            return Ok(conditions);
+        }
+
+        // Separating this call and the `.get_or_init` call means we could, if called from multiple
+        // threads, do the same work twice.
+        // The query planner does not use multiple threads for a single plan at the moment, and
+        // even if it did, occasionally computing this twice would still be better than eagerly
+        // recomputing it after every change.
+        let conditions = self.selection_set.conditions()?;
+        Ok(self.conditions.get_or_init(|| conditions))
     }
 }
 

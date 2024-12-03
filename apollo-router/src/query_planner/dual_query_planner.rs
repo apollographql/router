@@ -14,6 +14,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::QueryPlan;
@@ -1003,6 +1004,24 @@ fn same_ast_argument(x: &ast::Argument, y: &ast::Argument) -> bool {
     x.name == y.name && same_ast_argument_value(&x.value, &y.value)
 }
 
+fn same_ast_arguments(x: &[Node<ast::Argument>], y: &[Node<ast::Argument>]) -> bool {
+    vec_matches_sorted_by(
+        x,
+        y,
+        |a, b| a.name.cmp(&b.name),
+        |a, b| same_ast_argument(a, b),
+    )
+}
+
+fn same_directives(x: &ast::DirectiveList, y: &ast::DirectiveList) -> bool {
+    vec_matches_sorted_by(
+        x,
+        y,
+        |a, b| a.name.cmp(&b.name),
+        |a, b| a.name == b.name && same_ast_arguments(&a.arguments, &b.arguments),
+    )
+}
+
 fn get_ast_selection_key(
     selection: &ast::Selection,
     fragment_map: &HashMap<Name, Name>,
@@ -1035,24 +1054,20 @@ fn same_ast_selection(
         (ast::Selection::Field(x), ast::Selection::Field(y)) => {
             x.name == y.name
                 && x.alias == y.alias
-                && vec_matches_sorted_by(
-                    &x.arguments,
-                    &y.arguments,
-                    |a, b| a.name.cmp(&b.name),
-                    |a, b| same_ast_argument(a, b),
-                )
-                && x.directives == y.directives
+                && same_ast_arguments(&x.arguments, &y.arguments)
+                && same_directives(&x.directives, &y.directives)
                 && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set, fragment_map)
         }
         (ast::Selection::FragmentSpread(x), ast::Selection::FragmentSpread(y)) => {
             let mapped_fragment_name = fragment_map
                 .get(&x.fragment_name)
                 .unwrap_or(&x.fragment_name);
-            *mapped_fragment_name == y.fragment_name && x.directives == y.directives
+            *mapped_fragment_name == y.fragment_name
+                && same_directives(&x.directives, &y.directives)
         }
         (ast::Selection::InlineFragment(x), ast::Selection::InlineFragment(y)) => {
             x.type_condition == y.type_condition
-                && x.directives == y.directives
+                && same_directives(&x.directives, &y.directives)
                 && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set, fragment_map)
         }
         _ => false,
@@ -1195,6 +1210,15 @@ mod ast_comparison_tests {
     fn test_selection_argument_order() {
         let op_x = r#"{ x(arg1: "one", arg2: "two") }"#;
         let op_y = r#"{ x(arg2: "two", arg1: "one") }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_selection_directive_order() {
+        let op_x = r#"{ x @include(if:true) @skip(if:false) }"#;
+        let op_y = r#"{ x @skip(if:false) @include(if:true) }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());

@@ -853,10 +853,8 @@ impl PluginPrivate for Telemetry {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
     }
-}
 
-impl Telemetry {
-    pub(crate) fn activate(&self) {
+    fn activate(&self) {
         let mut activation = self.activation.lock();
         if activation.is_active {
             return;
@@ -910,7 +908,9 @@ impl Telemetry {
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;
     }
+}
 
+impl Telemetry {
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
         let propagation = &config.exporters.tracing.propagation;
 
