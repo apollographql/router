@@ -16,11 +16,10 @@ These instruments can be consumed by configuring a [metrics exporter](/router/co
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
   - `subgraph`: (Optional) The subgraph being queried
 - `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status
-- `apollo_router_timeout` - Number of triggered timeouts
 
 ### GraphQL
 
-- `apollo_router_graphql_error` - counts GraphQL errors in responses, attributes:
+- `apollo.router.graphql_error` - counts GraphQL errors in responses, attributes:
   - `code`: error code
 
 ### Session
@@ -122,8 +121,17 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 The following metrics have been deprecated and should not be used.
 
-- `apollo_router_span` - **Deprecated**—use `apollo_router_processing_time` instead.
-- `apollo_router_http_request_retry_total` **Deprecated**- Number of subgraph requests retried. You should use:
+- `apollo_router_span` - **Deprecated**: use `apollo_router_processing_time` instead.
+- `apollo_router_deduplicated_subscriptions_total` - **Deprecated**: use the `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated` attribute.
+- `apollo_authentication_failure_count` - **Deprecated**: use the `apollo.router.operations.authentication.jwt` metric's `authentication.jwt.failed` attribute.
+- `apollo_authentication_success_count` - **Deprecated**: use the `apollo.router.operations.authentication.jwt` metric instead. If the `authentication.jwt.failed` attribute is *absent* or `false`, the authentication succeeded.
+- `apollo_require_authentication_failure_count` - **Deprecated**: use the `http.server.request.duration` metric's `http.response.status_code` attribute. Requests with authentication failures have HTTP status code 401.
+- `apollo_router_timeout` - **Deprecated**: this metric conflates timed-out requests from client to the router, and requests from the router to subgraphs. Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests, and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
+- `apollo_router_http_request_retry_total` **Deprecated**: this can be achieved with custom telemetry instead. See [below for an example](#migrate-from-apollo_router_http_request_retry_total).
+
+#### Migrate from `apollo_router_http_request_retry_total`
+
+The below configuration filters the deprecated metric, and defines a custom histogram recording the number of retried HTTP requests to subgraphs.
 
 ```yaml title="config.router.yaml"
 telemetry:
