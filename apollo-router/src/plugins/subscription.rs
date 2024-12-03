@@ -430,7 +430,7 @@ impl Service<router::Request> for CallbackService {
 
                 match parts.method {
                     Method::POST => {
-                        let cb_body = Into::<RouterBody>::into(body).to_bytes()
+                        let cb_body = router::body::get_body_bytes(Into::<RouterBody>::into(body))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -447,7 +447,7 @@ impl Service<router::Request> for CallbackService {
                                 return Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::BAD_REQUEST)
-                                        .body(err.into())
+                                        .body(router::body::full(err))
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 });
