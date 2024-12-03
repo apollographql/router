@@ -444,7 +444,7 @@ impl IntoResponse for Response<graphql::Response> {
             .headers
             .insert(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
 
-        axum::response::Response::from_parts(parts, http_body_util::Full::new(json_body_bytes))
+        axum::response::Response::from_parts(parts, axum::body::Body::from(json_body_bytes))
     }
 }
 
@@ -453,7 +453,7 @@ impl IntoResponse for Response<Bytes> {
         // todo: chunks?
         let (parts, body) = http::Response::from(self).into_parts();
 
-        axum::response::Response::from_parts(parts, http_body_util::Full::new(body))
+        axum::response::Response::from_parts(parts, axum::body::Body::from(body))
     }
 }
 
