@@ -3948,7 +3948,7 @@ fn compute_nodes_for_op_path_element<'a>(
             (stack_item.node_id, &stack_item.node_path),
             // If setting a context, add __typename to the site where we are retrieving context from
             // since the context rewrites path will start with a type condition.
-            if child.set_context_ids.is_some() {
+            if child.matching_context_ids.is_some() {
                 Some(edge_id)
             } else {
                 None
@@ -3957,12 +3957,12 @@ fn compute_nodes_for_op_path_element<'a>(
             created_nodes,
         )?;
 
-        if let Some(set_context_ids) = &child.set_context_ids {
+        if let Some(matching_context_ids) = &child.matching_context_ids {
             let mut condition_nodes = vec![conditions_node_data.conditions_merge_node_id];
             condition_nodes.extend(&conditions_node_data.created_node_ids);
             let mut context_to_condition_nodes =
                 stack_item.context_to_condition_nodes.deref().clone();
-            for context in set_context_ids {
+            for context in matching_context_ids {
                 context_to_condition_nodes.insert(context.clone(), condition_nodes.clone());
             }
             updated.context_to_condition_nodes = Arc::new(context_to_condition_nodes);

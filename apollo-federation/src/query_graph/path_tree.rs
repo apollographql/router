@@ -10,7 +10,7 @@ use petgraph::graph::NodeIndex;
 use serde::Serialize;
 
 use super::graph_path::ArgumentsToContextUsages;
-use super::graph_path::SetContextIds;
+use super::graph_path::MatchingContextIds;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::GraphPathItem;
@@ -96,8 +96,8 @@ where
     pub(crate) tree: Arc<PathTree<TTrigger, TEdge>>,
     // PORT_NOTE: This field was renamed because the JS name (`contextToSelection`) implied it was
     // a map to selections, which it isn't.
-    /// The IDs of contexts set at the head of the edge.
-    pub(crate) set_context_ids: Option<SetContextIds>,
+    /// The IDs of contexts that have matched at the edge.
+    pub(crate) matching_context_ids: Option<MatchingContextIds>,
     // PORT_NOTE: This field was renamed because the JS name (`parameterToContext`) left confusion
     // to how a parameter was different from an argument.
     /// A map of @fromContext arguments to info about the contexts used in those arguments.
@@ -252,7 +252,7 @@ where
             trigger: &'inputs Arc<TTrigger>,
             conditions: Option<Arc<OpPathTree>>,
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
-            set_context_ids: Option<SetContextIds>,
+            matching_context_ids: Option<MatchingContextIds>,
             arguments_to_context_usages: Option<ArgumentsToContextUsages>,
         }
 
@@ -263,7 +263,7 @@ where
                 generic_edge,
                 trigger,
                 conditions,
-                set_context_ids,
+                matching_context_ids,
                 arguments_to_context_usages,
             )) = graph_path_iter.next()
             else {
@@ -293,9 +293,9 @@ where
                     let existing = entry.into_mut();
                     existing.trigger = trigger;
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
-                    if let Some(other) = set_context_ids {
+                    if let Some(other) = matching_context_ids {
                         existing
-                            .set_context_ids
+                            .matching_context_ids
                             .get_or_insert_with(Default::default)
                             .extend(other);
                     }
@@ -315,7 +315,7 @@ where
                         trigger,
                         conditions: conditions.clone(),
                         sub_paths_and_selections: vec![(graph_path_iter, selection)],
-                        set_context_ids,
+                        matching_context_ids,
                         arguments_to_context_usages,
                     });
                 }
@@ -334,7 +334,7 @@ where
                         by_unique_edge.target_node,
                         child.sub_paths_and_selections,
                     )?),
-                    set_context_ids: child.set_context_ids.clone(),
+                    matching_context_ids: child.matching_context_ids.clone(),
                     arguments_to_context_usages: child.arguments_to_context_usages.clone(),
                 }))
             }
@@ -369,11 +369,11 @@ where
                         (Some(cond_a), Some(cond_b)) => cond_a.equals_same_root(cond_b),
                         _ => false,
                     }
-                    && match (&a.set_context_ids, &b.set_context_ids) {
-                        (Some(_), Some(_)) => a.set_context_ids == b.set_context_ids,
+                    && match (&a.matching_context_ids, &b.matching_context_ids) {
+                        (Some(_), Some(_)) => a.matching_context_ids == b.matching_context_ids,
                         (_, _) =>
-                            a.set_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true) &&
-                                b.set_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true)
+                            a.matching_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true) &&
+                                b.matching_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true)
                     }
                     && match (&a.arguments_to_context_usages, &b.arguments_to_context_usages) {
                         (Some(_), Some(_)) => a.arguments_to_context_usages == b.arguments_to_context_usages,
@@ -462,9 +462,9 @@ where
                     trigger: child.trigger.clone(),
                     conditions: merge_conditions(&child.conditions, &other_child.conditions),
                     tree: child.tree.merge(&other_child.tree),
-                    set_context_ids: merge_set_context_ids(
-                        &child.set_context_ids,
-                        &other_child.set_context_ids,
+                    matching_context_ids: merge_matching_context_ids(
+                        &child.matching_context_ids,
+                        &other_child.matching_context_ids,
                     ),
                     arguments_to_context_usages: merge_arguments_to_context_usages(
                         &child.arguments_to_context_usages,
@@ -491,13 +491,13 @@ where
     }
 }
 
-fn merge_set_context_ids(
-    a: &Option<SetContextIds>,
-    b: &Option<SetContextIds>,
-) -> Option<SetContextIds> {
+fn merge_matching_context_ids(
+    a: &Option<MatchingContextIds>,
+    b: &Option<MatchingContextIds>,
+) -> Option<MatchingContextIds> {
     match (a, b) {
         (Some(a), Some(b)) => {
-            let mut merged: SetContextIds = Default::default();
+            let mut merged: MatchingContextIds = Default::default();
             merged.extend(a.iter().cloned());
             merged.extend(b.iter().cloned());
             Some(merged)

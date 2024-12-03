@@ -181,6 +181,9 @@ pub(crate) fn parse_field_value_without_validation(
     )?)
 }
 
+// Similar to parse_field_set(), we explicitly forbid aliases for field values. In this case though,
+// it's because field value evaluation semantics means aliases would be stripped out and have no
+// effect.
 pub(crate) fn validate_field_value(
     schema: &ValidFederationSchema,
     field_value: FieldSet,

@@ -574,10 +574,7 @@ impl QueryGraph {
             .get(source)
             .and_then(|r| r.get(argument))
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: "context ID unexpectedly missing for @fromContext argument".to_owned(),
-                }
-                .into()
+                internal_error!("context ID unexpectedly missing for @fromContext argument")
             })
     }
 

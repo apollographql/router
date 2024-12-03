@@ -175,8 +175,8 @@ where
     defer_on_tail: Option<DeferDirectiveArguments>,
     // PORT_NOTE: This field was renamed because the JS name (`contextToSelection`) implied it was
     // a map to selections, which it isn't.
-    /// The IDs of contexts set at the head of an edge, for each edge in the path.
-    set_context_ids: Vec<Option<SetContextIds>>,
+    /// The IDs of contexts that have matched at the edge, for each edge in the path.
+    matching_context_ids: Vec<Option<MatchingContextIds>>,
     // PORT_NOTE: This field was renamed because the JS name (`parameterToContext`) left confusion
     // to how a parameter was different from an argument.
     /// Maps of @fromContext arguments to info about the contexts used in those arguments, for each
@@ -208,7 +208,7 @@ where
             runtime_types_of_tail,
             runtime_types_before_tail_if_last_is_cast,
             defer_on_tail,
-            set_context_ids: _,
+            matching_context_ids: _,
             arguments_to_context_usages: _,
         } = self;
 
@@ -269,7 +269,7 @@ impl OverrideId {
     }
 }
 
-pub(crate) type SetContextIds = IndexSet<Name>;
+pub(crate) type MatchingContextIds = IndexSet<Name>;
 pub(crate) type ArgumentsToContextUsages = IndexMap<Name, ContextUsageEntry>;
 
 /// The item type for [`GraphPath::iter`]
@@ -277,7 +277,7 @@ pub(crate) type GraphPathItem<'path, TTrigger, TEdge> = (
     TEdge,
     &'path Arc<TTrigger>,
     &'path Option<Arc<OpPathTree>>,
-    Option<SetContextIds>,
+    Option<MatchingContextIds>,
     Option<ArgumentsToContextUsages>,
 );
 
@@ -1002,7 +1002,7 @@ where
             runtime_types_of_tail: Arc::new(IndexSet::default()),
             runtime_types_before_tail_if_last_is_cast: None,
             defer_on_tail: None,
-            set_context_ids: Vec::default(),
+            matching_context_ids: Vec::default(),
             arguments_to_context_usages: Vec::default(),
         };
         path.runtime_types_of_tail = Arc::new(path.head_possible_runtime_types()?);
@@ -1046,7 +1046,7 @@ where
         let mut edges = self.edges.clone();
         let mut edge_triggers = self.edge_triggers.clone();
         let mut edge_conditions = self.edge_conditions.clone();
-        let mut set_context_ids = self.set_context_ids.clone();
+        let mut matching_context_ids = self.matching_context_ids.clone();
         let mut arguments_to_context_usages = self.arguments_to_context_usages.clone();
         let mut last_subgraph_entering_edge_info = if defer.is_none() {
             self.last_subgraph_entering_edge_info.clone()
@@ -1058,7 +1058,7 @@ where
             edges.push(edge);
             edge_triggers.push(Arc::new(trigger));
             edge_conditions.push(condition_path_tree);
-            set_context_ids.push(None);
+            matching_context_ids.push(None);
             arguments_to_context_usages.push(None);
             return Ok(GraphPath {
                 graph: self.graph.clone(),
@@ -1079,7 +1079,7 @@ where
                 ),
                 runtime_types_before_tail_if_last_is_cast: None,
                 defer_on_tail: defer,
-                set_context_ids,
+                matching_context_ids,
                 arguments_to_context_usages,
             });
         };
@@ -1218,7 +1218,7 @@ where
                                         } else {
                                             self.defer_on_tail.clone()
                                         },
-                                        set_context_ids: self.set_context_ids.clone(),
+                                        matching_context_ids: self.matching_context_ids.clone(),
                                         arguments_to_context_usages: self
                                             .arguments_to_context_usages
                                             .clone(),
@@ -1282,13 +1282,13 @@ where
                     // We know last edge is not a cast.
                     runtime_types_before_tail_if_last_is_cast: None,
                     defer_on_tail: defer,
-                    set_context_ids: self.set_context_ids.clone(),
+                    matching_context_ids: self.matching_context_ids.clone(),
                     arguments_to_context_usages: self.arguments_to_context_usages.clone(),
                 });
             }
         }
 
-        let (new_edge_conditions, new_set_context_ids, new_arguments_to_context_usages) =
+        let (new_edge_conditions, new_matching_context_ids, new_arguments_to_context_usages) =
             self.merge_edge_conditions_with_resolution(&condition_path_tree, &context_map);
         let last_arguments_to_context_usages = new_arguments_to_context_usages.last();
 
@@ -1378,7 +1378,7 @@ where
             } else {
                 None
             },
-            set_context_ids: new_set_context_ids,
+            matching_context_ids: new_matching_context_ids,
             arguments_to_context_usages: new_arguments_to_context_usages,
         })
     }
@@ -1394,16 +1394,16 @@ where
         Vec<Option<IndexMap<Name, ContextUsageEntry>>>,
     ) {
         let mut edge_conditions = self.edge_conditions.clone();
-        let mut set_context_ids = self.set_context_ids.clone();
+        let mut matching_context_ids = self.matching_context_ids.clone();
         let mut arguments_to_context_usages = self.arguments_to_context_usages.clone();
 
         edge_conditions.push(condition_path_tree.clone());
-        set_context_ids.push(None);
+        matching_context_ids.push(None);
         if context_map.is_none() || context_map.as_ref().is_some_and(|m| m.is_empty()) {
             arguments_to_context_usages.push(None);
             (
                 edge_conditions,
-                set_context_ids,
+                matching_context_ids,
                 arguments_to_context_usages,
             )
         } else {
@@ -1417,7 +1417,7 @@ where
                         .map_or_else(|| path_tree.clone(), |condition| condition.merge(path_tree));
                     edge_conditions[idx] = Some(merged_conditions);
                 }
-                set_context_ids[idx]
+                matching_context_ids[idx]
                     .get_or_insert_with(Default::default)
                     .insert(entry.context_id.clone());
 
@@ -1437,7 +1437,7 @@ where
             arguments_to_context_usages.push(Some(new_arguments_to_context_usages));
             (
                 edge_conditions,
-                set_context_ids,
+                matching_context_ids,
                 arguments_to_context_usages,
             )
         }
@@ -1446,22 +1446,25 @@ where
     pub(crate) fn iter(&self) -> impl Iterator<Item = GraphPathItem<'_, TTrigger, TEdge>> {
         debug_assert_eq!(self.edges.len(), self.edge_triggers.len());
         debug_assert_eq!(self.edges.len(), self.edge_conditions.len());
-        debug_assert_eq!(self.edges.len(), self.set_context_ids.len());
+        debug_assert_eq!(self.edges.len(), self.matching_context_ids.len());
         debug_assert_eq!(self.edges.len(), self.arguments_to_context_usages.len());
         self.edges
             .iter()
             .copied()
             .zip(&self.edge_triggers)
             .zip(&self.edge_conditions)
-            .zip(&self.set_context_ids)
+            .zip(&self.matching_context_ids)
             .zip(&self.arguments_to_context_usages)
             .map(
-                |((((edge, trigger), condition), set_context_ids), arguments_to_context_usages)| {
+                |(
+                    (((edge, trigger), condition), matching_context_ids),
+                    arguments_to_context_usages,
+                )| {
                     (
                         edge,
                         trigger,
                         condition,
-                        set_context_ids.clone(),
+                        matching_context_ids.clone(),
                         arguments_to_context_usages.clone(),
                     )
                 },
@@ -2675,7 +2678,7 @@ impl OpGraphPath {
             defer_on_tail: self.defer_on_tail.clone(),
             // PORT_NOTE: The JS codebase doesn't properly truncate these fields, this is a bug
             // which we fix here.
-            set_context_ids: self.set_context_ids[0..prefix_length].to_vec(),
+            matching_context_ids: self.matching_context_ids[0..prefix_length].to_vec(),
             arguments_to_context_usages: self.arguments_to_context_usages[0..prefix_length]
                 .to_vec(),
         })
