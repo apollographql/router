@@ -17,9 +17,6 @@ These instruments can be consumed by configuring a [metrics exporter](/router/co
   - `subgraph`: (Optional) The subgraph being queried
 - `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status
 - `apollo_router_timeout` - Number of triggered timeouts
-- `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
-  - `subgraph`: The subgraph being queried
-  - `status` : If the retry was aborted (`aborted`)
 
 ### GraphQL
 
@@ -126,3 +123,39 @@ The initial call to Uplink during router startup is not reflected in metrics.
 The following metrics have been deprecated and should not be used.
 
 - `apollo_router_span` - **Deprecated**—use `apollo_router_processing_time` instead.
+- `apollo_router_http_request_retry_total` **Deprecated**- Number of subgraph requests retried. You should use:
+
+```yaml title="config.router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+        - name: apollo_router_http_request_retry_total # Drop the deprecated metric
+          aggregation: drop
+        - name: http.client.request.retry # Set the right buckets for the new metric
+          aggregation:
+            histogram:
+              buckets:
+                - 1
+                - 10
+                - 100
+                - 1000
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.retry: # Create custom histogram measuring the number of retries for http request to a subgraph
+          type: histogram
+          value:
+            subgraph_resend_count: true
+          unit: hit
+          description: histogram of subgraph request resend count
+          condition:
+            gt:
+            - subgraph_resend_count: true
+            - 0
+          attributes:
+            subgraph.name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string
+```

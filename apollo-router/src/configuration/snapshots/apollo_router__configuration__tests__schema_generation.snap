@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -5744,6 +5743,11 @@ snapshot_kind: text
     "SubgraphAttributes": {
       "additionalProperties": false,
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -6235,6 +6239,24 @@ snapshot_kind: text
           },
           "required": [
             "subgraph_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "subgraph_resend_count": {
+              "description": "The subgraph http resend count",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_resend_count"
           ],
           "type": "object"
         },
@@ -7756,6 +7778,11 @@ snapshot_kind: text
         "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -7785,6 +7812,11 @@ snapshot_kind: text
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",

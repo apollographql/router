@@ -190,6 +190,7 @@ mod test {
     use super::studio::SingleStatsReport;
     use super::*;
     use crate::context::OPERATION_KIND;
+    use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::subscription;
@@ -421,7 +422,7 @@ mod test {
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
-        subscription::Subscription::new(PluginInit::fake_new(
+        <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
         ))
