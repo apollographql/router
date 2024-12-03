@@ -340,7 +340,7 @@ impl SigningParamsConfig {
             parts,
             crate::services::router::body::full(body_bytes),
         );
-        signing_instructions.apply_to_request_http0x(&mut req);
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -379,7 +379,7 @@ impl SigningParamsConfig {
             })?
             .into_parts();
         req = Request::<()>::from_parts(parts, ());
-        signing_instructions.apply_to_request_http0x(&mut req);
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
