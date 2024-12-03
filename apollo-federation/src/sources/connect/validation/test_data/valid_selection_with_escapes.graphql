@@ -8,23 +8,23 @@ type Query {
         selection: """
 
 
-        foo
-        bar
+        one
+        two
 
 
 
-        			unicode:$('﷽é').
+        			unicode:$('﷽é€中π').
         """
     )
     standard: T
     @connect(
         http: { GET: "http://127.0.0.1/something" }
-        selection: "\n\n\nfoo bar\t\t\t\n\n\nunicode:$('\uFDFD\u0065\u0301')."
+        selection: "\n\n\none two\t\t\t\n\n\nunicode:$('\uFDFD\u0065\u0301\u20AC\u4E2D\u03C0')."
     )
 }
 
 type T {
-    foo: String
-    bar: String
+    one: String
+    two: String
     unicode: String
 }

@@ -8,14 +8,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/valid_sel
         code: InvalidJsonSelection,
         message: "`@connect(selection:)` on `Query.block` is not a valid JSONSelection: Path selection . must be followed by key (identifier or quoted string literal): .",
         locations: [
-            16:27..16:28,
+            16:30..16:31,
         ],
     },
     Message {
         code: InvalidJsonSelection,
         message: "`@connect(selection:)` on `Query.standard` is not a valid JSONSelection: Path selection . must be followed by key (identifier or quoted string literal): .",
         locations: [
-            22:77..22:78,
+            22:95..22:96,
         ],
     },
 ]

@@ -6,7 +6,7 @@
 //! Standard strings may contain escape sequences, while block strings contain verbatim text.
 //! Block strings additionally have any common indent and leading whitespace lines removed.
 //!
-//! See: https://spec.graphql.org/October2021/#sec-String-Value
+//! See: <https://spec.graphql.org/October2021/#sec-String-Value>
 
 use std::ops::Range;
 
@@ -15,21 +15,8 @@ use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::Node;
 use nom::AsChar;
-use crate::sources::connect::validation::graphql::SchemaInfo;
 
-#[derive(Clone, Copy)]
-pub(crate) struct GraphQLString<'schema> {
-    /// The GraphQL string literal with the rules from the spec applied by the compiler
-    compiled_string: &'schema str,
-    /// The original string from the source file, excluding the surrounding quotes
-    raw_string: &'schema str,
-    /// Where `raw_string` _starts_ in the source text
-    raw_offset: usize,
-    /// Whether the string is a block string or standard string
-    block_string: bool,
-    /// The common indent for block strings (0 for standard strings)
-    common_indent: usize,
-}
+use crate::sources::connect::validation::graphql::SchemaInfo;
 
 fn is_whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t')
@@ -37,6 +24,31 @@ fn is_whitespace(c: char) -> bool {
 
 fn is_whitespace_line(line: &str) -> bool {
     line.is_empty() || line.chars().all(is_whitespace)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum GraphQLString<'schema> {
+    Standard {
+        data: Data<'schema>,
+    },
+    Block {
+        data: Data<'schema>,
+
+        /// The common indent
+        common_indent: usize,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Data<'schema> {
+    /// The GraphQL string literal with the rules from the spec applied by the compiler
+    compiled_string: &'schema str,
+
+    /// The original string from the source file, excluding the surrounding quotes
+    raw_string: &'schema str,
+
+    /// Where `raw_string` _starts_ in the source text
+    raw_offset: usize,
 }
 
 impl<'schema> GraphQLString<'schema> {
@@ -47,7 +59,7 @@ impl<'schema> GraphQLString<'schema> {
         // The node value has escape sequences removed (for standard strings) and block string
         // rules applied (for block strings) which affect whitespace and newlines. Offsets into
         // the node value string will not match what is in the source file.
-        let node_value = value.as_str().ok_or(())?;
+        let compiled_string = value.as_str().ok_or(())?;
 
         // Get the raw string value from the source file. This is just the raw string without any
         // of the escape sequence processing or whitespace/newline modifications mentioned above.
@@ -56,38 +68,53 @@ impl<'schema> GraphQLString<'schema> {
         let source_text = file.source_text();
         let start_of_quotes = source_span.offset();
         let end_of_quotes = source_span.end_offset();
-        let raw_value_with_quotes = source_text.get(start_of_quotes..end_of_quotes).ok_or(())?;
+        let raw_string_with_quotes = source_text.get(start_of_quotes..end_of_quotes).ok_or(())?;
 
         // Count the number of double-quote characters
-        let num_quotes = raw_value_with_quotes.chars().take_while(|c| matches!(c, '"')).count();
-        let raw_value = source_text.get(start_of_quotes + num_quotes..end_of_quotes - num_quotes).ok_or(())?;
+        let num_quotes = raw_string_with_quotes
+            .chars()
+            .take_while(|c| matches!(c, '"'))
+            .count();
 
-        let common_indent = if num_quotes == 3 {
-            raw_value
-                .lines()
-                .skip(1)
-                .filter_map(|line| {
-                    let length = line.len();
-                    let indent = line.chars().take_while(|&c| is_whitespace(c)).count();
-                    (indent < length).then_some(indent)
-                })
-                .min()
-                .unwrap_or(0)
+        // Get the raw string with the quotes removed
+        let raw_string = source_text
+            .get(start_of_quotes + num_quotes..end_of_quotes - num_quotes)
+            .ok_or(())?;
+
+        Ok(if num_quotes == 3 {
+            GraphQLString::Block {
+                data: Data {
+                    compiled_string,
+                    raw_string,
+                    raw_offset: start_of_quotes + num_quotes,
+                },
+                common_indent: raw_string
+                    .lines()
+                    .skip(1)
+                    .filter_map(|line| {
+                        let length = line.len();
+                        let indent = line.chars().take_while(|&c| is_whitespace(c)).count();
+                        (indent < length).then_some(indent)
+                    })
+                    .min()
+                    .unwrap_or(0),
+            }
         } else {
-            0
-        };
-
-        Ok(Self {
-            compiled_string: node_value,
-            raw_string: raw_value,
-            raw_offset: start_of_quotes + num_quotes,
-            common_indent,
-            block_string: num_quotes == 3,
+            GraphQLString::Standard {
+                data: Data {
+                    compiled_string,
+                    raw_string,
+                    raw_offset: start_of_quotes + num_quotes,
+                },
+            }
         })
     }
 
     pub(crate) fn as_str(&self) -> &str {
-        self.compiled_string
+        match self {
+            GraphQLString::Standard { data } => data.compiled_string,
+            GraphQLString::Block { data, .. } => data.compiled_string,
+        }
     }
 
     pub(crate) fn line_col_for_subslice(
@@ -109,53 +136,77 @@ impl<'schema> GraphQLString<'schema> {
     /// Given an offset into the compiled string, compute the true offset in the raw source string.
     /// See: https://spec.graphql.org/October2021/#sec-String-Value
     fn true_offset(&self, input_offset: usize) -> Option<usize> {
-        let mut true_offset = self.raw_offset;
-        let mut skip = 0usize;
-        let mut skip_lines = if self.block_string {
-            self.raw_string.lines().take_while(|&line| is_whitespace_line(line)).count()
-        } else {
-            0
-        };
-        let mut i = 0usize;
-        let mut chars = self.raw_string.chars();
-
-        while i < input_offset {
-            let ch = chars.next()?;
-            true_offset += 1;
-            if skip > 0 {
-                skip -= 1;
-                continue;
+        match self {
+            GraphQLString::Standard { data } => {
+                // For standard strings, handle escape sequences
+                let mut i = 0usize;
+                let mut true_offset = data.raw_offset;
+                let mut chars = data.raw_string.chars();
+                while i < input_offset {
+                    let ch = chars.next()?;
+                    true_offset += 1;
+                    if ch == '\\' {
+                        let next = chars.next()?;
+                        true_offset += 1;
+                        if next == 'u' {
+                            // Determine the length of the codepoint in bytes. For example, \uFDFD
+                            // is 3 bytes when encoded in UTF-8 (0xEF,0xB7,0xBD).
+                            let codepoint: String = (&mut chars).take(4).collect();
+                            let codepoint = u32::from_str_radix(&codepoint, 16).ok()?;
+                            i += char::from_u32(codepoint)?.len();
+                            true_offset += 4;
+                            continue;
+                        }
+                    }
+                    i += ch.len();
+                }
+                Some(true_offset)
             }
-            if skip_lines > 0 {
-                if ch == '\n' {
-                    skip_lines -= 1;
-                    if skip_lines == 0 {
-                        skip = self.common_indent;
+            GraphQLString::Block {
+                data,
+                common_indent,
+            } => {
+                // For block strings, handle whitespace changes
+                let mut skip_chars = 0usize;
+                let mut skip_lines = data
+                    .raw_string
+                    .lines()
+                    .take_while(|&line| is_whitespace_line(line))
+                    .count();
+                let mut i = 0usize;
+                let mut true_offset = data.raw_offset;
+                let mut chars = data.raw_string.chars();
+                while i < input_offset {
+                    let ch = chars.next()?;
+                    true_offset += 1;
+                    if skip_chars > 0 {
+                        if ch == '\n' {
+                            skip_chars = *common_indent;
+                            i += 1;
+                        } else {
+                            skip_chars -= 1;
+                        }
+                        continue;
+                    }
+                    if skip_lines > 0 {
+                        if ch == '\n' {
+                            skip_lines -= 1;
+                            if skip_lines == 0 {
+                                skip_chars = *common_indent;
+                            }
+                        }
+                        continue;
+                    }
+                    if ch == '\n' {
+                        skip_chars = *common_indent;
+                    }
+                    if ch != '\r' {
+                        i += ch.len();
                     }
                 }
-                continue;
-            }
-            if !self.block_string && ch == '\\' {
-                let next = chars.next()?;
-                true_offset += 1;
-                if next == 'u' {
-                    // Determine the length of the codepoint in bytes. For example, \uFDFD is 3
-                    // bytes when encoded in UTF-8 (0xEF,0xB7,0xBD).
-                    let codepoint: String = (&mut chars).take(4).collect();
-                    let codepoint = u32::from_str_radix(&*codepoint, 16).ok()?;
-                    i += char::from_u32(codepoint)?.len();
-                    true_offset += 4;
-                    continue;
-                }
-            }
-            if ch == '\n' {
-                skip = self.common_indent;
-            }
-            if ch != '\r' {
-                i += ch.len();
+                Some(true_offset + skip_chars)
             }
         }
-        Some(true_offset + skip)
     }
 }
 
@@ -197,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn single_quoted_string() {
+    fn standard_string() {
         let schema = Schema::parse(SCHEMA, "test.graphql").unwrap();
         let http = connect_argument(&schema, "http").as_object().unwrap();
         let value = &http[0].1;
@@ -221,27 +272,25 @@ mod tests {
     }
 
     #[test]
-    fn multi_line_string() {
+    fn block_string() {
         let schema = Schema::parse(SCHEMA, "test.graphql").unwrap();
         let value = connect_argument(&schema, "selection");
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
-        assert_eq!(
-            string.as_str(),
-            r#"something
-            somethingElse {
-              nested
-            }"#
-        );
+        assert_eq!(string.as_str(), "something\nsomethingElse {\n  nested\n}");
         let name = "unused".try_into().unwrap();
         let schema_info = SchemaInfo::new(&schema, SCHEMA, &name, &name);
+        assert_eq!("nested", &string.as_str()[28..34]);
         assert_eq!(
-            string.line_col_for_subslice(8..16, &schema_info),
+            string.line_col_for_subslice(28..34, &schema_info),
             Some(
                 LineColumn {
-                    line: 8,
+                    line: 10,
+                    column: 15
+                }..LineColumn {
+                    line: 10,
                     column: 21
-                }..LineColumn { line: 9, column: 7 }
+                }
             )
         );
     }

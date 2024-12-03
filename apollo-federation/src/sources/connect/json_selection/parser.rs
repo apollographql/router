@@ -116,11 +116,7 @@ impl std::error::Error for JSONSelectionParseError {}
 
 impl Display for JSONSelectionParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}: {}",
-            self.message, self.fragment
-        )
+        write!(f, "{}: {}", self.message, self.fragment)
     }
 }
 
