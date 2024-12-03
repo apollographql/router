@@ -73,7 +73,7 @@ impl Mapping {
 /// Datadog span exporter
 pub struct DatadogExporter {
     client: Arc<dyn HttpClient>,
-    request_url: http::Uri,
+    request_url: http_0_2::Uri,
     model_config: ModelConfig,
     api_version: ApiVersion,
     mapping: Mapping,
@@ -111,7 +111,7 @@ impl DatadogExporter {
             &self.mapping,
             &self.unified_tags,
         )?;
-        let req = http::Request::builder()
+        let req = http_0_2::Request::builder()
             .method(http::Method::POST)
             .uri(self.request_url.clone())
             .header(http::header::CONTENT_TYPE, self.api_version.content_type())
@@ -254,7 +254,7 @@ impl DatadogPipelineBuilder {
 
     // parse the endpoint and append the path based on versions.
     // keep the query and host the same.
-    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<http::Uri, TraceError> {
+    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<http_0_2::Uri, TraceError> {
         // build agent endpoint based on version
         let mut endpoint = agent_endpoint
             .parse::<Url>()
