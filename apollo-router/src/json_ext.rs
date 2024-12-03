@@ -155,9 +155,6 @@ pub(crate) trait ValueExt {
     /// value type
     fn json_type_name(&self) -> &'static str;
 
-    /// Convert this value to an instance of `apollo_compiler::ast::Value`
-    fn to_ast(&self) -> apollo_compiler::ast::Value;
-
     fn as_i32(&self) -> Option<i32>;
 }
 
@@ -539,37 +536,6 @@ impl ValueExt for Value {
             Value::Number(_) => "number",
             Value::String(_) => "string",
             Value::Object(_) => "object",
-        }
-    }
-
-    fn to_ast(&self) -> apollo_compiler::ast::Value {
-        match self {
-            Value::Null => apollo_compiler::ast::Value::Null,
-            Value::Bool(b) => apollo_compiler::ast::Value::Boolean(*b),
-            Value::Number(n) if n.is_f64() => {
-                apollo_compiler::ast::Value::Float(n.as_f64().expect("is float").into())
-            }
-            Value::Number(n) => {
-                apollo_compiler::ast::Value::Int((n.as_i64().expect("is int") as i32).into())
-            }
-            Value::String(s) => apollo_compiler::ast::Value::String(s.as_str().to_string()),
-            Value::Array(inner_vars) => apollo_compiler::ast::Value::List(
-                inner_vars
-                    .iter()
-                    .map(|v| apollo_compiler::Node::new(v.to_ast()))
-                    .collect(),
-            ),
-            Value::Object(inner_vars) => apollo_compiler::ast::Value::Object(
-                inner_vars
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            apollo_compiler::Name::new(k.as_str()).expect("is valid name"),
-                            apollo_compiler::Node::new(v.to_ast()),
-                        )
-                    })
-                    .collect(),
-            ),
         }
     }
 

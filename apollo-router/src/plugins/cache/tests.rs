@@ -16,7 +16,10 @@ use super::entity::EntityCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
+use crate::plugins::cache::entity::CacheKeyContext;
+use crate::plugins::cache::entity::CacheKeysContext;
 use crate::plugins::cache::entity::Subgraph;
+use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
@@ -227,6 +230,10 @@ async fn insert() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
 
     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
     let response = response.next_response().await.unwrap();
@@ -255,6 +262,11 @@ async fn insert() {
     let mut response = service.oneshot(request).await.unwrap();
 
     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
+
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response);
@@ -434,14 +446,13 @@ async fn private() {
         .context(context)
         .build()
         .unwrap();
-    let response = service
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
+    let mut response = service.clone().oneshot(request).await.unwrap();
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
 
+    let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
     println!("\nNOW WITHOUT SUBGRAPHS\n");
@@ -463,14 +474,13 @@ async fn private() {
         .context(context)
         .build()
         .unwrap();
-    let response = service
-        .clone()
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
+    let mut response = service.clone().oneshot(request).await.unwrap();
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
+
+    let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response);
 
@@ -483,15 +493,16 @@ async fn private() {
         .context(context)
         .build()
         .unwrap();
-    let response = service
-        .clone()
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
+    let mut response = service.clone().oneshot(request).await.unwrap();
+    assert!(response
+        .context
+        .get::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS)
+        .ok()
+        .flatten()
+        .is_none());
+    insta::assert_json_snapshot!(cache_keys);
 
+    let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 }
 
@@ -589,6 +600,18 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys, {
+        "[].cache_control" => insta::dynamic_redaction(|value, _path| {
+            let cache_control = value.as_str().unwrap().to_string();
+            assert!(cache_control.contains("max-age="));
+            assert!(cache_control.contains("public"));
+            "[REDACTED]"
+        })
+    });
+
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
@@ -652,6 +675,18 @@ async fn no_data() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
+
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys, {
+        "[].cache_control" => insta::dynamic_redaction(|value, _path| {
+            let cache_control = value.as_str().unwrap().to_string();
+            assert!(cache_control.contains("max-age="));
+            assert!(cache_control.contains("public"));
+            "[REDACTED]"
+        })
+    });
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response);

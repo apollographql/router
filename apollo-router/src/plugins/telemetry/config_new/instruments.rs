@@ -1506,7 +1506,7 @@ where
                             })
                         }
                         None => {
-                            ::tracing::error!("cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub");
+                            failfast_debug!("cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub");
                         }
                     }
                 }
@@ -1561,7 +1561,7 @@ where
                             });
                         }
                         None => {
-                            ::tracing::error!("cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub");
+                            failfast_debug!("cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub");
                         }
                     }
                 }
