@@ -321,7 +321,7 @@ fn validate_abstract_type(
     keyword: &str,
 ) -> Message {
     Message {
-        code: Code::UnsupportedAbstractType,
+        code: Code::ConnectorsUnsupportedAbstractType,
         message: format!("Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."),
         locations: node.and_then(|location| location.line_column_range(source_map))
             .into_iter()
