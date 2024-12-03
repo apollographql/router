@@ -1,10 +1,12 @@
-//! Helpers for dealing with GraphQL literal strings and getting locations within them.
+//! Helpers for dealing with GraphQL literal strings and locations within them.
 //!
-//! Specifically, working around these issues with `apollo-compiler` which make determining the
-//! line/column of locations _within_ a string impossible:
+//! GraphQL string literals can be either standard single-line strings surrounded by a single
+//! set of quotes, or a multi-line block string surrounded by triple quotes.
 //!
-//! 1. Quotes are included in locations (i.e., `line_column_range`) but not the values from `Node<Value>`.
-//! 2. String values in `Node<Value>` are stripped of insignificant whitespace
+//! Standard strings may contain escape sequences, while block strings contain verbatim text.
+//! Block strings additionally have any common indent and leading whitespace lines removed.
+//!
+//! See: https://spec.graphql.org/October2021/#sec-String-Value
 
 use std::ops::Range;
 
@@ -12,53 +14,80 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::Node;
-
+use nom::AsChar;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 #[derive(Clone, Copy)]
 pub(crate) struct GraphQLString<'schema> {
-    /// The GraphQL String literal without quotes, but with all whitespace intact
+    /// The GraphQL string literal with the rules from the spec applied by the compiler
+    compiled_string: &'schema str,
+    /// The original string from the source file, excluding the surrounding quotes
     raw_string: &'schema str,
     /// Where `raw_string` _starts_ in the source text
-    offset: usize,
+    raw_offset: usize,
+    /// Whether the string is a block string or standard string
+    block_string: bool,
+    /// The common indent for block strings (0 for standard strings)
+    common_indent: usize,
+}
+
+fn is_whitespace(c: char) -> bool {
+    matches!(c, ' ' | '\t')
+}
+
+fn is_whitespace_line(line: &str) -> bool {
+    line.is_empty() || line.chars().all(is_whitespace)
 }
 
 impl<'schema> GraphQLString<'schema> {
-    /// Get the raw string value of this GraphQL string literal
-    ///
-    /// Returns `None` if the value was not a string literal or if location data is messed up
     pub(crate) fn new(
         value: &'schema Node<Value>,
         sources: &'schema SourceMap,
     ) -> Result<Self, ()> {
-        let value_without_quotes = value.as_str().ok_or(())?;
+        // The node value has escape sequences removed (for standard strings) and block string
+        // rules applied (for block strings) which affect whitespace and newlines. Offsets into
+        // the node value string will not match what is in the source file.
+        let node_value = value.as_str().ok_or(())?;
+
+        // Get the raw string value from the source file. This is just the raw string without any
+        // of the escape sequence processing or whitespace/newline modifications mentioned above.
         let source_span = value.location().ok_or(())?;
         let file = sources.get(&source_span.file_id()).ok_or(())?;
         let source_text = file.source_text();
         let start_of_quotes = source_span.offset();
         let end_of_quotes = source_span.end_offset();
-        let value_with_quotes = source_text.get(start_of_quotes..end_of_quotes).ok_or(())?;
+        let raw_value_with_quotes = source_text.get(start_of_quotes..end_of_quotes).ok_or(())?;
 
-        // On each line, the whitespace gets messed up for multi-line strings
-        // So we find the first and last lines of the parsed value (no whitespace) within
-        // the raw value (with whitespace) to get our raw string.
-        let first_line_of_value = value_without_quotes.lines().next().ok_or(())?;
-        let start_of_value = value_with_quotes.find(first_line_of_value).ok_or(())?;
-        let last_line_of_value = value_without_quotes.lines().last().ok_or(())?;
-        let end_of_value =
-            value_with_quotes.rfind(last_line_of_value).ok_or(())? + last_line_of_value.len();
-        let raw_string = value_with_quotes
-            .get(start_of_value..end_of_value)
-            .ok_or(())?;
+        // Count the number of double-quote characters
+        let num_quotes = raw_value_with_quotes.chars().take_while(|c| matches!(c, '"')).count();
+        let raw_value = source_text.get(start_of_quotes + num_quotes..end_of_quotes - num_quotes).ok_or(())?;
+
+        let common_indent = if num_quotes == 3 {
+            raw_value
+                .lines()
+                .skip(1)
+                .filter_map(|line| {
+                    let length = line.len();
+                    let indent = line.chars().take_while(|&c| is_whitespace(c)).count();
+                    (indent < length).then_some(indent)
+                })
+                .min()
+                .unwrap_or(0)
+        } else {
+            0
+        };
 
         Ok(Self {
-            raw_string,
-            offset: start_of_quotes + start_of_value,
+            compiled_string: node_value,
+            raw_string: raw_value,
+            raw_offset: start_of_quotes + num_quotes,
+            common_indent,
+            block_string: num_quotes == 3,
         })
     }
 
     pub(crate) fn as_str(&self) -> &str {
-        self.raw_string
+        self.compiled_string
     }
 
     pub(crate) fn line_col_for_subslice(
@@ -66,8 +95,8 @@ impl<'schema> GraphQLString<'schema> {
         substring_location: Range<usize>,
         schema_info: &SchemaInfo,
     ) -> Option<Range<LineColumn>> {
-        let start_offset = self.offset + substring_location.start;
-        let end_offset = self.offset + substring_location.end;
+        let start_offset = self.true_offset(substring_location.start)?;
+        let end_offset = self.true_offset(substring_location.end)?;
 
         let (line, column) = schema_info.line_col(start_offset)?;
         let start = LineColumn { line, column };
@@ -75,6 +104,58 @@ impl<'schema> GraphQLString<'schema> {
         let end = LineColumn { line, column };
 
         Some(start..end)
+    }
+
+    /// Given an offset into the compiled string, compute the true offset in the raw source string.
+    /// See: https://spec.graphql.org/October2021/#sec-String-Value
+    fn true_offset(&self, input_offset: usize) -> Option<usize> {
+        let mut true_offset = self.raw_offset;
+        let mut skip = 0usize;
+        let mut skip_lines = if self.block_string {
+            self.raw_string.lines().take_while(|&line| is_whitespace_line(line)).count()
+        } else {
+            0
+        };
+        let mut i = 0usize;
+        let mut chars = self.raw_string.chars();
+
+        while i < input_offset {
+            let ch = chars.next()?;
+            true_offset += 1;
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            if skip_lines > 0 {
+                if ch == '\n' {
+                    skip_lines -= 1;
+                    if skip_lines == 0 {
+                        skip = self.common_indent;
+                    }
+                }
+                continue;
+            }
+            if !self.block_string && ch == '\\' {
+                let next = chars.next()?;
+                true_offset += 1;
+                if next == 'u' {
+                    // Determine the length of the codepoint in bytes. For example, \uFDFD is 3
+                    // bytes when encoded in UTF-8 (0xEF,0xB7,0xBD).
+                    let codepoint: String = (&mut chars).take(4).collect();
+                    let codepoint = u32::from_str_radix(&*codepoint, 16).ok()?;
+                    i += char::from_u32(codepoint)?.len();
+                    true_offset += 4;
+                    continue;
+                }
+            }
+            if ch == '\n' {
+                skip = self.common_indent;
+            }
+            if ch != '\r' {
+                i += ch.len();
+            }
+        }
+        Some(true_offset + skip)
     }
 }
 

@@ -118,8 +118,8 @@ impl Display for JSONSelectionParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} at offset {}: {}",
-            self.message, self.offset, self.fragment
+            "{}: {}",
+            self.message, self.fragment
         )
     }
 }

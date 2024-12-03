@@ -1,0 +1,30 @@
+extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+    block: T
+    @connect(
+        http: { GET: "http://127.0.0.1/something" }
+        selection: """
+
+
+        foo
+        bar
+
+
+
+        			unicode:$('﷽é').
+        """
+    )
+    standard: T
+    @connect(
+        http: { GET: "http://127.0.0.1/something" }
+        selection: "\n\n\nfoo bar\t\t\t\n\n\nunicode:$('\uFDFD\u0065\u0301')."
+    )
+}
+
+type T {
+    foo: String
+    bar: String
+    unicode: String
+}
