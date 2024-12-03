@@ -126,25 +126,44 @@ fn map_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        if let ShapeCase::Array { prefix, tail } = input_shape.case() {
-            let new_prefix = prefix
-                .iter()
-                .map(|shape| {
-                    first_arg.compute_output_shape(
-                        shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                    )
-                })
-                .collect::<Vec<_>>();
-            let new_tail = first_arg.compute_output_shape(
-                tail.clone(),
+        match input_shape.case() {
+            ShapeCase::Array { prefix, tail } => {
+                let new_prefix = prefix
+                    .iter()
+                    .map(|shape| {
+                        first_arg.compute_output_shape(
+                            shape.clone(),
+                            dollar_shape.clone(),
+                            named_var_shapes,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let new_tail = first_arg.compute_output_shape(
+                    tail.clone(),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                );
+                Shape::array(&new_prefix, new_tail)
+            }
+            ShapeCase::Name(_name, _subpath) => {
+                // Since we do not know if a named shape is an array or a
+                // non-array, we hedge the input shape using a .* subpath
+                // wildcard, which denotes the union of all array element shapes
+                // for arrays, or the shape itself (no union) for non-arrays.
+                let any_subshape = input_shape.any_item();
+                first_arg.compute_output_shape(
+                    // When we ->map, the @ variable gets rebound to each
+                    // element visited, but the $ variable stays the same.
+                    any_subshape.clone(),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                )
+            }
+            _ => first_arg.compute_output_shape(
+                input_shape.clone(),
                 dollar_shape.clone(),
                 named_var_shapes,
-            );
-            Shape::array(&new_prefix, new_tail)
-        } else {
-            first_arg.compute_output_shape(input_shape, dollar_shape.clone(), named_var_shapes)
+            ),
         }
     } else {
         Shape::error_with_range(

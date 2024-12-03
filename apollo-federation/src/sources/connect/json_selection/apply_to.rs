@@ -895,8 +895,6 @@ impl ApplyToInternal for SubSelection {
         _previous_dollar_shape: Shape,
         named_var_shapes: &IndexMap<&str, Shape>,
     ) -> Shape {
-        // TODO Record raw input_shape as all_shape.input_shape?
-
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
         // shapes of each array element shape.
@@ -916,6 +914,11 @@ impl ApplyToInternal for SubSelection {
 
             return Shape::array(&new_prefix, new_tail);
         }
+
+        // If the input shape is a named shape, it might end up being an array,
+        // so we need to hedge the output shape using a wildcard that maps over
+        // array elements.
+        let input_shape = input_shape.any_item();
 
         // The SubSelection rebinds the $ variable to the selected input object,
         // so we can ignore _previous_dollar_shape.
@@ -2520,7 +2523,7 @@ mod tests {
 
         assert_eq!(
             selection!("id name").static_shape().pretty_print(),
-            "{ id: $root.id, name: $root.name }",
+            "{ id: $root.*.id, name: $root.*.name }",
         );
 
         assert_eq!(
@@ -2536,7 +2539,7 @@ mod tests {
             // One<{...}, List<{...}>> everywhere a SubSelection appears.
             //
             // But then we don't know where the array indexes should go...
-            "{ thisOrThat: One<$root.data.maybe.this, $root.data.maybe.that> }",
+            "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
         );
 
         assert_eq!(
@@ -2554,22 +2557,7 @@ mod tests {
             // $root.friend_ids.* }> (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
-            "{ alias: { x: $root.arrayOfArrays.x, y: $root.arrayOfArrays.y }, friends: { id: $root.friend_ids }, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
-
-            // TODO Proposing a new syntax to capture the One<T, List<T>>
-            // ambiguity without combinatorial explosion of binary alternatives.
-            // The { <$root.friend_ids:Friend> id: $ } syntax means the
-            // subselection was applied to $root.friend_ids, has an output shape
-            // of Friend, and the $ shape is bound either to each element of
-            // $root.friend_ids if it's an array, or directly to
-            // $root.friend_ids if it's not an array, mirroring the way $ is
-            // used in JSONSelection SubSelection syntax.
-            //
-            //   "{ alias: { <$root.arrayOfArrays:> x: $.x, y: $.y }, friends: { <$root.friend_ids:Friend> id: $ }, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
-            //
-            // Once we find out if $root.friend_ids is an array, we can
-            // potentially simplify this shape further, so it no longer needs
-            // the indirection of the $ binding.
+            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
         );
 
         assert_eq!(
@@ -2580,7 +2568,7 @@ mod tests {
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
             "#).static_shape().pretty_print(),
-            "{ alias: { x: $root.arrayOfArrays.x, y: $root.arrayOfArrays.y }, friends: One<{ id: $root.friend_ids }, List<{ id: $root.friend_ids.0 }>>, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
+            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
         );
 
         assert_eq!(
@@ -2592,7 +2580,7 @@ mod tests {
                 )
                 price: $($.price, $.cost, "unknown")
             "#).static_shape().pretty_print(),
-            "One<{ author: $root.author, price: One<$root.price, $root.cost, \"unknown\">, title: $root.title, upc: $root.upc }, { director: $root.director, price: One<$root.price, $root.cost, \"unknown\">, title: $root.title, upc: $root.upc }>"
+            "One<{ author: $root.*.author, price: One<$root.*.price, $root.*.cost, \"unknown\">, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: One<$root.*.price, $root.*.cost, \"unknown\">, title: $root.*.title, upc: $root.*.upc }, { price: One<$root.*.price, $root.*.cost, \"unknown\">, upc: $root.*.upc }>",
         );
 
         assert_eq!(
@@ -2648,7 +2636,7 @@ mod tests {
                 )
                 price: cost
             "#).static_shape().pretty_print(),
-            "One<{ author: $root.author, price: $root.cost, title: $root.title, upc: $root.upc }, { director: $root.director, price: $root.cost, title: $root.title, upc: $root.upc }, { artist: $root.artist, price: $root.cost, title: $root.title, upc: $root.upc }, { price: $root.cost, upc: $root.upc }>"
+            "One<{ author: $root.*.author, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { artist: $root.*.artist, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { price: $root.*.cost, upc: $root.*.upc }>"
         );
 
         assert_eq!(
@@ -2660,11 +2648,12 @@ mod tests {
                     [@, ${ <Unknown> }],
                 )
             "#).static_shape().pretty_print(),
-            "One<{ <Book> title: $root.title, upc: $root.upc }, { <Film> director: $root.director, upc: $root.upc }, { <Album> artist: $root.artist, upc: $root.upc }, { <Unknown> upc: $root.upc }>",
+            "One<{ <Book> title: $root.*.title, upc: $root.*.upc }, { <Film> director: $root.*.director, upc: $root.*.upc }, { <Album> artist: $root.*.artist, upc: $root.*.upc }, { <Unknown> upc: $root.*.upc }>",
         );
 
         assert_eq!(
             selection!(r#"
+                # No need for this abstract annotation in practice, but it's here for demonstration purposes.
                 <Product>
                 upc
                 ... kind->match(
@@ -2675,7 +2664,7 @@ mod tests {
             "#).static_shape().pretty_print(),
             // Note All<Book, Product> would theoretically simplify down to just
             // Book if the shape system knows Book is a subtype of Product.
-            "One<{ <All<Book, Product>> price: $root.cost, title: $root.title, upc: $root.upc }, { <All<Film, Product>> director: $root.director, price: $root.cost, upc: $root.upc }, { <Product> price: $root.cost, upc: $root.upc }>",
+            "One<{ <All<Book, Product>> price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { <All<Film, Product>> director: $root.*.director, price: $root.*.cost, upc: $root.*.upc }, { <Product> price: $root.*.cost, upc: $root.*.upc }>",
         );
 
         assert_eq!(
