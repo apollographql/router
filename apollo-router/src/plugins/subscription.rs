@@ -474,7 +474,7 @@ impl Service<router::Request> for CallbackService {
                             return Ok(router::Response {
                                 response: http::Response::builder()
                                     .status(StatusCode::UNAUTHORIZED)
-                                    .body("verifier doesn't match".into())
+                                    .body(router::body::full("verifier doesn't match"))
                                     .map_err(BoxError::from)?,
                                 context: req.context,
                             });
@@ -495,7 +495,7 @@ impl Service<router::Request> for CallbackService {
                                         return Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::NOT_FOUND)
-                                                .body("suscription doesn't exist".into())
+                                                .body(router::body::full("suscription doesn't exist"))
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         });
@@ -512,7 +512,7 @@ impl Service<router::Request> for CallbackService {
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::OK)
-                                        .body("".into())
+                                        .body(router::body::empty())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -525,7 +525,7 @@ impl Service<router::Request> for CallbackService {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
                                             .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body("".into())
+                                            .body(router::body::empty())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -534,7 +534,7 @@ impl Service<router::Request> for CallbackService {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
                                             .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body("suscription doesn't exist".into())
+                                            .body(router::body::full("suscription doesn't exist"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -549,7 +549,7 @@ impl Service<router::Request> for CallbackService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::UNAUTHORIZED)
-                                            .body("id used for the verifier is not part of ids array".into())
+                                            .body(router::body::full("id used for the verifier is not part of ids array"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -560,7 +560,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
-                                            .body("".into())
+                                            .body(router::body::empty())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -568,7 +568,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body("suscriptions don't exist".into())
+                                            .body(router::body::full("suscriptions don't exist"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -590,11 +590,13 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body(serde_json::to_string_pretty(&InvalidIdsPayload{
-                                                invalid_ids,
-                                                id,
-                                                verifier,
-                                            })?.into())
+                                            .body(router::body::full(
+                                                serde_json::to_string_pretty(&InvalidIdsPayload{
+                                                    invalid_ids,
+                                                    id,
+                                                    verifier,
+                                                })?,
+                                            ))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -611,7 +613,7 @@ impl Service<router::Request> for CallbackService {
                                             return Ok(router::Response {
                                                 response: http::Response::builder()
                                                     .status(StatusCode::NOT_FOUND)
-                                                    .body("unknown topic".into())
+                                                    .body(router::body::full("unknown topic"))
                                                     .map_err(BoxError::from)?,
                                                 context: req.context,
                                             });
@@ -620,7 +622,7 @@ impl Service<router::Request> for CallbackService {
                                             return Ok(router::Response {
                                                 response: http::Response::builder()
                                                     .status(StatusCode::NOT_FOUND)
-                                                    .body(err.to_string().into())
+                                                    .body(router::body::full(err.to_string()))
                                                     .map_err(BoxError::from)?,
                                                 context: req.context,
                                             });
@@ -637,7 +639,7 @@ impl Service<router::Request> for CallbackService {
                                         return Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::NOT_FOUND)
-                                                .body("cannot send errors to the client".into())
+                                                .body(router::body::full("cannot send errors to the client"))
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         });
@@ -647,7 +649,7 @@ impl Service<router::Request> for CallbackService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body("cannot force delete".into())
+                                            .body(router::body::full("cannot force delete"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -655,7 +657,7 @@ impl Service<router::Request> for CallbackService {
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::ACCEPTED)
-                                        .body("".into())
+                                        .body(router::body::empty())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -665,7 +667,7 @@ impl Service<router::Request> for CallbackService {
                     _ => Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body("".into())
+                            .body(router::body::empty())
                             .map_err(BoxError::from)?,
                         context: req.context,
                     }),
@@ -698,7 +700,9 @@ fn ensure_id_consistency(
             Err(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body("id from url path and id from body are different".into())
+                    .body(router::body::full(
+                        "id from url path and id from body are different",
+                    ))
                     .expect("this body is valid"),
                 context: context.clone(),
             })

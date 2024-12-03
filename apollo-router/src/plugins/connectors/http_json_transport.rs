@@ -25,6 +25,7 @@ use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::services::connect;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 
 pub(crate) fn make_request(
@@ -65,22 +66,19 @@ pub(crate) fn make_request(
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
                     let len = encoded.bytes().len();
-                    (http_body_util::BodyStream::from(encoded), len)
-                    // (hyper::Body::from(encoded), len)
+                    (router::body::full(encoded), len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
-                    (http_body_util::BodyStream::from(bytes), len)
-                    // (hyper::Body::from(bytes), len)
+                    (router::body::full(bytes), len)
                 }
             } else {
-                (http_body_util::Empty::new(), 0)
-                // (hyper::Body::empty(), 0)
+                (router::body::empty(), 0)
             };
             (json_body, form_body, body, content_length, apply_to_errors)
         } else {
-            (None, None, http_body_util::Empty::new(), 0, vec![])
+            (None, None, router::body::empty(), 0, vec![])
         };
 
     match transport.method {

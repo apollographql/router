@@ -188,10 +188,12 @@ pub(crate) fn generate_tls_client_config(
         (Some(store), None) => tls_builder
             .with_root_certificates(store)
             .with_no_client_auth(),
-        (None, Some(client_auth_config)) => tls_builder.with_native_roots()?.with_client_auth_cert(
-            client_auth_config.certificate_chain.clone(),
-            client_auth_config.key.clone_key(),
-        )?,
+        (None, Some(client_auth_config)) => {
+            tls_builder.with_native_roots()?.with_client_auth_cert(
+                client_auth_config.certificate_chain.clone(),
+                client_auth_config.key.clone_key(),
+            )?
+        }
         (Some(store), Some(client_auth_config)) => tls_builder
             .with_root_certificates(store)
             .with_client_auth_cert(

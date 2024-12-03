@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use bytes::Buf;
 use futures::future::BoxFuture;
 use http::header::AUTHORIZATION;
 use http::Method;
@@ -20,7 +19,7 @@ use super::invalidation::InvalidationOrigin;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
+use crate::services::router::body::get_body_bytes;
 use crate::ListenAddr;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
@@ -105,15 +104,14 @@ impl Service<router::Request> for InvalidationService {
                     return Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::UNAUTHORIZED)
-                            .body("Missing authorization header".into())
+                            .body(router::body::full("Missing authorization header"))
                             .map_err(BoxError::from)?,
                         context: req.context,
                     });
                 }
                 match parts.method {
                     Method::POST => {
-                        let body = Into::<RouterBody>::into(body)
-                            .to_bytes()
+                        let body = get_body_bytes(body)
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -141,7 +139,9 @@ impl Service<router::Request> for InvalidationService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::UNAUTHORIZED)
-                                            .body("Invalid authorization header".into())
+                                            .body(router::body::full(
+                                                "Invalid authorization header",
+                                            ))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -153,19 +153,18 @@ impl Service<router::Request> for InvalidationService {
                                     Ok(count) => Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::ACCEPTED)
-                                            .body(
-                                                serde_json::to_string(&json!({
+                                            .body(router::body::full(serde_json::to_string(
+                                                &json!({
                                                     "count": count
-                                                }))?
-                                                .into(),
-                                            )
+                                                }),
+                                            )?))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     }),
                                     Err(err) => Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::BAD_REQUEST)
-                                            .body(err.to_string().into())
+                                            .body(router::body::full(err.to_string()))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     }),
@@ -174,7 +173,7 @@ impl Service<router::Request> for InvalidationService {
                             Err(err) => Ok(router::Response {
                                 response: http::Response::builder()
                                     .status(StatusCode::BAD_REQUEST)
-                                    .body(err.into())
+                                    .body(router::body::full(err.to_string()))
                                     .map_err(BoxError::from)?,
                                 context: req.context,
                             }),
@@ -183,7 +182,7 @@ impl Service<router::Request> for InvalidationService {
                     _ => Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body("".into())
+                            .body(router::body::empty())
                             .map_err(BoxError::from)?,
                         context: req.context,
                     }),
