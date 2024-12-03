@@ -126,6 +126,16 @@ pub(crate) enum DemandControlError {
     ContextSerializationError(String),
     /// {0}
     FederationError(FederationError),
+    /// Schema is missing information for argument {field_name}({arg_name}:)
+    ArgumentLookupError {
+        field_name: String,
+        arg_name: String,
+    },
+    /// Schema is missing information for field {type_name}.{field_name}
+    FieldLookupError {
+        type_name: String,
+        field_name: String,
+    },
 }
 
 impl IntoGraphQLErrors for DemandControlError {
@@ -170,6 +180,14 @@ impl IntoGraphQLErrors for DemandControlError {
                 .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
+            DemandControlError::ArgumentLookupError { .. } => Ok(vec![graphql::Error::builder()
+                .extension_code(self.code())
+                .message(self.to_string())
+                .build()]),
+            DemandControlError::FieldLookupError { .. } => Ok(vec![graphql::Error::builder()
+                .extension_code(self.code())
+                .message(self.to_string())
+                .build()]),
         }
     }
 }
@@ -183,6 +201,8 @@ impl DemandControlError {
             DemandControlError::SubgraphOperationNotInitialized(e) => e.code(),
             DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
             DemandControlError::FederationError(_) => "FEDERATION_ERROR",
+            DemandControlError::ArgumentLookupError { .. } => "ARGUMENT_LOOKUP_ERROR",
+            DemandControlError::FieldLookupError { .. } => "FIELD_LOOKUP_ERROR",
         }
     }
 }

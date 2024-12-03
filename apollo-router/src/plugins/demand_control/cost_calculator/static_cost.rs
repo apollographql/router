@@ -42,19 +42,17 @@ struct ScoringContext<'a> {
     should_estimate_requires: bool,
 }
 
-// TODO: Error messages
 fn score_input_object(
     obj: &apollo_compiler::ast::Value,
-    variables: &Object,
     meta: &InputObjectDirectiveMetadata,
-    schema: &DemandControlledSchema,
+    ctx: &ScoringContext,
 ) -> Result<f64, DemandControlError> {
     match (obj, &meta.ty) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
-        | (_, ExtendedType::Union(_)) => {
-            Err(DemandControlError::QueryParseFailure("TBD".to_string()))
-        }
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+            "Interface, Object, and Union types are disallowed in Input Objects".to_string(),
+        )),
 
         (ast::Value::Object(inner_args), ExtendedType::InputObject(_)) => {
             let mut cost = meta
@@ -62,16 +60,8 @@ fn score_input_object(
                 .as_ref()
                 .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
-                let arg_meta = schema
-                    .type_input_metadata(meta.ty.name(), arg_name)
-                    .ok_or_else(|| {
-                        DemandControlError::QueryParseFailure(format!(
-                            "Type metadata is missing for {}.{}",
-                            meta.ty.name(),
-                            arg_name,
-                        ))
-                    })?;
-                cost += score_input_object(arg_val, variables, arg_meta, schema)?;
+                let arg_meta = ctx.schema.type_input_metadata(meta.ty.name(), arg_name)?;
+                cost += score_input_object(arg_val, arg_meta, ctx)?;
             }
             Ok(cost)
         }
@@ -81,15 +71,15 @@ fn score_input_object(
                 .as_ref()
                 .map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_input_object(arg_val, variables, meta, schema)?;
+                cost += score_input_object(arg_val, meta, ctx)?;
             }
             Ok(cost)
         }
         (ast::Value::Variable(name), _) => {
             // We make a best effort attempt to score the variable, but some of these may not exist in the variables
             // sent on the supergraph request, such as `$representations`.
-            if let Some(variable) = variables.get(name.as_str()) {
-                score_variable(variable, meta, schema)
+            if let Some(variable) = ctx.variables.get(name.as_str()) {
+                score_variable(variable, meta, ctx.schema)
             } else {
                 Ok(0.0)
             }
@@ -110,9 +100,9 @@ fn score_variable(
     match (variable, &meta.ty) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
-        | (_, ExtendedType::Union(_)) => {
-            Err(DemandControlError::QueryParseFailure("TBD".to_string()))
-        }
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+            "Interface, Object, and Union types are disallowed in Input Objects".to_string(),
+        )),
 
         (Value::Object(inner_args), ExtendedType::InputObject(_)) => {
             let mut cost = meta
@@ -120,15 +110,7 @@ fn score_variable(
                 .as_ref()
                 .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
-                let arg_meta = schema
-                    .type_input_metadata(meta.ty.name(), arg_name.as_str())
-                    .ok_or_else(|| {
-                        DemandControlError::QueryParseFailure(format!(
-                            "Type metadata is missing for {}.{}",
-                            meta.ty.name(),
-                            arg_name.as_str(),
-                        ))
-                    })?;
+                let arg_meta = schema.type_input_metadata(meta.ty.name(), arg_name.as_str())?;
                 cost += score_variable(arg_val, arg_meta, schema)?;
             }
             Ok(cost)
@@ -189,8 +171,8 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_from_upstream: Option<i32>,
     ) -> Result<f64, DemandControlError> {
-        // We know this is a string without directives, so we return here to avoid the failure
-        // when it isn't in the lookup below.
+        // The lookup for field metadata does not contain entries for __typename, but we know this
+        // is a `String!` without a `@cost` directive
         if field.name == TYPENAME {
             return Ok(0.0);
         }
@@ -199,15 +181,7 @@ impl StaticCostCalculator {
             return Ok(0.0);
         }
 
-        let field_metadata = ctx
-            .schema
-            .type_field_metadata(parent_type, &field.name)
-            .ok_or_else(|| {
-                DemandControlError::QueryParseFailure(format!(
-                    "Field {} was found in query, but its type is missing from the schema.",
-                    field.name
-                ))
-            })?;
+        let field_metadata = ctx.schema.type_field_metadata(parent_type, &field.name)?;
 
         let list_size_directive = match field_metadata.list_size_directive.as_ref() {
             Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
@@ -248,21 +222,8 @@ impl StaticCostCalculator {
 
         let mut arguments_cost = 0.0;
         for argument in &field.arguments {
-            let argument_metadata = field_metadata
-                .argument_directive_metadata
-                .get(&argument.name)
-                .ok_or_else(|| {
-                    DemandControlError::QueryParseFailure(format!(
-                        "Argument {} of field {} is missing a definition in the schema",
-                        argument.name, field.name
-                    ))
-                })?;
-            arguments_cost += score_input_object(
-                &argument.value,
-                ctx.variables,
-                argument_metadata,
-                ctx.schema,
-            )?;
+            let argument_metadata = field_metadata.argument_metadata(&argument.name)?;
+            arguments_cost += score_input_object(&argument.value, argument_metadata, ctx)?;
         }
 
         let mut requirements_cost = 0.0;
@@ -567,20 +528,21 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         value: &Value,
     ) {
         self.visit_list_item(request, variables, parent_ty, field, value);
-        if let Some(field_metadata) = self.schema.type_field_metadata(parent_ty, &field.name) {
+        let ctx = ScoringContext {
+            query: request,
+            variables,
+            schema: self.schema,
+            should_estimate_requires: false,
+        };
+        if let Ok(field_metadata) = self.schema.type_field_metadata(parent_ty, &field.name) {
             for argument in &field.arguments {
-                if let Some(argument_metadata) = field_metadata
-                    .argument_directive_metadata
-                    .get(&argument.name)
+                if let Ok(argument_cost) = field_metadata
+                    .argument_metadata(&argument.name)
+                    .and_then(|argument_metadata| {
+                        score_input_object(&argument.value, argument_metadata, &ctx)
+                    })
                 {
-                    if let Ok(argument_cost) = score_input_object(
-                        &argument.value,
-                        variables,
-                        argument_metadata,
-                        self.schema,
-                    ) {
-                        self.cost += argument_cost;
-                    }
+                    self.cost += argument_cost;
                 }
             }
         }
@@ -597,6 +559,7 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         let cost_directive = self
             .schema
             .type_field_metadata(parent_ty, &field.name)
+            .ok()
             .and_then(|meta| meta.cost_directive.as_ref());
 
         match value {

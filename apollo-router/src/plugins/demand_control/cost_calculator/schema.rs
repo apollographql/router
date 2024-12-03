@@ -22,11 +22,26 @@ pub(crate) struct DemandControlledSchema {
 }
 
 pub(crate) struct FieldDirectiveMetadata {
+    pub(crate) name: Name,
     pub(crate) ty: ExtendedType,
     pub(crate) cost_directive: Option<CostDirective>,
     pub(crate) list_size_directive: Option<ListSizeDirective>,
     pub(crate) requires_directive: Option<RequiresDirective>,
-    pub(crate) argument_directive_metadata: HashMap<Name, InputObjectDirectiveMetadata>,
+    argument_directive_metadata: HashMap<Name, InputObjectDirectiveMetadata>,
+}
+
+impl FieldDirectiveMetadata {
+    pub(crate) fn argument_metadata(
+        &self,
+        arg_name: &str,
+    ) -> Result<&InputObjectDirectiveMetadata, DemandControlError> {
+        self.argument_directive_metadata
+            .get(arg_name)
+            .ok_or_else(|| DemandControlError::ArgumentLookupError {
+                field_name: self.name.to_string(),
+                arg_name: arg_name.to_string(),
+            })
+    }
 }
 
 pub(crate) struct InputObjectDirectiveMetadata {
@@ -58,6 +73,7 @@ impl DemandControlledSchema {
                         let field_metadata = type_metadata
                             .entry(field_name.clone())
                             .or_insert_with(|| FieldDirectiveMetadata {
+                                name: field_name.clone(),
                                 ty: field_type.clone(),
                                 cost_directive: None,
                                 list_size_directive: None,
@@ -123,6 +139,7 @@ impl DemandControlledSchema {
                         let field_metadata = type_metadata
                             .entry(field_name.clone())
                             .or_insert_with(|| FieldDirectiveMetadata {
+                                name: field_name.clone(),
                                 ty: field_type.clone(),
                                 cost_directive: None,
                                 list_size_directive: None,
@@ -213,16 +230,28 @@ impl DemandControlledSchema {
         &self,
         type_name: &str,
         field_name: &str,
-    ) -> Option<&FieldDirectiveMetadata> {
-        self.type_field_metadata.get(type_name)?.get(field_name)
+    ) -> Result<&FieldDirectiveMetadata, DemandControlError> {
+        self.type_field_metadata
+            .get(type_name)
+            .and_then(|m| m.get(field_name))
+            .ok_or_else(|| DemandControlError::FieldLookupError {
+                type_name: type_name.to_string(),
+                field_name: field_name.to_string(),
+            })
     }
 
     pub(in crate::plugins::demand_control) fn type_input_metadata(
         &self,
         type_name: &str,
         field_name: &str,
-    ) -> Option<&InputObjectDirectiveMetadata> {
-        self.type_input_metadata.get(type_name)?.get(field_name)
+    ) -> Result<&InputObjectDirectiveMetadata, DemandControlError> {
+        self.type_input_metadata
+            .get(type_name)
+            .and_then(|m| m.get(field_name))
+            .ok_or_else(|| DemandControlError::FieldLookupError {
+                type_name: type_name.to_string(),
+                field_name: field_name.to_string(),
+            })
     }
 }
 
