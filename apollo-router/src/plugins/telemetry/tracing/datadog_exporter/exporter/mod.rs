@@ -111,7 +111,7 @@ impl DatadogExporter {
             &self.mapping,
             &self.unified_tags,
         )?;
-        let req = http_0_2::Request::builder()
+        let req = http::Request::builder()
             .method(http::Method::POST)
             .uri(self.request_url.clone())
             .header(http::header::CONTENT_TYPE, self.api_version.content_type())
