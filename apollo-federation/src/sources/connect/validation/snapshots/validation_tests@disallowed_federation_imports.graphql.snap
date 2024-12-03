@@ -5,14 +5,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/disallowe
 ---
 [
     Message {
-        code: UnsupportedFederationDirective,
+        code: ConnectorsUnsupportedFederationDirective,
         message: "The directive `@context` is not supported when using connectors.",
         locations: [
             6:7..6:17,
         ],
     },
     Message {
-        code: UnsupportedFederationDirective,
+        code: ConnectorsUnsupportedFederationDirective,
         message: "The directive `@fromContext` is not supported when using connectors.",
         locations: [
             7:7..7:21,
