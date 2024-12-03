@@ -45,6 +45,8 @@ pub enum LinkError {
     InvalidName(#[from] InvalidNameError),
     #[error("Invalid use of @link in schema: {0}")]
     BootstrapError(String),
+    #[error("Unknown import: {0}")]
+    InvalidImport(String),
 }
 
 // TODO: Replace LinkError usages with FederationError.
