@@ -1,5 +1,3 @@
-# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/variables.yaml > apollo-router/src/plugins/connectors/testdata/variables.graphql
-federation_version: =2.10.0-local.3
 subgraphs:
   connectors:
     routing_url: none
