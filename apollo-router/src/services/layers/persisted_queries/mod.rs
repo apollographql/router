@@ -405,6 +405,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use maplit::hashmap;
     use serde_json::json;
 
     use super::*;
@@ -416,6 +417,7 @@ mod tests {
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::spec::Schema;
     use crate::test_harness::mocks::persisted_queries::*;
+    use crate::Context;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn disabled_pq_layer_has_no_poller() {
@@ -493,6 +495,84 @@ mod tests {
             .ok()
             .expect("pq layer returned response instead of putting the query on the request");
         assert_eq!(request.supergraph_request.body().query, Some(body));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn enabled_pq_layer_with_client_names() {
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&hashmap! {
+            FullPersistedQueryOperationId {
+                operation_id: "both-plain-and-cliented".to_string(),
+                client_name: None,
+            } => "query { bpac_no_client: __typename }".to_string(),
+            FullPersistedQueryOperationId {
+                operation_id: "both-plain-and-cliented".to_string(),
+                client_name: Some("web".to_string()),
+            } => "query { bpac_web_client: __typename }".to_string(),
+            FullPersistedQueryOperationId {
+                operation_id: "only-cliented".to_string(),
+                client_name: Some("web".to_string()),
+            } => "query { oc_web_client: __typename }".to_string(),
+        })
+        .await;
+
+        let pq_layer = PersistedQueryLayer::new(
+            &Configuration::fake_builder()
+                .persisted_query(PersistedQueries::builder().enabled(true).build())
+                .uplink(uplink_config)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let map_to_query = |operation_id: &str, client_name: Option<&str>| -> Option<String> {
+            let context = Context::new();
+            if let Some(client_name) = client_name {
+                context
+                    .insert(
+                        PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY,
+                        client_name.to_string(),
+                    )
+                    .unwrap();
+            }
+
+            let incoming_request = SupergraphRequest::fake_builder()
+                .extension(
+                    "persistedQuery",
+                    json!({"version": 1, "sha256Hash": operation_id.to_string()}),
+                )
+                .context(context)
+                .build()
+                .unwrap();
+
+            pq_layer
+                .supergraph_request(incoming_request)
+                .ok()
+                .expect("pq layer returned response instead of putting the query on the request")
+                .supergraph_request
+                .body()
+                .query
+                .clone()
+        };
+
+        assert_eq!(
+            map_to_query("both-plain-and-cliented", None),
+            Some("query { bpac_no_client: __typename }".to_string())
+        );
+        assert_eq!(
+            map_to_query("both-plain-and-cliented", Some("not-web")),
+            Some("query { bpac_no_client: __typename }".to_string())
+        );
+        assert_eq!(
+            map_to_query("both-plain-and-cliented", Some("web")),
+            Some("query { bpac_web_client: __typename }".to_string())
+        );
+        assert_eq!(
+            map_to_query("only-cliented", Some("web")),
+            Some("query { oc_web_client: __typename }".to_string())
+        );
+        assert_eq!(map_to_query("only-cliented", None), None);
+        assert_eq!(map_to_query("only-cliented", Some("not-web")), None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
