@@ -1135,7 +1135,6 @@ impl TlsSupergraph {
         certificates.extend(self.certificate_chain.iter().cloned());
 
         let mut config = ServerConfig::builder()
-            .with_safe_defaults()
             .with_no_client_auth()
             .with_single_cert(certificates, self.key.clone())
             .map_err(ApolloRouterError::Rustls)?;

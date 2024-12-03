@@ -208,7 +208,7 @@ async fn tls_server_with_client_auth(
     body: &'static str,
 ) {
     let mut client_auth_roots = RootCertStore::empty();
-    client_auth_roots.add(&client_root).unwrap();
+    client_auth_roots.add(client_root).unwrap();
 
     let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots).boxed();
 
@@ -344,8 +344,7 @@ async fn test_subgraph_h2c() {
     let subgraph_service = HttpClientService::new(
         "test",
         rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
+            .with_native_roots()?
             .with_no_client_auth(),
         crate::configuration::shared::Client::builder()
             .experimental_http2(Http2Config::Http2Only)
@@ -422,8 +421,7 @@ async fn test_compressed_request_response_body() {
     let subgraph_service = HttpClientService::new(
         "test",
         rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
+            .with_native_roots()?
             .with_no_client_auth(),
         crate::configuration::shared::Client::builder()
             .experimental_http2(Http2Config::Http2Only)

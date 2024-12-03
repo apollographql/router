@@ -183,7 +183,7 @@ impl HttpClientService {
 
         for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
         {
-            match roots.add(&cert) {
+            match roots.add(cert) {
                 Ok(_) => valid_count += 1,
                 Err(err) => {
                     tracing::trace!("invalid cert der {:?}", cert);
@@ -206,7 +206,7 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: RootCertStore,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    let tls_builder = rustls::ClientConfig::builder();
     Ok(match client_cert_config {
         Some(client_auth_config) => tls_builder
             .with_root_certificates(tls_cert_store)
