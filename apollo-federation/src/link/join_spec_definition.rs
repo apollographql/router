@@ -82,7 +82,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
         ) -> Result<(), FederationError> {
             if let Some(first_value) = field {
                 bail!(
-                    r#"Input field "{name}" in contextArguments was repeated with value "{value}" (previous value was "{first_value}")"#
+                    r#"Input field "{name}" in contextArguments is repeated with value "{value}" (previous value was "{first_value}")"#
                 )
             }
             let _ = field.insert(value);
@@ -96,19 +96,19 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
             field
                 .ok_or_else(|| {
                     FederationError::internal(format!(
-                        r#"Input field "{field_name}" was missing from contextArguments"#
+                        r#"Input field "{field_name}" is missing from contextArguments"#
                     ))
                 })?
                 .as_str()
                 .ok_or_else(|| {
                     FederationError::internal(format!(
-                        r#"Input field "{field_name}" in contextArguments was not a string"#
+                        r#"Input field "{field_name}" in contextArguments is not a string"#
                     ))
                 })
         }
 
         let Value::Object(input_object) = value else {
-            bail!(r#"Item "{value}" in contextArguments list was not an object"#)
+            bail!(r#"Item "{value}" in contextArguments list is not an object"#)
         };
         let mut name = None;
         let mut type_ = None;
