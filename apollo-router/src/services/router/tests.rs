@@ -204,7 +204,7 @@ async fn test_http_max_request_bytes() {
                      in `apollo-router/src/services/supergraph.rs` has changed. \
                      Please update `CANNED_REQUEST_LEN` accordingly."
                 );
-                hyper::Body::from(json_bytes)
+                router::body::full(json_bytes)
             });
         let config = serde_json::json!({
             "limits": {
@@ -294,7 +294,7 @@ async fn it_processes_a_valid_query_batch() {
                 result.push(b',');
                 result.append(&mut json_bytes_3);
                 result.push(b']');
-                hyper::Body::from(result)
+                router::body::full(result)
             });
         let config = serde_json::json!({
             "batching": {
@@ -374,7 +374,7 @@ async fn it_will_not_process_a_poorly_formatted_query_batch() {
                 result.push(b',');
                 result.append(&mut json_bytes);
                 // Deliberately omit the required trailing ]
-                hyper::Body::from(result)
+                router::body::full(result)
             });
         let config = serde_json::json!({
             "batching": {
@@ -427,7 +427,7 @@ async fn it_will_process_a_non_batched_defered_query() {
             .supergraph_request
             .map(|req: graphql::Request| {
                 let bytes = serde_json::to_vec(&req).unwrap();
-                hyper::Body::from(bytes)
+                router::body::full(bytes)
             });
         let config = serde_json::json!({
             "batching": {
