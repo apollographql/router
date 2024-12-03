@@ -65,12 +65,12 @@ use crate::Notify;
 /// You can pass in a configuration and a schema to the test harness. If you pass in a schema, the test harness will create a query planner and use the schema to extract subgraph schemas.
 ///
 ///
-pub(crate) struct PluginTestHarness<T: Plugin> {
+pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
     plugin: Box<dyn DynPlugin>,
     phantom: std::marker::PhantomData<T>,
 }
 #[buildstructor::buildstructor]
-impl<T: Plugin> PluginTestHarness<T> {
+impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
     pub(crate) async fn new<'a, 'b>(config: Option<&'a str>, schema: Option<&'b str>) -> Self {
         let factory = crate::plugin::plugins()
