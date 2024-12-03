@@ -22,9 +22,9 @@ use hyper_rustls::TlsAcceptor;
 #[cfg(unix)]
 use hyperlocal::UnixServerExt;
 use mime::APPLICATION_JSON;
+use rustls::pki_types::CertificateDer;
+use rustls::pki_types::PrivateKeyDer;
 use rustls::server::AllowAnyAuthenticatedClient;
-use rustls::Certificate;
-use rustls::PrivateKey;
 use rustls::RootCertStore;
 use rustls::ServerConfig;
 use serde_json_bytes::ByteString;
@@ -52,8 +52,8 @@ use crate::TestHarness;
 
 async fn tls_server(
     listener: tokio::net::TcpListener,
-    certificates: Vec<Certificate>,
-    key: PrivateKey,
+    certificates: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
     body: &'static str,
 ) {
     let acceptor = TlsAcceptor::builder()
@@ -202,9 +202,9 @@ async fn tls_custom_root() {
 
 async fn tls_server_with_client_auth(
     listener: tokio::net::TcpListener,
-    certificates: Vec<Certificate>,
-    key: PrivateKey,
-    client_root: Certificate,
+    certificates: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+    client_root: CertificateDer<'static>,
     body: &'static str,
 ) {
     let mut client_auth_roots = RootCertStore::empty();

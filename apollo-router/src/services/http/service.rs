@@ -183,11 +183,10 @@ impl HttpClientService {
 
         for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
         {
-            let cert = rustls::Certificate(cert.0);
             match roots.add(&cert) {
                 Ok(_) => valid_count += 1,
                 Err(err) => {
-                    tracing::trace!("invalid cert der {:?}", cert.0);
+                    tracing::trace!("invalid cert der {:?}", cert);
                     tracing::debug!("certificate parsing failed: {:?}", err);
                     invalid_count += 1
                 }

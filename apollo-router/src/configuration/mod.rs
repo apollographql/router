@@ -19,12 +19,9 @@ pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
-use rustls::Certificate;
-use rustls::PrivateKey;
+use rustls::pki_types::CertificateDer;
+use rustls::pki_types::PrivateKeyDer;
 use rustls::ServerConfig;
-use rustls_pemfile::certs;
-use rustls_pemfile::read_one;
-use rustls_pemfile::Item;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -1121,15 +1118,15 @@ pub(crate) struct TlsSupergraph {
     /// server certificate in PEM format
     #[serde(deserialize_with = "deserialize_certificate", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate: Certificate,
+    pub(crate) certificate: CertificateDer<'static>,
     /// server key in PEM format
     #[serde(deserialize_with = "deserialize_key", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) key: PrivateKey,
+    pub(crate) key: PrivateKeyDer<'static>,
     /// list of certificate authorities in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate_chain: Vec<Certificate>,
+    pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
 }
 
 impl TlsSupergraph {
@@ -1148,7 +1145,7 @@ impl TlsSupergraph {
     }
 }
 
-fn deserialize_certificate<'de, D>(deserializer: D) -> Result<Certificate, D::Error>
+fn deserialize_certificate<'de, D>(deserializer: D) -> Result<CertificateDer<'static>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1167,7 +1164,9 @@ where
         })
 }
 
-fn deserialize_certificate_chain<'de, D>(deserializer: D) -> Result<Vec<Certificate>, D::Error>
+fn deserialize_certificate_chain<'de, D>(
+    deserializer: D,
+) -> Result<Vec<CertificateDer<'static>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1176,7 +1175,7 @@ where
     load_certs(&data).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKey, D::Error>
+fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKeyDer<'static>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1185,20 +1184,22 @@ where
     load_key(&data).map_err(serde::de::Error::custom)
 }
 
-pub(crate) fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
-    certs(&mut BufReader::new(data.as_bytes()))
+pub(crate) fn load_certs(data: &str) -> io::Result<Vec<CertificateDer<'static>>> {
+    rustls_pemfile::certs(&mut BufReader::new(data.as_bytes()))
+        .collect::<Result<Vec<_>, _>>()
+        // XXX(@goto-bus-stop): `certs()` already returns an io::Error, should we wrap it instead
+        // of replacing it with this generic error?
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
-        .map(|mut certs| certs.drain(..).map(Certificate).collect())
 }
 
-pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
+pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(data.as_bytes());
-    let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
+    let mut key_iterator = iter::from_fn(|| rustls_pemfile::read_one(&mut reader).transpose());
 
     let private_key = match key_iterator.next() {
-        Some(Ok(Item::RSAKey(key))) => PrivateKey(key),
-        Some(Ok(Item::PKCS8Key(key))) => PrivateKey(key),
-        Some(Ok(Item::ECKey(key))) => PrivateKey(key),
+        Some(Ok(rustls_pemfile::Item::Pkcs1Key(key))) => PrivateKeyDer::from(key),
+        Some(Ok(rustls_pemfile::Item::Pkcs8Key(key))) => PrivateKeyDer::from(key),
+        Some(Ok(rustls_pemfile::Item::Sec1Key(key))) => PrivateKeyDer::from(key),
         Some(Err(e)) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1266,11 +1267,11 @@ pub(crate) struct TlsClientAuth {
     /// list of certificates in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate_chain: Vec<Certificate>,
+    pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
     /// key in PEM format
     #[serde(deserialize_with = "deserialize_key", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) key: PrivateKey,
+    pub(crate) key: PrivateKeyDer<'static>,
 }
 
 /// Configuration options pertaining to the sandbox page.

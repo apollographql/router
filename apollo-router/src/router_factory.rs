@@ -7,6 +7,7 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
+use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
@@ -478,7 +479,7 @@ pub(crate) fn create_certificate_store(
     })?;
     for certificate in certificates {
         store
-            .add(&certificate)
+            .add(certificate)
             .map_err(|e| ConfigurationError::CertificateAuthorities {
                 error: format!("could not add certificate to root store: {e}"),
             })?;
@@ -492,17 +493,20 @@ pub(crate) fn create_certificate_store(
     }
 }
 
-fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     tracing::debug!("loading root certificates");
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to load certificate".to_string(),
-        )
-    })?;
-    Ok(certs.into_iter().map(rustls::Certificate).collect())
+    rustls_pemfile::certs(&mut certificates.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
+        // instead of replacing it with this generic error message?
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "failed to load certificate".to_string(),
+            )
+        })
 }
 
 /// test only helper method to create a router factory in integration tests
