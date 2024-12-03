@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use apollo_compiler::ast;
-use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
@@ -12,12 +11,12 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Node;
 use serde_json_bytes::Value;
 
 use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
 use super::schema::DemandControlledSchema;
+use super::schema::InputObjectDirectiveMetadata;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
@@ -28,6 +27,7 @@ use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
+use crate::spec::TYPENAME;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
@@ -42,53 +42,40 @@ struct ScoringContext<'a> {
     should_estimate_requires: bool,
 }
 
-fn score_argument(
-    argument: &apollo_compiler::ast::Value,
-    argument_definition: &Node<InputValueDefinition>,
-    schema: &DemandControlledSchema,
+// TODO: Error messages
+fn score_input_object(
+    obj: &apollo_compiler::ast::Value,
     variables: &Object,
+    meta: &InputObjectDirectiveMetadata,
+    schema: &DemandControlledSchema,
 ) -> Result<f64, DemandControlError> {
-    let ty = schema
-        .types
-        .get(argument_definition.ty.inner_named_type())
-        .ok_or_else(|| {
-            DemandControlError::QueryParseFailure(format!(
-                "Argument {} was found in query, but its type ({}) was not found in the schema",
-                argument_definition.name,
-                argument_definition.ty.inner_named_type()
-            ))
-        })?;
-    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
-
-    match (argument, ty) {
+    match (obj, &meta.ty) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
-        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
-            format!(
-                "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
-                argument_definition.name,
-                argument_definition.ty.inner_named_type()
-            )
-        )),
+        | (_, ExtendedType::Union(_)) => {
+            Err(DemandControlError::QueryParseFailure("TBD".to_string()))
+        }
 
-        (ast::Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
-            let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
+        (ast::Value::Object(inner_args), ExtendedType::InputObject(_)) => {
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
-                let arg_def = inner_arg_defs.fields.get(arg_name).ok_or_else(|| {
-                    DemandControlError::QueryParseFailure(format!(
-                        "Argument {} was found in query, but its type ({}) was not found in the schema",
-                        argument_definition.name,
-                        argument_definition.ty.inner_named_type()
-                    ))
-                })?;
-                cost += score_argument(arg_val, arg_def, schema, variables,)?;
+                let arg_meta = schema
+                    .type_input_metadata(meta.ty.name(), arg_name)
+                    .expect("has meta");
+                cost += score_input_object(arg_val, variables, arg_meta, schema)?;
             }
             Ok(cost)
         }
         (ast::Value::List(inner_args), _) => {
-            let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_argument(arg_val, argument_definition, schema, variables)?;
+                cost += score_input_object(arg_val, variables, meta, schema)?;
             }
             Ok(cost)
         }
@@ -96,67 +83,59 @@ fn score_argument(
             // We make a best effort attempt to score the variable, but some of these may not exist in the variables
             // sent on the supergraph request, such as `$representations`.
             if let Some(variable) = variables.get(name.as_str()) {
-                score_variable(variable, argument_definition, schema)
+                score_variable(variable, meta, schema)
             } else {
                 Ok(0.0)
             }
         }
         (ast::Value::Null, _) => Ok(0.0),
-        _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
+        _ => Ok(meta
+            .cost_directive
+            .as_ref()
+            .map_or(0.0, |cost| cost.weight())),
     }
 }
 
 fn score_variable(
     variable: &Value,
-    argument_definition: &Node<InputValueDefinition>,
+    meta: &InputObjectDirectiveMetadata,
     schema: &DemandControlledSchema,
 ) -> Result<f64, DemandControlError> {
-    let ty = schema
-        .types
-        .get(argument_definition.ty.inner_named_type())
-        .ok_or_else(|| {
-            DemandControlError::QueryParseFailure(format!(
-                "Argument {} was found in query, but its type ({}) was not found in the schema",
-                argument_definition.name,
-                argument_definition.ty.inner_named_type()
-            ))
-        })?;
-    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
-
-    match (variable, ty) {
+    match (variable, &meta.ty) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
-        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
-            format!(
-                "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
-                argument_definition.name,
-                argument_definition.ty.inner_named_type()
-            )
-        )),
+        | (_, ExtendedType::Union(_)) => {
+            Err(DemandControlError::QueryParseFailure("TBD".to_string()))
+        }
 
-        (Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
-            let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
+        (Value::Object(inner_args), ExtendedType::InputObject(_)) => {
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
-                let arg_def = inner_arg_defs.fields.get(arg_name.as_str()).ok_or_else(|| {
-                    DemandControlError::QueryParseFailure(format!(
-                        "Argument {} was found in query, but its type ({}) was not found in the schema",
-                        argument_definition.name,
-                        argument_definition.ty.inner_named_type()
-                    ))
-                })?;
-                cost += score_variable(arg_val, arg_def, schema)?;
+                let arg_meta = schema
+                    .type_input_metadata(meta.ty.name(), arg_name.as_str())
+                    .expect("has meta");
+                cost += score_variable(arg_val, arg_meta, schema)?;
             }
             Ok(cost)
         }
         (Value::Array(inner_args), _) => {
-            let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_variable(arg_val, argument_definition, schema)?;
+                cost += score_variable(arg_val, meta, schema)?;
             }
             Ok(cost)
         }
         (Value::Null, _) => Ok(0.0),
-        _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
+        _ => Ok(meta
+            .cost_directive
+            .as_ref()
+            .map_or(0.0, |cost| cost.weight())),
     }
 }
 
@@ -198,24 +177,27 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_from_upstream: Option<i32>,
     ) -> Result<f64, DemandControlError> {
+        // We know this is a string without directives, so we return here to avoid the failure
+        // when it isn't in the lookup below.
+        if field.name == TYPENAME {
+            return Ok(0.0);
+        }
+
         if StaticCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
         }
 
-        // We need to look up the `FieldDefinition` from the supergraph schema instead of using `field.definition`
-        // because `field.definition` was generated from the API schema, which strips off the directives we need.
-        let definition = ctx.schema.type_field(parent_type, &field.name)?;
-        let ty = field.inner_type_def(ctx.schema).ok_or_else(|| {
-            DemandControlError::QueryParseFailure(format!(
-                "Field {} was found in query, but its type is missing from the schema.",
-                field.name
-            ))
-        })?;
-
-        let list_size_directive = match ctx
+        let field_metadata = ctx
             .schema
-            .type_field_list_size_directive(parent_type, &field.name)
-        {
+            .type_field_metadata(parent_type, &field.name)
+            .ok_or_else(|| {
+                DemandControlError::QueryParseFailure(format!(
+                    "Field {} was found in query, but its type is missing from the schema.",
+                    field.name
+                ))
+            })?;
+
+        let list_size_directive = match field_metadata.list_size_directive.as_ref() {
             Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
             None => Ok(None),
         }?;
@@ -235,12 +217,12 @@ impl StaticCostCalculator {
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
-        let mut type_cost = if let Some(cost_directive) = ctx
-            .schema
-            .type_field_cost_directive(parent_type, &field.name)
-        {
+        let mut type_cost = if let Some(cost_directive) = field_metadata.cost_directive.as_ref() {
             cost_directive.weight()
-        } else if ty.is_interface() || ty.is_object() || ty.is_union() {
+        } else if field_metadata.ty.is_interface()
+            || field_metadata.ty.is_object()
+            || field_metadata.ty.is_union()
+        {
             1.0
         } else {
             0.0
@@ -254,18 +236,20 @@ impl StaticCostCalculator {
 
         let mut arguments_cost = 0.0;
         for argument in &field.arguments {
-            let argument_definition =
-                definition.argument_by_name(&argument.name).ok_or_else(|| {
+            let argument_metadata = field_metadata
+                .argument_directive_metadata
+                .get(&argument.name)
+                .ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
                         "Argument {} of field {} is missing a definition in the schema",
                         argument.name, field.name
                     ))
                 })?;
-            arguments_cost += score_argument(
+            arguments_cost += score_input_object(
                 &argument.value,
-                argument_definition,
-                ctx.schema,
                 ctx.variables,
+                argument_metadata,
+                ctx.schema,
             )?;
         }
 
@@ -274,9 +258,9 @@ impl StaticCostCalculator {
             // If the field is marked with `@requires`, the required selection may not be included
             // in the query's selection. Adding that requirement's cost to the field ensures it's
             // accounted for.
-            let requirements = ctx
-                .schema
-                .type_field_requires_directive(parent_type, &field.name)
+            let requirements = field_metadata
+                .requires_directive
+                .as_ref()
                 .map(|d| &d.fields);
             if let Some(selection_set) = requirements {
                 requirements_cost = self.score_selection_set(
@@ -571,24 +555,18 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         value: &Value,
     ) {
         self.visit_list_item(request, variables, parent_ty, field, value);
-
-        let definition = self.schema.type_field(parent_ty, &field.name);
-        for argument in &field.arguments {
-            if let Ok(Some(argument_definition)) = definition
-                .as_ref()
-                .map(|def| def.argument_by_name(&argument.name))
-            {
-                if let Ok(score) =
-                    score_argument(&argument.value, argument_definition, self.schema, variables)
+        if let Some(field_metadata) = self.schema.type_field_metadata(parent_ty, &field.name) {
+            for argument in &field.arguments {
+                // TODO: Remove expectations
+                let argument_metadata = field_metadata
+                    .argument_directive_metadata
+                    .get(&argument.name)
+                    .expect("has arg metadata");
+                if let Ok(argument_cost) =
+                    score_input_object(&argument.value, variables, argument_metadata, &self.schema)
                 {
-                    self.cost += score;
+                    self.cost += argument_cost;
                 }
-            } else {
-                tracing::warn!(
-                    "Failed to get schema definition for argument {} of field {}. The resulting actual cost will be a partial result.",
-                    argument.name,
-                    field.name
-                )
             }
         }
     }
@@ -603,7 +581,8 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
     ) {
         let cost_directive = self
             .schema
-            .type_field_cost_directive(parent_ty, &field.name);
+            .type_field_metadata(parent_ty, &field.name)
+            .and_then(|meta| meta.cost_directive.as_ref());
 
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
