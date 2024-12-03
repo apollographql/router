@@ -653,7 +653,7 @@ mod tests {
             &IndexMap::with_hasher(Default::default()),
             &Map::default(),
         );
-        let request = request.body(hyper::Body::empty()).unwrap();
+        let request = request.body(http_body_util::Empty::new()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -686,7 +686,7 @@ mod tests {
             &config,
             &Map::default(),
         );
-        let request = request.body(hyper::Body::empty()).unwrap();
+        let request = request.body(http_body_util::Empty::new()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));

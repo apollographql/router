@@ -811,7 +811,7 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::full(r#"{"query":"query { me { name }}"}"#))
                         .unwrap(),
                 ),
             )
@@ -845,7 +845,7 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::full(r#"{"query":"query { me { name }}"}"#))
                         .unwrap(),
                 ),
             )
