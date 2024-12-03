@@ -264,6 +264,9 @@ impl DefaultForLevel for SubgraphAttributes {
                 if self.graphql_operation_type.is_none() {
                     self.graphql_operation_type = Some(StandardAttribute::Bool(true));
                 }
+                if self.http_request_resend_count.is_none() {
+                    self.http_request_resend_count = Some(StandardAttribute::Bool(true));
+                }
             }
             DefaultAttributeRequirementLevel::None => {}
         }
