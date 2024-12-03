@@ -142,6 +142,12 @@ Cons:
 
 - It supports only JWT-based authentication with keys from a JWKS endpoint.
 
+### Additional resources
+
+You can use the Apollo Solutions [router JWKS generator](https://github.com/apollosolutions/router-jwks-generator) to create a router configuration file for use with the authentication plugin.
+
+<SolutionsNote />
+
 ## Use a coprocessor
 
 If you have a custom authentication strategy, you can use a [coprocessor](/graphos/routing/customization/coprocessor) to implement it.
@@ -203,6 +209,12 @@ Pros:
 Cons:
 
 - The initial lift of implementing a coprocessor is non-trivial, but once it's in place you can leverage it for any number of router customizations.
+
+### Additional resources
+
+See the Apollo Solutions [coprocessor example](https://github.com/apollosolutions/example-coprocessor-external-auth) for a runnable example including configuration YAML.
+
+<SolutionsNote />
 
 ## Combining authentication strategies
 
