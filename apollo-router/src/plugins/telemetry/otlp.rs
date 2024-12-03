@@ -182,7 +182,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) key: Option<String>,
 
     /// gRPC metadata
-    #[serde(with = "http_serde::header_map")]
+    #[serde(with = "http_serde_1_1::header_map")]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: http::HeaderMap,
 }

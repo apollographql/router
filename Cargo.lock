@@ -293,7 +293,8 @@ dependencies = [
  "http 1.1.0",
  "http-body 1.0.1",
  "http-body-util",
- "http-serde",
+ "http-serde 1.1.3",
+ "http-serde 2.1.1",
  "humantime",
  "humantime-serde",
  "hyper 1.5.1",
@@ -3414,6 +3415,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f560b665ad9f1572cfcaf034f7fb84338a7ce945216d64a90fd81f046a3caee"
 dependencies = [
  "http 0.2.12",
+ "serde",
+]
+
+[[package]]
+name = "http-serde"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f056c8559e3757392c8d091e796416e4649d8e49e88b8d76df6c002f05027fd"
+dependencies = [
+ "http 1.1.0",
  "serde",
 ]
 
