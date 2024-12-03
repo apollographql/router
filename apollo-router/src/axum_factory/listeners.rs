@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use axum::response::*;
 use axum::Router;
+use bytesize::ByteSize;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper_util::rt::TokioExecutor;
@@ -204,6 +205,8 @@ pub(super) fn serve_router_on_listen_addr(
     address: ListenAddr,
     router: axum::Router,
     main_graphql_port: bool,
+    opt_max_headers: Option<usize>,
+    opt_max_buf_size: Option<ByteSize>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -267,14 +270,22 @@ pub(super) fn serve_router_on_listen_addr(
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
-                                        let mut builder = Builder::new(TokioExecutor::new());
-                                        let mut http_connection = builder
-                                            .http1();
-                                        let connection = http_connection
-                                            .keep_alive(true)
-                                            .header_read_timeout(Duration::from_secs(10))
-                                            .serve_connection(tokio_stream, hyper_service);
 
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        #[cfg(feature = "hyper_header_limits")]
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.http1_max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
+
+                                        let connection = http_config.serve_connection(tokio_stream, hyper_service);
                                         tokio::pin!(connection);
                                         tokio::select! {
                                             // the connection finished first
@@ -306,11 +317,19 @@ pub(super) fn serve_router_on_listen_addr(
                                             app.clone().call(request)
                                         });
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let mut http_connection = builder
-                                            .http1();
-                                        let connection = http_connection
-                                            .keep_alive(true)
-                                            .serve_connection(tokio_stream, hyper_service);
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        #[cfg(feature = "hyper_header_limits")]
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.http1_max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
+                                        let connection = http_config.serve_connection(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -344,24 +363,28 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-                                        let protocol = stream.get_ref().1.alpn_protocol();
-                                        let http2 = protocol == Some(&b"h2"[..]);
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        if stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]) {
+                                            builder = builder.http2_only();
+                                        }
 
                                         let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
-                                        let mut builder = Builder::new(TokioExecutor::new());
-                                        builder = if http2 {
-                                            builder.http2_only()
-                                        } else {
-                                            builder
-                                        };
-                                        let mut http_connection = builder
-                                            .http1();
-                                        let connection = http_connection
-                                            .keep_alive(true)
-                                            .header_read_timeout(Duration::from_secs(10))
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        #[cfg(feature = "hyper_header_limits")]
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.http1_max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
+                                        let connection = http_config
                                             .serve_connection(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);

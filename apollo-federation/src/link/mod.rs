@@ -22,6 +22,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
+pub(crate) mod context_spec_definition;
 pub(crate) mod cost_spec_definition;
 pub mod database;
 pub(crate) mod federation_spec_definition;
@@ -44,6 +45,8 @@ pub enum LinkError {
     InvalidName(#[from] InvalidNameError),
     #[error("Invalid use of @link in schema: {0}")]
     BootstrapError(String),
+    #[error("Unknown import: {0}")]
+    InvalidImport(String),
 }
 
 // TODO: Replace LinkError usages with FederationError.

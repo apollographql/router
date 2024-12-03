@@ -20,7 +20,6 @@ use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -30,7 +29,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
-use serde::Serialize;
 
 use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
@@ -72,12 +70,11 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 
 /// Opaque wrapper of the unique selection ID type.
 ///
-/// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
-/// to be something like UUIDs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-// NOTE(@TylerBloom): This feature gate can be removed once the condition in the comment above is
-// met. Note that there are `serde(skip)` statements that should be removed once this is removed.
-#[cfg_attr(feature = "snapshot_tracing", derive(Serialize))]
+/// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
+/// startup. It currently implements `Serialize` for debugging purposes. It should not implement
+/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// provided (i.e. the inner type is a `Uuid` or the like).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct SelectionId(usize);
 
 impl SelectionId {
@@ -92,9 +89,12 @@ impl SelectionId {
 /// All arguments and input object values are sorted in a consistent order.
 ///
 /// This type is immutable and cheaply cloneable.
-#[derive(Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub(crate) struct ArgumentList {
     /// The inner list *must* be sorted with `sort_arguments`.
+    #[serde(
+        serialize_with = "crate::utils::serde_bridge::serialize_optional_slice_of_exe_argument_nodes"
+    )]
     inner: Option<Arc<[Node<executable::Argument>]>>,
 }
 
@@ -243,7 +243,7 @@ impl Operation {
 /// - For the type, stores the schema and the position in that schema instead of just the
 ///   `NamedType`.
 /// - Stores selections in a map so they can be normalized efficiently.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SelectionSet {
     #[serde(skip)]
     pub(crate) schema: ValidFederationSchema,
@@ -271,7 +271,7 @@ pub(crate) use selection_map::SelectionValue;
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant, serde::Serialize)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -659,9 +659,7 @@ mod field_selection {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
         pub(crate) alias: Option<Name>,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_debug_string")]
         pub(crate) arguments: ArgumentList,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: DirectiveList,
         pub(crate) sibling_typename: Option<SiblingTypename>,
     }
@@ -869,16 +867,13 @@ mod fragment_spread_selection {
         pub(crate) fragment_name: Name,
         pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
         // directives applied on the fragment spread selection
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: DirectiveList,
         // directives applied within the fragment definition
         //
         // PORT_NOTE: The JS codebase combined the fragment spread's directives with the fragment
         // definition's directives. This was invalid GraphQL as those directives may not be applicable
         // on different locations. While we now keep track of those references, they are currently ignored.
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) fragment_directives: DirectiveList,
-        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         pub(crate) selection_id: SelectionId,
     }
 
@@ -1063,9 +1058,7 @@ mod inline_fragment_selection {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
         pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: DirectiveList,
-        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         pub(crate) selection_id: SelectionId,
     }
 
@@ -2982,7 +2975,7 @@ pub(crate) struct NormalizedDefer {
 }
 
 struct DeferNormalizer {
-    used_labels: HashSet<String>,
+    used_labels: IndexSet<String>,
     assigned_labels: IndexSet<String>,
     conditions: IndexMap<Name, IndexSet<String>>,
     label_offset: usize,
@@ -2991,7 +2984,7 @@ struct DeferNormalizer {
 impl DeferNormalizer {
     fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
         let mut digest = Self {
-            used_labels: HashSet::default(),
+            used_labels: IndexSet::default(),
             label_offset: 0,
             assigned_labels: IndexSet::default(),
             conditions: IndexMap::default(),

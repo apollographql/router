@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/plugins/cache/tests.rs
+expression: cache_keys
+snapshot_kind: text
+---
+[
+  {
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:5221ff42b311b757445c096c023cee4fefab5de49735e421c494f1119326317b:hash:392508655d0b54b6c8e439eabbe356c4d54a9fdc323ac9b93e48efbc29581170:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "status": "cached",
+    "cache_control": "[REDACTED]"
+  },
+  {
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:hash:392508655d0b54b6c8e439eabbe356c4d54a9fdc323ac9b93e48efbc29581170:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "status": "cached",
+    "cache_control": "[REDACTED]"
+  }
+]
