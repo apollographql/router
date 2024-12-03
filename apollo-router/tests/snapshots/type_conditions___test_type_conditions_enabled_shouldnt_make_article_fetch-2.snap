@@ -54,7 +54,7 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "587c887350ef75eaf4b647be94fd682616bcd33909e15fb797cee226e95fa36a",
+              "schemaAwareHash": "130217826766119286dfcc6c95317df332634acf49fcdc5408c6c4d1b0669517",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -115,7 +115,7 @@ expression: response
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "a0bf36d3a611df53c3a60b9b124a2887f2d266858221c606ace0985d101d64bd",
+                    "schemaAwareHash": "a331620be2259b8a89122f1c41feb3abdfbd782ebbc2a1e17e3de128c4bb5cb5",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -174,7 +174,7 @@ expression: response
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "3e84a53f967bf40d4c08254a94f3fa32a828ab3ad8184a22bb3439c596ecaaf4",
+                    "schemaAwareHash": "115c6ba516a8368e9b331769942157a1e438d3f79b60690de68378da16bde989",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],

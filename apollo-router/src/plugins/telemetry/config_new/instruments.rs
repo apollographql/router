@@ -289,6 +289,7 @@ impl InstrumentsConfig {
                         }
                     },
                     updated: false,
+                    _phantom: PhantomData,
                 }),
             });
         let http_server_request_body_size =
@@ -329,6 +330,7 @@ impl InstrumentsConfig {
                             })),
                             selectors,
                             updated: false,
+                            _phantom: PhantomData,
                         }),
                     }
                 });
@@ -372,6 +374,7 @@ impl InstrumentsConfig {
                             })),
                             selectors,
                             updated: false,
+                            _phantom: PhantomData,
                         }),
                     }
                 });
@@ -592,6 +595,7 @@ impl InstrumentsConfig {
                             selector: None,
                             selectors,
                             updated: false,
+                            _phantom: PhantomData,
                         }),
                     }
                 });
@@ -633,6 +637,7 @@ impl InstrumentsConfig {
                             })),
                             selectors,
                             updated: false,
+                            _phantom: PhantomData,
                         }),
                     }
                 });
@@ -674,6 +679,7 @@ impl InstrumentsConfig {
                             })),
                             selectors,
                             updated: false,
+                            _phantom: PhantomData,
                         }),
                     }
                 });
@@ -781,6 +787,7 @@ impl InstrumentsConfig {
                         })),
                         selectors,
                         updated: false,
+                        _phantom: PhantomData,
                     }),
                 }
             }),
@@ -818,6 +825,7 @@ impl InstrumentsConfig {
                             selector: None,
                             selectors,
                             incremented: false,
+                            _phantom: PhantomData,
                         }),
                     }
                 }),
@@ -882,6 +890,7 @@ impl InstrumentsConfig {
                         })),
                         selectors,
                         incremented: false,
+                        _phantom: PhantomData,
                     }),
                 }
             }),
@@ -1057,22 +1066,19 @@ where
     }
 }
 
-impl<T, Request, Response, EventResponse> Selectors for DefaultedStandardInstrument<T>
+impl<T, Request, Response, EventResponse> Selectors<Request, Response, EventResponse>
+    for DefaultedStandardInstrument<T>
 where
-    T: Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    T: Selectors<Request, Response, EventResponse>,
 {
-    type Request = Request;
-    type Response = Response;
-    type EventResponse = EventResponse;
-
-    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response(response),
@@ -1086,7 +1092,7 @@ where
         }
     }
 
-    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_event(&self, response: &EventResponse, ctx: &Context) -> Vec<KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response_event(response, ctx),
@@ -1174,30 +1180,24 @@ where
     condition: Condition<E>,
 }
 
-impl<A, E, Request, Response, EventResponse, SelectorValue> Selectors
-    for Instrument<A, E, SelectorValue>
+impl<A, E, Request, Response, EventResponse, SelectorValue>
+    Selectors<Request, Response, EventResponse> for Instrument<A, E, SelectorValue>
 where
-    A: Debug
-        + Default
-        + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    A: Debug + Default + Selectors<Request, Response, EventResponse>,
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
     for<'a> &'a SelectorValue: Into<InstrumentValue<E>>,
 {
-    type Request = Request;
-    type Response = Response;
-    type EventResponse = EventResponse;
-
-    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_request(request)
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_response(response)
     }
 
     fn on_response_event(
         &self,
-        response: &Self::EventResponse,
+        response: &EventResponse,
         ctx: &Context,
     ) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_response_event(response, ctx)
@@ -1293,9 +1293,7 @@ impl<A, B, E, Request, Response, EventResponse, SelectorValue> Instrumented
 where
     A: Default
         + Instrumented<Request = Request, Response = Response, EventResponse = EventResponse>,
-    B: Default
-        + Debug
-        + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    B: Default + Debug + Selectors<Request, Response, EventResponse>,
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
     for<'a> InstrumentValue<E>: From<&'a SelectorValue>,
 {
@@ -1330,12 +1328,8 @@ where
     }
 }
 
-impl Selectors for SubgraphInstrumentsConfig {
-    type Request = subgraph::Request;
-    type Response = subgraph::Response;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
+impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrumentsConfig {
+    fn on_request(&self, request: &subgraph::Request) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
         attrs.extend(self.http_client_request_duration.on_request(request));
         attrs.extend(self.http_client_response_body_size.on_request(request));
@@ -1343,7 +1337,7 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &subgraph::Response) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_response(response);
         attrs.extend(self.http_client_request_duration.on_response(response));
         attrs.extend(self.http_client_response_body_size.on_response(response));
@@ -1360,20 +1354,26 @@ impl Selectors for SubgraphInstrumentsConfig {
     }
 }
 
-pub(crate) struct CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
-where
-    Attributes: Selectors<Request = Request, Response = Response> + Default,
+pub(crate) struct CustomInstruments<
+    Request,
+    Response,
+    EventResponse,
+    Attributes,
+    Select,
+    SelectorValue,
+> where
+    Attributes: Selectors<Request, Response, EventResponse> + Default,
     Select: Selector<Request = Request, Response = Response> + Debug,
 {
     _phantom: PhantomData<SelectorValue>,
-    counters: Vec<CustomCounter<Request, Response, Attributes, Select>>,
-    histograms: Vec<CustomHistogram<Request, Response, Attributes, Select>>,
+    counters: Vec<CustomCounter<Request, Response, EventResponse, Attributes, Select>>,
+    histograms: Vec<CustomHistogram<Request, Response, EventResponse, Attributes, Select>>,
 }
 
-impl<Request, Response, Attributes, Select, SelectorValue>
-    CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
+impl<Request, Response, EventResponse, Attributes, Select, SelectorValue>
+    CustomInstruments<Request, Response, EventResponse, Attributes, Select, SelectorValue>
 where
-    Attributes: Selectors<Request = Request, Response = Response> + Default,
+    Attributes: Selectors<Request, Response, EventResponse> + Default,
     Select: Selector<Request = Request, Response = Response> + Debug,
 {
     pub(crate) fn is_empty(&self) -> bool {
@@ -1381,10 +1381,10 @@ where
     }
 }
 
-impl<Request, Response, Attributes, Select, SelectorValue>
-    CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
+impl<Request, Response, EventResponse, Attributes, Select, SelectorValue>
+    CustomInstruments<Request, Response, EventResponse, Attributes, Select, SelectorValue>
 where
-    Attributes: Selectors<Request = Request, Response = Response> + Default + Debug + Clone,
+    Attributes: Selectors<Request, Response, EventResponse> + Default + Debug + Clone,
     Select: Selector<Request = Request, Response = Response> + Debug + Clone,
     for<'a> &'a SelectorValue: Into<InstrumentValue<Select>>,
 {
@@ -1440,13 +1440,14 @@ where
                                 selector,
                                 selectors: Some(instrument.attributes.clone()),
                                 incremented: false,
+                                _phantom: PhantomData,
                             };
                             counters.push(CustomCounter {
                                 inner: Mutex::new(counter),
                             })
                         }
                         None => {
-                            ::tracing::error!("cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub");
+                            failfast_debug!("cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub");
                         }
                     }
                 }
@@ -1494,6 +1495,7 @@ where
                                 selector,
                                 selectors: Some(instrument.attributes.clone()),
                                 updated: false,
+                                _phantom: PhantomData,
                             };
 
                             histograms.push(CustomHistogram {
@@ -1501,7 +1503,7 @@ where
                             });
                         }
                         None => {
-                            ::tracing::error!("cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub");
+                            failfast_debug!("cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub");
                         }
                     }
                 }
@@ -1517,10 +1519,9 @@ where
 }
 
 impl<Request, Response, EventResponse, Attributes, Select, SelectorValue> Instrumented
-    for CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
+    for CustomInstruments<Request, Response, EventResponse, Attributes, Select, SelectorValue>
 where
-    Attributes:
-        Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    Attributes: Selectors<Request, Response, EventResponse> + Default,
     Select: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
 {
     type Request = Request;
@@ -1581,14 +1582,14 @@ where
 
 pub(crate) struct RouterInstruments {
     http_server_request_duration: Option<
-        CustomHistogram<router::Request, router::Response, RouterAttributes, RouterSelector>,
+        CustomHistogram<router::Request, router::Response, (), RouterAttributes, RouterSelector>,
     >,
     http_server_active_requests: Option<ActiveRequestsCounter>,
     http_server_request_body_size: Option<
-        CustomHistogram<router::Request, router::Response, RouterAttributes, RouterSelector>,
+        CustomHistogram<router::Request, router::Response, (), RouterAttributes, RouterSelector>,
     >,
     http_server_response_body_size: Option<
-        CustomHistogram<router::Request, router::Response, RouterAttributes, RouterSelector>,
+        CustomHistogram<router::Request, router::Response, (), RouterAttributes, RouterSelector>,
     >,
     custom: RouterCustomInstruments,
 }
@@ -1683,6 +1684,7 @@ pub(crate) struct SubgraphInstruments {
         CustomHistogram<
             subgraph::Request,
             subgraph::Response,
+            (),
             SubgraphAttributes,
             SubgraphSelector,
         >,
@@ -1691,6 +1693,7 @@ pub(crate) struct SubgraphInstruments {
         CustomHistogram<
             subgraph::Request,
             subgraph::Response,
+            (),
             SubgraphAttributes,
             SubgraphSelector,
         >,
@@ -1699,6 +1702,7 @@ pub(crate) struct SubgraphInstruments {
         CustomHistogram<
             subgraph::Request,
             subgraph::Response,
+            (),
             SubgraphAttributes,
             SubgraphSelector,
         >,
@@ -1754,6 +1758,7 @@ impl Instrumented for SubgraphInstruments {
 pub(crate) type RouterCustomInstruments = CustomInstruments<
     router::Request,
     router::Response,
+    (),
     RouterAttributes,
     RouterSelector,
     RouterValue,
@@ -1762,6 +1767,7 @@ pub(crate) type RouterCustomInstruments = CustomInstruments<
 pub(crate) type SupergraphCustomInstruments = CustomInstruments<
     supergraph::Request,
     supergraph::Response,
+    crate::graphql::Response,
     SupergraphAttributes,
     SupergraphSelector,
     SupergraphValue,
@@ -1770,6 +1776,7 @@ pub(crate) type SupergraphCustomInstruments = CustomInstruments<
 pub(crate) type SubgraphCustomInstruments = CustomInstruments<
     subgraph::Request,
     subgraph::Response,
+    (),
     SubgraphAttributes,
     SubgraphSelector,
     SubgraphValue,
@@ -1798,17 +1805,18 @@ fn to_i64(value: opentelemetry::Value) -> Option<i64> {
     }
 }
 
-pub(crate) struct CustomCounter<Request, Response, A, T>
+pub(crate) struct CustomCounter<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    pub(crate) inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
+    pub(crate) inner: Mutex<CustomCounterInner<Request, Response, EventResponse, A, T>>,
 }
 
-impl<Request, Response, A, T> Clone for CustomCounter<Request, Response, A, T>
+impl<Request, Response, EventResponse, A, T> Clone
+    for CustomCounter<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug + Clone,
 {
     fn clone(&self) -> Self {
@@ -1818,9 +1826,9 @@ where
     }
 }
 
-pub(crate) struct CustomCounterInner<Request, Response, A, T>
+pub(crate) struct CustomCounterInner<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
     pub(crate) increment: Increment,
@@ -1831,11 +1839,13 @@ where
     pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
     pub(crate) incremented: bool,
+    pub(crate) _phantom: PhantomData<EventResponse>,
 }
 
-impl<Request, Response, A, T> Clone for CustomCounterInner<Request, Response, A, T>
+impl<Request, Response, EventResponse, A, T> Clone
+    for CustomCounterInner<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug + Clone,
 {
     fn clone(&self) -> Self {
@@ -1847,13 +1857,15 @@ where
             condition: self.condition.clone(),
             attributes: self.attributes.clone(),
             incremented: self.incremented,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Instrumented
+    for CustomCounter<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
         + Debug
         + Debug,
@@ -2109,9 +2121,10 @@ where
     }
 }
 
-impl<A, T, Request, Response> Drop for CustomCounter<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Drop
+    for CustomCounter<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
     fn drop(&mut self) {
@@ -2230,17 +2243,17 @@ impl Drop for ActiveRequestsCounter {
 
 // ---------------- Histogram -----------------------
 
-pub(crate) struct CustomHistogram<Request, Response, A, T>
+pub(crate) struct CustomHistogram<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response>,
 {
-    pub(crate) inner: Mutex<CustomHistogramInner<Request, Response, A, T>>,
+    pub(crate) inner: Mutex<CustomHistogramInner<Request, Response, EventResponse, A, T>>,
 }
 
-pub(crate) struct CustomHistogramInner<Request, Response, A, T>
+pub(crate) struct CustomHistogramInner<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response>,
 {
     pub(crate) increment: Increment,
@@ -2251,12 +2264,13 @@ where
     pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's an histogram on events to know if we have to count for an event or not
     pub(crate) updated: bool,
+    pub(crate) _phantom: PhantomData<EventResponse>,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented
-    for CustomHistogram<Request, Response, A, T>
+    for CustomHistogram<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
@@ -2501,9 +2515,10 @@ where
     }
 }
 
-impl<A, T, Request, Response> Drop for CustomHistogram<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Drop
+    for CustomHistogram<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response>,
 {
     fn drop(&mut self) {

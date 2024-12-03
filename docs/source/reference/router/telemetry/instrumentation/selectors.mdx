@@ -90,6 +90,7 @@ The subgraph service executes multiple times during query execution, with each e
 | `supergraph_query`          | Yes         | `string`         | The graphql query to the supergraph                                            |
 | `supergraph_query_variable` | Yes         |                  | The name of a supergraph query variable                                        |
 | `supergraph_request_header` | Yes         |                  | The name of a supergraph request header                                        |
+| `subgraph_resend_count`     | Yes         | `true`\|`false`  | Number of retries for an http request to a subgraph                            |
 | `request_context`           | Yes         |                  | The name of a request context key                                              |
 | `response_context`          | Yes         |                  | The name of a response context key                                             |
 | `baggage`                   | Yes         |                  | The name of a baggage item                                                     |
