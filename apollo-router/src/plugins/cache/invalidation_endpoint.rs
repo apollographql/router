@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::task::Poll;
 
+use bytes::Buf;
 use futures::future::BoxFuture;
 use http::header::AUTHORIZATION;
 use http::Method;
