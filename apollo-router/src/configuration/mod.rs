@@ -1107,12 +1107,12 @@ pub(crate) struct Tls {
     /// TLS server configuration
     ///
     /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
-    pub(crate) supergraph: Option<TlsSupergraph>,
+    pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
 }
 
 /// Configuration options pertaining to the supergraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsSupergraph {
     /// server certificate in PEM format
@@ -1236,7 +1236,7 @@ pub(crate) struct TlsClient {
     /// list of certificate authorities in PEM format
     pub(crate) certificate_authorities: Option<String>,
     /// client certificate authentication
-    pub(crate) client_authentication: Option<TlsClientAuth>,
+    pub(crate) client_authentication: Option<Arc<TlsClientAuth>>,
 }
 
 #[buildstructor::buildstructor]
@@ -1244,7 +1244,7 @@ impl TlsClient {
     #[builder]
     pub(crate) fn new(
         certificate_authorities: Option<String>,
-        client_authentication: Option<TlsClientAuth>,
+        client_authentication: Option<Arc<TlsClientAuth>>,
     ) -> Self {
         Self {
             certificate_authorities,
@@ -1260,7 +1260,7 @@ impl Default for TlsClient {
 }
 
 /// TLS client authentication
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsClientAuth {
     /// list of certificates in PEM format
