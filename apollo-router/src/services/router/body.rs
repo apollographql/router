@@ -5,18 +5,21 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::Stream;
+use futures::StreamExt;
 use http_body::Frame;
 use http_body::SizeHint;
 // use http_body_util::combinators::BoxBody;
 use http_body_util::combinators::UnsyncBoxBody;
+use http_body_util::BodyDataStream;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
 use http_body_util::Full;
+use http_body_util::StreamBody;
 use hyper::body::Body as HttpBody;
 use tower::BoxError;
 use tower::Service;
 
-pub type RouterBody = UnsyncBoxBody<Bytes, hyper::Error>;
+pub type RouterBody = UnsyncBoxBody<Bytes, BoxError>;
 
 pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
     Ok(body.collect().await?.to_bytes())
@@ -24,13 +27,13 @@ pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Err
 
 // We create some utility functions to make Empty and Full bodies
 // and convert types
-pub(crate) fn empty() -> UnsyncBoxBody<Bytes, hyper::Error> {
+pub(crate) fn empty() -> UnsyncBoxBody<Bytes, BoxError> {
     Empty::<Bytes>::new()
         .map_err(|never| match never {})
         .boxed_unsync()
 }
 
-pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, hyper::Error> {
+pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, BoxError> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed_unsync()
@@ -57,6 +60,21 @@ where
     S: Stream<Item = Result<Frame<RouterBody>, E>>,
 {
     http_body_util::StreamBody::new(stream)
+}
+
+pub(crate) fn from_data_stream(data_stream: BodyDataStream<RouterBody>) -> RouterBody {
+    RouterBody::new(StreamBody::new(
+        data_stream.map(|s| s.map(|body| Frame::data(body))),
+    ))
+}
+
+pub(crate) fn from_result_stream<S>(data_stream: S) -> RouterBody
+where
+    S: Stream<Item = Result<Bytes, BoxError>> + Send,
+{
+    RouterBody::new(StreamBody::new(
+        data_stream.map(|s| s.map(|body| Frame::data(body))),
+    ))
 }
 
 // pub struct RouterBody(super::Body);

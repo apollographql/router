@@ -25,6 +25,9 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
 use http_body::Body;
+use http_body::Frame;
+use http_body_util::BodyExt;
+use http_body_util::StreamBody;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto::Builder;
 use itertools::Itertools;
@@ -64,6 +67,7 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -651,17 +655,17 @@ async fn handle_graphql<RF: RouterFactory>(
                 .and_then(|value| value.to_str().ok())
                 .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
             let body = match opt_compressor {
-                // None => http_body_util::BodyDataStream::new(body),
-                None => crate::services::router::body::wrap_body_as_data_stream(body),
+                None => body,
                 Some(compressor) => {
                     parts.headers.insert(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    crate::services::router::body::wrap_stream_as_stream_body(
-                        compressor.process(body),
-                    )
-                    // Body::wrap_stream(compressor.process(body.into()))
+                    RouterBody::new(StreamBody::new(
+                        compressor
+                            .process(body)
+                            .map(|b| b.map(|body| Frame::data(body))),
+                    ))
                 }
             };
 
