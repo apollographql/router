@@ -359,37 +359,5 @@ async fn do_fetch(
         })
         .await?
         .into_parts();
-    Ok(http::Response::from_parts(
-        parts,
-        RouterBody::wrap_stream(BodyStream { inner: body }),
-    ))
-}
-
-pin_project! {
-    pub(crate) struct BodyStream<B: HttpBody> {
-        #[pin]
-        inner: DecompressionBody<B>
-    }
-}
-
-impl<B: HttpBody> BodyStream<B> {
-    /// Create a new `BodyStream`.
-    pub(crate) fn new(body: DecompressionBody<B>) -> Self {
-        Self { inner: body }
-    }
-}
-
-impl<B> Stream for BodyStream<B>
-where
-    B: HttpBody,
-    B::Error: Into<tower_http::BoxError>,
-{
-    type Item = Result<Bytes, BoxError>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_data(cx)
-    }
+    Ok(http::Response::from_parts(parts, RouterBody::new(body)))
 }
