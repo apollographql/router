@@ -40,7 +40,6 @@ use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower_http::decompression::DecompressionBody;
 use tower_http::trace::TraceLayer;
 use tracing::instrument::WithSubscriber;
 use tracing::Instrument;
@@ -570,80 +569,43 @@ async fn license_handler(
     }
 }
 
+#[derive(Clone)]
+struct HandlerOptions {
+    early_cancel: bool,
+    experimental_log_on_broken_pipe: bool,
+}
+
 pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router<()>
 where
     RF: RouterFactory,
 {
-    let early_cancel = configuration.supergraph.early_cancel;
-    let experimental_log_on_broken_pipe = configuration.supergraph.experimental_log_on_broken_pipe;
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
-        get({
-            move |Extension(service): Extension<RF>,
-                  request: Request<DecompressionBody<router::body::RouterBody>>| {
-                handle_graphql(
-                    service.create().boxed(),
-                    early_cancel,
-                    experimental_log_on_broken_pipe,
-                    request,
-                )
-            }
-        })
-        .post({
-            move |Extension(service): Extension<RF>,
-                  request: Request<DecompressionBody<router::body::RouterBody>>| {
-                handle_graphql(
-                    service.create().boxed(),
-                    early_cancel,
-                    experimental_log_on_broken_pipe,
-                    request,
-                )
-            }
-        }),
+        get(handle_graphql::<RF>).post(handle_graphql::<RF>),
     );
 
     if configuration.supergraph.path == "/*" {
         router = router.route(
             "/",
-            get({
-                move |Extension(service): Extension<RF>,
-                      request: Request<DecompressionBody<router::body::RouterBody>>| {
-                    handle_graphql(
-                        service.create().boxed(),
-                        early_cancel,
-                        experimental_log_on_broken_pipe,
-                        request,
-                    )
-                }
-            })
-            .post({
-                move |Extension(service): Extension<RF>,
-                      request: Request<DecompressionBody<router::body::RouterBody>>| {
-                    handle_graphql(
-                        service.create().boxed(),
-                        early_cancel,
-                        experimental_log_on_broken_pipe,
-                        request,
-                    )
-                }
-            }),
+            get(handle_graphql::<RF>).post(handle_graphql::<RF>),
         );
     }
 
-    router
+    router.route_layer(Extension(HandlerOptions {
+        early_cancel: configuration.supergraph.early_cancel,
+        experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
+    }))
 }
 
-async fn handle_graphql(
-    service: router::BoxService,
-    early_cancel: bool,
-    experimental_log_on_broken_pipe: bool,
-    http_request: Request<DecompressionBody<router::body::RouterBody>>,
+async fn handle_graphql<RF: RouterFactory>(
+    Extension(options): Extension<HandlerOptions>,
+    Extension(service_factory): Extension<RF>,
+    http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
     let _guard = SessionCountGuard::start();
 
-    let (parts, body) = http_request.into_parts();
-
-    let http_request = http::Request::from_parts(parts, http_body_util::BodyStream::new(body));
+    let HandlerOptions { early_cancel, experimental_log_on_broken_pipe } = options;
+    let service = service_factory.create();
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
