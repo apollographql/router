@@ -2095,20 +2095,19 @@ async fn listening_to_unix_socket() {
 async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
     use tokio::net::UnixStream;
     let stream = UnixStream::connect(addr.to_string()).await.unwrap();
-    let (mut sender, conn) = hyper::client::conn::handshake(stream).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
             println!("Connection failed: {:?}", err);
         }
     });
 
-    let http_body = hyper::Body::from(body.to_string());
     let mut request = http::Request::builder()
         .method(method.clone())
         .header("Host", "localhost:4100")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .body(http_body)
+        .body(body.to_string())
         .unwrap();
     if method == Method::GET {
         *request.uri_mut() = body.parse().unwrap();

@@ -7,6 +7,7 @@ use futures::stream::TryStreamExt;
 use futures::Stream;
 use http::HeaderMap;
 use http::HeaderValue;
+use http_body::Frame;
 use http_body_util::BodyExt;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
@@ -14,6 +15,7 @@ use mediatype::names::MULTIPART;
 use mediatype::MediaType;
 use rand::RngCore;
 
+use super::error::FileUploadError;
 use super::map_field::MapFieldRaw;
 use super::MultipartRequest;
 use super::Result as UploadResult;
@@ -58,9 +60,8 @@ impl MultipartFormData {
                 self.boundary, name
             )
         };
-
         let static_part = tokio_stream::once(Ok(Bytes::from(field_prefix("operations"))))
-            .chain(operations.map_err(Into::into))
+            .chain(operations.into_data_stream().map_err(FileUploadError::from))
             .chain(tokio_stream::once(Ok(Bytes::from(format!(
                 "\r\n{}{}\r\n",
                 field_prefix("map"),

@@ -490,7 +490,7 @@ mod test {
             self: Pin<&mut Self>,
             cx: &mut Context<'_>,
         ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-            if let Some(data) = self.data.take() {
+            if let Some(data) = self.get_mut().data.take() {
                 Poll::Ready(Some(Ok(Frame::data(bytes::Bytes::from(data)))))
             } else {
                 Poll::Ready(None)
@@ -509,7 +509,7 @@ mod test {
 
     #[tokio::test]
     async fn test_convert_from_hyper_body() {
-        let body = convert_to_body(hyper::Body::from("test"));
+        let body = convert_to_body(String::from("test"));
         assert_eq!(
             &String::from_utf8(get_body_bytes(body).await.unwrap().to_vec()).unwrap(),
             "test"
