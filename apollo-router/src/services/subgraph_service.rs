@@ -1507,7 +1507,12 @@ fn get_websocket_request(
             })?,
         None => subgraph_url,
     };
-    let mut request = subgraph_url.into_client_request().map_err(|err| {
+    // XXX During hyper upgrade, observed that we had lost the implementation for Url
+    // so I made the expedient decision to get a string representation (as_str())
+    // for the creation of the client request. This works fine, but I'm not sure
+    // why we need to do it, because into_client_request **should** be implemented
+    // for Url...
+    let mut request = subgraph_url.as_str().into_client_request().map_err(|err| {
         tracing::error!("cannot create websocket client request: {err:?}");
 
         FetchError::SubrequestWsError {
