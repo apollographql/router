@@ -8,6 +8,7 @@ use ::serde::Deserialize;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::Stream;
+use futures::StreamExt;
 use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
@@ -16,6 +17,8 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::Request;
 use http_body::Body as HttpBody;
+use http_body::Frame;
+use http_body_util::StreamBody;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
@@ -134,7 +137,8 @@ impl HttpClientService {
                 .client_authentication
                 .as_ref());
 
-        let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
+        let tls_client_config =
+            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
         HttpClientService::new(name, tls_client_config, client_config)
     }
@@ -309,8 +313,13 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let body = match opt_compressor {
             None => body,
-            Some(compressor) => RouterBody::wrap_stream(compressor.process(body)),
+            Some(compressor) => RouterBody::new(StreamBody::new(
+                compressor
+                    .process(body)
+                    .map(|b| b.map(|body| Frame::data(body)).map_err(BoxError::from)),
+            )),
         };
+
         let mut http_request = http::Request::from_parts(parts, body);
 
         http_request

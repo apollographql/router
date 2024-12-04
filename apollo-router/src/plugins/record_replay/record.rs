@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use futures::stream::once;
 use futures::StreamExt;
+use http_body::Frame;
+use http_body_util::BodyExt;
+use http_body_util::StreamBody;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -125,13 +128,17 @@ impl Plugin for Record {
                     })
                     .filter_map(|a| async move { a.unwrap() });
 
-                    let stream = stream.chain(after_complete);
+                    let stream = stream.into_data_stream().chain(after_complete);
 
                     Ok(router::Response {
                         context: res.context,
                         response: http::Response::from_parts(
                             parts,
-                            RouterBody::wrap_stream(stream).into_inner(),
+                            RouterBody::new(StreamBody::new(
+                                stream.map(|b| {
+                                    b.map(|body| Frame::data(body)).map_err(BoxError::from)
+                                }),
+                            )),
                         ),
                     })
                 }

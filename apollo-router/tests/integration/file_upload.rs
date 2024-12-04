@@ -1018,6 +1018,7 @@ mod helper {
     use std::net::SocketAddr;
     use std::path::PathBuf;
 
+    use apollo_router::services::router::body::RouterBody;
     use axum::extract::State;
     use axum::response::IntoResponse;
     use axum::BoxError;
@@ -1028,6 +1029,8 @@ mod helper {
     use http::header::CONTENT_TYPE;
     use http::Request;
     use http::StatusCode;
+    use http_body::Frame;
+    use http_body_util::StreamBody;
     use hyper::Body;
     use itertools::Itertools;
     use multer::Multipart;
@@ -1265,7 +1268,11 @@ mod helper {
             .part("map", mappings);
         for (index, (file_name, file)) in names.into_iter().zip(files).enumerate() {
             let file_name: String = file_name.into();
-            let part = Part::stream(hyper::Body::wrap_stream(file)).file_name(file_name);
+
+            let part = Part::stream(RouterBody::new(StreamBody::new(
+                file.map(|b| b.map(|body| Frame::data(body)).map_err(BoxError::from)),
+            )))
+            .file_name(file_name);
 
             request = request.part(index.to_string(), part);
         }
