@@ -827,9 +827,9 @@ where
         crate::services::router::Body,
     ) = body.into_future().await;
         */
-    let stream = body.into_data_stream();
+    let mut stream = body.into_data_stream();
 
-    let mut first = stream.take(1).collect::<Vec<_>>().await;
+    let mut first = stream.by_ref().take(1).collect::<Vec<_>>().await;
     let rest = stream;
 
     let opt_first: Option<Bytes> = first.pop().transpose().expect("XXX FIX LATER");
