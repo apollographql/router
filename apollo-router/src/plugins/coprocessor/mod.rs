@@ -990,7 +990,12 @@ where
     // Create our response stream which consists of the bytes from our first body chained with the
     // rest of the responses in our mapped stream.
     let bytes = get_body_bytes(body).await.map_err(BoxError::from);
-    let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
+    let final_stream = RouterBody::new(http_body_util::StreamBody::new(
+        once(ready(bytes)).chain(mapped_stream).map(|b| {
+            b.map(|body| http_body::Frame::data(body))
+                .map_err(BoxError::from)
+        }),
+    ));
 
     // Finally, return a response which has a Body that wraps our stream of response chunks.
     Ok(router::Response {
