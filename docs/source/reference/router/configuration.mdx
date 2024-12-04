@@ -1273,10 +1273,11 @@ supergraph:
 
 <Note>
 
-The JavaScript query planner also supports an experimental algorithm that attempts to
-reuse fragments from the original operation while forming subgraph requests. This
-experimental feature used to be enabled by default, but is still available to support
-subgraphs that rely on the specific shape of fragments in an operation:
+The legacy query planner still supports an experimental algorithm that attempts to
+reuse fragments from the original operation while forming subgraph requests. The 
+legacy query planner has to be explicitly enabled. This experimental feature used to
+be enabled by default, but is still available to support subgraphs that rely on the
+specific shape of fragments in an operation:
 
 ```yaml
 supergraph:

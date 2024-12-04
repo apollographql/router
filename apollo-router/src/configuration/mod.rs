@@ -691,9 +691,8 @@ pub(crate) struct Supergraph {
     pub(crate) introspection: bool,
 
     /// Enable reuse of query fragments
-    ///
-    /// This feature is deprecated and will be removed in next release. It is only available in JS QP.
-    /// Use generate_query_fragments instead.
+    /// This feature is deprecated and will be removed in next release.
+    /// The config can only be set when the legacy query planner is explicitly enabled.
     #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: Option<bool>,
 
