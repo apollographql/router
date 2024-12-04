@@ -16,6 +16,7 @@ use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
 use crate::operation::NormalizedDefer;
@@ -443,10 +444,10 @@ impl QueryPlanner {
             .root_kinds_to_nodes()?
             .get(&normalized_operation.root_kind)
         else {
-            panic!(
+            return Err(internal_error!(
                 "Shouldn't have a {0} operation if the subgraphs don't have a {0} root",
                 normalized_operation.root_kind
-            );
+            ));
         };
 
         let operation_compression = if self.config.generate_query_fragments {
