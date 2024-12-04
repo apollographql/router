@@ -23,6 +23,7 @@ use crate::plugin::PluginPrivate;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
+const OFFICIAL_HELM_CHART_VAR: &str = "APOLLO_ROUTER_OFFICIAL_HELM_CHART";
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
@@ -69,6 +70,7 @@ impl GaugeStore {
         let meter = meter_provider().meter("apollo/router");
 
         let mut gauges = Vec::new();
+        // apollo.router.instance
         {
             let mut attributes = Vec::new();
             // CPU architecture
@@ -88,6 +90,8 @@ impl GaugeStore {
                     attributes.push(KeyValue::new("cloud.provider", cloud_provider.code()));
                 }
             }
+            // Official helm chart
+            attributes.push(KeyValue::new("deployment.type", get_deployment_type()));
             gauges.push(
                 meter
                     .u64_observable_gauge("apollo.router.instance")
@@ -98,6 +102,7 @@ impl GaugeStore {
                     .init(),
             );
         }
+        // apollo.router.instance.cpu_freq
         {
             let system_getter = system_getter.clone();
             gauges.push(
@@ -119,6 +124,7 @@ impl GaugeStore {
                     .init(),
             );
         }
+        // apollo.router.instance.cpu_count
         {
             let system_getter = system_getter.clone();
             gauges.push(
@@ -137,6 +143,7 @@ impl GaugeStore {
                     .init(),
             );
         }
+        // apollo.router.instance.total_memory
         {
             let system_getter = system_getter.clone();
             gauges.push(
@@ -289,6 +296,13 @@ fn get_otel_os() -> &'static str {
         "ios" => "darwin",
         a => a,
     }
+}
+
+fn get_deployment_type() -> &'static str {
+    if std::env::var_os(OFFICIAL_HELM_CHART_VAR).is_some() {
+        return "official_helm_chart";
+    }
+    "unknown"
 }
 
 register_private_plugin!("apollo", "fleet_detector", FleetDetector);
