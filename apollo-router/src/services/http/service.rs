@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -11,6 +12,7 @@ use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
+use http::HeaderName;
 use http::HeaderValue;
 use http::Request;
 use http_body::Body as HttpBody;
@@ -279,10 +281,22 @@ impl tower::Service<HttpRequest> for HttpClientService {
             //"graphql.operation.name" = %operation_name,
         );
         get_text_map_propagator(|propagator| {
+            // Otel is not upgraded yet, so we need to convert the request headers into http 0.2 format rather than passing in the request directly.
+            let mut headers = http_0_2::HeaderMap::new();
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
-                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
+                &mut opentelemetry_http::HeaderInjector(&mut headers),
             );
+            for (name, value) in headers {
+                if let Some(name) = name {
+                    http_request.headers_mut().insert(
+                        HeaderName::from_str(name.as_str())
+                            .expect("header name should already have been validated"),
+                        HeaderValue::from_bytes(value.as_bytes())
+                            .expect("header value should already have been validated"),
+                    );
+                }
+            }
         });
 
         let (parts, body) = http_request.into_parts();
