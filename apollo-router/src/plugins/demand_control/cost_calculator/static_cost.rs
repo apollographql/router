@@ -16,6 +16,7 @@ use serde_json_bytes::Value;
 use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
 use super::schema::DemandControlledSchema;
+use super::schema::FieldDirectiveMetadata;
 use super::schema::InputObjectDirectiveMetadata;
 use super::DemandControlError;
 use crate::graphql::Response;
@@ -519,6 +520,8 @@ impl<'schema> ResponseCostCalculator<'schema> {
 }
 
 impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
+    type Context = FieldDirectiveMetadata;
+
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
@@ -527,14 +530,21 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         field: &Field,
         value: &Value,
     ) {
-        self.visit_list_item(request, variables, parent_ty, field, value);
-        let ctx = ScoringContext {
-            query: request,
-            variables,
-            schema: self.schema,
-            should_estimate_requires: false,
-        };
         if let Ok(field_metadata) = self.schema.type_field_metadata(parent_ty, &field.name) {
+            self.visit_list_item(
+                request,
+                variables,
+                parent_ty,
+                field,
+                value,
+                Some(field_metadata),
+            );
+            let ctx = ScoringContext {
+                query: request,
+                variables,
+                schema: self.schema,
+                should_estimate_requires: false,
+            };
             for argument in &field.arguments {
                 if let Ok(argument_cost) = field_metadata
                     .argument_metadata(&argument.name)
@@ -552,15 +562,12 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
         variables: &Object,
-        parent_ty: &apollo_compiler::executable::NamedType,
+        _parent_ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
+        meta: Option<&Self::Context>,
     ) {
-        let cost_directive = self
-            .schema
-            .type_field_metadata(parent_ty, &field.name)
-            .ok()
-            .and_then(|meta| meta.cost_directive.as_ref());
+        let cost_directive = meta.and_then(|m| m.cost_directive.as_ref());
 
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
@@ -568,7 +575,7 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
             }
             Value::Array(items) => {
                 for item in items {
-                    self.visit_list_item(request, variables, parent_ty, field, item);
+                    self.visit_list_item(request, variables, _parent_ty, field, item, meta);
                 }
             }
             Value::Object(children) => {

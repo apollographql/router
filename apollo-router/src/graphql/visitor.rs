@@ -4,6 +4,8 @@ use crate::graphql::Response;
 use crate::json_ext::Object;
 
 pub(crate) trait ResponseVisitor {
+    type Context;
+
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
@@ -21,6 +23,7 @@ pub(crate) trait ResponseVisitor {
                         field.ty().inner_named_type(),
                         field,
                         item,
+                        None,
                     );
                 }
             }
@@ -38,11 +41,12 @@ pub(crate) trait ResponseVisitor {
         _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
+        _context: Option<&Self::Context>,
     ) {
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_list_item(request, variables, _ty, field, item);
+                    self.visit_list_item(request, variables, _ty, field, item, _context);
                 }
             }
             Value::Object(children) => {
@@ -200,6 +204,8 @@ mod tests {
     }
 
     impl ResponseVisitor for FieldCounter {
+        type Context = ();
+
         fn visit_field(
             &mut self,
             request: &ExecutableDocument,
@@ -219,6 +225,7 @@ mod tests {
                             field.ty().inner_named_type(),
                             field,
                             item,
+                            None,
                         );
                     }
                 }

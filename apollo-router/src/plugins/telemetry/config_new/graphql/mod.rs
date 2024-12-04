@@ -168,6 +168,8 @@ struct GraphQLInstrumentsVisitor<'a> {
 }
 
 impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
+    type Context = ();
+
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
@@ -188,6 +190,7 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
                         field.ty().inner_named_type(),
                         field,
                         item,
+                        None,
                     );
                 }
             }
