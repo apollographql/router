@@ -52,7 +52,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         code: InvalidHeader,
         message: "In `@source(http.headers:)` invalid HTTP header value `  Value with 😊 emoji and newline  \n `",
         locations: [
-            22:19..22:58,
+            22:19..22:56,
         ],
     },
     Message {
