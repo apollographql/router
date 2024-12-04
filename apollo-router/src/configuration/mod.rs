@@ -416,14 +416,6 @@ impl Configuration {
     pub(crate) fn rust_query_planner_config(
         &self,
     ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-        if self
-            .supergraph
-            .reuse_query_fragments
-            .is_some_and(|flag| flag)
-        {
-            // warn the user that reuse query fragments is unsupported for RS QP
-            tracing::warn!("'experimental_reuse_query_fragments' is not supported by the Rust QP and this configuration option will be removed in the next release. Use 'generate_query_fragments' instead.");
-        }
         apollo_federation::query_plan::query_planner::QueryPlannerConfig {
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
