@@ -43,7 +43,7 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
     ) -> Option<Self::Future> {
         let subgraph_name = req.subgraph_name.clone().unwrap_or_default();
         match result {
-            Ok(resp) => {
+            Ok(_resp) => {
                 // Treat all `Response`s as success,
                 // so deposit budget and don't retry...
                 self.budget.deposit();
@@ -89,9 +89,6 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
 
 #[cfg(test)]
 mod tests {
-    use http::StatusCode;
-    use tower::BoxError;
-
     use super::*;
     use crate::error::FetchError;
     use crate::graphql;
