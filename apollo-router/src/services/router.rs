@@ -12,6 +12,7 @@ use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http_body_util::BodyExt;
 use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
