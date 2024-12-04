@@ -312,8 +312,8 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 tikv-jemallocator = "0.6.0"
 
 [dev-dependencies]
-axum = { version = "0.6.20", features = [
-    "headers",
+axum = { version = "0.7.9", features = [
+    # "headers",
     "json",
     "original-uri",
     "ws",
