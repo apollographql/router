@@ -56,8 +56,8 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                     return None;
                 }
 
-                let withdrew = self.budget.withdraw();
-                if withdrew.is_err() {
+                let can_retry = self.budget.withdraw();
+                if !can_retry {
                     tracing::info!(
                         monotonic_counter.apollo_router_http_request_retry_total = 1u64,
                         status = "aborted",
