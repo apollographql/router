@@ -2,13 +2,14 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::str::FromStr;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::{HeaderMap, HeaderName};
+use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -306,13 +307,17 @@ where
             );
             for (name, value) in headers {
                 if let Some(name) = name {
-                    request.headers_mut().insert(HeaderName::from_str(name.as_str()).expect("header name should already have been validated"), HeaderValue::from_bytes(value.as_bytes()).expect("header value should already have been validated"));
+                    request.headers_mut().insert(
+                        HeaderName::from_str(name.as_str())
+                            .expect("header name should already have been validated"),
+                        HeaderValue::from_bytes(value.as_bytes())
+                            .expect("header value should already have been validated"),
+                    );
                 }
             }
-
         });
 
-        let response = client.call(request).await?;
+        let response = client.call(request).await.map_err(BoxError::from)?;
         get_body_bytes(response.into_body())
             .await
             .map_err(BoxError::from)

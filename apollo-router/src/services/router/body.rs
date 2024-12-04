@@ -70,7 +70,7 @@ pub(crate) fn from_data_stream(data_stream: BodyDataStream<RouterBody>) -> Route
 
 pub(crate) fn from_result_stream<S>(data_stream: S) -> RouterBody
 where
-    S: Stream<Item = Result<Bytes, BoxError>> + Send,
+    S: Stream<Item = Result<Bytes, BoxError>> + Send + 'static,
 {
     RouterBody::new(StreamBody::new(
         data_stream.map(|s| s.map(|body| Frame::data(body))),

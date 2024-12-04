@@ -474,7 +474,7 @@ where
                 }
 
                 // We return the deferred_response into our stream of response chunks
-                Ok(new_deferred_response)
+                Ok::<_, BoxError>(new_deferred_response)
             }
         })
         .map(|res: Result<graphql::Response, BoxError>| match res {

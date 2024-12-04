@@ -827,16 +827,13 @@ where
         crate::services::router::Body,
     ) = body.into_future().await;
         */
-    let stream = body.into_data_stream();
-
-    let mut first = stream.take(1).collect::<Vec<_>>().await;
+    let mut stream = body.into_data_stream();
+    let first = stream.next().await.transpose().expect("XXX FIX LATER");
     let rest = stream;
-
-    let opt_first: Option<Bytes> = first.pop().transpose().expect("XXX FIX LATER");
 
     // If first is None, or contains an error we return an error
     // let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
-    let bytes = match opt_first {
+    let bytes = match first {
         Some(b) => b,
         None => {
             tracing::error!(
