@@ -238,7 +238,15 @@ impl Component {
             if let Some((var, suffix)) = remaining.split_once('}') {
                 let start_offset = var.as_ptr() as usize - url_template.as_ptr() as usize;
                 let reference: VariableReference<'static, Namespace> =
-                    VariableReference::parse(var, start_offset)?.into_owned();
+                    VariableReference::parse(var, start_offset)
+                        .map_err(|e| match e {
+                            VariableError::ParseError { .. } => Error::ParseError {
+                                message: format!("Invalid variable reference `{{{var}}}`"),
+                                location: Some(start_offset..start_offset + var.len()),
+                            },
+                            _ => e.into(),
+                        })?
+                        .into_owned();
                 parts.push(ValuePart::Var(reference));
                 remaining = suffix;
             } else {
@@ -449,6 +457,18 @@ mod test_parse {
             Error::InvalidVariableNamespace {
                 namespace: "$blah".into(),
                 location: 12..17
+            }
+        );
+    }
+
+    #[test]
+    fn test_variable_with_extra_text() {
+        let err = URLTemplate::from_str("/something/{$this.stuff->foo}/more").unwrap_err();
+        assert_eq!(
+            err,
+            Error::ParseError {
+                message: "Invalid variable reference `{$this.stuff->foo}`".into(),
+                location: Some(12..28),
             }
         );
     }
