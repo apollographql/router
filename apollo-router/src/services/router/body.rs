@@ -1,13 +1,14 @@
 #![allow(deprecated)]
 use std::fmt::Debug;
 
-use bytes::Buf;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::Stream;
+use http_body::Frame;
 use http_body::SizeHint;
-use http_body_util::combinators::BoxBody;
+// use http_body_util::combinators::BoxBody;
+use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
 use http_body_util::Full;
@@ -15,38 +16,45 @@ use hyper::body::Body as HttpBody;
 use tower::BoxError;
 use tower::Service;
 
-pub type RouterBody = BoxBody<Bytes, hyper::Error>;
+pub type RouterBody = UnsyncBoxBody<Bytes, hyper::Error>;
 
 pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
-    Ok(body
-        .collect()
-        .await?
-        // .map_err(axum::Error::new)?
-        .to_bytes())
+    Ok(body.collect().await?.to_bytes())
 }
 
 // We create some utility functions to make Empty and Full bodies
 // and convert types
-pub(crate) fn empty() -> BoxBody<Bytes, hyper::Error> {
+pub(crate) fn empty() -> UnsyncBoxBody<Bytes, hyper::Error> {
     Empty::<Bytes>::new()
         .map_err(|never| match never {})
-        .boxed()
+        .boxed_unsync()
 }
 
-pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
-        .boxed()
+        .boxed_unsync()
 }
 
-pub(crate) fn wrap_body_as_data_stream(body: RouterBody) -> http_body_util::BodyDataStream<Bytes> {
-    http_body_util::BodyDataStream::new(body)
+// Useful Conversion notes:
+//  - If you have a body and want to convert it to BodyDataStream
+//    You can call `body.into_data_stream` from BodyExt
+//  - If you have a Stream and want a StreamBody, you can call
+//    `StreamBody::new(stream)`.
+//
+//  I'll leave these functions here as examples and at some point
+//  in the upgrade we can remove them.
+//
+
+pub(crate) fn into_data_stream_body(
+    body: RouterBody,
+) -> http_body_util::BodyDataStream<RouterBody> {
+    body.into_data_stream()
 }
 
-pub(crate) fn wrap_stream_as_stream_body<S, D, E>(stream: S) -> http_body_util::StreamBody<D>
+pub(crate) fn into_stream_body<S, E>(stream: S) -> http_body_util::StreamBody<S>
 where
-    S: Stream<Item = Result<http_body::Frame<D>, E>>,
-    D: Buf,
+    S: Stream<Item = Result<Frame<RouterBody>, E>>,
 {
     http_body_util::StreamBody::new(stream)
 }
