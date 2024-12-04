@@ -319,7 +319,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         FA: RouterSuperServiceFactory,
     {
         let schema = Arc::new(
-            Schema::parse_arc(Arc::new(schema_state.sdl.clone()), &configuration)
+            Schema::parse_arc(schema_state.clone(), &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
         // Check the license

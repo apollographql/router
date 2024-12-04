@@ -5,6 +5,7 @@
 
 use graphql_client::GraphQLQuery;
 
+use super::schema::SchemaState;
 use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
 use crate::uplink::schema_stream::supergraph_sdl_query::SupergraphSdlQueryRouterConfig;
 use crate::uplink::UplinkRequest;
@@ -27,6 +28,41 @@ impl From<UplinkRequest> for supergraph_sdl_query::Variables {
             api_key: req.api_key,
             graph_ref: req.graph_ref,
             if_after_id: req.id,
+        }
+    }
+}
+
+impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<SchemaState> {
+    fn from(response: supergraph_sdl_query::ResponseData) -> Self {
+        match response.router_config {
+            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::New {
+                response: SchemaState {
+                    sdl: result.supergraph_sdl,
+                    launch_id: Some(result.id.clone()),
+                },
+                id: result.id,
+                // this will truncate the number of seconds to under u64::MAX, which should be
+                // a large enough delay anyway
+                delay: result.min_delay_seconds as u64,
+            },
+            SupergraphSdlQueryRouterConfig::Unchanged(response) => UplinkResponse::Unchanged {
+                id: Some(response.id),
+                delay: Some(response.min_delay_seconds as u64),
+            },
+            SupergraphSdlQueryRouterConfig::FetchError(err) => UplinkResponse::Error {
+                retry_later: err.code == FetchErrorCode::RETRY_LATER,
+                code: match err.code {
+                    FetchErrorCode::AUTHENTICATION_FAILED => "AUTHENTICATION_FAILED".to_string(),
+                    FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
+                    FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
+                    FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                    FetchErrorCode::NOT_IMPLEMENTED_ON_THIS_INSTANCE => {
+                        "NOT_IMPLEMENTED_ON_THIS_INSTANCE".to_string()
+                    }
+                    FetchErrorCode::Other(other) => other,
+                },
+                message: err.message,
+            },
         }
     }
 }
