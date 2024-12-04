@@ -72,29 +72,16 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
-    #[deprecated = "use `from_router_service` instead"]
-    #[allow(deprecated)]
-    pub fn new(path: String, handler: router::BoxService) -> Self {
-        let router_service = ServiceBuilder::new()
-            .map_request(|request: router::Request| request.router_request)
-            .map_response(|response: router::Response| response.into())
-            .service(handler)
-            .boxed();
-        Self {
-            path,
-            handler: Handler::new(router_service),
-        }
-    }
-
-    /// Creates an Endpoint given a path and a Boxed Service
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
             handler: Handler::new(handler),
         }
     }
+
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<crate::services::router::Body>| {
+        // let handler = move |req: http::Request<crate::services::router::Body>| {
+        let handler = move |req: http::Request<axum::body::Body>| {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
