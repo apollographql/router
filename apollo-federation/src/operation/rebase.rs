@@ -22,7 +22,6 @@ use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use crate::ensure;
 use crate::error::FederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
@@ -276,15 +275,17 @@ impl Field {
         else {
             return Ok(None);
         };
-        if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
+        if let Some(federation_spec_definition) = schema
+            .subgraph_metadata()
+            .map(|d| d.federation_spec_definition())
         {
             let from_context_directive_definition_name = &federation_spec_definition
                 .from_context_directive_definition(schema)?
                 .name;
-            // We need to prevent arguments with `@fromContext` from being lost/overwriten. If the
-            // would-be parent type's field has `@fromContext` and one (or more) of this field's
-            // arguments doesn't exist in the would-be parent's field, rebasing would loose that
-            // context.
+            // We need to ensure that all arguments with `@fromContext` are provided. If the
+            // would-be parent type's field has an argument with `@fromContext` and that argument
+            // has no value/data in this field, then we return `None` to indicate the rebase isn't
+            // possible.
             if field_definition.arguments.iter().any(|arg_definition| {
                 arg_definition
                     .directives
