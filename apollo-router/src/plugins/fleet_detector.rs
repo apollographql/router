@@ -90,7 +90,7 @@ impl GaugeStore {
                     attributes.push(KeyValue::new("cloud.provider", cloud_provider.code()));
                 }
             }
-            // Official helm chart
+            // Deployment type
             attributes.push(KeyValue::new("deployment.type", get_deployment_type()));
             gauges.push(
                 meter
@@ -299,6 +299,7 @@ fn get_otel_os() -> &'static str {
 }
 
 fn get_deployment_type() -> &'static str {
+    // Official Apollo helm chart
     if std::env::var_os(OFFICIAL_HELM_CHART_VAR).is_some() {
         return "official_helm_chart";
     }
