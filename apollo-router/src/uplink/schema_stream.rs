@@ -38,7 +38,7 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
     }
 }
 
-impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
+impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<SchemaState> {
     fn from(response: supergraph_sdl_query::ResponseData) -> Self {
         match response.router_config {
             SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::New {
