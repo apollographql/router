@@ -109,7 +109,7 @@ impl<'schema> ListSizeDirective<'schema> {
     }
 }
 
-pub(crate) struct RequiresDirective {
+pub(in crate::plugins::demand_control) struct RequiresDirective {
     pub(in crate::plugins::demand_control) fields: SelectionSet,
 }
 

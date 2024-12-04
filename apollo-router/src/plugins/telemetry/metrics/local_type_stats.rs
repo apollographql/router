@@ -20,8 +20,6 @@ impl LocalTypeStatRecorder {
 }
 
 impl ResponseVisitor for LocalTypeStatRecorder {
-    type Context = ();
-
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
@@ -71,7 +69,6 @@ impl ResponseVisitor for LocalTypeStatRecorder {
                         field.ty().inner_named_type(),
                         field,
                         item,
-                        None,
                     );
                 }
             }
