@@ -1634,12 +1634,25 @@ impl FederatedQueryGraphBuilder {
             .base
             .query_graph
             .subgraphs()
-            .filter_map(|(source, _)| subgraph_to_args.get_full(source))
+            .enumerate()
+            .filter_map(|(index, (source, _))| {
+                subgraph_to_args
+                    .get_key_value(source)
+                    .map(|(source, args)| (index, source, args))
+            })
             .map(|(index, source, args)| {
                 Ok::<_, FederationError>((
                     source.clone(),
                     args.iter()
-                        .sorted()
+                        // TODO: We're manually sorting by the actual GraphQL coordinate string here
+                        //       to mimic the behavior of JS code. In the future, we could just sort
+                        //       the argument position in the natural tuple-based way.
+                        .sorted_by_key(|arg| {
+                            format!(
+                                "{}.{}({}:)",
+                                arg.type_name, arg.field_name, arg.argument_name
+                            )
+                        })
                         .enumerate()
                         .map(|(i, arg)| {
                             Ok::<_, FederationError>((

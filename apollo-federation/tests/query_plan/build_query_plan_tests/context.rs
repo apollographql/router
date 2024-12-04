@@ -328,7 +328,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                        } =>
                        {
                          ... on U {
-                           field(a: $contextualArgument_1_0)
+                           field(a: $contextualArgument_2_0)
                          }
                        }
                      },
@@ -345,7 +345,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                         node.context_rewrites,
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
+                                rename_key_to: Name::new("contextualArgument_2_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Parent,
                                     FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
@@ -1308,7 +1308,7 @@ fn set_context_test_before_key_resolution_transition() {
             } =>
             {
               ... on Child {
-                prop(legacyUserId: $contextualArgument_1_0)
+                prop(legacyUserId: $contextualArgument_2_0)
               }
             }
           },
@@ -1440,7 +1440,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
             {
               ... on Customer {
                 accounts {
-                  foo(ctx_id5: $contextualArgument_1_0, ctx_mid: $contextualArgument_1_1) {
+                  foo(ctx_id5: $contextualArgument_3_0, ctx_mid: $contextualArgument_3_1) {
                     id
                   }
                 }
@@ -1460,7 +1460,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
                         node.context_rewrites,
                         vec![
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
+                                rename_key_to: Name::new("contextualArgument_3_0").unwrap(),
                                 path: vec![
                                     FetchDataPathElement::Key(
                                         Name::new_unchecked("identifiers"),
@@ -1473,7 +1473,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
                                 ],
                             })),
                             Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-                                rename_key_to: Name::new("contextualArgument_1_1").unwrap(),
+                                rename_key_to: Name::new("contextualArgument_3_1").unwrap(),
                                 path: vec![FetchDataPathElement::Key(
                                     Name::new_unchecked("mid"),
                                     Default::default()
