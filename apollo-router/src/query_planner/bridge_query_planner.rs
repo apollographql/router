@@ -183,10 +183,7 @@ impl PlannerMode {
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
 
         match &result {
-            Err(FederationError::SingleFederationError {
-                inner: error,
-                trace: _,
-            }) => match error {
+            Err(FederationError::SingleFederationError(error)) => match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
