@@ -42,6 +42,7 @@ pub(crate) mod utils;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use itertools::Itertools;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
 
@@ -102,15 +103,15 @@ pub(crate) fn validate_supergraph(
         }.into());
     };
     let context_spec_definition = metadata.for_identity(&Identity::context_identity()).map(|context_link| {
-        context_versions.find(&context_link.url.version).map_or_else(|| {
-            Err(SingleFederationError::InvalidFederationSupergraph {
+        context_versions.find(&context_link.url.version).ok_or_else(|| {
+            SingleFederationError::InvalidFederationSupergraph {
                 message: format!(
                     "Invalid supergraph: uses unsupported context spec version {} (supported versions: {})",
                     context_link.url.version,
-                    context_versions.versions().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
+                    context_versions.versions().join(", "),
                 ),
-            })
-        }, Ok)
+            }
+        })
     }).transpose()?;
     Ok((
         link_spec_definition,

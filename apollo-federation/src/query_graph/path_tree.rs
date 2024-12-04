@@ -297,13 +297,13 @@ where
                         existing
                             .matching_context_ids
                             .get_or_insert_with(Default::default)
-                            .extend(other);
+                            .extend(other.iter().cloned());
                     }
                     if let Some(other) = arguments_to_context_usages {
                         existing
                             .arguments_to_context_usages
                             .get_or_insert_with(Default::default)
-                            .extend(other);
+                            .extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
                     }
                     existing
                         .sub_paths_and_selections
@@ -315,8 +315,8 @@ where
                         trigger,
                         conditions: conditions.clone(),
                         sub_paths_and_selections: vec![(graph_path_iter, selection)],
-                        matching_context_ids,
-                        arguments_to_context_usages,
+                        matching_context_ids: matching_context_ids.cloned(),
+                        arguments_to_context_usages: arguments_to_context_usages.cloned(),
                     });
                 }
             }

@@ -77,6 +77,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
@@ -681,16 +682,6 @@ impl FetchDependencyGraphNodePath {
                 Ok(new_path)
             }
         }
-    }
-}
-
-/// If the `iter` yields a single element, return it. Else return `None`.
-pub(crate) fn iter_into_single_item<T>(mut iter: impl Iterator<Item = T>) -> Option<T> {
-    let item = iter.next()?;
-    if iter.next().is_none() {
-        Some(item)
-    } else {
-        None
     }
 }
 

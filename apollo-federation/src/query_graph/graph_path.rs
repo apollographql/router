@@ -14,6 +14,7 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use either::Either;
+use itertools::izip;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
@@ -277,8 +278,8 @@ pub(crate) type GraphPathItem<'path, TTrigger, TEdge> = (
     TEdge,
     &'path Arc<TTrigger>,
     &'path Option<Arc<OpPathTree>>,
-    Option<MatchingContextIds>,
-    Option<ArgumentsToContextUsages>,
+    Option<&'path MatchingContextIds>,
+    Option<&'path ArgumentsToContextUsages>,
 );
 
 /// A `GraphPath` whose triggers are operation elements (essentially meaning that the path has been
@@ -1448,27 +1449,24 @@ where
         debug_assert_eq!(self.edges.len(), self.edge_conditions.len());
         debug_assert_eq!(self.edges.len(), self.matching_context_ids.len());
         debug_assert_eq!(self.edges.len(), self.arguments_to_context_usages.len());
-        self.edges
-            .iter()
-            .copied()
-            .zip(&self.edge_triggers)
-            .zip(&self.edge_conditions)
-            .zip(&self.matching_context_ids)
-            .zip(&self.arguments_to_context_usages)
-            .map(
-                |(
-                    (((edge, trigger), condition), matching_context_ids),
-                    arguments_to_context_usages,
-                )| {
-                    (
-                        edge,
-                        trigger,
-                        condition,
-                        matching_context_ids.clone(),
-                        arguments_to_context_usages.clone(),
-                    )
-                },
-            )
+        izip!(
+            self.edges.iter().copied(),
+            &self.edge_triggers,
+            &self.edge_conditions,
+            &self.matching_context_ids,
+            &self.arguments_to_context_usages,
+        )
+        .map(
+            |(edge, trigger, condition, matching_context_ids, arguments_to_context_usages)| {
+                (
+                    edge,
+                    trigger,
+                    condition,
+                    matching_context_ids.as_ref(),
+                    arguments_to_context_usages.as_ref(),
+                )
+            },
+        )
     }
 
     pub(crate) fn next_edges(

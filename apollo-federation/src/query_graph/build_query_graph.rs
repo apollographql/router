@@ -8,6 +8,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -32,7 +33,6 @@ use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::fetch_dependency_graph::iter_into_single_item;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -49,6 +49,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::extract_subgraphs_from_supergraph;
+use crate::utils::iter_into_single_item;
 use crate::utils::FallibleIterator;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
@@ -2343,6 +2344,13 @@ fn resolvable_key_applications<'doc>(
     Ok(applications)
 }
 
+lazy_static! {
+    static ref CONTEXT_PARSING_LEADING_PATTERN: Regex =
+        Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap();
+    static ref CONTEXT_PARSING_CONTEXT_PATTERN: Regex =
+        Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap();
+}
+
 fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     // PORT_NOTE: The original JS regex, as shown below
     //   /^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/
@@ -2356,8 +2364,7 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     // the haystack guaranteeing a match. Also note that Rust has (?s:.) to match all characters
     // including newlines, which we use in place of JS's common regex workaround of [\s\S].
     fn strip_leading_ignored_tokens(input: &str) -> Result<&str, FederationError> {
-        let leading_pattern = Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap();
-        iter_into_single_item(leading_pattern.captures_iter(input))
+        iter_into_single_item(CONTEXT_PARSING_LEADING_PATTERN.captures_iter(input))
             .and_then(|c| c.get(1))
             .map(|m| m.as_str())
             .ok_or_else(|| {
@@ -2373,9 +2380,8 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     let after_dollar = dollar_iter.as_str();
 
     let context_start = strip_leading_ignored_tokens(after_dollar)?;
-    let context_pattern = Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap();
     let Some(context_captures) =
-        iter_into_single_item(context_pattern.captures_iter(context_start))
+        iter_into_single_item(CONTEXT_PARSING_CONTEXT_PATTERN.captures_iter(context_start))
     else {
         bail!(
             r#"Failed to find context name token and selection in @fromContext substring "{context_start}""#
@@ -2543,6 +2549,9 @@ mod tests {
             assert_eq!(context, known_context);
             assert_eq!(selection, known_selection);
         }
+        // Ensure we don't backtrack in the comment regex.
+        assert!(super::parse_context("#comment $fakeContext fakeSelection").is_err());
+        assert!(super::parse_context("$ #comment fakeContext fakeSelection").is_err());
     }
 
     #[test]

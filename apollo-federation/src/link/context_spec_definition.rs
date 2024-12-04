@@ -6,7 +6,7 @@ use apollo_compiler::Node;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -44,12 +44,7 @@ impl ContextSpecDefinition {
         schema: &'schema FederationSchema,
     ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
         self.directive_definition(schema, &CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: "Unexpectedly could not find context spec in schema".to_owned(),
-                }
-                .into()
-            })
+            .ok_or_else(|| internal_error!("Unexpectedly could not find context spec in schema"))
     }
 
     pub(crate) fn context_directive_arguments<'doc>(
