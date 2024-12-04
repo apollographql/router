@@ -1,6 +1,5 @@
 //! Main entry point for CLI command to start server.
 
-use std::cell::Cell;
 use std::env;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -751,18 +750,8 @@ fn setup_panic_handler() {
         } else {
             tracing::error!("{}", e)
         }
-        if !USING_CATCH_UNWIND.get() {
-            // Once we've panic'ed the behaviour of the router is non-deterministic
-            // We've logged out the panic details. Terminate with an error code
-            std::process::exit(1);
-        }
+        std::process::exit(1);
     }));
-}
-
-// TODO: once the Rust query planner does not use `todo!()` anymore,
-// remove this and the use of `catch_unwind` to call it.
-thread_local! {
-    pub(crate) static USING_CATCH_UNWIND: Cell<bool> = const { Cell::new(false) };
 }
 
 static COPIED: AtomicBool = AtomicBool::new(false);
