@@ -170,10 +170,12 @@ where
 
         match res {
             Some(v) => {
-                tracing::info!(
-                    monotonic_counter.apollo_router_cache_hit_count = 1u64,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
+                u64_counter!(
+                    "apollo_router_cache_hit_count",
+                    "Number of cache hits",
+                    1,
+                    kind = self.caller,
+                    storage = CacheStorageName::Memory.to_string()
                 );
                 let duration = instant_memory.elapsed().as_secs_f64();
                 tracing::info!(
@@ -190,10 +192,12 @@ where
                     kind = %self.caller,
                     storage = &tracing::field::display(CacheStorageName::Memory),
                 );
-                tracing::info!(
-                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
+                u64_counter!(
+                    "apollo_router_cache_miss_count",
+                    "Number of cache misses",
+                    1,
+                    kind = self.caller,
+                    storage = CacheStorageName::Memory.to_string()
                 );
 
                 let instant_redis = Instant::now();
@@ -214,10 +218,12 @@ where
                         Some(v) => {
                             self.insert_in_memory(key.clone(), v.0.clone()).await;
 
-                            tracing::info!(
-                                monotonic_counter.apollo_router_cache_hit_count = 1u64,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            u64_counter!(
+                                "apollo_router_cache_hit_count",
+                                "Number of cache hits",
+                                1,
+                                kind = self.caller,
+                                storage = CacheStorageName::Redis.to_string()
                             );
                             let duration = instant_redis.elapsed().as_secs_f64();
                             tracing::info!(
@@ -228,10 +234,12 @@ where
                             Some(v.0)
                         }
                         None => {
-                            tracing::info!(
-                                monotonic_counter.apollo_router_cache_miss_count = 1u64,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            u64_counter!(
+                                "apollo_router_cache_miss_count",
+                                "Number of cache misses",
+                                1,
+                                kind = self.caller,
+                                storage = CacheStorageName::Redis.to_string()
                             );
                             let duration = instant_redis.elapsed().as_secs_f64();
                             tracing::info!(

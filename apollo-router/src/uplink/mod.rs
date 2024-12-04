@@ -210,7 +210,7 @@ where
     Response: Send + 'static + Debug,
     TransformedResponse: Send + 'static + Debug,
 {
-    let query = query_name::<Query>();
+    let query_name = query_name::<Query>();
     let (sender, receiver) = channel(2);
     let client = match reqwest::Client::builder()
         .no_gzip()
@@ -245,10 +245,12 @@ where
             .await
             {
                 Ok(response) => {
-                    tracing::info!(
-                        monotonic_counter.apollo_router_uplink_fetch_count_total = 1u64,
+                    u64_counter!(
+                        "apollo_router_uplink_fetch_count_total",
+                        "Total number of requests to Apollo Uplink",
+                        1u64,
                         status = "success",
-                        query
+                        query = query_name
                     );
                     match response {
                         UplinkResponse::New {
@@ -294,10 +296,12 @@ where
                     }
                 }
                 Err(err) => {
-                    tracing::info!(
-                        monotonic_counter.apollo_router_uplink_fetch_count_total = 1u64,
+                    u64_counter!(
+                        "apollo_router_uplink_fetch_count_total",
+                        "Total number of requests to Apollo Uplink",
+                        1u64,
                         status = "failure",
-                        query
+                        query = query_name
                     );
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");

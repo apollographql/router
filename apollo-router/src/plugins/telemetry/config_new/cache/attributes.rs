@@ -36,16 +36,12 @@ impl DefaultForLevel for CacheAttributes {
 
 // Nothing to do here because we're using a trick because entity_type is related to CacheControl data we put in the context and for one request we have several entity types
 // and so several metrics to generate it can't be done here
-impl Selectors for CacheAttributes {
-    type Request = subgraph::Request;
-    type Response = subgraph::Response;
-    type EventResponse = ();
-
-    fn on_request(&self, _request: &Self::Request) -> Vec<KeyValue> {
+impl Selectors<subgraph::Request, subgraph::Response, ()> for CacheAttributes {
+    fn on_request(&self, _request: &subgraph::Request) -> Vec<KeyValue> {
         Vec::default()
     }
 
-    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, _response: &subgraph::Response) -> Vec<KeyValue> {
         Vec::default()
     }
 
