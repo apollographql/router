@@ -6644,7 +6644,7 @@ expression: "&schema"
         },
         "experimental_reuse_query_fragments": {
           "default": null,
-          "description": "Enable reuse of query fragments\n\nThis feature is deprecated and will be removed in next release.\nThe config can only be set when the legacy query planner is explicitly enabled.",
+          "description": "Enable reuse of query fragments This feature is deprecated and will be removed in next release. The config can only be set when the legacy query planner is explicitly enabled.",
           "nullable": true,
           "type": "boolean"
         },
