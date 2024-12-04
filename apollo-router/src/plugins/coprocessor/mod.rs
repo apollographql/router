@@ -114,7 +114,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             inner: ServiceBuilder::new()
                 .layer(TimeoutLayer::new(init.config.timeout))
                 .service(
-                    hyper_util::client::legacy::Client::builder()
+                    hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
                         .http2_only(experimental_http2 == Http2Config::Http2Only)
                         .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                         .build(connector),

@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -11,6 +12,7 @@ use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
+use http::HeaderName;
 use http::HeaderValue;
 use http::Request;
 use http_body::Body as HttpBody;
@@ -132,7 +134,7 @@ impl HttpClientService {
                 .client_authentication
                 .as_ref());
 
-        let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
+        let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
         HttpClientService::new(name, tls_client_config, client_config)
     }
@@ -160,10 +162,11 @@ impl HttpClientService {
             builder.wrap_connector(http_connector)
         };
 
-        let http_client = hyper_util::client::legacy::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-            .http2_only(http2 == Http2Config::Http2Only)
-            .build(connector);
+        let http_client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                .http2_only(http2 == Http2Config::Http2Only)
+                .build(connector);
         Ok(Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
@@ -171,7 +174,12 @@ impl HttpClientService {
             #[cfg(unix)]
             unix_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
-                .service(hyper_util::client::legacy::Client::builder().build(UnixConnector)),
+                .service(
+                    hyper_util::client::legacy::Client::builder(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .build(UnixConnector),
+                ),
             service: Arc::new(service.into()),
         })
     }
@@ -273,10 +281,22 @@ impl tower::Service<HttpRequest> for HttpClientService {
             //"graphql.operation.name" = %operation_name,
         );
         get_text_map_propagator(|propagator| {
+            // Otel is not upgraded yet, so we need to convert the request headers into http 0.2 format rather than passing in the request directly.
+            let mut headers = http_0_2::HeaderMap::new();
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
-                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
+                &mut opentelemetry_http::HeaderInjector(&mut headers),
             );
+            for (name, value) in headers {
+                if let Some(name) = name {
+                    http_request.headers_mut().insert(
+                        HeaderName::from_str(name.as_str())
+                            .expect("header name should already have been validated"),
+                        HeaderValue::from_bytes(value.as_bytes())
+                            .expect("header value should already have been validated"),
+                    );
+                }
+            }
         });
 
         let (parts, body) = http_request.into_parts();
