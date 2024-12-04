@@ -43,6 +43,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use coordinates::source_http_argument_coordinate;
+use entity::EntityKeyChecker;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
 use source_name::SourceName;
@@ -139,6 +140,7 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
     }
 
     let mut seen_fields = IndexSet::default();
+    let mut entity_checker = EntityKeyChecker::default();
 
     let connect_errors = schema.types.values().flat_map(|extended_type| {
         validate_extended_type(
@@ -146,16 +148,19 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
             &schema_info,
             &all_source_names,
             &mut seen_fields,
+            &mut entity_checker,
         )
     });
     messages.extend(connect_errors);
 
-    if should_check_seen_fields(&messages) {
+    if should_do_advanced_validations(&messages) {
         messages.extend(check_seen_fields(
             &schema_info,
             &seen_fields,
             &external_directive_name,
         ));
+
+        messages.extend(entity_checker.check_for_missing_entity_connectors(&schema));
     }
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
@@ -177,7 +182,7 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
 /// We'll avoid doing this work if there are bigger issues with the schema.
 /// Otherwise we might emit a large number of diagnostics that will
 /// distract from the main problems.
-fn should_check_seen_fields(messages: &[Message]) -> bool {
+fn should_do_advanced_validations(messages: &[Message]) -> bool {
     !messages.iter().any(|error| {
         // some invariant is violated, so let's just stop here
         error.code == Code::GraphQLError
@@ -190,6 +195,8 @@ fn should_check_seen_fields(messages: &[Message]) -> bool {
             // if we encounter unsupported definitions, there are probably related definitions that we won't be able to resolve
             || error.code == Code::SubscriptionInConnectors
             || error.code == Code::ConnectorsUnsupportedAbstractType
+            // If we have entity argument issues, don't also check for missing entity connectors
+            || error.code == Code::EntityResolverArgumentMismatch
     })
 }
 
@@ -387,13 +394,13 @@ fn parse_url<Coordinate: Display + Copy>(
     http::url::validate_base_url(&url, coordinate, value, str_value, schema)
 }
 
-/// For an object type, get all the keys that are resolvable.
+/// For an object type, get all the keys (and directive nodes) that are resolvable.
 ///
 /// The FieldSet returned here is what goes in the `fields` argument, so `id` in `@key(fields: "id")`
 fn resolvable_key_fields<'a>(
     object: &'a Node<ObjectType>,
     schema: &'a Schema,
-) -> impl Iterator<Item = FieldSet> + 'a {
+) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> + 'a {
     object
         .directives
         .iter()
@@ -407,22 +414,25 @@ fn resolvable_key_fields<'a>(
                 .unwrap_or(true)
         })
         .filter_map(|directive| {
-            directive
+            if let Some(fields_str) = directive
                 .arguments
                 .iter()
                 .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
-        })
-        .map(|fields| &*fields.value)
-        .filter_map(|key_fields| key_fields.as_str())
-        .filter_map(|fields| {
-            Parser::new()
-                .parse_field_set(
-                    Valid::assume_valid_ref(schema),
-                    object.name.clone(),
-                    fields.to_string(),
-                    "",
-                )
-                .ok()
+                .map(|arg| &arg.value)
+                .and_then(|value| value.as_str())
+            {
+                Parser::new()
+                    .parse_field_set(
+                        Valid::assume_valid_ref(schema),
+                        object.name.clone(),
+                        fields_str.to_string(),
+                        "",
+                    )
+                    .ok()
+                    .map(|field_set| (field_set, directive))
+            } else {
+                None
+            }
         })
 }
 
@@ -494,6 +504,8 @@ pub enum Code {
     EntityResolverArgumentMismatch,
     /// The `entity` argument should only be used with non-list, nullable, object types.
     EntityTypeInvalid,
+    /// A @key is defined without a cooresponding entity connector.
+    MissingEntityConnector,
     /// A syntax error in `selection`
     InvalidJsonSelection,
     /// A cycle was detected within a `selection`

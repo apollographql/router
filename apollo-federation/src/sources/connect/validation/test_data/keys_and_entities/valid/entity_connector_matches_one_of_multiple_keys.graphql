@@ -14,7 +14,7 @@ type Query {
 }
 
 type Product
-  @key(fields: "id store { id country { key_id region } }", resolveable: false)
+  @key(fields: "id store { id country { key_id region } }", resolvable: false)
   @key(fields: "id store { id country { id region } }") {
   id: ID!
   store: Store!

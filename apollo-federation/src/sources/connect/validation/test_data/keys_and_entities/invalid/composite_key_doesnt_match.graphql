@@ -40,6 +40,7 @@ enum Region {
   AMERICAS
   EUROPE
 }
+
 input CountryInput {
   id: ID!
   region: Region!

@@ -1,3 +1,8 @@
+mod compare_keys;
+mod keys;
+
+use std::fmt::Debug;
+
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
@@ -9,27 +14,34 @@ use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+pub(super) use keys::make_key_field_set_from_variables;
+pub(super) use keys::EntityKeyChecker;
 
 use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::coordinates::field_with_connect_directive_entity_true_coordinate;
 use super::extended_type::ObjectCategory;
 use super::Code;
 use super::Message;
+use super::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::variable::VariableReference;
+use crate::sources::connect::EntityResolver;
+use crate::sources::connect::Namespace;
 
 /// Applies additional validations to `@connect` if `entity` is `true`.
 ///
-/// TODO: use the same code as expansion to generate the automatic key. Return that here so that
-/// the upper level can confirm all explicit `@key`s match an automatic key
+/// Also collects entity connectors for comparison with declared `@key`s.
 pub(super) fn validate_entity_arg(
     field: &Component<FieldDefinition>,
     connect_directive: &Node<Directive>,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     category: ObjectCategory,
+    variables: &[VariableReference<Namespace>],
+    entity_checker: &mut EntityKeyChecker,
 ) -> Result<(), Message> {
     let connect_directive_name = &connect_directive.name;
 
@@ -130,7 +142,19 @@ pub(super) fn validate_entity_arg(
     .walk(Group::Root {
         field,
         entity_type: object_type,
-    })
+    })?;
+
+    // Making a field set can fail, so this must occur after the visitor has validated the arguments
+    if let Some(fs) = make_key_field_set_from_variables(
+        schema,
+        field.ty.inner_named_type(),
+        variables,
+        EntityResolver::Explicit,
+    )? {
+        entity_checker.add_connector(&fs);
+    };
+
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
