@@ -581,10 +581,7 @@ where
     );
 
     if configuration.supergraph.path == "/*" {
-        router = router.route(
-            "/",
-            get(handle_graphql::<RF>).post(handle_graphql::<RF>),
-        );
+        router = router.route("/", get(handle_graphql::<RF>).post(handle_graphql::<RF>));
     }
 
     router.route_layer(Extension(HandlerOptions {
@@ -600,7 +597,10 @@ async fn handle_graphql<RF: RouterFactory>(
 ) -> impl IntoResponse {
     let _guard = SessionCountGuard::start();
 
-    let HandlerOptions { early_cancel, experimental_log_on_broken_pipe } = options;
+    let HandlerOptions {
+        early_cancel,
+        experimental_log_on_broken_pipe,
+    } = options;
     let service = service_factory.create();
 
     let request: router::Request = http_request.into();

@@ -160,10 +160,11 @@ impl HttpClientService {
             builder.wrap_connector(http_connector)
         };
 
-        let http_client = hyper_util::client::legacy::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-            .http2_only(http2 == Http2Config::Http2Only)
-            .build(connector);
+        let http_client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                .http2_only(http2 == Http2Config::Http2Only)
+                .build(connector);
         Ok(Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
@@ -171,7 +172,12 @@ impl HttpClientService {
             #[cfg(unix)]
             unix_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
-                .service(hyper_util::client::legacy::Client::builder().build(UnixConnector)),
+                .service(
+                    hyper_util::client::legacy::Client::builder(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .build(UnixConnector),
+                ),
             service: Arc::new(service.into()),
         })
     }
