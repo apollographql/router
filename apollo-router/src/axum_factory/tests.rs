@@ -11,7 +11,6 @@ use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
-use axum::body::BoxBody;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::poll_fn;
@@ -24,6 +23,8 @@ use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
 use http_body::Body;
+use http_body_util::combinators::BoxBody;
+use http_body_util::BodyExt;
 use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
@@ -74,6 +75,7 @@ use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::router::service::RouterCreator;
 use crate::services::supergraph;
 use crate::services::HasSchema;
@@ -1918,11 +1920,11 @@ async fn http_deferred_service() -> impl Service<
         .await
         .unwrap()
         .map_err(Into::into)
-        .map_response(|response: http::Response<BoxBody>| {
+        .map_response(|response: http::Response<RouterBody>| {
             let response = response.map(|body| {
                 // Convert from axum’s BoxBody to AsyncBufRead
                 let mut body = Box::pin(body);
-                let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
+                let stream = poll_fn(move |ctx| body.into_data_stream().poll_next_unpin(ctx))
                     .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
                 StreamReader::new(stream)
             });

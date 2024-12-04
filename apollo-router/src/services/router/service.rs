@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use axum::response::*;
+use axum_extra::extract::multipart;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -24,6 +25,8 @@ use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http_body::Body as _;
+use http_body::Frame;
+use http_body_util::combinators::BoxBody;
 use http_body_util::StreamBody;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
@@ -335,42 +338,30 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
-                    let multipart_stream = match response.subscribed {
-                        Some(true) => StreamBody::new(Multipart::new(
-                            body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            }),
-                            ProtocolMode::Subscription,
-                        )),
-                        _ => StreamBody::new(Multipart::new(
-                            once(ready(response)).chain(body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            })),
-                            ProtocolMode::Defer,
-                        )),
+                    let response = match response.subscribed {
+                        Some(true) => http::Response::from_parts(
+                            parts,
+                            RouterBody::new(StreamBody::new(
+                                Multipart::new(body, ProtocolMode::Subscription).map(|body| {
+                                    body.map(|bts| Frame::data(bts))
+                                        .map_err(|err| BoxError::from(err))
+                                }),
+                            )),
+                        ),
+                        _ => http::Response::from_parts(
+                            parts,
+                            RouterBody::new(StreamBody::new(
+                                Multipart::new(
+                                    once(ready(response)).chain(body),
+                                    ProtocolMode::Defer,
+                                )
+                                .map(|body| {
+                                    body.map(|bts| Frame::data(bts))
+                                        .map_err(|err| BoxError::from(err))
+                                }),
+                            )),
+                        ),
                     };
-                    let response = (parts, multipart_stream).into_response().map(|body| {
-                        // Axum makes this `body` have type:
-                        // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                        let mut body = Box::pin(body);
-                        // We make a stream based on its `poll_data` method
-                        // in order to create a `hyper::Body`.
-                        RouterBody::wrap_stream(stream::poll_fn(move |ctx| {
-                            body.as_mut().poll_data(ctx)
-                        }))
-                        .into_inner()
-                        // … but we ignore the `poll_trailers` method:
-                        // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                        // Apparently HTTP/2 trailers are like headers, except after the response body.
-                        // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                        // so ignoring `poll_trailers` is fine.
-                        // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                        // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                    });
 
                     Ok(RouterResponse { response, context })
                 } else {

@@ -12,7 +12,9 @@ use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http_body::Frame;
 use http_body_util::BodyExt;
+use http_body_util::StreamBody;
 use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -186,8 +188,12 @@ pub struct Response {
 
 #[buildstructor::buildstructor]
 impl Response {
-    pub async fn next_response(&mut self) -> Option<Result<Bytes, Error>> {
-        self.response.body_mut().next().await
+    pub async fn next_response(&mut self) -> Option<Result<Bytes, BoxError>> {
+        let body = std::mem::replace(self.response.body_mut(), body::empty());
+        let mut stream_body = body.into_data_stream();
+        let resp = stream_body.next().await;
+        *self.response.body_mut() = body::from_data_stream(stream_body);
+        resp
     }
 
     #[deprecated]
