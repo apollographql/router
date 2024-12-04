@@ -212,7 +212,7 @@ pub(crate) fn generate_tls_client_config(
             .with_root_certificates(tls_cert_store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
-                client_auth_config.key.clone(),
+                client_auth_config.key.clone_key(),
             )?,
         None => tls_builder
             .with_root_certificates(tls_cert_store)
