@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-// use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::Extension;
 use axum::extract::State;
@@ -449,10 +448,6 @@ pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
         .unwrap_or_default()
 }
 
-async fn decompression_error(_error: BoxError) -> axum::response::Response {
-    (StatusCode::BAD_REQUEST, "cannot decompress request body").into_response()
-}
-
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -467,14 +462,15 @@ where
     })?;
     let span_mode = span_mode(configuration);
 
-    let decompression = ServiceBuilder::new()
-        .layer(HandleErrorLayer::<_, ()>::new(decompression_error))
-        .layer(
-            tower_http::decompression::RequestDecompressionLayer::new()
-                .br(true)
-                .gzip(true)
-                .deflate(true),
-        );
+    // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
+    // to turn errors from decompression into an axum error response. Now,
+    // `RequestDecompressionLayer` appears to preserve(?) the error type from the inner service?
+    // So maybe we don't need this anymore? But I don't understand what happens to an error *caused
+    // by decompression* (such as an invalid compressed data stream).
+    let decompression = tower_http::decompression::RequestDecompressionLayer::new()
+        .br(true)
+        .gzip(true)
+        .deflate(true);
     let mut main_route = main_router::<RF>(configuration)
         .layer(decompression)
         .layer(middleware::from_fn_with_state(
