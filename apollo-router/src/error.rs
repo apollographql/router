@@ -1,4 +1,5 @@
 //! Router errors.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::validation::DiagnosticList;
@@ -408,6 +409,19 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 Ok(errors)
             }
             err => Err(err),
+        }
+    }
+}
+
+impl QueryPlannerError {
+    pub(crate) fn usage_reporting(&self) -> Option<UsageReporting> {
+        match self {
+            QueryPlannerError::PlanningErrors(pe) => Some(pe.usage_reporting.clone()),
+            QueryPlannerError::SpecError(e) => Some(UsageReporting {
+                stats_report_key: e.get_error_key().to_string(),
+                referenced_fields_by_type: HashMap::new(),
+            }),
+            _ => None,
         }
     }
 }

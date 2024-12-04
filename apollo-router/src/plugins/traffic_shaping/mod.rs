@@ -396,7 +396,6 @@ impl TrafficShaping {
                     config.min_per_sec,
                     config.retry_percent,
                     config.retry_mutations,
-                    name.to_string(),
                 );
                 tower::retry::RetryLayer::new(retry_policy)
             });
@@ -578,6 +577,9 @@ mod test {
             r#"
         traffic_shaping:
             deduplicate_variables: true
+        supergraph:
+            # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            generate_query_fragments: false
         "#,
         )
         .unwrap();

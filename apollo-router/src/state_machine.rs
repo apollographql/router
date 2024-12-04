@@ -558,12 +558,19 @@ where
             #[cfg(test)]
             self.notify_updated.notify_one();
 
-            tracing::debug!(
-                monotonic_counter.apollo_router_state_change_total = 1u64,
+            tracing::info!(
                 event = event_name,
                 state = ?state,
                 previous_state,
                 "state machine transitioned"
+            );
+            u64_counter!(
+                "apollo_router_state_change_total",
+                "Router state changes",
+                1,
+                event = event_name,
+                state = format!("{state:?}"),
+                previous_state = previous_state
             );
 
             // If we've errored then exit even if there are potentially more messages

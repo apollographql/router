@@ -12,8 +12,8 @@ use tower_service::Service;
 
 use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::PlannerMode;
 use crate::services::execution;
@@ -217,7 +217,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
 
 impl<T> Deref for PluginTestHarness<T>
 where
-    T: Plugin,
+    T: PluginPrivate,
 {
     type Target = T;
 

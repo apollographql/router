@@ -1,8 +1,16 @@
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
+fn reuse_fragments_config() -> QueryPlannerConfig {
+    QueryPlannerConfig {
+        reuse_query_fragments: true,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn it_works_with_nested_fragments_1() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             a: Anything
@@ -127,6 +135,7 @@ fn it_works_with_nested_fragments_1() {
 #[test]
 fn it_avoid_fragments_usable_only_once() {
     let planner = planner!(
+        config = reuse_fragments_config(),
             Subgraph1: r#"
           type Query {
             t: T
@@ -324,10 +333,9 @@ mod respects_query_planner_option_reuse_query_fragments {
 
     #[test]
     fn respects_query_planner_option_reuse_query_fragments_true() {
-        let reuse_query_fragments = true;
         let planner = planner!(
-          config = QueryPlannerConfig {reuse_query_fragments, ..Default::default()},
-          Subgraph1: SUBGRAPH1,
+            config = reuse_fragments_config(),
+            Subgraph1: SUBGRAPH1,
         );
         let query = QUERY;
 
@@ -395,6 +403,7 @@ mod respects_query_planner_option_reuse_query_fragments {
 #[test]
 fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             t: T
@@ -463,6 +472,7 @@ fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved()
 fn it_preserves_directives_when_fragment_not_used() {
     // (because used only once)
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             t: T
@@ -511,6 +521,7 @@ fn it_preserves_directives_when_fragment_not_used() {
 #[test]
 fn it_preserves_directives_when_fragment_is_reused() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             t: T
@@ -572,6 +583,7 @@ fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgraph() {
     // server would reject it when validating the query, and we must make sure it
     // is not reused.
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             i1: I
@@ -652,6 +664,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
     // Previous versions of the code were not handling this case and were error out by
     // creating the invalid selection (#2721), and this test ensures this is fixed.
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type V @shareable {
             x: Int
@@ -988,6 +1001,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
     // This test is similar to the subtyping case (it tests the same problems), but test the case
     // of unions instead of interfaces.
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type V @shareable {
             x: Int
@@ -1302,6 +1316,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
 #[test]
 fn it_preserves_nested_fragments_when_outer_one_has_directives_and_is_eliminated() {
     let planner = planner!(
+        config = reuse_fragments_config(),
         Subgraph1: r#"
           type Query {
             t: T

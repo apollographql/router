@@ -39,7 +39,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query CacheDefer__cache_defer_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+                                    "query": "query CacheDefer__cache_defer_reviews__1($representations:[_Any!]!){_entities(representations:$representations){..._generated_onUser1_0}}fragment _generated_onUser1_0 on User{reviews{body}}",
                                     "operationName": "CacheDefer__cache_defer_reviews__1",
                                     "variables": {
                                         "representations": [
