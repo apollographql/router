@@ -143,14 +143,11 @@ impl SchemaSource {
                 }
             }
             SchemaSource::Registry(uplink_config) => {
-                stream_from_uplink::<SupergraphSdlQuery, String>(uplink_config)
+                stream_from_uplink::<SupergraphSdlQuery, SchemaState>(uplink_config)
                     .filter_map(|res| {
                         future::ready(match res {
                             Ok(schema) => {
-                                let update_schema = UpdateSchema(SchemaState {
-                                    sdl: schema,
-                                    launch_id: None,
-                                });
+                                let update_schema = UpdateSchema(schema);
                                 Some(update_schema)
                             }
                             Err(e) => {
