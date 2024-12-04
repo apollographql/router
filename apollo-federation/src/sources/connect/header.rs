@@ -145,9 +145,17 @@ impl Error for HeaderValueError {}
 
 impl ParseError<Span<'_>> for HeaderValueError {
     fn from_error_kind(span: Span, _kind: ErrorKind) -> Self {
+        let end = span
+            .fragment()
+            .find('}')
+            .map(|i| i + 1)
+            .unwrap_or(span.fragment().len());
         HeaderValueError::ParseError {
-            message: format!("invalid variable reference `{s}`", s = span.fragment()),
-            location: span.location_offset()..span.location_offset() + span.fragment().len(),
+            message: format!(
+                "invalid variable reference `{s}`",
+                s = &span.fragment()[0..end]
+            ),
+            location: span.location_offset()..span.location_offset() + end,
         }
     }
 
@@ -356,6 +364,14 @@ mod tests {
             Err(HeaderValueError::InvalidVariableNamespace {
                 namespace: "foo".into(),
                 location: 8..11
+            })
+        );
+
+        assert_eq!(
+            HeaderValue::from_str("Before {$config.a.b.c->foo} After"),
+            Err(HeaderValueError::ParseError {
+                message: "invalid variable reference `{$config.a.b.c->foo}`".to_string(),
+                location: 7..27,
             })
         );
     }

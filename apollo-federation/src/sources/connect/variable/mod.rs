@@ -11,6 +11,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use itertools::Itertools;
+use nom::combinator::all_consuming;
 use parser::Span;
 use parser::VariableParseError;
 
@@ -237,7 +238,7 @@ impl<'a, N: FromStr + ToString> VariableReference<'a, N> {
     }
 
     fn from_str(s: &'a str) -> Result<Self, VariableError> {
-        parser::variable_reference(Span::new(s))
+        all_consuming(parser::variable_reference)(Span::new(s))
             .map(|(_, reference)| reference)
             .map_err(|e| match e {
                 nom::Err::Error(e) => e.into(),
