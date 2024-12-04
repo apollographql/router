@@ -460,7 +460,7 @@ where
     let val_any = &mut b as &mut dyn Any;
     match val_any.downcast_mut::<Body>() {
         Some(body) => mem::take(body),
-        None => Body::wrap_stream(services::http::body_stream::BodyStream::new(
+        None => Body::new(services::http::body_stream::BodyStream::new(
             b.map_err(Into::into),
         )),
     }
@@ -473,6 +473,7 @@ mod test {
     use std::task::Poll;
 
     use http::HeaderMap;
+    use http_body::Frame;
     use tower::BoxError;
 
     use crate::services::router::body::get_body_bytes;
@@ -485,22 +486,15 @@ mod test {
         type Data = bytes::Bytes;
         type Error = BoxError;
 
-        fn poll_data(
-            mut self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
             if let Some(data) = self.data.take() {
-                Poll::Ready(Some(Ok(bytes::Bytes::from(data))))
+                Poll::Ready(Some(Ok(Frame::data(bytes::Bytes::from(data)))))
             } else {
                 Poll::Ready(None)
             }
-        }
-
-        fn poll_trailers(
-            self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-            Poll::Ready(Ok(None))
         }
     }
 
