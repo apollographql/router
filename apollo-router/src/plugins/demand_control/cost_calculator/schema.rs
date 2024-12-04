@@ -12,7 +12,6 @@ use apollo_federation::link::cost_spec_definition::CostDirective;
 use apollo_federation::link::cost_spec_definition::CostSpecDefinition;
 use apollo_federation::link::cost_spec_definition::ListSizeDirective;
 use apollo_federation::schema::ValidFederationSchema;
-use rhai::Variant;
 
 use super::directives::RequiresDirective;
 use crate::plugins::demand_control::DemandControlError;
@@ -103,13 +102,13 @@ impl DemandControlledSchema {
         field_name: &Name,
         type_metadata: &mut HashMap<Name, FieldDirectiveMetadata>,
     ) -> Result<(), DemandControlError> {
-        let field_definition = schema.schema().type_field(ty.type_name(), field_name)?;
+        let field_definition = schema.schema().type_field(ty.name(), field_name)?;
         let field_type = schema
             .schema()
             .types
             .get(field_definition.ty.inner_named_type())
             .ok_or_else(|| DemandControlError::FieldLookupError {
-                type_name: ty.type_name().to_string(),
+                type_name: ty.name().to_string(),
                 field_name: field_name.to_string(),
             })?;
 
