@@ -298,7 +298,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
             Some(compressor) => RouterBody::new(StreamBody::new(
                 compressor
                     .process(body)
-                    .map(|b| b.map(|body| Frame::data(body)).map_err(axum::Error::new)),
+                    .map(|b| b.map(Frame::data).map_err(axum::Error::new)),
             )),
         };
 

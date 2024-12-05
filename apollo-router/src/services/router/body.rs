@@ -32,7 +32,7 @@ pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, AxumError> 
 
 pub(crate) fn from_data_stream(data_stream: BodyDataStream<RouterBody>) -> RouterBody {
     RouterBody::new(StreamBody::new(
-        data_stream.map(|s| s.map(|body| Frame::data(body))),
+        data_stream.map(|s| s.map(Frame::data)),
     ))
 }
 

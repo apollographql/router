@@ -659,7 +659,7 @@ async fn handle_graphql<RF: RouterFactory>(
                     RouterBody::new(StreamBody::new(
                         compressor
                             .process(body)
-                            .map(|b| b.map(|body| Frame::data(body)))
+                            .map(|b| b.map(Frame::data))
                             .map_err(axum::Error::new),
                     ))
                 }

@@ -177,7 +177,7 @@ async fn router_layer(
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
 
-        let mut multipart = MultipartRequest::new(request_body.into(), boundary, limits);
+        let mut multipart = MultipartRequest::new(request_body, boundary, limits);
         let operations_stream = multipart.operations_field().await?;
 
         req.context
@@ -195,7 +195,7 @@ async fn router_layer(
         request_parts.headers.remove(CONTENT_LENGTH);
 
         let request_body = RouterBody::new(StreamBody::new(
-            operations_stream.map(|b| b.map(|body| Frame::data(body)).map_err(axum::Error::new)),
+            operations_stream.map(|b| b.map(Frame::data).map_err(axum::Error::new)),
         ));
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
@@ -369,7 +369,7 @@ pub(crate) async fn http_request_wrapper(
         let request_body = RouterBody::new(StreamBody::new(
             form.into_stream(operations)
                 .await
-                .map(|b| b.map(|body| Frame::data(body)).map_err(axum::Error::new)),
+                .map(|b| b.map(Frame::data).map_err(axum::Error::new)),
         ));
 
         return http::Request::from_parts(request_parts, request_body);

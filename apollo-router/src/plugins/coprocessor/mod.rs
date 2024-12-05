@@ -989,7 +989,7 @@ where
     let bytes = get_body_bytes(body).await.map_err(BoxError::from);
     let final_stream = RouterBody::new(http_body_util::StreamBody::new(
         once(ready(bytes)).chain(mapped_stream).map(|b| {
-            b.map(|body| http_body::Frame::data(body))
+            b.map(http_body::Frame::data)
                 .map_err(axum::Error::new)
         }),
     ));

@@ -339,7 +339,7 @@ impl RouterService {
                             parts,
                             RouterBody::new(StreamBody::new(
                                 Multipart::new(body, ProtocolMode::Subscription).map(|body| {
-                                    body.map(|bts| Frame::data(bts)).map_err(axum::Error::new)
+                                    body.map(Frame::data).map_err(axum::Error::new)
                                 }),
                             )),
                         ),
@@ -351,7 +351,7 @@ impl RouterService {
                                     ProtocolMode::Defer,
                                 )
                                 .map(|body| {
-                                    body.map(|bts| Frame::data(bts)).map_err(axum::Error::new)
+                                    body.map(Frame::data).map_err(axum::Error::new)
                                 }),
                             )),
                         ),

@@ -135,7 +135,7 @@ impl Plugin for Record {
                         response: http::Response::from_parts(
                             parts,
                             RouterBody::new(StreamBody::new(stream.map(|b| {
-                                b.map(|body| Frame::data(body)).map_err(axum::Error::new)
+                                b.map(Frame::data).map_err(axum::Error::new)
                             }))),
                         ),
                     })
