@@ -19,9 +19,11 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 
 /// Added by `response_decompression` to `http::Response::extensions`
+#[derive(Clone)]
 pub(crate) struct ResponseBodyWasCompressed(pub(crate) bool);
 
 pub(crate) enum MaybeMultipart<Part> {
@@ -65,9 +67,8 @@ where
         })
         .map_response(|response: http::Response<Body>| {
             let mut response = response.map(|body| {
-                // Convert from axum’s Body to AsyncBufRead
-                let mut body = Box::pin(body);
-                let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
+                let stream = body
+                    .into_data_stream()
                     .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
                 StreamReader::new(stream)
             });
@@ -255,7 +256,7 @@ where
                 "content-type",
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),
             );
-            request.map(|body| serde_json::to_vec(&body).unwrap().into())
+            request.map(|body| router::body::full(serde_json::to_vec(&body).unwrap()))
         })
         .map_response(|response: http::Response<MaybeMultipart<Vec<u8>>>| {
             let (parts, body) = response.into_parts();
