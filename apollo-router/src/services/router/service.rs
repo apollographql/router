@@ -338,9 +338,8 @@ impl RouterService {
                         Some(true) => http::Response::from_parts(
                             parts,
                             RouterBody::new(StreamBody::new(
-                                Multipart::new(body, ProtocolMode::Subscription).map(|body| {
-                                    body.map(Frame::data).map_err(axum::Error::new)
-                                }),
+                                Multipart::new(body, ProtocolMode::Subscription)
+                                    .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
                             )),
                         ),
                         _ => http::Response::from_parts(
@@ -350,9 +349,7 @@ impl RouterService {
                                     once(ready(response)).chain(body),
                                     ProtocolMode::Defer,
                                 )
-                                .map(|body| {
-                                    body.map(Frame::data).map_err(axum::Error::new)
-                                }),
+                                .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
                             )),
                         ),
                     };

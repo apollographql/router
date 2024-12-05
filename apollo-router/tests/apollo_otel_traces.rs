@@ -26,6 +26,7 @@ use axum::Extension;
 use axum::Json;
 use bytes::Bytes;
 use http::header::ACCEPT;
+use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -316,9 +317,12 @@ where
         .expect("router service call failed");
 
     // Drain the response
-    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+    let mut found_report = match response
+        .response
+        .into_body()
+        .collect()
         .await
-        .map(|b| String::from_utf8(b.to_vec()))
+        .map(|b| String::from_utf8(b.to_bytes().to_vec()))
     {
         Ok(Ok(response)) => {
             if response.contains("errors") {

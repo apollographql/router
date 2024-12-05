@@ -988,10 +988,9 @@ where
     // rest of the responses in our mapped stream.
     let bytes = get_body_bytes(body).await.map_err(BoxError::from);
     let final_stream = RouterBody::new(http_body_util::StreamBody::new(
-        once(ready(bytes)).chain(mapped_stream).map(|b| {
-            b.map(http_body::Frame::data)
-                .map_err(axum::Error::new)
-        }),
+        once(ready(bytes))
+            .chain(mapped_stream)
+            .map(|b| b.map(http_body::Frame::data).map_err(axum::Error::new)),
     ));
 
     // Finally, return a response which has a Body that wraps our stream of response chunks.

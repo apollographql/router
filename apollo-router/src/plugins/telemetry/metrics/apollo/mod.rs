@@ -10,8 +10,8 @@ use opentelemetry_api::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use sys_info::hostname;
-use tonic_0_9 as tonic;
 use tonic::metadata::MetadataMap;
+use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 

@@ -393,7 +393,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
                         .unwrap();
                 assert_eq!(
                     deserialized_request.subgraph_request_id.as_deref(),
@@ -1021,7 +1021,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1133,7 +1133,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1257,7 +1257,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1409,7 +1409,7 @@ mod tests {
         assert_eq!("a value", value);
 
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(response.into_body()).await.unwrap(),
+            &get_body_bytes(response.into_body()).await.unwrap(),
         )
         .unwrap();
 
@@ -1443,7 +1443,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1486,7 +1486,7 @@ mod tests {
 
         assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(response.into_body()).await.unwrap(),
+            &get_body_bytes(response.into_body()).await.unwrap(),
         )
         .unwrap();
 
@@ -1530,10 +1530,8 @@ mod tests {
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
                     let deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(
-                            &hyper::body::to_bytes(res.into_body()).await.unwrap(),
-                        )
-                        .unwrap();
+                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
+                            .unwrap();
 
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(

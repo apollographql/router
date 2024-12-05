@@ -1,6 +1,7 @@
 use std::fmt::Debug;
-use http_0_2 as http;
+
 use http::uri;
+use http_0_2 as http;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::{self};
 use opentelemetry_sdk::export::ExportError;

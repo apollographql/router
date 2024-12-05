@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
+use axum::body::Body;
 use axum::Server;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
@@ -16,7 +17,6 @@ use http::Uri;
 use http::Version;
 use hyper::server::conn::AddrIncoming;
 use hyper::service::make_service_fn;
-use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::TlsAcceptor;
 #[cfg(unix)]

@@ -1,7 +1,11 @@
+#![allow(deprecated)]
+use std::fmt::Debug;
+
 use axum::Error as AxumError;
 use bytes::Bytes;
 use futures::StreamExt;
 use http_body::Frame;
+use http_body::SizeHint;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyDataStream;
 use http_body_util::BodyExt;
@@ -31,9 +35,7 @@ pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, AxumError> 
 }
 
 pub(crate) fn from_data_stream(data_stream: BodyDataStream<RouterBody>) -> RouterBody {
-    RouterBody::new(StreamBody::new(
-        data_stream.map(|s| s.map(Frame::data)),
-    ))
+    RouterBody::new(StreamBody::new(data_stream.map(|s| s.map(Frame::data))))
 }
 
 // Useful Conversion notes:
