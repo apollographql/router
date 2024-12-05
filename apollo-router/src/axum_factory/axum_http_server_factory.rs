@@ -304,18 +304,18 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let actual_main_listen_address = main_listener
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
-            let mut http_config = Builder::new(TokioExecutor::new())
-                .http1()
-                .keep_alive(true)
-                .header_read_timeout(Duration::from_secs(10));
+            let mut http_config = Builder::new(TokioExecutor::new());
+            let mut h1_config = http_config.http1();
+            h1_config.keep_alive(true);
+            h1_config.header_read_timeout(Duration::from_secs(10));
 
             #[cfg(feature = "hyper_header_limits")]
             if let Some(max_headers) = configuration.limits.http1_max_request_headers {
-                http_config.http1_max_headers(max_headers);
+                h1_config.max_headers(max_headers);
             }
 
             if let Some(max_buf_size) = configuration.limits.http1_max_request_buf_size {
-                http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                h1_config.max_buf_size(max_buf_size.as_u64() as usize);
             }
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
