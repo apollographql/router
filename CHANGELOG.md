@@ -4,6 +4,30 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.58.1] - 2024-12-05
+
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+## 🐛 Fixes
+
+### Particular `supergraph` telemetry customizations using the `query` selector do not error ([PR #6324](https://github.com/apollographql/router/pull/6324))
+
+Telemetry customizations like those featured in the [request limits telemetry documentation](https://www.apollographql.com/docs/graphos/routing/security/request-limits#collecting-metrics) now work as intended when using the `query` selector on the `supergraph` layer.  Prior to this fix, this was sometimes causing a `this is a bug and should not happen` error, but is now resolved.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6324
+
+### Native query planner now receives both "plan" and "path" limits configuration ([PR #6316](https://github.com/apollographql/router/pull/6316))
+
+The native query planner now correctly sets two experimental configuration options for limiting query planning complexity.  These were previously available in the configuration and observed by the legacy planner, but were not being passed to the new native planner until now:
+
+- `supergraph.query_planning.experimental_plans_limit`
+- `supergraph.query_planning.experimental_paths_limit`
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6316
+
+
+
 # [1.58.0] - 2024-11-27
 
 > [!IMPORTANT]
