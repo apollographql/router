@@ -34,26 +34,22 @@ pub(crate) enum SelectionKey<'a> {
         /// The field alias (if specified) or field name in the resulting selection set.
         response_name: &'a Name,
         /// directives applied on the field
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         directives: &'a DirectiveList,
     },
     FragmentSpread {
         /// The name of the fragment.
         fragment_name: &'a Name,
         /// Directives applied on the fragment spread (does not contain @defer).
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         directives: &'a DirectiveList,
     },
     InlineFragment {
         /// The optional type condition of the fragment.
         type_condition: Option<&'a Name>,
         /// Directives applied on the fragment spread (does not contain @defer).
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         directives: &'a DirectiveList,
     },
     Defer {
         /// Unique selection ID used to distinguish deferred fragment spreads that cannot be merged.
-        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         deferred_id: SelectionId,
     },
 }
@@ -250,11 +246,6 @@ impl SelectionMap {
     /// Returns true if there are no selections in the map.
     pub(crate) fn is_empty(&self) -> bool {
         self.selections.is_empty()
-    }
-
-    /// Returns the first selection in the map, or None if the map is empty.
-    pub(crate) fn first(&self) -> Option<&Selection> {
-        self.selections.first()
     }
 
     /// Computes the hash of a selection key.

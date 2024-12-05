@@ -430,7 +430,6 @@ impl Configuration {
             .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
 
         QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments.unwrap_or(true),
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
             incremental_delivery: QueryPlanIncrementalDeliveryConfig {
@@ -700,7 +699,8 @@ pub(crate) struct Supergraph {
     pub(crate) introspection: bool,
 
     /// Enable reuse of query fragments
-    /// Default: depends on the federation version
+    /// This feature is deprecated and will be removed in next release.
+    /// The config can only be set when the legacy query planner is explicitly enabled.
     #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: Option<bool>,
 
@@ -781,7 +781,8 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -818,7 +819,8 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
