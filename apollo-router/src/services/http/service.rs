@@ -190,25 +190,11 @@ impl HttpClientService {
 
     pub(crate) fn native_roots_store() -> RootCertStore {
         let mut roots = rustls::RootCertStore::empty();
-        let mut valid_count = 0;
-        let mut invalid_count = 0;
 
-        for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
-        {
-            match roots.add(cert) {
-                Ok(_) => valid_count += 1,
-                Err(err) => {
-                    tracing::trace!("invalid cert der {:?}", cert);
-                    tracing::debug!("certificate parsing failed: {:?}", err);
-                    invalid_count += 1
-                }
-            }
-        }
-        tracing::debug!(
-            "with_native_roots processed {} valid and {} invalid certs",
-            valid_count,
-            invalid_count
+        roots.add_parsable_certificates(
+            rustls_native_certs::load_native_certs().expect("could not load platform certs"),
         );
+
         assert!(!roots.is_empty(), "no CA certificates found");
         roots
     }
