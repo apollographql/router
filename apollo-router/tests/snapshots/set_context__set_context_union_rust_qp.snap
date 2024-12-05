@@ -51,15 +51,6 @@ expression: response
                         "kind": "KeyRenamer",
                         "path": [
                           "..",
-                          "... on A",
-                          "prop"
-                        ],
-                        "renameKeyTo": "contextualArgument_1_1"
-                      },
-                      {
-                        "kind": "KeyRenamer",
-                        "path": [
-                          "..",
                           "... on B",
                           "prop"
                         ],
@@ -114,15 +105,6 @@ expression: response
                         "path": [
                           "..",
                           "... on A",
-                          "prop"
-                        ],
-                        "renameKeyTo": "contextualArgument_1_1"
-                      },
-                      {
-                        "kind": "KeyRenamer",
-                        "path": [
-                          "..",
-                          "... on B",
                           "prop"
                         ],
                         "renameKeyTo": "contextualArgument_1_1"
