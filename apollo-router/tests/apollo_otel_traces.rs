@@ -50,7 +50,7 @@ async fn config(
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new()
         .route("/", post(traces_handler))
@@ -58,9 +58,7 @@ async fn config(
         .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
     let task = ROUTER_SERVICE_RUNTIME.spawn(async move {
-        axum::Server::from_tcp(listener)
-            .expect("must be able to create otlp receiver")
-            .serve(app.into_make_service())
+        axum::serve(listener, app)
             .await
             .expect("could not start axum server")
     });

@@ -9,10 +9,7 @@ use std::sync::Arc;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use http::header::CONTENT_TYPE;
-use hyper::server::conn::AddrIncoming;
-use hyper::service::make_service_fn;
 use hyper::service::service_fn;
-use hyper::Server;
 use insta::assert_yaml_snapshot;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
@@ -1322,7 +1319,7 @@ async fn jwks_send_headers() {
             }))
         }
     });
-    let server = Server::builder(AddrIncoming::from_listener(listener).unwrap()).serve(service);
+    let server = axum::serve(listener, service);
     tokio::task::spawn(server);
 
     let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
