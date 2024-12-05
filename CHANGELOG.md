@@ -6,6 +6,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.58.1] - 2024-12-05
 
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
 ## 🐛 Fixes
 
 ### Particular `supergraph` telemetry customizations using the `query` selector do not error ([PR #6324](https://github.com/apollographql/router/pull/6324))
