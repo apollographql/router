@@ -23,9 +23,6 @@ struct QueryPlannerArgs {
     /// Enable @defer support.
     #[arg(long, default_value_t = false)]
     enable_defer: bool,
-    /// Reuse fragments to compress subgraph queries.
-    #[arg(long, default_value_t = false)]
-    reuse_fragments: bool,
     /// Generate fragments to compress subgraph queries.
     #[arg(long, default_value_t = false)]
     generate_fragments: bool,
@@ -109,8 +106,6 @@ enum Command {
 impl QueryPlannerArgs {
     fn apply(&self, config: &mut QueryPlannerConfig) {
         config.incremental_delivery.enable_defer = self.enable_defer;
-        // --generate-fragments trumps --reuse-fragments
-        config.reuse_query_fragments = self.reuse_fragments && !self.generate_fragments;
         config.generate_query_fragments = self.generate_fragments;
         config.subgraph_graphql_validation = self.subgraph_validation.unwrap_or(true);
         if let Some(max_evaluated_plans) = self.max_evaluated_plans {

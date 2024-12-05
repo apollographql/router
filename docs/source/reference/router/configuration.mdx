@@ -1257,37 +1257,37 @@ example:
 ```
 
 <!-- keep links to the old heading name working -->
-<a id="fragment-reuse-and-generation"></a>
-### Fragment generation and reuse
+<a id="automatic-fragment-generation"></a>
+### Automatic fragment generation
 
 By default, the router compresses subgraph requests by generating fragment
 definitions based on the shape of the subgraph operation. In many cases this
 significantly reduces the size of the query sent to subgraphs.
 
-The router also supports an experimental algorithm that attempts to reuse fragments
-from the original operation while forming subgraph requests. This experimental feature
-used to be enabled by default, but is still available to support subgraphs that rely
-on the specific shape of fragments in an operation:
+You can explicitly opt-out of this behavior by specifying:
 
 ```yaml
 supergraph:
   generate_query_fragments: false
-  experimental_reuse_query_fragments: true 
+```
+
+<Note>
+
+The legacy query planner still supports an experimental algorithm that attempts to
+reuse fragments from the original operation while forming subgraph requests. The 
+legacy query planner has to be explicitly enabled. This experimental feature used to
+be enabled by default, but is still available to support subgraphs that rely on the
+specific shape of fragments in an operation:
+
+```yaml
+supergraph:
+  generate_query_fragments: false
+  experimental_reuse_query_fragments: true
 ```
 
 Note that `generate_query_fragments` and `experimental_reuse_query_fragments` are
 mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments`
 will take precedence.
-
-<Note>
-
-In the future, the `generate_query_fragments` option will be the only option for handling fragments.
-
-</Note>
-
-<Note>
-
-In the future, the `generate_query_fragments` option will be the only option for handling fragments.
 
 </Note>
 

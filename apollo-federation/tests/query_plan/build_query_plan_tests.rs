@@ -34,6 +34,7 @@ fn some_name() {
 mod context;
 mod debug_max_evaluated_plans_configuration;
 mod defer;
+mod entities;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
@@ -44,8 +45,7 @@ mod interface_type_explosion;
 mod introspection_typename_handling;
 mod merged_abstract_types_handling;
 mod mutations;
-mod named_fragments;
-mod named_fragments_preservation;
+mod named_fragments_expansion;
 mod overrides;
 mod provides;
 mod requires;
