@@ -1609,7 +1609,6 @@ where
 mod tests {
     use std::convert::Infallible;
     use std::net::SocketAddr;
-    use std::net::TcpListener;
     use std::str::FromStr;
 
     use axum::body::Body;
@@ -1619,15 +1618,14 @@ mod tests {
     use axum::response::IntoResponse;
     use axum::routing::get;
     use axum::Router;
-    use axum::Server;
     use bytes::Buf;
     use futures::StreamExt;
     use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
-    use hyper::service::make_service_fn;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::service_fn;
@@ -1650,6 +1648,22 @@ mod tests {
     use crate::services::router::body::get_body_bytes;
     use crate::Context;
 
+    async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler)
+    where
+        Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Send + 'static,
+        Fut:
+            std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
+    {
+        // XXX(@goto-bus-stop) This is probably not the best way to go about this!
+        // This is just a long-winded way of turning the handler into a MakeService, lacking
+        // `make_service_fn`.
+        let server = axum::serve(
+            listener,
+            Router::new().route("/", axum::routing::any_service(service_fn(handle))),
+        );
+        server.await.unwrap();
+    }
+
     // starts a local server emulating a subgraph returning status code 400
     async fn emulate_subgraph_bad_request(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
@@ -1670,9 +1684,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning status code 401
@@ -1685,9 +1697,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning connection closed
@@ -1697,8 +1707,10 @@ mod tests {
             panic!("test")
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
+        let server = axum::serve(
+            listener,
+            Router::new().route("/", axum::routing::any_service(service_fn(handle))),
+        );
         server.await.unwrap();
     }
 
@@ -1712,9 +1724,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1729,9 +1739,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1746,9 +1754,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1761,9 +1767,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1776,9 +1780,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning response with missing content_type
@@ -1790,9 +1792,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning response with invalid content_type
@@ -1805,9 +1805,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning unsupported content_type
@@ -1820,9 +1818,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -1875,9 +1871,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -1932,9 +1926,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -1992,9 +1984,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -2052,9 +2042,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning a response to request with apq
@@ -2093,9 +2081,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     // starts a local server emulating a subgraph returning a response to request without apq
@@ -2136,9 +2122,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     async fn emulate_correct_websocket_server(listener: TcpListener) {
@@ -2187,9 +2171,10 @@ mod tests {
         }
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::from_tcp(listener)
-            .unwrap()
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>());
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
         server.await.unwrap();
     }
 
@@ -2202,9 +2187,10 @@ mod tests {
         }
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::from_tcp(listener)
-            .unwrap()
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>());
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
         server.await.unwrap();
     }
 
@@ -2251,9 +2237,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await;
     }
 
     fn subscription_config() -> SubscriptionConfig {
@@ -2308,7 +2292,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_callback() {
         let _ = SUBSCRIPTION_CALLBACK_HMAC_KEY.set(String::from("TESTEST"));
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(listener));
         let subgraph_service = SubgraphService::new(
@@ -2352,7 +2336,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_content_type_application_graphql() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_graphql_response(listener));
         let subgraph_service = SubgraphService::new(
@@ -2386,7 +2370,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_content_type_application_json() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
         let subgraph_service = SubgraphService::new(
@@ -2421,7 +2405,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(target_os = "macos"))]
     async fn test_subgraph_service_panic() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_panic(listener));
         let subgraph_service = SubgraphService::new(
@@ -2459,7 +2443,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_invalid_response() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_ok_status_invalid_response(listener));
         let subgraph_service = SubgraphService::new(
@@ -2496,7 +2480,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_invalid_status_invalid_response_application_json() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_json(listener),
@@ -2539,7 +2523,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_invalid_status_invalid_response_application_graphql() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_graphql(listener),
@@ -2582,7 +2566,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_websocket() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_correct_websocket_server(listener));
         let subgraph_service = SubgraphService::new(
@@ -2635,7 +2619,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_websocket_with_error() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_incorrect_websocket_server(listener));
         let subgraph_service = SubgraphService::new(
@@ -2679,7 +2663,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bad_status_code_should_not_fail() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(listener));
         let subgraph_service = SubgraphService::new(
@@ -2720,7 +2704,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_missing_content_type() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_missing_content_type(listener));
 
@@ -2758,7 +2742,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_invalid_content_type() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_invalid_content_type(listener));
 
@@ -2796,7 +2780,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_unsupported_content_type() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unsupported_content_type(listener));
 
@@ -2834,7 +2818,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_unauthorized() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(listener));
         let subgraph_service = SubgraphService::new(
@@ -2871,7 +2855,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_supported_message() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_message(listener));
         let subgraph_service = SubgraphService::new(
@@ -2915,7 +2899,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_supported_extension_code() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(
             listener,
@@ -2961,7 +2945,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_found_message() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_message(listener));
         let subgraph_service = SubgraphService::new(
@@ -3002,7 +2986,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_found_extension_code() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_extension_code(listener));
         let subgraph_service = SubgraphService::new(
@@ -3043,7 +3027,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_apq_enabled_subgraph_configuration() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_enabled_configuration(listener));
         let subgraph_service = SubgraphService::new(
@@ -3084,7 +3068,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_apq_disabled_subgraph_configuration() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_disabled_configuration(listener));
         let subgraph_service = SubgraphService::new(

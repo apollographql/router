@@ -695,7 +695,6 @@ mod tests {
     use axum::extract::WebSocketUpgrade;
     use axum::routing::get;
     use axum::Router;
-    use axum::Server;
     use futures::FutureExt;
     use http::HeaderValue;
     use tokio_tungstenite::connect_async;
@@ -833,13 +832,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
@@ -930,13 +928,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
