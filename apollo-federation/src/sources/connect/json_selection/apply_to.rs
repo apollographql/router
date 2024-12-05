@@ -329,17 +329,20 @@ impl ApplyToInternal for NamedSelection {
                     ));
                 }
             }
-            Self::Path(alias_opt, path_selection) => {
-                let (value_opt, apply_errors) =
-                    path_selection.apply_to_path(data, vars, input_path);
+            Self::Path {
+                alias,
+                path,
+                inline,
+            } => {
+                let (value_opt, apply_errors) = path.apply_to_path(data, vars, input_path);
                 errors.extend(apply_errors);
 
-                if let Some(alias) = alias_opt {
+                if let Some(alias) = alias {
                     // Handle the NamedPathSelection case.
                     if let Some(value) = value_opt {
                         output.insert(alias.name(), value);
                     }
-                } else if let Some(sub) = path_selection.next_subselection() {
+                } else if let Some(sub) = path.next_subselection() {
                     match value_opt {
                         Some(JSON::Object(value)) => {
                             // Handle the PathWithSubSelection case.
@@ -369,22 +372,32 @@ impl ApplyToInternal for NamedSelection {
                             ));
                         }
                     };
-                } else if let Some(JSON::Object(map)) = value_opt {
-                    // TODO Handle collisions with existing values (merge logic)
-                    // TODO Gate this behavior on whether
-                    // path_selection.compute_output_shape() returns an object
-                    // with statically known fields, and potentially verify map
-                    // actually has those fields.
-                    output.extend(map);
+                } else if *inline {
+                    if let Some(JSON::Object(map)) = value_opt {
+                        // TODO Handle collisions with existing values (merge logic)
+                        // TODO Gate this behavior on whether
+                        // path_selection.compute_output_shape() returns an object
+                        // with statically known fields, and potentially verify map
+                        // actually has those fields.
+                        output.extend(map);
+                    } else {
+                        // This error case should never happen if the selection was
+                        // constructed by parsing, because the presence of the
+                        // SubSelection (in the absence of an Alias) is enforced by
+                        // NamedSelection::parse_path.
+                        errors.push(ApplyToError::new(
+                            "Path inlined with ... must produce object".to_string(),
+                            input_path.to_vec(),
+                            path.range(),
+                        ));
+                    }
                 } else {
-                    // This error case should never happen if the selection was
-                    // constructed by parsing, because the presence of the
-                    // SubSelection (in the absence of an Alias) is enforced by
-                    // NamedSelection::parse_path.
+                    // If the path has no trailing SubSelection and was not
+                    // inlined with ... (and has no Alias), that's an error.
                     errors.push(ApplyToError::new(
-                        "Path without alias must produce object".to_string(),
+                        "Path must have an alias, a trailing subselection, or be inlined with ... and produce an object".to_string(),
                         input_path.to_vec(),
-                        path_selection.range(),
+                        path.range(),
                     ));
                 }
             }
@@ -423,13 +436,10 @@ impl ApplyToInternal for NamedSelection {
                     },
                 );
             }
-            Self::Path(alias_opt, path_selection) => {
-                let path_shape = path_selection.compute_output_shape(
-                    input_shape,
-                    dollar_shape,
-                    named_var_shapes,
-                );
-                if let Some(alias) = alias_opt {
+            Self::Path { alias, path, .. } => {
+                let path_shape =
+                    path.compute_output_shape(input_shape, dollar_shape, named_var_shapes);
+                if let Some(alias) = alias {
                     output.insert(alias.name().to_string(), path_shape);
                 } else {
                     return path_shape;
@@ -2337,9 +2347,10 @@ mod tests {
         // actually have a SubSelection, which should not be possible to
         // construct through normal parsing.
         let invalid_inline_path_selection = JSONSelection::Named(SubSelection {
-            selections: vec![NamedSelection::Path(
-                None,
-                PathSelection {
+            selections: vec![NamedSelection::Path {
+                alias: None,
+                inline: false,
+                path: PathSelection {
                     path: PathList::Key(
                         Key::field("some").into_with_range(),
                         PathList::Key(
@@ -2350,7 +2361,7 @@ mod tests {
                     )
                     .into_with_range(),
                 },
-            )],
+            }],
             ..Default::default()
         });
 
@@ -2363,11 +2374,46 @@ mod tests {
             (
                 Some(json!({})),
                 vec![ApplyToError::new(
-                    "Path without alias must produce object".to_string(),
+                    "Path must have an alias, a trailing subselection, or be inlined with ... and produce an object".to_string(),
                     vec![],
                     // No range because this is a manually constructed selection.
                     None,
                 ),],
+            ),
+        );
+
+        let valid_inline_path_selection = JSONSelection::Named(SubSelection {
+            selections: vec![NamedSelection::Path {
+                alias: None,
+                inline: true, // This makes it valid.
+                path: PathSelection {
+                    path: PathList::Key(
+                        Key::field("some").into_with_range(),
+                        PathList::Key(
+                            Key::field("object").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                },
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            valid_inline_path_selection.apply_to(&json!({
+                "some": {
+                    "object": {
+                        "key": "value",
+                    },
+                },
+            })),
+            (
+                Some(json!({
+                    "key": "value",
+                })),
+                vec![],
             ),
         );
     }
@@ -2540,7 +2586,7 @@ mod tests {
         assert_eq!(
             selection!(r#"
                 upc
-                kind->match(
+                ... kind->match(
                     ["book", ${ author title }],
                     ["movie", ${ director title }],
                 )
@@ -2595,7 +2641,7 @@ mod tests {
         assert_eq!(
             selection!(r#"
                 upc
-                kind->match(
+                ... kind->match(
                     ["book", ${ author title }],
                     ["movie", ${ director title }],
                     ["album", ${ artist title }],
@@ -2607,8 +2653,7 @@ mod tests {
 
         assert_eq!(
             selection!(r#"
-                upc
-                kind->match(
+                upc...kind->match(
                     ["book", ${ <Book> title }],
                     ["movie", ${ <Film> director }],
                     ["album", ${ <Album> artist }],
@@ -2622,7 +2667,7 @@ mod tests {
             selection!(r#"
                 <Product>
                 upc
-                kind->match(
+                ... kind->match(
                     ["book", ${ <Book> title }],
                     ["movie", ${ <Film> director }],
                 )
@@ -2654,7 +2699,7 @@ mod tests {
                 r#"
                 <Product>
                 upc
-                kind->match(
+                ...kind->match(
                     ["book", ${ <Book> title }],
                     ["movie", ${ <Film> director }],
                     ["album", ${ <Album> artist }],
@@ -2675,5 +2720,122 @@ mod tests {
                 vec![],
             ),
         );
+        {
+            let book_data = json!({
+                "upc": "9780593734223",
+                "kind": "book",
+                "title": "Sapiens",
+            });
+
+            let film_data = json!({
+                "upc": "9780593734223",
+                "kind": "movie",
+                "director": "Ridley Scott",
+            });
+
+            let album_data = json!({
+                "upc": "9780593734223",
+                "kind": "album",
+                "artist": "The Beatles",
+            });
+
+            let unknown_data = json!({
+                "upc": "9780593734223",
+            });
+
+            let selection = selection!(
+                r#"
+                <Product>
+                upc
+                ... $($.kind, null)->match(
+                    ["book", ${ <Book> title }],
+                    ["movie", ${ <Film> director }],
+                    ["album", ${ <Album> artist }],
+                )
+            "#
+            );
+
+            assert_eq!(selection.apply_to(&book_data), (
+                Some(json!({
+                    "__typename": "Book",
+                    "upc": "9780593734223",
+                    "title": "Sapiens",
+                })),
+                vec![],
+            ));
+
+            assert_eq!(selection.apply_to(&film_data), (
+                Some(json!({
+                    "__typename": "Film",
+                    "upc": "9780593734223",
+                    "director": "Ridley Scott",
+                })),
+                vec![],
+            ));
+
+            assert_eq!(selection.apply_to(&album_data), (
+                Some(json!({
+                    "__typename": "Album",
+                    "upc": "9780593734223",
+                    "artist": "The Beatles",
+                })),
+                vec![],
+            ));
+
+            assert_eq!(selection.apply_to(&unknown_data), (
+                Some(json!({
+                    "__typename": "Product",
+                    "upc": "9780593734223",
+                })),
+                vec![ApplyToError::new(
+                    "Method ->match did not match any [candidate, value] pair".to_string(),
+                    vec![json!("->match")],
+                    Some(84..262),
+                )],
+            ));
+
+            let selection_with_unknown_match_case = selection!(
+                r#"
+                upc
+                ... $($.kind, null)->match(
+                    ["book", ${ <Book> title }],
+                    ["movie", ${ <Film> director }],
+                    ["album", ${ <Album> artist }],
+                    # It's too bad the @ gets rebound by the selection set here...
+                    [@, ${ <Unknown> }],
+                )
+            "#
+            );
+
+            assert_eq!(selection_with_unknown_match_case.apply_to(&unknown_data), (
+                Some(json!({
+                    "__typename": "Unknown",
+                    "upc": "9780593734223",
+                })),
+                vec![],
+            ));
+
+            let default_whole_match = selection!(
+                r#"
+                upc
+                ... $(
+                    kind->match(
+                        ["book", ${ <Book> title }],
+                        ["movie", ${ <Film> director }],
+                        ["album", ${ <Album> artist }],
+                    ),
+                    ${ <Product> },
+                )
+            "#
+            );
+
+            assert_eq!(default_whole_match.apply_to(&unknown_data), (
+                Some(json!({
+                    "__typename": "Product",
+                    "upc": "9780593734223",
+                })),
+                vec![],
+            ));
+        }
     }
 }

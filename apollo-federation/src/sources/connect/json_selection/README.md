@@ -84,7 +84,7 @@ below.
 JSONSelection        ::= PathSelection | NamedSelection*
 SubSelection         ::= "{" NamedSelection* "}"
 NamedSelection       ::= NamedPathSelection | PathWithSubSelection | NamedFieldSelection | NamedGroupSelection
-NamedPathSelection   ::= Alias PathSelection
+NamedPathSelection   ::= (Alias | "...") PathSelection
 NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Key ":"
@@ -256,7 +256,8 @@ object in different ways.
 
 Since `PathSelection` returns an anonymous value extracted from the given path,
 if you want to use a `PathSelection` alongside other `NamedSelection` items, you
-can prefix it with an `Alias`, turning it into a `NamedPathSelection`.
+can either prefix it with an `Alias` or use the `...` token to indicate the
+path's output fields should be merged into the larger selection set.
 
 For example, the `abc:` alias in this example causes the `{ a b c }` object
 selected from `some.nested.path` to be nested under an `abc` output key:
@@ -269,6 +270,18 @@ abc: some.nested.path { a b c }
 
 This selection produces an output object with keys `id`, `name`, and `abc`,
 where `abc` is an object with keys `a`, `b`, and `c`.
+
+The `...` token is useful when you want to merge the output fields of a path
+selection as siblings of other fields in a larger selection set:
+
+```graphql
+id
+name
+... some.nested.path { a b c }
+```
+
+This produces an output object with keys `id`, `name`, `a`, `b`, and `c`, all at
+the same level, rather than grouping them under the `abc` alias`.
 
 #### Related syntax: `PathWithSubSelection`
 
