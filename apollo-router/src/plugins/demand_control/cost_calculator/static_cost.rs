@@ -22,7 +22,6 @@ use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
-use crate::plugins::demand_control::cost_calculator::directives::CostDirective;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::DeferredNode;
@@ -59,9 +58,7 @@ fn score_argument(
                 argument_definition.ty.inner_named_type()
             ))
         })?;
-    let cost_directive =
-        CostDirective::from_argument(schema.directive_name_map(), argument_definition)
-            .or(CostDirective::from_type(schema.directive_name_map(), ty));
+    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
 
     match (argument, ty) {
         (_, ExtendedType::Interface(_))
@@ -124,9 +121,7 @@ fn score_variable(
                 argument_definition.ty.inner_named_type()
             ))
         })?;
-    let cost_directive =
-        CostDirective::from_argument(schema.directive_name_map(), argument_definition)
-            .or(CostDirective::from_type(schema.directive_name_map(), ty));
+    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
 
     match (variable, ty) {
         (_, ExtendedType::Interface(_))
@@ -221,7 +216,7 @@ impl StaticCostCalculator {
             .schema
             .type_field_list_size_directive(parent_type, &field.name)
         {
-            Some(dir) => dir.with_field_and_variables(field, ctx.variables).map(Some),
+            Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
             None => Ok(None),
         }?;
         let instance_count = if !field.ty().is_list() {
