@@ -384,7 +384,7 @@ fn validate_field<'s>(
                 EntityResolver::Implicit,
             ) {
                 Ok(Some(field_set)) => {
-                    entity_checker.add_connector(&field_set);
+                    entity_checker.add_connector(field_set);
                 }
                 Err(err) => errors.push(err),
                 _ => {}

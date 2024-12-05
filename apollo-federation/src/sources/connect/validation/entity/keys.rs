@@ -1,8 +1,10 @@
 use std::fmt;
+use std::fmt::Display;
 use std::fmt::Formatter;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -11,7 +13,6 @@ use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::compare_keys::field_set_is_subset;
-use super::compare_keys::optimize_field_set;
 use super::VariableReference;
 use super::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::sources::connect::validation::Code;
@@ -23,7 +24,7 @@ use crate::sources::connect::Namespace;
 #[derive(Default)]
 pub(crate) struct EntityKeyChecker<'schema> {
     /// Any time we see `type T @key(fields: "f")` (with resolvable: true)
-    resolvable_keys: Vec<(Valid<FieldSet>, &'schema Node<Directive>, &'schema Name)>,
+    resolvable_keys: Vec<(FieldSet, &'schema Node<Directive>, &'schema Name)>,
     /// Any time we see either:
     /// - `type Query { t(f: X): T @connect(entity: true) }` (Explicit entity resolver)
     /// - `type T { f: X g: Y @connect(... $this.f ...) }`  (Implicit entity resolver)
@@ -38,14 +39,14 @@ impl<'schema> EntityKeyChecker<'schema> {
         type_name: &'schema Name,
     ) {
         self.resolvable_keys
-            .push((optimize_field_set(field_set), directive, type_name));
+            .push((field_set.clone(), directive, type_name));
     }
 
-    pub(crate) fn add_connector(&mut self, field_set: &Valid<FieldSet>) {
+    pub(crate) fn add_connector(&mut self, field_set: Valid<FieldSet>) {
         self.entity_connectors
             .entry(field_set.selection_set.ty.clone())
             .or_default()
-            .push(optimize_field_set(field_set));
+            .push(field_set);
     }
 
     /// For each @key we've seen, check if there's a corresponding entity connector
@@ -123,16 +124,8 @@ impl std::fmt::Debug for EntityKeyChecker<'_> {
     }
 }
 
-/// Given the parts of the connector that contain variables, synthesize a field
-/// set appropriate for use in a @key directive.
-///
-/// This only looks at `$args` variables because those are the ones used
-/// for `entity: true` connectors.
-///
-/// TODO: this is simpler to code in expand/mod.rs and might be something we
-/// could combine. The expand code not only generates a key, but also copies
-/// the types related to the key into the expanded subgraph, so it does more work
-/// than this function.
+/// Given the variables relevant to entity fetching, synthesize a FieldSet
+/// appropriate for use in a @key directive.
 pub(crate) fn make_key_field_set_from_variables(
     schema: &Schema,
     object_type_name: &Name,
@@ -152,17 +145,15 @@ pub(crate) fn make_key_field_set_from_variables(
         return Ok(None);
     }
 
-    let mut keys = Vec::with_capacity(params.len());
-    for VariableReference { path, .. } in params {
-        let parts = path.iter().map(|part| part.part.as_ref());
-        let field_and_selection = FieldAndSelection::from_path(parts);
-        keys.push(field_and_selection.to_key());
+    let mut merged = TrieNode::default();
+    for param in params {
+        merged.insert(&param.path.iter().map(|p| p.as_str()).collect::<Vec<_>>());
     }
 
     FieldSet::parse_and_validate(
         Valid::assume_valid_ref(schema),
         object_type_name.clone(),
-        keys.join(" "),
+        merged.to_string(),
         "",
     )
     // This shouldn't happen because we've already validated the inputs using ArgumentVisitor
@@ -173,43 +164,74 @@ pub(crate) fn make_key_field_set_from_variables(
     }).map(Some)
 }
 
-/// Represents a field and the subselection of that field, which can then be joined together into
-/// a full named selection (which is the same as a key, in simple cases).
-///
-/// TODO: this is copied from expand/mod.rs
-struct FieldAndSelection<'a> {
-    field_name: &'a str,
-    sub_selection: String,
-}
+#[derive(Default)]
+struct TrieNode(IndexMap<String, TrieNode>);
 
-impl<'a> FieldAndSelection<'a> {
-    /// Extract from a path like `a.b.c` into `a` and `b { c }`
-    fn from_path<I: IntoIterator<Item = &'a str>>(parts: I) -> Self {
-        let mut parts = parts.into_iter().peekable();
-        let field_name = parts.next().unwrap_or_default();
-        let mut sub_selection = String::new();
-        let mut closing_braces = 0;
-        while let Some(sub_path) = parts.next() {
-            sub_selection.push_str(sub_path);
-            if parts.peek().is_some() {
-                sub_selection.push_str(" { ");
-                closing_braces += 1;
-            }
-        }
-        for _ in 0..closing_braces {
-            sub_selection.push_str(" }");
-        }
-        FieldAndSelection {
-            field_name,
-            sub_selection,
+impl TrieNode {
+    fn insert(&mut self, path: &[&str]) {
+        let mut node = self;
+        for head in path {
+            node = node.0.entry(head.to_string()).or_default();
         }
     }
+}
 
-    fn to_key(&self) -> String {
-        if self.sub_selection.is_empty() {
-            self.field_name.to_string()
-        } else {
-            format!("{} {{ {} }}", self.field_name, self.sub_selection)
+impl Display for TrieNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for (i, (key, node)) in self.0.iter().enumerate() {
+            write!(f, "{}", key)?;
+            if !node.0.is_empty() {
+                write!(f, " {{ {} }}", node)?;
+            }
+            if i != self.0.len() - 1 {
+                write!(f, " ")?;
+            }
         }
+        Ok(())
+    }
+}
+
+#[test]
+fn test_trie() {
+    let mut trie = TrieNode::default();
+    trie.insert(&["a", "b", "c"]);
+    trie.insert(&["a", "b", "d"]);
+    trie.insert(&["a", "b", "e"]);
+    trie.insert(&["a", "c"]);
+    trie.insert(&["a", "d"]);
+    trie.insert(&["b"]);
+    assert_eq!(trie.to_string(), "a { b { c d e } c d } b");
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+    use apollo_compiler::Schema;
+
+    use super::make_key_field_set_from_variables;
+    use super::VariableReference;
+
+    #[test]
+    fn test_make_key_field_set_from_variables() {
+        let result = make_key_field_set_from_variables(
+            &Schema::parse_and_validate("type Query { t: T } type T { a: A b: ID } type A { b: B c: ID d: ID } type B { c: ID d: ID e: ID }", "").unwrap(),
+            &name!("T"),
+            &vec![
+                VariableReference::parse("$args.a.b.c", 0).unwrap(),
+                VariableReference::parse("$args.a.b.d", 0).unwrap(),
+                VariableReference::parse("$args.a.b.e", 0).unwrap(),
+                VariableReference::parse("$args.a.c", 0).unwrap(),
+                VariableReference::parse("$args.a.d", 0).unwrap(),
+                VariableReference::parse("$args.b", 0).unwrap()
+            ],
+            super::EntityResolver::Explicit,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            result.serialize().no_indent().to_string(),
+            "a { b { c d e } c d } b"
+        );
     }
 }

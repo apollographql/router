@@ -151,7 +151,7 @@ pub(super) fn validate_entity_arg(
         variables,
         EntityResolver::Explicit,
     )? {
-        entity_checker.add_connector(&fs);
+        entity_checker.add_connector(fs);
     };
 
     Ok(())
