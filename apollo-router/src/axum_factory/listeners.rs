@@ -15,6 +15,7 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
+use hyper_util::rt::TokioTimer;
 use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
@@ -275,6 +276,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut http_connection = builder.http1();
                                         let http_config = http_connection
                                                          .keep_alive(true)
+                                                         .timer(TokioTimer::new())
                                                          .header_read_timeout(Duration::from_secs(10));
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
@@ -319,6 +321,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut http_connection = builder.http1();
                                         let http_config = http_connection
                                                          .keep_alive(true)
+                                                         .timer(TokioTimer::new())
                                                          .header_read_timeout(Duration::from_secs(10));
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
@@ -373,6 +376,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut http_connection = builder.http1();
                                         let http_config = http_connection
                                                          .keep_alive(true)
+                                                         .timer(TokioTimer::new())
                                                          .header_read_timeout(Duration::from_secs(10));
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
