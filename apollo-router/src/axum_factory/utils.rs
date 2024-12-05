@@ -26,27 +26,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 
         // Before we make the span we need to attach span info that may have come in from the request.
         let context = global::get_text_map_propagator(|propagator| {
-            /// A header extractor that works on http 1.x types.
-            ///
-            /// The implementation is a straight copy from [opentelemetry_http::HeaderExtractor].
-            /// This can be removed after we update otel.
-            struct HeaderExtractor<'a>(&'a http::HeaderMap);
-            impl<'a> opentelemetry_api::propagation::Extractor for HeaderExtractor<'a> {
-                /// Get a value for a key from the HeaderMap.  If the value is not valid ASCII, returns None.
-                fn get(&self, key: &str) -> Option<&str> {
-                    self.0.get(key).and_then(|value| value.to_str().ok())
-                }
-
-                /// Collect all the keys from the HeaderMap.
-                fn keys(&self) -> Vec<&str> {
-                    self.0
-                        .keys()
-                        .map(|value| value.as_str())
-                        .collect::<Vec<_>>()
-                }
-            }
-
-            propagator.extract(&HeaderExtractor(request.headers()))
+            propagator.extract(&crate::otel_compat::HeaderExtractor(request.headers()))
         });
         let use_legacy_request_span = matches!(self.span_mode, SpanMode::Deprecated);
 

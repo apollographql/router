@@ -299,22 +299,10 @@ where
             )?))?;
 
         get_text_map_propagator(|propagator| {
-            // Otel is not upgraded yet, so we need to convert the request headers into http 0.2 format rather than passing in the request directly.
-            let mut headers = http_0_2::HeaderMap::new();
             propagator.inject_context(
                 &prepare_context(tracing::span::Span::current().context()),
-                &mut opentelemetry_http::HeaderInjector(&mut headers),
+                &mut crate::otel_compat::HeaderInjector(request.headers_mut()),
             );
-            for (name, value) in headers {
-                if let Some(name) = name {
-                    request.headers_mut().insert(
-                        HeaderName::from_str(name.as_str())
-                            .expect("header name should already have been validated"),
-                        HeaderValue::from_bytes(value.as_bytes())
-                            .expect("header value should already have been validated"),
-                    );
-                }
-            }
         });
 
         let response = client.call(request).await.map_err(BoxError::from)?;
