@@ -1926,11 +1926,11 @@ async fn http_deferred_service() -> impl Service<
         .await
         .unwrap()
         .map_err(Into::into)
-        .map_response(|response: http::Response<RouterBody>| {
+        .map_response(|response: http::Response<axum::body::Body>| {
             let response = response.map(|body| {
                 // Convert from axum’s BoxBody to AsyncBufRead
-                let mut body = Box::pin(body);
-                let stream = poll_fn(move |ctx| body.into_data_stream().poll_next_unpin(ctx))
+                let mut body = body.into_data_stream();
+                let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
                     .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
                 StreamReader::new(stream)
             });
