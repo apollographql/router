@@ -215,7 +215,6 @@ async fn tls_server_with_client_auth(
     let acceptor = TlsAcceptor::builder()
         .with_tls_config(
             ServerConfig::builder()
-                .with_safe_defaults()
                 .with_client_cert_verifier(client_auth)
                 .with_single_cert(certificates, key)
                 .unwrap(),
