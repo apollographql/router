@@ -150,7 +150,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_sync_agent_exporter()
                             .expect("jaeger pipeline failed"),
-                        opentelemtry_sdk::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -167,7 +167,7 @@ impl Telemetry {
                         )
                         .build_span_exporter()
                         .expect("otlp pipeline failed"),
-                        opentelemtry_sdk::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -181,7 +181,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemtry_sdk::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -195,7 +195,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .init_exporter()
                             .expect("zipkin pipeline failed"),
-                        opentelemtry_sdk::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -213,7 +213,7 @@ impl Telemetry {
 
         match self {
             Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger_propagator::Propagator::new();
+                let propagator = opentelemetry_jaeger::Propagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -253,7 +253,7 @@ impl Telemetry {
 
         match self {
             Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger_propagator::Propagator::new();
+                let propagator = opentelemetry_jaeger::Propagator::new();
                 propagator.extract(&headers)
             }
             Telemetry::Datadog => {
