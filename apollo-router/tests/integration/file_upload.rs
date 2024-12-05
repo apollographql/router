@@ -50,7 +50,7 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
         .part("0", Part::text(FILE).file_name(FILE_NAME));
 
     async fn subgraph_handler(
-        mut request: http::Request<hyper::Body>,
+        mut request: http::Request<axum::body::Body>,
     ) -> impl axum::response::IntoResponse {
         let boundary = request
             .headers()
@@ -1031,7 +1031,7 @@ mod helper {
     use http::StatusCode;
     use http_body::Frame;
     use http_body_util::StreamBody;
-    use hyper::Body;
+    use axum::body::Body;
     use itertools::Itertools;
     use multer::Multipart;
     use reqwest::multipart::Form;
