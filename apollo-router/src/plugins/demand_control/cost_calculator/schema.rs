@@ -54,9 +54,9 @@ impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
         let fed_schema = ValidFederationSchema::new((*schema).clone())?;
         let mut type_field_metadata: HashMap<Name, HashMap<Name, FieldDirectiveMetadata>> =
-            HashMap::new();
+            HashMap::with_hasher(ahash::RandomState::default());
         let mut type_input_metadata: HashMap<Name, HashMap<Name, InputObjectDirectiveMetadata>> =
-            HashMap::new();
+            HashMap::with_hasher(ahash::RandomState::default());
 
         for (type_name, type_) in &schema.types {
             match type_ {
@@ -121,7 +121,7 @@ impl DemandControlledSchema {
                     cost_directive: None,
                     list_size_directive: None,
                     requires_directive: None,
-                    argument_directive_metadata: HashMap::new(),
+                    argument_directive_metadata: HashMap::with_hasher(ahash::RandomState::default()),
                 });
         field_metadata.cost_directive =
             CostSpecDefinition::cost_directive_from_field(schema, field_definition, field_type)?;
