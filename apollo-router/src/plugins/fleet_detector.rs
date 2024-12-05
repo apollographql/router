@@ -160,7 +160,7 @@ impl GaugeStore {
             let opts = opts.clone();
             gauges.push(
                 meter
-                    .u64_observable_gauge("apollo.router.schema")
+                    .u64_observable_gauge("apollo.router.instance.schema")
                     .with_description("Details about the current in-use schema")
                     .with_callback(move |gauge| {
                         // NOTE: this is a fixed gauge. We only care about observing the included
