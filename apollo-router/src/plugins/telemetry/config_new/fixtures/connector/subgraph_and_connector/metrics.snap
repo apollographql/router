@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Connector HTTP client duration metric
+description: Both subgraph and connector HTTP client duration metrics
 expression: "&metrics.all()"
 info:
   telemetry:
@@ -12,10 +12,9 @@ info:
             attributes:
               subgraph.name: true
         connector:
-          http:
-            http.client.request.duration:
-              attributes:
-                subgraph.name: true
+          http.client.request.duration:
+            attributes:
+              subgraph.name: true
 ---
 - name: http.client.request.duration
   description: Duration of HTTP client requests.
@@ -23,8 +22,10 @@ info:
   data:
     datapoints:
       - sum: 0.1
+        count: 1
         attributes:
           subgraph.name: products
       - sum: 0.1
+        count: 1
         attributes:
           subgraph.name: reviews
