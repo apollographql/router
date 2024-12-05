@@ -1289,7 +1289,7 @@ async fn jwks_send_headers() {
 
     let got_header = Arc::new(AtomicBool::new(false));
     let gh = got_header.clone();
-    let service = make_service_fn(move |_| {
+    let service = move |_| {
         let gh = gh.clone();
         async move {
             //let gh1 = gh.clone();
@@ -1318,7 +1318,7 @@ async fn jwks_send_headers() {
                 }
             }))
         }
-    });
+    };
     let server = axum::serve(listener, service);
     tokio::task::spawn(server);
 
