@@ -188,7 +188,7 @@ pub struct Response {
 
 #[buildstructor::buildstructor]
 impl Response {
-    pub async fn next_response(&mut self) -> Option<Result<Bytes, BoxError>> {
+    pub async fn next_response(&mut self) -> Option<Result<Bytes, axum::Error>> {
         let body = std::mem::replace(self.response.body_mut(), body::empty());
         let mut stream_body = body.into_data_stream();
         let resp = stream_body.next().await;
@@ -461,7 +461,7 @@ where
     match val_any.downcast_mut::<Body>() {
         Some(body) => mem::take(body),
         None => Body::new(services::http::body_stream::BodyStream::new(
-            b.map_err(Into::into),
+            b.map_err(axum::Error::new),
         )),
     }
 }

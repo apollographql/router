@@ -18,6 +18,7 @@ use http::HeaderValue;
 use http::Request;
 use http_body::Body as HttpBody;
 use http_body::Frame;
+use http_body_util::BodyExt;
 use http_body_util::StreamBody;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -302,7 +303,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
             Some(compressor) => RouterBody::new(StreamBody::new(
                 compressor
                     .process(body)
-                    .map(|b| b.map(|body| Frame::data(body)).map_err(BoxError::from)),
+                    .map(|b| b.map(|body| Frame::data(body)).map_err(axum::Error::new)),
             )),
         };
 
@@ -354,5 +355,8 @@ async fn do_fetch(
         })
         .await?
         .into_parts();
-    Ok(http::Response::from_parts(parts, RouterBody::new(body)))
+    Ok(http::Response::from_parts(
+        parts,
+        RouterBody::new(body.map_err(axum::Error::new)),
+    ))
 }

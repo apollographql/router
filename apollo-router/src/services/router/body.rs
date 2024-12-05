@@ -9,6 +9,7 @@ use futures::StreamExt;
 use http_body::Frame;
 use http_body::SizeHint;
 // use http_body_util::combinators::BoxBody;
+use axum::Error as AxumError;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyDataStream;
 use http_body_util::BodyExt;
@@ -19,7 +20,7 @@ use hyper::body::Body as HttpBody;
 use tower::BoxError;
 use tower::Service;
 
-pub type RouterBody = UnsyncBoxBody<Bytes, BoxError>;
+pub type RouterBody = UnsyncBoxBody<Bytes, AxumError>;
 
 pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
     Ok(body.collect().await?.to_bytes())
@@ -27,13 +28,13 @@ pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Err
 
 // We create some utility functions to make Empty and Full bodies
 // and convert types
-pub(crate) fn empty() -> UnsyncBoxBody<Bytes, BoxError> {
+pub(crate) fn empty() -> UnsyncBoxBody<Bytes, AxumError> {
     Empty::<Bytes>::new()
         .map_err(|never| match never {})
         .boxed_unsync()
 }
 
-pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, BoxError> {
+pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, AxumError> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed_unsync()
@@ -70,7 +71,7 @@ pub(crate) fn from_data_stream(data_stream: BodyDataStream<RouterBody>) -> Route
 
 pub(crate) fn from_result_stream<S>(data_stream: S) -> RouterBody
 where
-    S: Stream<Item = Result<Bytes, BoxError>> + Send + 'static,
+    S: Stream<Item = Result<Bytes, AxumError>> + Send + 'static,
 {
     RouterBody::new(StreamBody::new(
         data_stream.map(|s| s.map(|body| Frame::data(body))),

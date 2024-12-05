@@ -58,6 +58,9 @@ pub(super) enum FileUploadError {
 
     #[error("{0}")]
     BoxError(#[from] BoxError),
+
+    #[error("{0}")]
+    AxumError(#[from] axum::Error),
 }
 
 impl From<FileUploadError> for graphql::Error {

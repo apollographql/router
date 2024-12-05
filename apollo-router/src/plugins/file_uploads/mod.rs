@@ -196,7 +196,7 @@ async fn router_layer(
         request_parts.headers.remove(CONTENT_LENGTH);
 
         let request_body = RouterBody::new(StreamBody::new(
-            operations_stream.map(|b| b.map(|body| Frame::data(body)).map_err(BoxError::from)),
+            operations_stream.map(|b| b.map(|body| Frame::data(body)).map_err(axum::Error::new)),
         ));
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
@@ -370,7 +370,7 @@ pub(crate) async fn http_request_wrapper(
         let request_body = RouterBody::new(StreamBody::new(
             form.into_stream(operations)
                 .await
-                .map(|b| b.map(|body| Frame::data(body)).map_err(BoxError::from)),
+                .map(|b| b.map(|body| Frame::data(body)).map_err(axum::Error::new)),
         ));
 
         return http::Request::from_parts(request_parts, request_body);
