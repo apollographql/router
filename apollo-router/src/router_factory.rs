@@ -13,7 +13,6 @@ use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;

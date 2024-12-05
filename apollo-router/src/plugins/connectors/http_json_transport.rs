@@ -89,7 +89,7 @@ pub(crate) fn make_request(
     }
 
     let request = request
-        .body(body.into())
+        .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
     let debug_request = debug.as_ref().map(|_| {

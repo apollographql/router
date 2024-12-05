@@ -7,7 +7,6 @@ use futures::stream::TryStreamExt;
 use futures::Stream;
 use http::HeaderMap;
 use http::HeaderValue;
-use http_body::Frame;
 use http_body_util::BodyExt;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;

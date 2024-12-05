@@ -8,7 +8,6 @@ use http::header::CONTENT_TYPE;
 use http::HeaderName;
 use http::HeaderValue;
 use http_body::Frame;
-use http_body_util::BodyStream;
 use http_body_util::StreamBody;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
