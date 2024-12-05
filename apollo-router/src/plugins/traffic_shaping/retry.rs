@@ -2,7 +2,8 @@ use std::future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tower::retry::budget::Budget;
+use tower::retry::budget::Budget as _;
+use tower::retry::budget::TpsBudget;
 use tower::retry::Policy;
 
 use crate::query_planner::OperationKind;
@@ -10,7 +11,7 @@ use crate::services::subgraph;
 
 #[derive(Clone, Default)]
 pub(crate) struct RetryPolicy {
-    budget: Arc<Budget>,
+    budget: Arc<TpsBudget>,
     retry_mutations: bool,
     subgraph_name: String,
 }
@@ -24,7 +25,7 @@ impl RetryPolicy {
         subgraph_name: String,
     ) -> Self {
         Self {
-            budget: Arc::new(Budget::new(
+            budget: Arc::new(TpsBudget::new(
                 duration.unwrap_or_else(|| Duration::from_secs(10)),
                 min_per_sec.unwrap_or(10),
                 retry_percent.unwrap_or(0.2),
@@ -36,9 +37,13 @@ impl RetryPolicy {
 }
 
 impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
-    type Future = future::Ready<Self>;
+    type Future = future::Ready<()>;
 
-    fn retry(&self, req: &subgraph::Request, result: Result<&Res, &E>) -> Option<Self::Future> {
+    fn retry(
+        &mut self,
+        req: &mut subgraph::Request,
+        result: &mut Result<Res, E>,
+    ) -> Option<Self::Future> {
         match result {
             Ok(_) => {
                 // Treat all `Response`s as success,
@@ -51,8 +56,8 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                     return None;
                 }
 
-                let withdrew = self.budget.withdraw();
-                if withdrew.is_err() {
+                let can_retry = self.budget.withdraw();
+                if !can_retry {
                     tracing::info!(
                         monotonic_counter.apollo_router_http_request_retry_total = 1u64,
                         status = "aborted",
@@ -67,12 +72,12 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                     subgraph = %self.subgraph_name,
                 );
 
-                Some(future::ready(self.clone()))
+                Some(future::ready(()))
             }
         }
     }
 
-    fn clone_request(&self, req: &subgraph::Request) -> Option<subgraph::Request> {
+    fn clone_request(&mut self, req: &subgraph::Request) -> Option<subgraph::Request> {
         Some(req.clone())
     }
 }

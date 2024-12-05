@@ -34,6 +34,7 @@ use axum::Extension;
 use axum::Json;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
+use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use prost::Message;
 use proto::reports::Report;
@@ -378,9 +379,12 @@ where
         .expect("router service call failed");
 
     // Drain the response
-    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+    let mut found_report = match response
+        .response
+        .into_body()
+        .collect()
         .await
-        .map(|b| String::from_utf8(b.to_vec()))
+        .map(|b| String::from_utf8(b.to_bytes().to_vec()))
     {
         Ok(Ok(response)) => {
             if response.contains("errors") {
@@ -428,7 +432,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
         .expect("router service call failed");
 
     // Drain the response (and throw it away)
-    let _found_report = hyper::body::to_bytes(response.response.into_body()).await;
+    let _found_report = response.response.into_body().collect().await;
 
     // Give the server a little time to export something
     // If this test fails, consider increasing this time.

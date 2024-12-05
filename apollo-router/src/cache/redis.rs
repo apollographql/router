@@ -160,7 +160,10 @@ impl RedisCacheStorage {
         if let Some(tls) = config.tls.as_ref() {
             let tls_cert_store = tls.create_certificate_store().transpose()?;
             let client_cert_config = tls.client_authentication.as_ref();
-            let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
+            let tls_client_config = generate_tls_client_config(
+                tls_cert_store,
+                client_cert_config.map(|arc| arc.as_ref()),
+            )?;
             let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_client_config));
 
             client_config.tls = Some(TlsConfig {

@@ -64,7 +64,7 @@ where
                                 CONTENT_TYPE,
                                 HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
                             )
-                            .body(crate::services::router::Body::from(page.clone()))
+                            .body(crate::services::router::body::full(page.clone()))
                             .unwrap();
                         ControlFlow::Break(router::Response {
                             response,

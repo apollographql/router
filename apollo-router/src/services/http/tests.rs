@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
+use axum::body::Body;
 use axum::Server;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
@@ -16,15 +17,14 @@ use http::Uri;
 use http::Version;
 use hyper::server::conn::AddrIncoming;
 use hyper::service::make_service_fn;
-use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::TlsAcceptor;
 #[cfg(unix)]
 use hyperlocal::UnixServerExt;
 use mime::APPLICATION_JSON;
+use rustls::pki_types::CertificateDer;
+use rustls::pki_types::PrivateKeyDer;
 use rustls::server::AllowAnyAuthenticatedClient;
-use rustls::Certificate;
-use rustls::PrivateKey;
 use rustls::RootCertStore;
 use rustls::ServerConfig;
 use serde_json_bytes::ByteString;
@@ -52,8 +52,8 @@ use crate::TestHarness;
 
 async fn tls_server(
     listener: tokio::net::TcpListener,
-    certificates: Vec<Certificate>,
-    key: PrivateKey,
+    certificates: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
     body: &'static str,
 ) {
     let acceptor = TlsAcceptor::builder()
@@ -202,20 +202,19 @@ async fn tls_custom_root() {
 
 async fn tls_server_with_client_auth(
     listener: tokio::net::TcpListener,
-    certificates: Vec<Certificate>,
-    key: PrivateKey,
-    client_root: Certificate,
+    certificates: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+    client_root: CertificateDer<'static>,
     body: &'static str,
 ) {
     let mut client_auth_roots = RootCertStore::empty();
-    client_auth_roots.add(&client_root).unwrap();
+    client_auth_roots.add(client_root).unwrap();
 
     let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots).boxed();
 
     let acceptor = TlsAcceptor::builder()
         .with_tls_config(
             ServerConfig::builder()
-                .with_safe_defaults()
                 .with_client_cert_verifier(client_auth)
                 .with_single_cert(certificates, key)
                 .unwrap(),
@@ -344,8 +343,7 @@ async fn test_subgraph_h2c() {
     let subgraph_service = HttpClientService::new(
         "test",
         rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
+            .with_native_roots()?
             .with_no_client_auth(),
         crate::configuration::shared::Client::builder()
             .experimental_http2(Http2Config::Http2Only)
@@ -422,8 +420,7 @@ async fn test_compressed_request_response_body() {
     let subgraph_service = HttpClientService::new(
         "test",
         rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
+            .with_native_roots()?
             .with_no_client_auth(),
         crate::configuration::shared::Client::builder()
             .experimental_http2(Http2Config::Http2Only)

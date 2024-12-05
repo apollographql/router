@@ -137,10 +137,12 @@ async fn graphql_client(nesting_level: usize) -> Result<Value, String> {
         .unwrap();
     let client = hyper::Client::new();
     let mut response = client.request(request).await.map_err(|e| e.to_string())?;
-    let body = hyper::body::to_bytes(response.body_mut())
+    let body = response
+        .body_mut()
+        .collect()
         .await
         .map_err(|e| e.to_string())?;
-    let json = serde_json::from_slice::<Value>(&body).map_err(|e| e.to_string())?;
+    let json = serde_json::from_slice::<Value>(&body.to_bytes()).map_err(|e| e.to_string())?;
     if let Some(errors) = json.get("errors") {
         if !errors.is_null() {
             return Err(errors.to_string());

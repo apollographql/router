@@ -6,11 +6,15 @@ use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::router;
+use apollo_router::services::router::body::RouterBody;
 use apollo_router::services::supergraph;
 use apollo_router::Context;
 use apollo_router::TestHarness;
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::FutureExt;
+use http_body_util::BodyExt as _;
+use http_body_util::Full;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -258,10 +262,10 @@ const TEST_PLUGIN_ORDERING_CONTEXT_KEY: &str = "ordering-trace";
 #[tokio::test(flavor = "multi_thread")]
 async fn test_plugin_ordering() {
     async fn coprocessor(
-        request: http::Request<hyper::Body>,
-    ) -> Result<http::Response<hyper::Body>, BoxError> {
-        let body = hyper::body::to_bytes(request.into_body()).await?;
-        let mut json: serde_json::Value = serde_json::from_slice(&body)?;
+        request: http::Request<RouterBody>,
+    ) -> Result<http::Response<RouterBody>, BoxError> {
+        let body = request.into_body().collect().await?;
+        let mut json: serde_json::Value = serde_json::from_slice(&body.to_bytes())?;
         let stage = json["stage"].as_str().unwrap().to_owned();
         json["context"]["entries"]
             .as_object_mut()
@@ -271,8 +275,8 @@ async fn test_plugin_ordering() {
             .as_array_mut()
             .unwrap()
             .push(format!("coprocessor {stage}").into());
-        Ok(http::Response::new(hyper::Body::from(
-            serde_json::to_string(&json)?,
+        Ok(http::Response::new(RouterBody::new(
+            Full::new(Bytes::from(serde_json::to_vec(&json)?)).map_err(|never| match never {}),
         )))
     }
 

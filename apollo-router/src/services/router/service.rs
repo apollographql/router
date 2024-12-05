@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::body::StreamBody;
 use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
@@ -12,7 +11,6 @@ use bytes::BytesMut;
 use futures::future::join_all;
 use futures::future::ready;
 use futures::future::BoxFuture;
-use futures::stream;
 use futures::stream::once;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -24,7 +22,8 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use http_body::Body as _;
+use http_body::Frame;
+use http_body_util::StreamBody;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use tower::BoxError;
@@ -287,10 +286,9 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(
-                            RouterBody::from("router service is not available to process request")
-                                .into_inner(),
-                        )
+                        .body(router::body::full(
+                            "router service is not available to process request",
+                        ))
                         .expect("cannot fail"),
                     context,
                 })
@@ -310,10 +308,7 @@ impl RouterService {
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
                         Ok(router::Response {
-                            response: http::Response::from_parts(
-                                parts,
-                                RouterBody::from(body).into_inner(),
-                            ),
+                            response: http::Response::from_parts(parts, router::body::full(body)),
                             context,
                         })
                     })
@@ -339,42 +334,25 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
-                    let multipart_stream = match response.subscribed {
-                        Some(true) => StreamBody::new(Multipart::new(
-                            body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            }),
-                            ProtocolMode::Subscription,
-                        )),
-                        _ => StreamBody::new(Multipart::new(
-                            once(ready(response)).chain(body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            })),
-                            ProtocolMode::Defer,
-                        )),
+                    let response = match response.subscribed {
+                        Some(true) => http::Response::from_parts(
+                            parts,
+                            RouterBody::new(StreamBody::new(
+                                Multipart::new(body, ProtocolMode::Subscription)
+                                    .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
+                            )),
+                        ),
+                        _ => http::Response::from_parts(
+                            parts,
+                            RouterBody::new(StreamBody::new(
+                                Multipart::new(
+                                    once(ready(response)).chain(body),
+                                    ProtocolMode::Defer,
+                                )
+                                .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
+                            )),
+                        ),
                     };
-                    let response = (parts, multipart_stream).into_response().map(|body| {
-                        // Axum makes this `body` have type:
-                        // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                        let mut body = Box::pin(body);
-                        // We make a stream based on its `poll_data` method
-                        // in order to create a `hyper::Body`.
-                        RouterBody::wrap_stream(stream::poll_fn(move |ctx| {
-                            body.as_mut().poll_data(ctx)
-                        }))
-                        .into_inner()
-                        // … but we ignore the `poll_trailers` method:
-                        // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                        // Apparently HTTP/2 trailers are like headers, except after the response body.
-                        // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                        // so ignoring `poll_trailers` is fine.
-                        // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                        // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                    });
 
                     Ok(RouterResponse { response, context })
                 } else {
@@ -507,10 +485,7 @@ impl RouterService {
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
-                response: http::Response::from_parts(
-                    parts,
-                    RouterBody::from(bytes.freeze()).into_inner(),
-                ),
+                response: http::Response::from_parts(parts, router::body::full(bytes.freeze())),
                 context,
             })
         } else {

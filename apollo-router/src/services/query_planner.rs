@@ -115,10 +115,10 @@ pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<Request, Response, QueryPlannerError>;
 #[allow(dead_code)]
 pub(crate) type ServiceResult = Result<Response, QueryPlannerError>;
-#[allow(dead_code)]
-pub(crate) type Body = hyper::Body;
-#[allow(dead_code)]
-pub(crate) type Error = hyper::Error;
+// #[allow(dead_code)]
+// pub(crate) type Body = hyper::Body;
+// #[allow(dead_code)]
+// pub(crate) type Error = hyper::Error;
 
 #[async_trait]
 pub(crate) trait QueryPlannerPlugin: Send + Sync + 'static {

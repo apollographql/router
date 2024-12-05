@@ -3,13 +3,12 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use async_compression::tokio::bufread::BrotliDecoder;
-use axum::body::BoxBody;
+use axum::body::Body;
 use futures::stream::poll_fn;
 use futures::Future;
 use futures::Stream;
 use futures::StreamExt;
 use http::HeaderValue;
-use http_body::Body;
 use mediatype::MediaType;
 use mediatype::ReadParams;
 use mime::APPLICATION_JSON;
@@ -19,6 +18,8 @@ use tokio_util::io::StreamReader;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+
+use crate::services::router::body::RouterBody;
 
 /// Added by `response_decompression` to `http::Response::extensions`
 pub(crate) struct ResponseBodyWasCompressed(pub(crate) bool);
@@ -53,7 +54,7 @@ pub(crate) fn response_decompression<InnerService, RequestBody>(
 >
 where
     InnerService:
-        Service<http::Request<RequestBody>, Response = http::Response<BoxBody>, Error = BoxError>,
+        Service<http::Request<RequestBody>, Response = http::Response<Body>, Error = BoxError>,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<RequestBody>| {
@@ -62,9 +63,9 @@ where
                 .insert("accept-encoding", "br".try_into().unwrap());
             request
         })
-        .map_response(|response: http::Response<BoxBody>| {
+        .map_response(|response: http::Response<Body>| {
             let mut response = response.map(|body| {
-                // Convert from axum’s BoxBody to AsyncBufRead
+                // Convert from axum’s Body to AsyncBufRead
                 let mut body = Box::pin(body);
                 let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
                     .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
@@ -243,7 +244,7 @@ pub(crate) fn json<InnerService>(
 >
 where
     InnerService: Service<
-        http::Request<hyper::Body>,
+        http::Request<RouterBody>,
         Response = http::Response<MaybeMultipart<Vec<u8>>>,
         Error = BoxError,
     >,
