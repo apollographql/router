@@ -1019,6 +1019,7 @@ mod helper {
     use std::path::PathBuf;
 
     use apollo_router::services::router::body::RouterBody;
+    use axum::body::Body;
     use axum::extract::State;
     use axum::response::IntoResponse;
     use axum::BoxError;
@@ -1031,7 +1032,6 @@ mod helper {
     use http::StatusCode;
     use http_body::Frame;
     use http_body_util::StreamBody;
-    use axum::body::Body;
     use itertools::Itertools;
     use multer::Multipart;
     use reqwest::multipart::Form;
