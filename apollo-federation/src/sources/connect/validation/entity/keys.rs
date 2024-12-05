@@ -26,7 +26,7 @@ pub(crate) struct EntityKeyChecker<'schema> {
     resolvable_keys: Vec<(Valid<FieldSet>, &'schema Node<Directive>, &'schema Name)>,
     /// Any time we see either:
     /// - `type Query { t(f: X): T @connect(entity: true) }` (Explicit entity resolver)
-    /// - `type T { f: X g: Y @connect(... $this.f ...) }``  (Implicit entity resolver)
+    /// - `type T { f: X g: Y @connect(... $this.f ...) }`  (Implicit entity resolver)
     entity_connectors: HashMap<Name, Vec<Valid<FieldSet>>>,
 }
 
