@@ -1179,7 +1179,7 @@ type User
             "#,
             "operation.graphql",
         )
-            .unwrap();
+        .unwrap();
 
         let config = QueryPlannerConfig {
             generate_query_fragments: true,
