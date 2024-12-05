@@ -4,6 +4,27 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.58.1] - 2024-12-05
+
+## 🐛 Fixes
+
+### Particular `supergraph` telemetry customizations using the `query` ([PR #6324](https://github.com/apollographql/router/pull/6324))
+
+Telemetry customizations like those featured in the [request limits telemetry documentation](https://www.apollographql.com/docs/graphos/routing/security/request-limits#collecting-metrics) now work as intended when using the `query` selector on the `supergraph`.  In some cases, this was causing a `this is a bug and should not happen` error, but is now resolved.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6324
+
+### Native query planner now receives both "plan" and "path" limits configuration ([PR #6316](https://github.com/apollographql/router/pull/6316))
+
+The native query planner now correctly sets two experimental configuration options for limiting query planning complexity.  These were previously available in the configuration and observed by the legacy planner, but were not being passed to the new native planner until now:
+
+- `supergraph.query_planning.experimental_plans_limit`
+- `supergraph.query_planning.experimental_paths_limit`
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6316
+
+
+
 # [1.58.0] - 2024-11-27
 
 > [!IMPORTANT]
