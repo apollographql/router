@@ -66,9 +66,9 @@ impl SubSelection {
         // TODO: this must change before we support interfaces and unions
         // because it will emit the abstract type's name which is invalid.
         if field_map.contains_key("__typename") {
-            new_selections.push(NamedSelection::Path(
-                Some(Alias::new("__typename")),
-                PathSelection {
+            new_selections.push(NamedSelection::Path {
+                alias: Some(Alias::new("__typename")),
+                path: PathSelection {
                     path: WithRange::new(
                         PathList::Var(
                             WithRange::new(KnownVariable::Dollar, None),
@@ -90,7 +90,8 @@ impl SubSelection {
                         None,
                     ),
                 },
-            ));
+                inline: false,
+            });
         }
 
         for selection in &self.selections {
@@ -117,7 +118,12 @@ impl SubSelection {
                         }
                     }
                 }
-                NamedSelection::Path(alias, path_selection) => {
+                NamedSelection::Path {
+                    alias,
+                    path: path_selection,
+                    inline,
+                } => {
+                    let inline = *inline;
                     if let Some(key) = alias.as_ref().map(|a| a.name.as_str()) {
                         // If the NamedSelection::Path has an alias (meaning
                         // it's a NamedPathSelection according to the grammar),
@@ -125,11 +131,12 @@ impl SubSelection {
                         // fields in the selection set.
                         if let Some(fields) = field_map.get_vec(key) {
                             for field in fields {
-                                new_selections.push(NamedSelection::Path(
-                                    Some(Alias::new(field.response_key().as_str())),
-                                    path_selection
+                                new_selections.push(NamedSelection::Path {
+                                    alias: Some(Alias::new(field.response_key().as_str())),
+                                    path: path_selection
                                         .apply_selection_set(document, &field.selection_set),
-                                ));
+                                    inline,
+                                });
                             }
                         }
                     } else {
@@ -137,10 +144,11 @@ impl SubSelection {
                         // it's a PathWithSubSelection according to the
                         // grammar), apply the selection set to the path and add
                         // the new PathWithSubSelection to the new_selections.
-                        new_selections.push(NamedSelection::Path(
-                            None,
-                            path_selection.apply_selection_set(document, selection_set),
-                        ));
+                        new_selections.push(NamedSelection::Path {
+                            alias: None,
+                            path: path_selection.apply_selection_set(document, selection_set),
+                            inline,
+                        });
                     }
                 }
                 NamedSelection::Group(alias, sub) => {

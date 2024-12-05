@@ -293,8 +293,15 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str(sub.as_str());
                 }
             }
-            Self::Path(alias_opt, path) => {
-                if let Some(alias) = alias_opt {
+            Self::Path {
+                inline,
+                alias,
+                path,
+            } => {
+                if *inline {
+                    result.push_str("... ");
+                }
+                if let Some(alias) = alias {
                     result.push_str(alias.pretty_print().as_str());
                     result.push(' ');
                 }
