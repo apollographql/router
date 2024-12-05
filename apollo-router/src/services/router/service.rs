@@ -5,14 +5,12 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use axum::response::*;
-use axum_extra::extract::multipart;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::future::join_all;
 use futures::future::ready;
 use futures::future::BoxFuture;
-use futures::stream;
 use futures::stream::once;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -24,9 +22,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use http_body::Body as _;
 use http_body::Frame;
-use http_body_util::combinators::BoxBody;
 use http_body_util::StreamBody;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
@@ -342,9 +338,8 @@ impl RouterService {
                         Some(true) => http::Response::from_parts(
                             parts,
                             RouterBody::new(StreamBody::new(
-                                Multipart::new(body, ProtocolMode::Subscription).map(|body| {
-                                    body.map(|bts| Frame::data(bts)).map_err(axum::Error::new)
-                                }),
+                                Multipart::new(body, ProtocolMode::Subscription)
+                                    .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
                             )),
                         ),
                         _ => http::Response::from_parts(
@@ -354,9 +349,7 @@ impl RouterService {
                                     once(ready(response)).chain(body),
                                     ProtocolMode::Defer,
                                 )
-                                .map(|body| {
-                                    body.map(|bts| Frame::data(bts)).map_err(axum::Error::new)
-                                }),
+                                .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
                             )),
                         ),
                     };

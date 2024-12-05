@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use http_0_2 as http;
-
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;

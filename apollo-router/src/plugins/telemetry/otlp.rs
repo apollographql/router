@@ -2,10 +2,10 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use http_0_2 as http;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
+use http_0_2 as http;
 use lazy_static::lazy_static;
 use opentelemetry::sdk::metrics::reader::TemporalitySelector;
 use opentelemetry::sdk::metrics::InstrumentKind;
@@ -16,12 +16,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-
-use tonic_0_9 as tonic;
 use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
+use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 

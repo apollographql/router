@@ -385,7 +385,7 @@ impl<'a> TestHarness<'a> {
 #[cfg(test)]
 pub(crate) type HttpService = tower::util::BoxService<
     http::Request<crate::services::router::Body>,
-    http::Response<axum::body::BoxBody>,
+    http::Response<axum::body::Body>,
     std::convert::Infallible,
 >;
 

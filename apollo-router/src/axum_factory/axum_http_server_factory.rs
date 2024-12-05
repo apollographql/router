@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use axum::error_handling::HandleErrorLayer;
 use axum::extract::Extension;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -24,9 +23,7 @@ use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
-use http_body::Body;
 use http_body::Frame;
-use http_body_util::BodyExt;
 use http_body_util::StreamBody;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto::Builder;
@@ -40,7 +37,6 @@ use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
 use tracing::instrument::WithSubscriber;
@@ -309,7 +305,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
             h1_config.keep_alive(true);
             h1_config.header_read_timeout(Duration::from_secs(10));
 
-            #[cfg(feature = "hyper_header_limits")]
             if let Some(max_headers) = configuration.limits.http1_max_request_headers {
                 h1_config.max_headers(max_headers);
             }
@@ -664,7 +659,7 @@ async fn handle_graphql<RF: RouterFactory>(
                     RouterBody::new(StreamBody::new(
                         compressor
                             .process(body)
-                            .map(|b| b.map(|body| Frame::data(body)))
+                            .map(|b| b.map(Frame::data))
                             .map_err(axum::Error::new),
                     ))
                 }

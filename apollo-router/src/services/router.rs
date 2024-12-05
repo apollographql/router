@@ -12,9 +12,7 @@ use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use http_body::Frame;
 use http_body_util::BodyExt;
-use http_body_util::StreamBody;
 use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -71,6 +69,32 @@ impl From<(http::Request<Body>, Context)> for Request {
     }
 }
 
+/// Helper type to conveniently construct a body from several types used commonly in tests.
+///
+/// It's only meant for tests, as the "real" router should create bodies explicitly accounting for
+/// streaming, size limits, etc.
+struct IntoBody(Body);
+impl From<Body> for IntoBody {
+    fn from(value: Body) -> Self {
+        Self(value)
+    }
+}
+impl From<String> for IntoBody {
+    fn from(value: String) -> Self {
+        Self(self::body::full(value))
+    }
+}
+impl From<Bytes> for IntoBody {
+    fn from(value: Bytes) -> Self {
+        Self(self::body::full(value))
+    }
+}
+impl From<Vec<u8>> for IntoBody {
+    fn from(value: Vec<u8>) -> Self {
+        Self(self::body::full(value))
+    }
+}
+
 #[buildstructor::buildstructor]
 impl Request {
     /// This is the constructor (or builder) to use when constructing a real Request.
@@ -106,12 +130,12 @@ impl Request {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         uri: Option<http::Uri>,
         method: Option<Method>,
-        body: Option<Body>,
+        body: Option<IntoBody>,
     ) -> Result<Request, BoxError> {
         let mut router_request = http::Request::builder()
             .uri(uri.unwrap_or_else(|| http::Uri::from_static("http://example.com/")))
             .method(method.unwrap_or(Method::GET))
-            .body(body.unwrap_or_else(self::body::empty))?;
+            .body(body.map_or_else(self::body::empty, |constructed| constructed.0))?;
         *router_request.headers_mut() = header_map(headers)?;
         Ok(Self {
             router_request,

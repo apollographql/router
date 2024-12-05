@@ -69,7 +69,7 @@ impl UriEndpoint {
 
     // Temp pending Otel upgrade
     pub(crate) fn to_uri_0_2(&self, default_endpoint: &http_0_2::Uri) -> Option<http_0_2::Uri> {
-        self.uri.as_ref().map(|uri| {
+        self.uri.as_ref().map(|_uri| {
             let mut parts = http_0_2::uri::Parts::default();
             if parts.scheme.is_none() {
                 parts.scheme = default_endpoint.scheme().cloned();
@@ -93,8 +93,10 @@ impl UriEndpoint {
 
                     if let Some(port) = port {
                         parts.authority = Some(
-                            http_0_2::uri::Authority::from_str(format!("{}:{}", host, port).as_str())
-                                .expect("host and port must have come from a valid uri, qed"),
+                            http_0_2::uri::Authority::from_str(
+                                format!("{}:{}", host, port).as_str(),
+                            )
+                            .expect("host and port must have come from a valid uri, qed"),
                         )
                     } else {
                         parts.authority = Some(

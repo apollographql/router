@@ -20,10 +20,10 @@ use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use parking_lot::Mutex;
 use sys_info::hostname;
-use tonic_0_9 as tonic;
 use tonic::codec::CompressionEncoding;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
+use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 

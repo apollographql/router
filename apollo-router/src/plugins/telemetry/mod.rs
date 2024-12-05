@@ -2360,7 +2360,7 @@ mod tests {
             .into_router();
 
         let http_req_prom = http::Request::get("http://localhost:9090/metrics")
-            .body(Default::default())
+            .body(axum::body::Body::empty())
             .unwrap();
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);

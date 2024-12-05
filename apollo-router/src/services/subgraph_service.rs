@@ -75,7 +75,6 @@ use crate::services::layers::apq;
 use crate::services::router;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
-
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
@@ -1613,6 +1612,7 @@ mod tests {
     use std::net::TcpListener;
     use std::str::FromStr;
 
+    use axum::body::Body;
     use axum::extract::ws::Message;
     use axum::extract::ConnectInfo;
     use axum::extract::WebSocketUpgrade;
@@ -1626,7 +1626,6 @@ mod tests {
     use http::StatusCode;
     use http::Uri;
     use hyper::service::make_service_fn;
-    use hyper::Body;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tokio::sync::mpsc;

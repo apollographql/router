@@ -964,7 +964,7 @@ mod tests {
         let socket_addr =
             emulate_correct_websocket_server_new_protocol(send_ping, heartbeat_interval, port)
                 .await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{}/ws", socket_addr);
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -1031,7 +1031,7 @@ mod tests {
 
     async fn test_ws_connection_old_proto(send_ping: bool, port: Option<u16>) {
         let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping, port).await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{}/ws", socket_addr);
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,

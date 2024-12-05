@@ -83,7 +83,7 @@ impl Service<router::Request> for SimpleEndpoint {
         let fut = async move {
             let body = req.router_request.into_body();
 
-            let body = hyper::body::to_bytes(body).await.unwrap();
+            let body = body.collect().await.unwrap().to_bytes();
 
             let mut json_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
             tracing::info!("✉️ got payload:");

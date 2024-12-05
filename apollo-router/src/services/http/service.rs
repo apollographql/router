@@ -5,9 +5,7 @@ use std::task::Poll;
 use std::time::Duration;
 
 use ::serde::Deserialize;
-use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::Stream;
 use futures::StreamExt;
 use futures::TryFutureExt;
 use global::get_text_map_propagator;
@@ -16,7 +14,6 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderName;
 use http::HeaderValue;
 use http::Request;
-use http_body::Body as HttpBody;
 use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::StreamBody;
@@ -25,7 +22,6 @@ use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
-use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
@@ -34,7 +30,6 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower_http::decompression::Decompression;
-use tower_http::decompression::DecompressionBody;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
 
@@ -303,7 +298,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
             Some(compressor) => RouterBody::new(StreamBody::new(
                 compressor
                     .process(body)
-                    .map(|b| b.map(|body| Frame::data(body)).map_err(axum::Error::new)),
+                    .map(|b| b.map(Frame::data).map_err(axum::Error::new)),
             )),
         };
 

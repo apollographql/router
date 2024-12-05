@@ -276,9 +276,8 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .header_read_timeout(Duration::from_secs(10));
-                                        #[cfg(feature = "hyper_header_limits")]
                                         if let Some(max_headers) = opt_max_headers {
-                                            http_config.http1_max_headers(max_headers);
+                                            http_config.max_headers(max_headers);
                                         }
 
                                         if let Some(max_buf_size) = opt_max_buf_size {
@@ -321,9 +320,8 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .header_read_timeout(Duration::from_secs(10));
-                                        #[cfg(feature = "hyper_header_limits")]
                                         if let Some(max_headers) = opt_max_headers {
-                                            http_config.http1_max_headers(max_headers);
+                                            http_config.max_headers(max_headers);
                                         }
 
                                         if let Some(max_buf_size) = opt_max_buf_size {
@@ -376,9 +374,8 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .header_read_timeout(Duration::from_secs(10));
-                                        #[cfg(feature = "hyper_header_limits")]
                                         if let Some(max_headers) = opt_max_headers {
-                                            http_config.http1_max_headers(max_headers);
+                                            http_config.max_headers(max_headers);
                                         }
 
                                         if let Some(max_buf_size) = opt_max_buf_size {

@@ -23,12 +23,12 @@ use http::HeaderValue;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::util::future::EitherResponseFuture;
 use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::util::future::EitherResponseFuture;
 
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;

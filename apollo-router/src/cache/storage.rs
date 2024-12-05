@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use lru::LruCache;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::metrics::Unit;
-use opentelemetry::KeyValue;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;

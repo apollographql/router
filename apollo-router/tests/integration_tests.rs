@@ -162,7 +162,7 @@ async fn empty_posts_should_not_work() {
             HeaderValue::from_static(APPLICATION_JSON.essence_str()),
         )
         .method(Method::POST)
-        .body(hyper::Body::empty())
+        .body(axum::body::Body::empty())
         .unwrap();
 
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
@@ -518,7 +518,7 @@ async fn persisted_queries() {
                 CONTENT_TYPE,
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),
             )
-            .body(router::Body::empty())
+            .body(axum::body::Body::empty())
             .unwrap()
             .into(),
     )
