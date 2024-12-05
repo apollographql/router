@@ -20,11 +20,23 @@ register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 #[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct Config {
-    /// Include errors from all subgraphs
+    /// Redact all subgraphs errors by default
     all: bool,
 
-    /// Include errors from specific subgraphs
-    subgraphs: HashMap<String, bool>,
+    /// Default keys to remove from error extensions for all subgraphs.
+    redact_extensions_keys: Vec<String>,
+
+    /// Override default configuration for specific subgraphs
+    subgraphs: HashMap<String, SubgraphConfig>,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(deny_unknown_fields, untagged)]
+enum SubgraphConfig {
+    /// Enable or disable redaction for a subgraph
+    Included(bool),
+    /// Always reveal specific error extensions keys from a subgraph
+    PropagateExtensionsKeys(Vec<String>),
 }
 
 struct IncludeSubgraphErrors {
@@ -42,8 +54,14 @@ impl Plugin for IncludeSubgraphErrors {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        // Search for subgraph in our configured subgraph map. If we can't find it, use the "all" value
-        let include_subgraph_errors = *self.config.subgraphs.get(name).unwrap_or(&self.config.all);
+        let subgraph_config = self.config.subgraphs.get(name).cloned();
+        let redact_extensions_keys = self.config.redact_extensions_keys.clone();
+
+        let include_subgraph_errors = match subgraph_config {
+            Some(SubgraphConfig::Included(enabled)) => enabled,
+            Some(SubgraphConfig::PropagateExtensionsKeys(_)) => false,
+            None => self.config.all,
+        };
 
         let sub_name_response = name.to_string();
         let sub_name_error = name.to_string();
@@ -58,11 +76,40 @@ impl Plugin for IncludeSubgraphErrors {
                                 .entry("service")
                                 .or_insert(sub_name_response.clone().into());
                         }
+                        return response;
                     } else {
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
-                        for error in errors.iter_mut() {
+
+                        for error in response.response.body_mut().errors.iter_mut() {
+                            let mut new_extensions = error.extensions.clone();
+                            match subgraph_config.clone() {
+                                Some(SubgraphConfig::PropagateExtensionsKeys(keys)) => {
+                                    // Remove default keys, but show subgraph specific keys
+                                    for key in &redact_extensions_keys {
+                                        if !keys.contains(key) {
+                                            new_extensions.remove(key.as_str());
+                                        }
+                                    }
+                                }
+                                Some(SubgraphConfig::Included(enabled)) if enabled => {
+                                    // Do not redact any keys
+                                    for key in &redact_extensions_keys {
+                                        new_extensions.remove(key.as_str());
+                                    }
+                                }
+                                _ => {
+                                    if redact_extensions_keys.is_empty() {
+                                        new_extensions = Object::default();
+                                    } else {
+                                        for key in &redact_extensions_keys {
+                                            new_extensions.remove(key.as_str());
+                                        }
+                                    }
+                                }
+                            }
+
                             error.message = REDACTED_ERROR_MESSAGE.to_string();
-                            error.extensions = Object::default();
+                            error.extensions = new_extensions;
                         }
                     }
                 }
