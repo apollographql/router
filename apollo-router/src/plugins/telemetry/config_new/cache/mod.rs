@@ -49,7 +49,7 @@ impl DefaultForLevel for CacheInstrumentsConfig {
 
 pub(crate) struct CacheInstruments {
     pub(crate) cache_hit: Option<
-        CustomCounter<subgraph::Request, subgraph::Response, CacheAttributes, SubgraphSelector>,
+        CustomCounter<subgraph::Request, subgraph::Response, (), CacheAttributes, SubgraphSelector>,
     >,
 }
 

@@ -9,8 +9,8 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
 
-use super::graph_path::ContextToSelection;
-use super::graph_path::ParameterToContext;
+use super::graph_path::ArgumentsToContextUsages;
+use super::graph_path::MatchingContextIds;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::GraphPathItem;
@@ -94,10 +94,14 @@ where
     pub(crate) conditions: Option<Arc<OpPathTree>>,
     /// The child `PathTree` reached by taking the edge.
     pub(crate) tree: Arc<PathTree<TTrigger, TEdge>>,
-    // a list of contexts set at this point in the path tree
-    pub(crate) context_to_selection: Option<ContextToSelection>,
-    // a list of contexts used at this point in the path tree
-    pub(crate) parameter_to_context: Option<ParameterToContext>,
+    // PORT_NOTE: This field was renamed because the JS name (`contextToSelection`) implied it was
+    // a map to selections, which it isn't.
+    /// The IDs of contexts that have matched at the edge.
+    pub(crate) matching_context_ids: Option<MatchingContextIds>,
+    // PORT_NOTE: This field was renamed because the JS name (`parameterToContext`) left confusion
+    // to how a parameter was different from an argument.
+    /// A map of @fromContext arguments to info about the contexts used in those arguments.
+    pub(crate) arguments_to_context_usages: Option<ArgumentsToContextUsages>,
 }
 
 impl<TTrigger, TEdge> PartialEq for PathTreeChild<TTrigger, TEdge>
@@ -248,8 +252,8 @@ where
             trigger: &'inputs Arc<TTrigger>,
             conditions: Option<Arc<OpPathTree>>,
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
-            context_to_selection: Option<ContextToSelection>,
-            parameter_to_context: Option<ParameterToContext>,
+            matching_context_ids: Option<MatchingContextIds>,
+            arguments_to_context_usages: Option<ArgumentsToContextUsages>,
         }
 
         let mut local_selection_sets = Vec::new();
@@ -259,8 +263,8 @@ where
                 generic_edge,
                 trigger,
                 conditions,
-                context_to_selection,
-                parameter_to_context,
+                matching_context_ids,
+                arguments_to_context_usages,
             )) = graph_path_iter.next()
             else {
                 // End of an input `GraphPath`
@@ -289,17 +293,17 @@ where
                     let existing = entry.into_mut();
                     existing.trigger = trigger;
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
-                    if let Some(other) = context_to_selection {
+                    if let Some(other) = matching_context_ids {
                         existing
-                            .context_to_selection
+                            .matching_context_ids
                             .get_or_insert_with(Default::default)
-                            .extend(other);
+                            .extend(other.iter().cloned());
                     }
-                    if let Some(other) = parameter_to_context {
+                    if let Some(other) = arguments_to_context_usages {
                         existing
-                            .parameter_to_context
-                            .get_or_insert_with(IndexMap::default)
-                            .extend(other);
+                            .arguments_to_context_usages
+                            .get_or_insert_with(Default::default)
+                            .extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
                     }
                     existing
                         .sub_paths_and_selections
@@ -311,8 +315,8 @@ where
                         trigger,
                         conditions: conditions.clone(),
                         sub_paths_and_selections: vec![(graph_path_iter, selection)],
-                        context_to_selection,
-                        parameter_to_context,
+                        matching_context_ids: matching_context_ids.cloned(),
+                        arguments_to_context_usages: arguments_to_context_usages.cloned(),
                     });
                 }
             }
@@ -330,8 +334,8 @@ where
                         by_unique_edge.target_node,
                         child.sub_paths_and_selections,
                     )?),
-                    context_to_selection: child.context_to_selection.clone(),
-                    parameter_to_context: child.parameter_to_context.clone(),
+                    matching_context_ids: child.matching_context_ids.clone(),
+                    arguments_to_context_usages: child.arguments_to_context_usages.clone(),
                 }))
             }
         }
@@ -365,8 +369,18 @@ where
                         (Some(cond_a), Some(cond_b)) => cond_a.equals_same_root(cond_b),
                         _ => false,
                     }
-                    && a.context_to_selection == b.context_to_selection
-                    && a.parameter_to_context == b.parameter_to_context
+                    && match (&a.matching_context_ids, &b.matching_context_ids) {
+                        (Some(_), Some(_)) => a.matching_context_ids == b.matching_context_ids,
+                        (_, _) =>
+                            a.matching_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true) &&
+                                b.matching_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true)
+                    }
+                    && match (&a.arguments_to_context_usages, &b.arguments_to_context_usages) {
+                        (Some(_), Some(_)) => a.arguments_to_context_usages == b.arguments_to_context_usages,
+                        (_, _) =>
+                            a.arguments_to_context_usages.as_ref().map(|c| c.is_empty()).unwrap_or(true) &&
+                                b.arguments_to_context_usages.as_ref().map(|c| c.is_empty()).unwrap_or(true)
+                    }
                     && a.tree.equals_same_root(&b.tree)
             })
     }
@@ -448,13 +462,13 @@ where
                     trigger: child.trigger.clone(),
                     conditions: merge_conditions(&child.conditions, &other_child.conditions),
                     tree: child.tree.merge(&other_child.tree),
-                    context_to_selection: merge_context_to_selection(
-                        &child.context_to_selection,
-                        &other_child.context_to_selection,
+                    matching_context_ids: merge_matching_context_ids(
+                        &child.matching_context_ids,
+                        &other_child.matching_context_ids,
                     ),
-                    parameter_to_context: merge_parameter_to_context(
-                        &child.parameter_to_context,
-                        &other_child.parameter_to_context,
+                    arguments_to_context_usages: merge_arguments_to_context_usages(
+                        &child.arguments_to_context_usages,
+                        &other_child.arguments_to_context_usages,
                     ),
                 })
             } else {
@@ -477,13 +491,13 @@ where
     }
 }
 
-fn merge_context_to_selection(
-    a: &Option<ContextToSelection>,
-    b: &Option<ContextToSelection>,
-) -> Option<ContextToSelection> {
+fn merge_matching_context_ids(
+    a: &Option<MatchingContextIds>,
+    b: &Option<MatchingContextIds>,
+) -> Option<MatchingContextIds> {
     match (a, b) {
         (Some(a), Some(b)) => {
-            let mut merged: ContextToSelection = Default::default();
+            let mut merged: MatchingContextIds = Default::default();
             merged.extend(a.iter().cloned());
             merged.extend(b.iter().cloned());
             Some(merged)
@@ -494,13 +508,13 @@ fn merge_context_to_selection(
     }
 }
 
-fn merge_parameter_to_context(
-    a: &Option<ParameterToContext>,
-    b: &Option<ParameterToContext>,
-) -> Option<ParameterToContext> {
+fn merge_arguments_to_context_usages(
+    a: &Option<ArgumentsToContextUsages>,
+    b: &Option<ArgumentsToContextUsages>,
+) -> Option<ArgumentsToContextUsages> {
     match (a, b) {
         (Some(a), Some(b)) => {
-            let mut merged: ParameterToContext = Default::default();
+            let mut merged: ArgumentsToContextUsages = Default::default();
             merged.extend(a.iter().map(|(k, v)| (k.clone(), v.clone())));
             merged.extend(b.iter().map(|(k, v)| (k.clone(), v.clone())));
             Some(merged)

@@ -248,11 +248,6 @@ impl SelectionMap {
         self.selections.is_empty()
     }
 
-    /// Returns the first selection in the map, or None if the map is empty.
-    pub(crate) fn first(&self) -> Option<&Selection> {
-        self.selections.first()
-    }
-
     /// Computes the hash of a selection key.
     fn hash(&self, key: SelectionKey<'_>) -> u64 {
         self.hash_builder.hash_one(key)
