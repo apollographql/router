@@ -243,16 +243,12 @@ pub(super) fn match_shape(
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
-                    match pair[0].as_ref() {
-                        LitExpr::Path(path) => match path.path.as_ref() {
-                            PathList::Var(known_var, _tail) => {
-                                if known_var.as_ref() == &KnownVariable::AtSign {
-                                    has_infallible_case = true;
-                                }
+                    if let LitExpr::Path(path) = pair[0].as_ref() {
+                        if let PathList::Var(known_var, _tail) = path.path.as_ref() {
+                            if known_var.as_ref() == &KnownVariable::AtSign {
+                                has_infallible_case = true;
                             }
-                            _ => {}
-                        },
-                        _ => {}
+                        }
                     };
 
                     let value_shape = pair[1].compute_output_shape(
