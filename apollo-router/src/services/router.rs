@@ -211,11 +211,7 @@ pub struct Response {
 #[buildstructor::buildstructor]
 impl Response {
     pub async fn next_response(&mut self) -> Option<Result<Bytes, axum::Error>> {
-        let body = std::mem::replace(self.response.body_mut(), body::empty());
-        let mut stream_body = body.into_data_stream();
-        let resp = stream_body.next().await;
-        *self.response.body_mut() = body::from_data_stream(stream_body);
-        resp
+        self.response.body_mut().into_data_stream().next().await
     }
 
     #[deprecated]
