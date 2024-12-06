@@ -22,14 +22,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "Subgraph1",
               "variableUsages": [],
-              "operation": "query Query_Null_Param__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
+              "operation": "query Query_Null_Param__Subgraph1__0{t{__typename prop id u{__typename id}}}",
               "operationName": "Query_Null_Param__Subgraph1__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "5a33cc9574d930882310fe1f9ddae8f262a448a50ac9a899e71896a339fa0f85",
+              "schemaAwareHash": "73819a48542fc2a3eb3a831b27ab5cc0b1286a73c2750279d8886fc529ba9e9e",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -39,6 +39,7 @@ expression: response
             {
               "kind": "Flatten",
               "path": [
+                "",
                 "t",
                 "u"
               ],
@@ -64,7 +65,7 @@ expression: response
                 "variableUsages": [
                   "contextualArgument_1_0"
                 ],
-                "operation": "query Query_Null_Param__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                "operation": "query Query_Null_Param__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
                 "operationName": "Query_Null_Param__Subgraph1__1",
                 "operationKind": "query",
                 "id": null,
@@ -81,7 +82,7 @@ expression: response
                     "renameKeyTo": "contextualArgument_1_0"
                   }
                 ],
-                "schemaAwareHash": "4f6eeca0e601bbf183b759aa785df84eb0c435a266a36568238e8d721dc8fc3c",
+                "schemaAwareHash": "042955e454618e67e75f3c86c9b8c71e2da866f1c40d0dc462d52053e1861803",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -92,7 +93,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

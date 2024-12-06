@@ -40,11 +40,11 @@ expression: response
               "id": null,
               "inputRewrites": null,
               "kind": "Fetch",
-              "operation": "query QueryLL__Subgraph1__0 { tList { __typename prop id uList { __typename id } } }",
+              "operation": "query QueryLL__Subgraph1__0{tList{__typename prop id uList{__typename id}}}",
               "operationKind": "query",
               "operationName": "QueryLL__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "560ba34c3cdda6c435aaab55e21528b252f44caabc6c082117e4e9fcc935af5f",
+              "schemaAwareHash": "589a7dec7f09fdedd06128f1e7396c727740ac1f84ad936ea9c61c3cf96d3ee4",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -70,7 +70,7 @@ expression: response
                 "id": null,
                 "inputRewrites": null,
                 "kind": "Fetch",
-                "operation": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                "operation": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
                 "operationKind": "query",
                 "operationName": "QueryLL__Subgraph1__1",
                 "outputRewrites": null,
@@ -90,13 +90,14 @@ expression: response
                     "typeCondition": "U"
                   }
                 ],
-                "schemaAwareHash": "b97924736c4f71e4b6e80e2a9e2661130363820bd3df5b2e38000be4a4fb47b5",
+                "schemaAwareHash": "0c966292093d13acca6c8ebb257a146a46840e5a04c9cbaede12e08df98cd489",
                 "serviceName": "Subgraph1",
                 "variableUsages": [
                   "contextualArgument_1_0"
                 ]
               },
               "path": [
+                "",
                 "tList",
                 "@",
                 "uList",
@@ -106,7 +107,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        tList {\n          __typename\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"tList.@.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        tList {\n          __typename\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".tList.@.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }
