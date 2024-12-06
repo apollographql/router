@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Instant;
@@ -796,33 +795,6 @@ impl QueryPlanResult {
 pub(super) struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     pub(super) node: Option<Arc<PlanNode>>,
-}
-
-// Note: Reexported under `apollo_router::_private`
-pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
-    let mut output = String::new();
-    for diff_line in differences {
-        match diff_line {
-            diff::Result::Left(l) => {
-                let trimmed = l.trim();
-                if !trimmed.starts_with('#') && !trimmed.is_empty() {
-                    writeln!(&mut output, "-{l}").expect("write will never fail");
-                } else {
-                    writeln!(&mut output, " {l}").expect("write will never fail");
-                }
-            }
-            diff::Result::Both(l, _) => {
-                writeln!(&mut output, " {l}").expect("write will never fail");
-            }
-            diff::Result::Right(r) => {
-                let trimmed = r.trim();
-                if trimmed != "---" && !trimmed.is_empty() {
-                    writeln!(&mut output, "+{r}").expect("write will never fail");
-                }
-            }
-        }
-    }
-    output
 }
 
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {

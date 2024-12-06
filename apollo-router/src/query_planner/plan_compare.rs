@@ -10,12 +10,11 @@ use std::hash::Hasher;
 use apollo_compiler::ast;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_federation::query_plan::QueryPlan;
+use apollo_federation::query_plan::QueryPlan as NativeQueryPlan;
 
 use super::convert::convert_root_query_plan_node;
 use super::fetch::FetchNode;
 use super::fetch::SubgraphOperation;
-use super::render_diff;
 use super::rewrites::DataRewrite;
 use super::selection::Selection;
 use super::subscription::SubscriptionNode;
@@ -24,6 +23,9 @@ use super::FlattenNode;
 use super::PlanNode;
 use super::Primary;
 use super::QueryPlanResult;
+
+//==================================================================================================
+// Public interface
 
 pub struct MatchFailure {
     description: String,
@@ -80,116 +82,18 @@ macro_rules! check_match_eq {
     };
 }
 
-fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFailure> {
-    let FetchNode {
-        service_name,
-        requires,
-        variable_usages,
-        operation,
-        // ignored:
-        // reordered parallel fetches may have different names
-        operation_name: _,
-        operation_kind,
-        id,
-        input_rewrites,
-        output_rewrites,
-        context_rewrites,
-        // ignored
-        schema_aware_hash: _,
-        // ignored:
-        // when running in comparison mode, the rust plan node does not have
-        // the attached cache key metadata for authorisation, since the rust plan is
-        // not going to be the one being executed.
-        authorization: _,
-    } = this;
-
-    check_match_eq!(*service_name, other.service_name);
-    check_match_eq!(*operation_kind, other.operation_kind);
-    check_match_eq!(*id, other.id);
-    check_match!(same_requires(requires, &other.requires));
-    check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
-    check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
-    check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
-    check_match!(same_rewrites(context_rewrites, &other.context_rewrites));
-    operation_matches(operation, &other.operation)?;
-    Ok(())
-}
-
-fn subscription_primary_matches(
-    this: &SubscriptionNode,
-    other: &SubscriptionNode,
-) -> Result<(), MatchFailure> {
-    let SubscriptionNode {
-        service_name,
-        variable_usages,
-        operation,
-        operation_name: _, // ignored (reordered parallel fetches may have different names)
-        operation_kind,
-        input_rewrites,
-        output_rewrites,
-    } = this;
-    check_match_eq!(*service_name, other.service_name);
-    check_match_eq!(*operation_kind, other.operation_kind);
-    check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
-    check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
-    check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
-    operation_matches(operation, &other.operation)?;
-    Ok(())
-}
-
-fn operation_matches(
-    this: &SubgraphOperation,
-    other: &SubgraphOperation,
-) -> Result<(), MatchFailure> {
-    document_str_matches(this.as_serialized(), other.as_serialized())
-}
-
-// Compare operation document strings such as query or just selection set.
-fn document_str_matches(this: &str, other: &str) -> Result<(), MatchFailure> {
-    let this_ast = match ast::Document::parse(this, "this_operation.graphql") {
-        Ok(document) => document,
-        Err(_) => {
-            return Err(MatchFailure::new(
-                "Failed to parse this operation".to_string(),
-            ));
-        }
-    };
-    let other_ast = match ast::Document::parse(other, "other_operation.graphql") {
-        Ok(document) => document,
-        Err(_) => {
-            return Err(MatchFailure::new(
-                "Failed to parse other operation".to_string(),
-            ));
-        }
-    };
-    same_ast_document(&this_ast, &other_ast)
-}
-
-fn opt_document_string_matches(
-    this: &Option<String>,
-    other: &Option<String>,
-) -> Result<(), MatchFailure> {
-    match (this, other) {
-        (None, None) => Ok(()),
-        (Some(this_sel), Some(other_sel)) => document_str_matches(this_sel, other_sel),
-        _ => Err(MatchFailure::new(format!(
-            "mismatched at opt_document_string_matches\nleft: {:?}\nright: {:?}",
-            this, other
-        ))),
-    }
-}
-
-// The rest is calling the comparison functions above instead of `PartialEq`,
-// but otherwise behave just like `PartialEq`:
-
 // Note: Reexported under `apollo_router::_private`
-pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> Result<(), MatchFailure> {
+pub fn plan_matches(
+    js_plan: &QueryPlanResult,
+    rust_plan: &NativeQueryPlan,
+) -> Result<(), MatchFailure> {
     let js_root_node = &js_plan.query_plan.node;
     let rust_root_node = convert_root_query_plan_node(rust_plan);
     opt_plan_node_matches(js_root_node, &rust_root_node)
 }
 
-pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
+// Note: Reexported under `apollo_router::_private`
+pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &NativeQueryPlan) -> String {
     let js_root_node = &js_plan.query_plan.node;
     let rust_root_node = convert_root_query_plan_node(rust_plan);
 
@@ -214,19 +118,31 @@ pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
     }
 }
 
-pub(crate) fn opt_plan_node_matches(
-    this: &Option<impl Borrow<PlanNode>>,
-    other: &Option<impl Borrow<PlanNode>>,
-) -> Result<(), MatchFailure> {
-    match (this, other) {
-        (None, None) => Ok(()),
-        (None, Some(_)) | (Some(_), None) => Err(MatchFailure::new(format!(
-            "mismatch at opt_plan_node_matches\nleft: {:?}\nright: {:?}",
-            this.is_some(),
-            other.is_some()
-        ))),
-        (Some(this), Some(other)) => plan_node_matches(this.borrow(), other.borrow()),
+// Note: Reexported under `apollo_router::_private`
+pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
+    let mut output = String::new();
+    for diff_line in differences {
+        match diff_line {
+            diff::Result::Left(l) => {
+                let trimmed = l.trim();
+                if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                    writeln!(&mut output, "-{l}").expect("write will never fail");
+                } else {
+                    writeln!(&mut output, " {l}").expect("write will never fail");
+                }
+            }
+            diff::Result::Both(l, _) => {
+                writeln!(&mut output, " {l}").expect("write will never fail");
+            }
+            diff::Result::Right(r) => {
+                let trimmed = r.trim();
+                if trimmed != "---" && !trimmed.is_empty() {
+                    writeln!(&mut output, "+{r}").expect("write will never fail");
+                }
+            }
+        }
     }
+    output
 }
 
 //==================================================================================================
@@ -518,6 +434,78 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
     Ok(())
 }
 
+pub(crate) fn opt_plan_node_matches(
+    this: &Option<impl Borrow<PlanNode>>,
+    other: &Option<impl Borrow<PlanNode>>,
+) -> Result<(), MatchFailure> {
+    match (this, other) {
+        (None, None) => Ok(()),
+        (None, Some(_)) | (Some(_), None) => Err(MatchFailure::new(format!(
+            "mismatch at opt_plan_node_matches\nleft: {:?}\nright: {:?}",
+            this.is_some(),
+            other.is_some()
+        ))),
+        (Some(this), Some(other)) => plan_node_matches(this.borrow(), other.borrow()),
+    }
+}
+
+fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFailure> {
+    let FetchNode {
+        service_name,
+        requires,
+        variable_usages,
+        operation,
+        // ignored:
+        // reordered parallel fetches may have different names
+        operation_name: _,
+        operation_kind,
+        id,
+        input_rewrites,
+        output_rewrites,
+        context_rewrites,
+        // ignored
+        schema_aware_hash: _,
+        // ignored:
+        // when running in comparison mode, the rust plan node does not have
+        // the attached cache key metadata for authorisation, since the rust plan is
+        // not going to be the one being executed.
+        authorization: _,
+    } = this;
+
+    check_match_eq!(*service_name, other.service_name);
+    check_match_eq!(*operation_kind, other.operation_kind);
+    check_match_eq!(*id, other.id);
+    check_match!(same_requires(requires, &other.requires));
+    check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
+    check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
+    check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
+    check_match!(same_rewrites(context_rewrites, &other.context_rewrites));
+    operation_matches(operation, &other.operation)?;
+    Ok(())
+}
+
+fn subscription_primary_matches(
+    this: &SubscriptionNode,
+    other: &SubscriptionNode,
+) -> Result<(), MatchFailure> {
+    let SubscriptionNode {
+        service_name,
+        variable_usages,
+        operation,
+        operation_name: _, // ignored (reordered parallel fetches may have different names)
+        operation_kind,
+        input_rewrites,
+        output_rewrites,
+    } = this;
+    check_match_eq!(*service_name, other.service_name);
+    check_match_eq!(*operation_kind, other.operation_kind);
+    check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
+    check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
+    check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
+    operation_matches(operation, &other.operation)?;
+    Ok(())
+}
+
 fn defer_primary_node_matches(this: &Primary, other: &Primary) -> Result<(), MatchFailure> {
     let Primary { subselection, node } = this;
     opt_document_string_matches(subselection, &other.subselection)
@@ -638,6 +626,48 @@ fn same_rewrites(x: &Option<Vec<DataRewrite>>, y: &Option<Vec<DataRewrite>>) -> 
         (None, None) => true,
         (Some(x), Some(y)) => vec_matches_as_set(x, y, |a, b| a == b),
         _ => false,
+    }
+}
+
+fn operation_matches(
+    this: &SubgraphOperation,
+    other: &SubgraphOperation,
+) -> Result<(), MatchFailure> {
+    document_str_matches(this.as_serialized(), other.as_serialized())
+}
+
+// Compare operation document strings such as query or just selection set.
+fn document_str_matches(this: &str, other: &str) -> Result<(), MatchFailure> {
+    let this_ast = match ast::Document::parse(this, "this_operation.graphql") {
+        Ok(document) => document,
+        Err(_) => {
+            return Err(MatchFailure::new(
+                "Failed to parse this operation".to_string(),
+            ));
+        }
+    };
+    let other_ast = match ast::Document::parse(other, "other_operation.graphql") {
+        Ok(document) => document,
+        Err(_) => {
+            return Err(MatchFailure::new(
+                "Failed to parse other operation".to_string(),
+            ));
+        }
+    };
+    same_ast_document(&this_ast, &other_ast)
+}
+
+fn opt_document_string_matches(
+    this: &Option<String>,
+    other: &Option<String>,
+) -> Result<(), MatchFailure> {
+    match (this, other) {
+        (None, None) => Ok(()),
+        (Some(this_sel), Some(other_sel)) => document_str_matches(this_sel, other_sel),
+        _ => Err(MatchFailure::new(format!(
+            "mismatched at opt_document_string_matches\nleft: {:?}\nright: {:?}",
+            this, other
+        ))),
     }
 }
 
@@ -933,6 +963,9 @@ fn same_ast_selection_set_sorted(
         .zip(y_sorted)
         .all(|(x, y)| same_ast_selection(x, y, fragment_map))
 }
+
+//==================================================================================================
+// Unit tests
 
 #[cfg(test)]
 mod ast_comparison_tests {
