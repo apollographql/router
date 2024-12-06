@@ -1747,7 +1747,7 @@ expression: "&schema"
         },
         "client_name_header": {
           "default": "apollographql-client-name",
-          "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.",
           "nullable": true,
           "type": "string"
         },
