@@ -15,7 +15,7 @@ As part of GraphOS Studio metrics reporting, servers can [tag reported operation
 This **client awareness** helps graph maintainers understand which clients are using which fields in the schema.
 
 Apollo's GraphOS Router and Apollo Server can enable client awareness by requiring metadata about requesting clients.
-The router supports client awareness by default. If the client sets the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests, GraphOS Studio can separate the metrics and operations per client. This client name is also used by the [Persisted Queries](/graphos/routing/security/persisted-queries) feature.
+The router supports client awareness by default. If the client sets the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests, GraphOS Studio can separate the metrics and operations per client. This client name is also used by the persisted queries feature.
 
 Clients can (and should) [name their GraphQL operations](/react/data/operation-best-practices/#name-all-operations), which provides more context around how and where data is being used.
 
@@ -33,6 +33,7 @@ Apollo strongly recommends requiring client details (name and version) and opera
 
 The GraphOS Router supports client awareness by default if the client sets the `apollographql-client-name` and `apollographql-client-id` in their requests.
 These values can be overridden using the [router configuration file](/router/managed-federation/client-awareness/) directly.
+You can use a Rhai script to _enforce_ that clients include metadata.
 
 ### Customizing client awareness headers
 
@@ -51,7 +52,7 @@ cors:
   allow_headers: [ Content-Type, MyClientHeaderName, MyClientHeaderVersion]
 ```
 
-### Enforcement via Rhai script
+### Enforcing via Rhai script
 
 Client headers can be enforced using a [Rhai script](/graphos/routing/customization/rhai) on every incoming request.
 
