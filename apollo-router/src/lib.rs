@@ -118,8 +118,8 @@ pub mod _private {
     // For comparison/fuzzing
     pub use crate::query_planner::bridge_query_planner::render_diff;
     pub use crate::query_planner::bridge_query_planner::QueryPlanResult;
-    pub use crate::query_planner::dual_query_planner::diff_plan;
-    pub use crate::query_planner::dual_query_planner::plan_matches;
+    pub use crate::query_planner::plan_compare::diff_plan;
+    pub use crate::query_planner::plan_compare::plan_matches;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }
