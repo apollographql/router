@@ -266,12 +266,3 @@ pub enum QueryPathElement {
     #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_inline_fragment")]
     InlineFragment(executable::InlineFragment),
 }
-
-impl QueryPlan {
-    fn new(node: impl Into<TopLevelPlanNode>, statistics: QueryPlanningStatistics) -> Self {
-        Self {
-            node: Some(node.into()),
-            statistics,
-        }
-    }
-}

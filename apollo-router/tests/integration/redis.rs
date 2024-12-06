@@ -52,9 +52,9 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
     let known_cache_key = &format!(
-        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8f8ce6ad09f15c3d567a05f1c3d7230ab71b3366fcaebc9cc3bbfa356d55ac12", 
-        env!("CARGO_PKG_VERSION"
-    ));
+        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:81b9c296d8ebc8adf4575b83a8d296621fd76de6d12d8c91f4552eda02d1dd9c"
+        env!("CARGO_PKG_VERSION")
+    );
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -992,7 +992,7 @@ async fn query_planner_redis_update_query_fragments() {
         // This configuration turns the fragment generation option *off*.
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:b030b297e8cc0fb51de5b683162be9a4a5a0023844597253e580f99672bdf2b4",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:a55ce3338ce6d5b78566be89cc6a7ad3fe8a7eeb38229d14ddf647edef84e545",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1025,7 +1025,7 @@ async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:ab8143af84859ddbed87fc3ac3b1f9c1e2271ffc8e58b58a666619ffc90bfc29",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0497501d3d01d05ad142938e7b8d8e7ea13e648aabbbedb47f6291ca8b3e536d",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1050,7 +1050,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:285740e3d6ca7533144f54f8395204d7c19c44ed16e48f22a3ea41195d60180b",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:662f5041882b3f621aeb7bad8e18818173eb077dc4343e16f3a34d2b6b6e4e59",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1104,8 +1104,8 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
 
     // If the tests above are failing, this is the key that needs to be changed first.
     let starting_key = &format!(
-        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8f8ce6ad09f15c3d567a05f1c3d7230ab71b3366fcaebc9cc3bbfa356d55ac12",
-        env!("CARGO_PKG_VERSION"),
+        "plan:router:{}::5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:81b9c296d8ebc8adf4575b83a8d296621fd76de6d12d8c91f4552eda02d1dd9c",
+        env!("CARGO_PKG_VERSION")
     );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 

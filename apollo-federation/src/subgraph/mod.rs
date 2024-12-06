@@ -22,6 +22,7 @@ use crate::subgraph::spec::AppliedFederationLink;
 use crate::subgraph::spec::FederationSpecDefinitions;
 use crate::subgraph::spec::LinkSpecDefinitions;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
+use crate::subgraph::spec::CONTEXTFIELDVALUE_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::subgraph::spec::ENTITY_UNION_NAME;
 use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
@@ -175,6 +176,7 @@ impl Subgraph {
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
     ) -> Result<(), FederationError> {
+        // scalar FieldSet
         let fieldset_scalar_name = &fed_definitions.fieldset_scalar_name;
         schema
             .types
@@ -184,6 +186,19 @@ impl Subgraph {
                     .fieldset_scalar_definition(fieldset_scalar_name.clone())
                     .into()
             });
+
+        // scalar ContextFieldValue
+        let namespaced_contextfieldvalue_scalar_name =
+            fed_definitions.namespaced_type_name(&CONTEXTFIELDVALUE_SCALAR_NAME, false);
+        if let Entry::Vacant(entry) = schema
+            .types
+            .entry(namespaced_contextfieldvalue_scalar_name.clone())
+        {
+            let type_definition = fed_definitions.contextfieldvalue_scalar_definition(&Some(
+                namespaced_contextfieldvalue_scalar_name,
+            ));
+            entry.insert(type_definition.into());
+        }
 
         for directive_name in &FEDERATION_V2_DIRECTIVE_NAMES {
             let namespaced_directive_name =

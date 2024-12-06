@@ -35,10 +35,6 @@ struct QueryPlannerArgs {
     /// Set the `debug.paths_limit` option.
     #[arg(long)]
     paths_limit: Option<u32>,
-    /// If the supergraph only represents a single subgraph, pass through queries directly without
-    /// planning.
-    #[arg(long, default_value_t = false)]
-    single_subgraph_passthrough: bool,
 }
 
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
@@ -112,7 +108,6 @@ impl QueryPlannerArgs {
             config.debug.max_evaluated_plans = max_evaluated_plans;
         }
         config.debug.paths_limit = self.paths_limit;
-        config.debug.bypass_planner_for_single_subgraph = self.single_subgraph_passthrough;
     }
 }
 

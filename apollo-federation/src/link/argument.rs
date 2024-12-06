@@ -144,7 +144,7 @@ pub(crate) fn directive_optional_list_argument<'a>(
             Value::Null => Ok(None),
             Value::List(values) => Ok(Some(values.as_slice())),
             _ => bail!(
-                r#"Argument "{name}" of directive "@{}" must be a boolean."#,
+                r#"Argument "{name}" of directive "@{}" must be a list."#,
                 application.name
             ),
         },
