@@ -370,7 +370,7 @@ rstest = "0.22.0"
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
 
 [target.'cfg(unix)'.dev-dependencies]
-hyperlocal = { version = "0.8.0", default-features = false, features = [
+hyperlocal = { version = "0.9.1", default-features = false, features = [
     "client",
     "server",
 ] }

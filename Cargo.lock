@@ -299,8 +299,7 @@ dependencies = [
  "hyper 1.5.1",
  "hyper-rustls 0.27.3",
  "hyper-util",
- "hyperlocal 0.8.0",
- "hyperlocal 0.9.1",
+ "hyperlocal",
  "indexmap 2.7.0",
  "insta",
  "itertools 0.13.0",
@@ -3598,19 +3597,6 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "hyperlocal"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fafdf7b2b2de7c9784f76e02c0935e65a8117ec3b768644379983ab333ac98c"
-dependencies = [
- "futures-util",
- "hex",
- "hyper 0.14.31",
- "pin-project",
- "tokio",
 ]
 
 [[package]]
