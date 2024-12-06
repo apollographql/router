@@ -1,11 +1,13 @@
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 
-// --- Semantic comparison of selection sets -----------------------------------
-// NOTE: this code is derived from apollo-router's plan diffing code.
-// -----------------------------------------------------------------------------
-
 /// Returns true if `inner` is a subset of `outer`.
+///
+/// Note: apollo_federation::operation::SelectionSet has its own `contains`
+/// method I'd love to use, but it requires a ValidFederationSchema, which
+/// we don't have during validation. This code can be removed after we rewrite
+/// composition in rust and connector validations happen after schema validation
+/// and `@link` enrichment.
 pub(super) fn field_set_is_subset(inner: &FieldSet, outer: &FieldSet) -> bool {
     inner.selection_set.ty == outer.selection_set.ty
         && vec_includes_as_set(
