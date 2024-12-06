@@ -14,6 +14,8 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::QueryPlan;
@@ -23,7 +25,6 @@ use super::fetch::SubgraphOperation;
 use super::subscription::SubscriptionNode;
 use super::FlattenNode;
 use crate::error::format_bridge_errors;
-use crate::executable::USING_CATCH_UNWIND;
 use crate::query_planner::bridge_query_planner::metric_query_planning_plan_duration;
 use crate::query_planner::bridge_query_planner::JS_QP_MODE;
 use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
@@ -79,47 +80,23 @@ impl BothModeComparisonJob {
     }
 
     fn execute(self) {
-        // TODO: once the Rust query planner does not use `todo!()` anymore,
-        // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
-        let rust_result = std::panic::catch_unwind(|| {
-            let name = self
-                .operation_name
-                .clone()
-                .map(Name::try_from)
-                .transpose()?;
-            USING_CATCH_UNWIND.set(true);
+        let start = Instant::now();
 
-            let start = Instant::now();
-
-            // No question mark operator or macro from here …
-            let result =
+        let rust_result = self
+            .operation_name
+            .as_deref()
+            .map(|n| Name::new(n).map_err(FederationError::from))
+            .transpose()
+            .and_then(|operation| {
                 self.rust_planner
-                    .build_query_plan(&self.document, name, self.plan_options);
+                    .build_query_plan(&self.document, operation, self.plan_options)
+            });
 
-            let elapsed = start.elapsed().as_secs_f64();
-            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-            metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
-            metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, self.js_duration);
-
-            // … to here, so the thread can only eiher reach here or panic.
-            // We unset USING_CATCH_UNWIND in both cases.
-            USING_CATCH_UNWIND.set(false);
-            result
-        })
-        .unwrap_or_else(|panic| {
-            USING_CATCH_UNWIND.set(false);
-            Err(apollo_federation::error::FederationError::internal(
-                format!(
-                    "query planner panicked: {}",
-                    panic
-                        .downcast_ref::<String>()
-                        .map(|s| s.as_str())
-                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                        .unwrap_or_default()
-                ),
-            ))
-        });
+        metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+        metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, self.js_duration);
 
         let name = self.operation_name.as_deref();
         let operation_desc = if let Ok(operation) = self.document.operations.get(name) {
@@ -1003,6 +980,24 @@ fn same_ast_argument(x: &ast::Argument, y: &ast::Argument) -> bool {
     x.name == y.name && same_ast_argument_value(&x.value, &y.value)
 }
 
+fn same_ast_arguments(x: &[Node<ast::Argument>], y: &[Node<ast::Argument>]) -> bool {
+    vec_matches_sorted_by(
+        x,
+        y,
+        |a, b| a.name.cmp(&b.name),
+        |a, b| same_ast_argument(a, b),
+    )
+}
+
+fn same_directives(x: &ast::DirectiveList, y: &ast::DirectiveList) -> bool {
+    vec_matches_sorted_by(
+        x,
+        y,
+        |a, b| a.name.cmp(&b.name),
+        |a, b| a.name == b.name && same_ast_arguments(&a.arguments, &b.arguments),
+    )
+}
+
 fn get_ast_selection_key(
     selection: &ast::Selection,
     fragment_map: &HashMap<Name, Name>,
@@ -1035,24 +1030,20 @@ fn same_ast_selection(
         (ast::Selection::Field(x), ast::Selection::Field(y)) => {
             x.name == y.name
                 && x.alias == y.alias
-                && vec_matches_sorted_by(
-                    &x.arguments,
-                    &y.arguments,
-                    |a, b| a.name.cmp(&b.name),
-                    |a, b| same_ast_argument(a, b),
-                )
-                && x.directives == y.directives
+                && same_ast_arguments(&x.arguments, &y.arguments)
+                && same_directives(&x.directives, &y.directives)
                 && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set, fragment_map)
         }
         (ast::Selection::FragmentSpread(x), ast::Selection::FragmentSpread(y)) => {
             let mapped_fragment_name = fragment_map
                 .get(&x.fragment_name)
                 .unwrap_or(&x.fragment_name);
-            *mapped_fragment_name == y.fragment_name && x.directives == y.directives
+            *mapped_fragment_name == y.fragment_name
+                && same_directives(&x.directives, &y.directives)
         }
         (ast::Selection::InlineFragment(x), ast::Selection::InlineFragment(y)) => {
             x.type_condition == y.type_condition
-                && x.directives == y.directives
+                && same_directives(&x.directives, &y.directives)
                 && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set, fragment_map)
         }
         _ => false,
@@ -1195,6 +1186,15 @@ mod ast_comparison_tests {
     fn test_selection_argument_order() {
         let op_x = r#"{ x(arg1: "one", arg2: "two") }"#;
         let op_y = r#"{ x(arg2: "two", arg1: "one") }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_selection_directive_order() {
+        let op_x = r#"{ x @include(if:true) @skip(if:false) }"#;
+        let op_y = r#"{ x @skip(if:false) @include(if:true) }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());

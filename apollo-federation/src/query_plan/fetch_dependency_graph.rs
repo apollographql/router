@@ -32,6 +32,7 @@ use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
@@ -77,6 +78,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
@@ -213,9 +215,10 @@ impl FetchIdGenerator {
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
     pub(crate) selection_set: Arc<SelectionSet>,
-    /// The conditions determining whether the fetch should be executed (which must be recomputed
-    /// from the selection set when it changes).
-    pub(crate) conditions: Conditions,
+    /// The conditions determining whether the fetch should be executed, derived from the selection
+    /// set.
+    #[serde(skip)]
+    conditions: OnceLock<Conditions>,
 }
 
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
@@ -681,16 +684,6 @@ impl FetchDependencyGraphNodePath {
                 Ok(new_path)
             }
         }
-    }
-}
-
-/// If the `iter` yields a single element, return it. Else return `None`.
-fn iter_into_single_item<T>(mut iter: impl Iterator<Item = T>) -> Option<T> {
-    let item = iter.next()?;
-    if iter.next().is_none() {
-        Some(item)
-    } else {
-        None
     }
 }
 
@@ -1717,7 +1710,7 @@ impl FetchDependencyGraph {
                 children.push(child_index);
             } else {
                 let Some(child_defer_ref) = &child.defer_ref else {
-                    panic!(
+                    bail!(
                         "{} has defer_ref `{}`, so its child {} cannot have a top-level defer_ref.",
                         node.display(node_index),
                         DisplayOption(node.defer_ref.as_ref()),
@@ -1779,7 +1772,10 @@ impl FetchDependencyGraph {
             .graph
             .node_weight_mut(node_index)
             .ok_or_else(|| FederationError::internal("Node unexpectedly missing"))?;
-        let conditions = handled_conditions.update_with(&node.selection_set.conditions);
+        let conditions = node
+            .selection_set
+            .conditions()?
+            .update_with(&handled_conditions);
         let new_handled_conditions = conditions.clone().merge(handled_conditions);
 
         let processed = processor.on_node(
@@ -2669,15 +2665,13 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation =
-            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
+        let operation = operation_compression.compress(operation)?;
         let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError {
-                inner: SingleFederationError::InvalidGraphQL { diagnostics },
-                ..
-            } => FederationError::internal(format!(
+            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
+                diagnostics,
+            }) => internal_error!(
                 "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            )),
+            ),
             _ => err,
         })?;
 
@@ -3178,9 +3172,8 @@ impl FetchSelectionSet {
         type_position: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
         let selection_set = Arc::new(SelectionSet::empty(schema, type_position));
-        let conditions = selection_set.conditions()?;
         Ok(Self {
-            conditions,
+            conditions: OnceLock::new(),
             selection_set,
         })
     }
@@ -3191,18 +3184,34 @@ impl FetchSelectionSet {
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
-        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
-        // Or make it lazily-initialized and computed on demand?
-        self.conditions = self.selection_set.conditions()?;
+        self.conditions.take();
         Ok(())
     }
 
     fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
-        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
-        // Or make it lazily-initialized and computed on demand?
-        self.conditions = self.selection_set.conditions()?;
+        self.conditions.take();
         Ok(())
+    }
+
+    /// The conditions determining whether the fetch should be executed.
+    fn conditions(&self) -> Result<&Conditions, FederationError> {
+        // This is a bit inefficient, because `get_or_try_init` is unstable.
+        // https://github.com/rust-lang/rust/issues/109737
+        //
+        // Essentially we do `.get()` twice. This is still much better than eagerly recomputing the
+        // selection set all the time, though :)
+        if let Some(conditions) = self.conditions.get() {
+            return Ok(conditions);
+        }
+
+        // Separating this call and the `.get_or_init` call means we could, if called from multiple
+        // threads, do the same work twice.
+        // The query planner does not use multiple threads for a single plan at the moment, and
+        // even if it did, occasionally computing this twice would still be better than eagerly
+        // recomputing it after every change.
+        let conditions = self.selection_set.conditions()?;
+        Ok(self.conditions.get_or_init(|| conditions))
     }
 }
 
@@ -3383,7 +3392,7 @@ impl DeferTracking {
 
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             let Some(parent_info) = self.deferred.get_mut(parent_ref) else {
-                panic!("Cannot find info for parent {parent_ref} or {label}");
+                bail!("Cannot find info for parent {parent_ref} or {label}")
             };
 
             parent_info.deferred.insert(label.clone());
@@ -3948,7 +3957,7 @@ fn compute_nodes_for_op_path_element<'a>(
             (stack_item.node_id, &stack_item.node_path),
             // If setting a context, add __typename to the site where we are retrieving context from
             // since the context rewrites path will start with a type condition.
-            if child.context_to_selection.is_some() {
+            if child.matching_context_ids.is_some() {
                 Some(edge_id)
             } else {
                 None
@@ -3957,12 +3966,12 @@ fn compute_nodes_for_op_path_element<'a>(
             created_nodes,
         )?;
 
-        if let Some(context_to_selection) = &child.context_to_selection {
+        if let Some(matching_context_ids) = &child.matching_context_ids {
             let mut condition_nodes = vec![conditions_node_data.conditions_merge_node_id];
             condition_nodes.extend(&conditions_node_data.created_node_ids);
             let mut context_to_condition_nodes =
                 stack_item.context_to_condition_nodes.deref().clone();
-            for context in context_to_selection {
+            for context in matching_context_ids {
                 context_to_condition_nodes.insert(context.clone(), condition_nodes.clone());
             }
             updated.context_to_condition_nodes = Arc::new(context_to_condition_nodes);
@@ -3987,17 +3996,17 @@ fn compute_nodes_for_op_path_element<'a>(
 
     // If the edge uses context variables, every context used must be set in a different parent
     // node or else we need to create a new one.
-    if let Some(parameter_to_context) = &child.parameter_to_context {
+    if let Some(arguments_to_context_usages) = &child.arguments_to_context_usages {
         let mut conditions_nodes: IndexSet<NodeIndex> = Default::default();
         let mut is_subgraph_jump_needed = false;
-        for context_entry in parameter_to_context.values() {
+        for context_usage in arguments_to_context_usages.values() {
             let Some(context_nodes) = updated
                 .context_to_condition_nodes
-                .get(&context_entry.context_id)
+                .get(&context_usage.context_id)
             else {
                 bail!(
                     "Could not find condition nodes for context {}",
-                    context_entry.context_id
+                    context_usage.context_id
                 );
             };
             conditions_nodes.extend(context_nodes);
@@ -4106,14 +4115,14 @@ fn compute_nodes_for_op_path_element<'a>(
             }
 
             // Add context renamers.
-            for context_entry in parameter_to_context.values() {
+            for context_entry in arguments_to_context_usages.values() {
                 let updated_node = FetchDependencyGraph::node_weight_mut(
                     &mut dependency_graph.graph,
                     updated.node_id,
                 )?;
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
-                    context_entry.subgraph_arg_type.clone(),
+                    context_entry.subgraph_argument_type.clone(),
                 )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),
@@ -4139,7 +4148,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 .iter()
                 .filter(|e| matches!((**e).deref(), OpPathElement::Field(_)))
                 .count();
-            for context_entry in parameter_to_context.values() {
+            for context_entry in arguments_to_context_usages.values() {
                 let new_relative_path = &context_entry.relative_path
                     [..(context_entry.relative_path.len() - num_fields)];
                 let updated_node = FetchDependencyGraph::node_weight_mut(
@@ -4148,7 +4157,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 )?;
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
-                    context_entry.subgraph_arg_type.clone(),
+                    context_entry.subgraph_argument_type.clone(),
                 )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),

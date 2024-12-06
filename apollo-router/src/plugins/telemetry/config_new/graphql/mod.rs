@@ -62,6 +62,7 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
 pub(crate) type GraphQLCustomInstruments = CustomInstruments<
     supergraph::Request,
     supergraph::Response,
+    crate::graphql::Response,
     GraphQLAttributes,
     GraphQLSelector,
     GraphQLValue,
@@ -72,6 +73,7 @@ pub(crate) struct GraphQLInstruments {
         CustomHistogram<
             supergraph::Request,
             supergraph::Response,
+            crate::graphql::Response,
             GraphQLAttributes,
             GraphQLSelector,
         >,
@@ -80,6 +82,7 @@ pub(crate) struct GraphQLInstruments {
         CustomCounter<
             supergraph::Request,
             supergraph::Response,
+            crate::graphql::Response,
             GraphQLAttributes,
             GraphQLSelector,
         >,
