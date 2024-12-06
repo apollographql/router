@@ -52,7 +52,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
     let known_cache_key = &format!(
-        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:3ede629b6b9316f85d1525d17eafdc44549a028aaf9a598069d08180efe20753",
+        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:924b36a9ae6af4ff198220b1302b14b6329c4beb7c022fd31d6fef82eaad7ccb",
         env!("CARGO_PKG_VERSION")
     );
 
@@ -992,7 +992,7 @@ async fn query_planner_redis_update_query_fragments() {
         // This configuration turns the fragment generation option *off*.
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:79752951c056a09552c7f44df4ef954fc787dd072644e1cd4ca5e9f02679c277",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:28acec2bebc3922cd261ed3c8a13b26d53b49e891797a199e3e1ce8089e813e6",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1025,7 +1025,7 @@ async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fa0a3cba2dbf4e451174019c589b4e724b3c5e286c2a73567ebc7b88e5ecae5a",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:af3139ddd647c755d2eab5e6a177dc443030a528db278c19ad7b45c5c0324378",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1050,7 +1050,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8b0d609a26092aecbdfe7fb77f57f765b7f78ce18fda39e8a353f060b304973f",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8b87abe2e45d38df4712af966aa540f33dbab6fc2868a409f2dbb6a5a4fb2d08",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1104,7 +1104,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
 
     // If the tests above are failing, this is the key that needs to be changed first.
     let starting_key = &format!(
-        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:3ede629b6b9316f85d1525d17eafdc44549a028aaf9a598069d08180efe20753",
+        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:924b36a9ae6af4ff198220b1302b14b6329c4beb7c022fd31d6fef82eaad7ccb",
         env!("CARGO_PKG_VERSION")
     );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
