@@ -8,7 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_
         code: EntityResolverArgumentMismatch,
         message: "`Query.product` with `@connect(entity: true)` must have arguments. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
         locations: [
-            16:9..16:21,
+            10:7..10:19,
         ],
     },
 ]

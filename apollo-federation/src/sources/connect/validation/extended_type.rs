@@ -74,7 +74,7 @@ fn validate_object_fields(
 
     // Mark resolvable key fields as seen
     let mut selections: Vec<(Name, Selection)> = resolvable_key_fields(object, schema)
-        .flat_map(|field_set| {
+        .flat_map(|(field_set, _)| {
             field_set
                 .selection_set
                 .selections

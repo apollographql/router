@@ -1,3 +1,6 @@
+mod compare_keys;
+mod keys;
+
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
@@ -9,6 +12,8 @@ use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+pub(super) use keys::field_set_error;
+pub(super) use keys::EntityKeyChecker;
 
 use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::coordinates::field_with_connect_directive_entity_true_coordinate;
@@ -19,11 +24,9 @@ use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::variable::VariableReference;
 
 /// Applies additional validations to `@connect` if `entity` is `true`.
-///
-/// TODO: use the same code as expansion to generate the automatic key. Return that here so that
-/// the upper level can confirm all explicit `@key`s match an automatic key
 pub(super) fn validate_entity_arg(
     field: &Component<FieldDefinition>,
     connect_directive: &Node<Directive>,
