@@ -116,13 +116,9 @@ impl Connector {
         connect: ConnectDirectiveArguments,
         source_arguments: &[SourceDirectiveArguments],
     ) -> Result<(ConnectId, Self), FederationError> {
-        let source = if let Some(source_name) = connect.source {
-            source_arguments
-                .iter()
-                .find(|source| source.name == source_name)
-        } else {
-            None
-        };
+        let source = connect.source.as_ref()
+            .and_then(|name| source_arguments.iter()
+                .find(|s| s.name == name));
 
         let source_name = source.map(|s| s.name.clone());
         let connect_http = connect.http.expect("@connect http missing");
@@ -296,7 +292,7 @@ impl HttpJsonTransport {
     }
 
     fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
-        let url_variables = self.connect_template.variables().map(Clone::clone);
+        let url_variables = self.connect_template.variables().cloned();
         let header_variables = self
             .headers
             .iter()
@@ -305,7 +301,7 @@ impl HttpJsonTransport {
                 HeaderSource::Value(source) => Some(source.variable_references()),
             })
             .flatten()
-            .map(Clone::clone);
+            .cloned();
         let body_variables = self.body.iter().flat_map(|b| {
             b.external_var_paths()
                 .into_iter()
