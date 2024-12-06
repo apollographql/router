@@ -5,18 +5,18 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_
 ---
 [
     Message {
-        code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.product` contains an invalid expression `{$args.id}` - URI templates can't contain objects.",
-        locations: [
-            8:44..8:52,
-        ],
-    },
-    Message {
         code: EntityResolverArgumentMismatch,
         message: "`Query.product` with `@connect(entity: true)` has invalid arguments. Mismatched type on field `id` - expected `ID` but found `ProductInput`.",
         locations: [
             6:11..6:28,
             10:7..10:19,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.product` contains an invalid expression `{$args.id}` - URI templates can't contain objects.",
+        locations: [
+            8:44..8:52,
         ],
     },
 ]

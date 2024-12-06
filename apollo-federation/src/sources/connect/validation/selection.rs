@@ -40,7 +40,7 @@ pub(super) fn validate_selection(
     coordinate: ConnectDirectiveCoordinate,
     schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
-) -> Result<JSONSelection, Message> {
+) -> Result<(), Message> {
     let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
 
     validate_selection_variables(
@@ -55,11 +55,11 @@ pub(super) fn validate_selection(
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
         // TODO: Validate scalar return types
-        return Ok(json_selection);
+        return Ok(());
     };
     let Some(sub_selection) = json_selection.next_subselection() else {
         // TODO: Validate scalar selections
-        return Ok(json_selection);
+        return Ok(());
     };
 
     let group = Group {
@@ -76,7 +76,6 @@ pub(super) fn validate_selection(
         seen_fields,
     }
     .walk(group)
-    .map(|_| json_selection)
 }
 
 pub(super) fn validate_body_selection(
@@ -86,7 +85,7 @@ pub(super) fn validate_body_selection(
     field: &Component<FieldDefinition>,
     schema: &SchemaInfo,
     selection_node: &Node<Value>,
-) -> Result<JSONSelection, Message> {
+) -> Result<(), Message> {
     let coordinate =
         connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
 
@@ -129,7 +128,6 @@ pub(super) fn validate_body_selection(
         &selection,
         selection_str,
     )
-    .map(|_| selection)
 }
 
 /// Validate variable references in a JSON Selection

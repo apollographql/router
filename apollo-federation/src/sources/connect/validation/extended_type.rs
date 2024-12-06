@@ -29,9 +29,9 @@ use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
-pub(super) fn validate_extended_type<'s>(
-    extended_type: &'s ExtendedType,
-    schema: &'s SchemaInfo,
+pub(super) fn validate_extended_type(
+    extended_type: &ExtendedType,
+    schema: &SchemaInfo,
     all_source_names: &[SourceName],
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
@@ -62,9 +62,9 @@ pub(crate) enum ObjectCategory {
 
 /// Make sure that any `@connect` directives on object fields are valid, and that all fields
 /// are resolvable by some combination of `@connect` directives.
-fn validate_object_fields<'s>(
-    object: &'s Node<ObjectType>,
-    schema: &'s SchemaInfo,
+fn validate_object_fields(
+    object: &Node<ObjectType>,
+    schema: &SchemaInfo,
     source_names: &[SourceName],
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
@@ -72,9 +72,8 @@ fn validate_object_fields<'s>(
         return Vec::new();
     }
 
-    let keys_and_directives = resolvable_key_fields(object, schema);
-
-    let mut selections: Vec<(Name, Selection)> = keys_and_directives
+    // Mark resolvable key fields as seen
+    let mut selections: Vec<(Name, Selection)> = resolvable_key_fields(object, schema)
         .flat_map(|(field_set, _)| {
             field_set
                 .selection_set
@@ -84,9 +83,7 @@ fn validate_object_fields<'s>(
                 .collect::<Vec<_>>()
         })
         .collect();
-
     while !selections.is_empty() {
-        // Mark resolvable key fields as "seen"
         if let Some((type_name, selection)) = selections.pop() {
             if let Some(field) = selection.as_field() {
                 let t = (type_name, field.name.clone());
@@ -150,12 +147,12 @@ fn validate_object_fields<'s>(
         .collect()
 }
 
-fn validate_field<'s>(
-    field: &'s Component<FieldDefinition>,
+fn validate_field(
+    field: &Component<FieldDefinition>,
     category: ObjectCategory,
     source_names: &[SourceName],
-    object: &'s Node<ObjectType>,
-    schema: &'s SchemaInfo,
+    object: &Node<ObjectType>,
+    schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
     let source_map = &schema.sources;
@@ -215,6 +212,9 @@ fn validate_field<'s>(
 
         errors.extend(validate_selection(connect_coordinate, schema, seen_fields).err());
 
+        errors
+            .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
+
         let Some((http_arg, http_arg_node)) = connect_directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| Some((arg.as_object()?, arg)))
@@ -249,18 +249,17 @@ fn validate_field<'s>(
             .iter()
             .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
         {
-            errors.extend(
-                validate_body_selection(
-                    connect_directive,
-                    connect_coordinate,
-                    object,
-                    field,
-                    schema,
-                    body,
-                )
-                .err(),
-            );
-        };
+            if let Err(err) = validate_body_selection(
+                connect_directive,
+                connect_coordinate,
+                object,
+                field,
+                schema,
+                body,
+            ) {
+                errors.push(err);
+            }
+        }
 
         if let Some(source_name) = connect_directive
             .arguments
@@ -275,7 +274,7 @@ fn validate_field<'s>(
                 schema,
             ));
 
-            if let Some((template, coordinate)) = url_template.clone() {
+            if let Some((template, coordinate)) = url_template {
                 if template.base.is_some() {
                     errors.push(Message {
                         code: Code::AbsoluteConnectUrlWithSource,
@@ -289,7 +288,7 @@ fn validate_field<'s>(
                     })
                 }
             }
-        } else if let Some((template, coordinate)) = url_template.clone() {
+        } else if let Some((template, coordinate)) = url_template {
             if template.base.is_none() {
                 errors.push(Message {
                     code: Code::RelativeConnectUrlWithoutSource,
@@ -312,9 +311,6 @@ fn validate_field<'s>(
                 field: &field.name,
             },
         ));
-
-        errors
-            .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
     }
     errors
 }
