@@ -36,6 +36,6 @@ services:
 
   zipkin:
     container_name: zipkin
-    image: openzipkin/zipkin:3.0.6
+    image: openzipkin/zipkin:3.4.3
     ports:
       - 9411:9411

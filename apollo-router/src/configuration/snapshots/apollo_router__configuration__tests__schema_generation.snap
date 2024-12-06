@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1267,6 +1266,9 @@ snapshot_kind: text
       "type": "object"
     },
     "Conf5": {
+      "type": "object"
+    },
+    "Conf6": {
       "anyOf": [
         {
           "additionalProperties": {
@@ -1278,7 +1280,7 @@ snapshot_kind: text
       ],
       "description": "Subgraph URL mappings"
     },
-    "Conf6": {
+    "Conf7": {
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
@@ -1295,7 +1297,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "Conf7": {
+    "Conf8": {
       "additionalProperties": false,
       "description": "Telemetry configuration",
       "properties": {
@@ -5741,6 +5743,11 @@ snapshot_kind: text
     "SubgraphAttributes": {
       "additionalProperties": false,
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -6239,6 +6246,24 @@ snapshot_kind: text
           "additionalProperties": false,
           "properties": {
             "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "subgraph_resend_count": {
+              "description": "The subgraph http resend count",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_resend_count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
               "description": "Optional default value.",
               "nullable": true,
               "type": "string"
@@ -6619,7 +6644,7 @@ snapshot_kind: text
         },
         "experimental_reuse_query_fragments": {
           "default": null,
-          "description": "Enable reuse of query fragments Default: depends on the federation version",
+          "description": "Enable reuse of query fragments This feature is deprecated and will be removed in next release. The config can only be set when the legacy query planner is explicitly enabled.",
           "nullable": true,
           "type": "boolean"
         },
@@ -7753,6 +7778,11 @@ snapshot_kind: text
         "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -7782,6 +7812,11 @@ snapshot_kind: text
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -8343,6 +8378,10 @@ snapshot_kind: text
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
     },
+    "fleet_detector": {
+      "$ref": "#/definitions/Conf5",
+      "description": "#/definitions/Conf5"
+    },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig",
       "description": "#/definitions/ForbidMutationsConfig"
@@ -8368,8 +8407,8 @@ snapshot_kind: text
       "description": "#/definitions/Config"
     },
     "override_subgraph_url": {
-      "$ref": "#/definitions/Conf5",
-      "description": "#/definitions/Conf5"
+      "$ref": "#/definitions/Conf6",
+      "description": "#/definitions/Conf6"
     },
     "persisted_queries": {
       "$ref": "#/definitions/PersistedQueries",
@@ -8392,8 +8431,8 @@ snapshot_kind: text
       "description": "#/definitions/Config8"
     },
     "rhai": {
-      "$ref": "#/definitions/Conf6",
-      "description": "#/definitions/Conf6"
+      "$ref": "#/definitions/Conf7",
+      "description": "#/definitions/Conf7"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
@@ -8408,8 +8447,8 @@ snapshot_kind: text
       "description": "#/definitions/Supergraph"
     },
     "telemetry": {
-      "$ref": "#/definitions/Conf7",
-      "description": "#/definitions/Conf7"
+      "$ref": "#/definitions/Conf8",
+      "description": "#/definitions/Conf8"
     },
     "tls": {
       "$ref": "#/definitions/Tls",
