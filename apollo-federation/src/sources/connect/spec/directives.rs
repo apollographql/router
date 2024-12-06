@@ -3,6 +3,7 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::schema::ConnectDirectiveArguments;
@@ -19,10 +20,10 @@ use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-use crate::schema::FederationSchema;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::models::Header;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::ObjectFieldDefinitionPosition;
 
 macro_rules! internal {
     ($s:expr) => {
@@ -31,21 +32,11 @@ macro_rules! internal {
 }
 
 pub(crate) fn extract_source_directive_arguments(
-    schema: &FederationSchema,
+    schema: &Schema,
     name: &Name,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
-    let Ok(directive_refs) = schema.referencers().get_directive(name) else {
-        return Ok(vec![]);
-    };
-
-    // If we don't have any sources, then just short out
-    let Some(schema_directive_pos) = directive_refs.schema.as_ref() else {
-        return Ok(Vec::new());
-    };
-
-    let schema_def = schema_directive_pos.get(schema.schema());
-
-    schema_def
+    schema
+        .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == *name)
@@ -54,43 +45,46 @@ pub(crate) fn extract_source_directive_arguments(
 }
 
 pub(crate) fn extract_connect_directive_arguments(
-    schema: &FederationSchema,
+    schema: &Schema,
     name: &Name,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
-    let Ok(directive_refs) = schema.referencers().get_directive(name) else {
-        return Ok(vec![]);
-    };
-
-    directive_refs
-        .object_fields
+    schema
+        .types
         .iter()
-        .map(|pos| {
-            let object_field = pos
-                .get(schema.schema())
-                .map_err(|_| internal!("failed to get object field from schema"))?;
-
-            Ok::<_, FederationError>(
-                object_field
+        .filter_map(|(name, ty)| match ty {
+            apollo_compiler::schema::ExtendedType::Object(node) => Some((name, &node.fields)),
+            apollo_compiler::schema::ExtendedType::Interface(node) => Some((name, &node.fields)),
+            _ => None,
+        })
+        .flat_map(|(type_name, fields)| {
+            fields.iter().flat_map(move |(field_name, field_def)| {
+                field_def
                     .directives
                     .iter()
                     .enumerate()
-                    .filter(|(_, directive)| directive.name == *name)
-                    .map(move |(i, directive)| {
-                        let directive_pos = ObjectOrInterfaceFieldDirectivePosition {
-                            field: ObjectOrInterfaceFieldDefinitionPosition::Object(pos.clone()),
-                            directive_name: directive.name.clone(),
-                            directive_index: i,
-                        };
-                        ConnectDirectiveArguments::from_position_and_directive(
-                            directive_pos,
-                            directive,
-                        )
-                    }),
-            )
+                    .filter_map(move |(i, directive)| {
+                        if directive.name == *name {
+                            let field_pos = ObjectOrInterfaceFieldDefinitionPosition::Object(
+                                ObjectFieldDefinitionPosition {
+                                    type_name: type_name.clone(),
+                                    field_name: field_name.clone(),
+                                },
+                            );
+
+                            let position = ObjectOrInterfaceFieldDirectivePosition {
+                                field: field_pos,
+                                directive_name: directive.name.clone(),
+                                directive_index: i,
+                            };
+                            Some(ConnectDirectiveArguments::from_position_and_directive(
+                                position, directive,
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+            })
         })
-        .try_collect::<_, Vec<_>, _>()?
-        .into_iter()
-        .flatten()
         .collect()
 }
 
@@ -468,7 +462,7 @@ mod tests {
         let schema = &subgraph.schema;
 
         // Extract the connects from the schema definition and map them to their `Connect` equivalent
-        let connects = super::extract_connect_directive_arguments(schema, &name!(connect));
+        let connects = super::extract_connect_directive_arguments(schema.schema(), &name!(connect));
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),

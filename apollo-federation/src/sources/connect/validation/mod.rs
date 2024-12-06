@@ -43,6 +43,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use coordinates::source_http_argument_coordinate;
+use entity::field_set_error;
 use entity::EntityKeyChecker;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
@@ -51,6 +52,7 @@ use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 use url::Url;
 
+use super::Connector;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
@@ -140,7 +142,6 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
     }
 
     let mut seen_fields = IndexSet::default();
-    let mut entity_checker = EntityKeyChecker::default();
 
     let connect_errors = schema.types.values().flat_map(|extended_type| {
         validate_extended_type(
@@ -148,20 +149,9 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
             &schema_info,
             &all_source_names,
             &mut seen_fields,
-            &mut entity_checker,
         )
     });
     messages.extend(connect_errors);
-
-    if should_do_advanced_validations(&messages) {
-        messages.extend(check_seen_fields(
-            &schema_info,
-            &seen_fields,
-            &external_directive_name,
-        ));
-
-        messages.extend(entity_checker.check_for_missing_entity_connectors(&schema));
-    }
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
@@ -176,28 +166,70 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
                 .collect(),
         });
     }
+
+    if should_do_advanced_validations(&messages) {
+        messages.extend(check_seen_fields(
+            &schema_info,
+            &seen_fields,
+            &external_directive_name,
+        ));
+
+        match advanced_validations(&schema, file_name, ConnectSpec::V0_1) {
+            Ok(multiple) => messages.extend(multiple),
+            Err(Some(single)) => messages.push(single),
+            _ => {} // let the rest of composition handle this
+        };
+    }
+
     messages
+}
+
+fn advanced_validations(
+    schema: &Schema,
+    subgraph_name: &str,
+    spec: ConnectSpec,
+) -> Result<Vec<Message>, Option<Message>> {
+    let mut messages = vec![];
+
+    let connectors = Connector::from_schema(schema, subgraph_name, spec).map_err(|_| None)?;
+
+    let mut entity_checker = EntityKeyChecker::default();
+
+    for (field_set, directive) in find_all_resolvable_keys(schema) {
+        entity_checker.add_key(&field_set, directive);
+    }
+
+    for (_, connector) in connectors {
+        if let Some(field_set) = connector.resolvable_key(schema).map_err(|_| {
+            let variables = connector.variable_references().collect_vec();
+            field_set_error(&variables, connector.id.directive.field.type_name())
+        })? {
+            entity_checker.add_connector(field_set);
+        }
+    }
+
+    messages.extend(entity_checker.check_for_missing_entity_connectors(schema));
+
+    Ok(messages)
+}
+
+fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Directive>)> {
+    schema
+        .types
+        .values()
+        .flat_map(|extended_type| match extended_type {
+            ExtendedType::Object(object) => Some(resolvable_key_fields(object, schema)),
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
 /// We'll avoid doing this work if there are bigger issues with the schema.
 /// Otherwise we might emit a large number of diagnostics that will
 /// distract from the main problems.
 fn should_do_advanced_validations(messages: &[Message]) -> bool {
-    !messages.iter().any(|error| {
-        // some invariant is violated, so let's just stop here
-        error.code == Code::GraphQLError
-            // an invalid json selection means we can't visit the fields in the selection
-            || error.code == Code::InvalidJsonSelection
-            // the selection visitor emits these errors and stops visiting, so there will probably be fields we haven't visited
-            || error.code == Code::SelectedFieldNotFound
-            || error.code == Code::GroupSelectionIsNotObject
-            || error.code == Code::GroupSelectionRequiredForObject
-            // if we encounter unsupported definitions, there are probably related definitions that we won't be able to resolve
-            || error.code == Code::SubscriptionInConnectors
-            || error.code == Code::ConnectorsUnsupportedAbstractType
-            // If we have entity argument issues, don't also check for missing entity connectors
-            || error.code == Code::EntityResolverArgumentMismatch
-    })
+    messages.is_empty()
 }
 
 /// Check that all fields defined in the schema are resolved by a connector.

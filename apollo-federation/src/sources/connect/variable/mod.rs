@@ -15,6 +15,7 @@ use nom::combinator::all_consuming;
 use parser::Span;
 use parser::VariableParseError;
 
+pub(crate) mod keys;
 pub(crate) mod parser;
 
 /// The context of an expression containing variable references. The context determines what

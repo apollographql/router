@@ -194,14 +194,12 @@ mod helpers {
     use apollo_compiler::Schema;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
-    use itertools::Itertools;
 
     use super::filter_directives;
     use super::visitors::try_insert;
     use super::visitors::try_pre_insert;
     use super::visitors::GroupVisitor;
     use super::visitors::SchemaVisitor;
-    use super::FieldAndSelection;
     use crate::error::FederationError;
     use crate::internal_error;
     use crate::link::spec::Identity;
@@ -216,14 +214,10 @@ mod helpers {
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
-    use crate::sources::connect::json_selection::ExternalVarPaths;
-    use crate::sources::connect::variable::Namespace;
-    use crate::sources::connect::variable::VariableReference;
     use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
     use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::PathSelection;
     use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
     use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
@@ -454,170 +448,116 @@ mod helpers {
             parent_type_name: Name,
             output_type_name: Name,
         ) -> Result<(), FederationError> {
+            let resolvable_key = connector
+                .resolvable_key(self.original_schema.schema())
+                .map_err(|_| FederationError::internal("error creating resolvable key"))?;
+
+            let Some(resolvable_key) = resolvable_key else {
+                return self.copy_interface_object_keys(output_type_name, to_schema);
+            };
+
             let parent_type = self.original_schema.get_type(parent_type_name)?;
             let output_type = to_schema.get_type(output_type_name.clone())?;
+            let key_for_type = match &connector.entity_resolver {
+                Some(EntityResolver::Explicit) => output_type,
+                _ => parent_type,
+            };
 
-            // The body of the request might include references to input arguments / sibling fields
-            // that will need to be handled, so we extract any referenced variables now
-            let body_parameters = connector
-                .transport
-                .body
-                .as_ref()
-                .map(extract_params_from_selection)
-                .into_iter()
-                .flatten();
+            let parsed = JSONSelection::parse(&resolvable_key.serialize().no_indent().to_string())
+                .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
 
-            // The HTTP body might contain references to $this, so we grab those usages as well
-            let url_parameters = connector.transport.connect_template.variables().cloned();
+            let visitor =
+                SchemaVisitor::new(self.original_schema, to_schema, &self.directive_deny_list);
 
-            // The actual selection might make use of the $this variable, so we grab them too
-            let selection_parameters = extract_params_from_selection(&connector.selection);
+            let output_type = match &key_for_type {
+                TypeDefinitionPosition::Object(object) => object,
 
-            let (key_for_type, namespace_filter) =
-                if matches!(connector.entity_resolver, Some(EntityResolver::Explicit)) {
-                    // `entity: true` connectors only exist on Query.
-                    // We don't generate keys for `Query`, these are keys for the output type of the field.
-                    // Therefore, we're also only considering the `$args` fields as keys, which should
-                    // map 1-1 with output type fields.
-                    (output_type, Namespace::Args)
-                } else {
-                    // We're extending an entity by adding a new field dependent on some other fields
-                    // (identified by `$this`).
-                    (parent_type, Namespace::This)
-                };
+                other => {
+                    return Err(FederationError::internal(format!(
+                        "connector output types currently only support object types: found {}",
+                        other.type_name()
+                    )))
+                }
+            };
 
-            // We'll need to collect all synthesized keys for the output type, adding a federation
-            // `@key` directive once completed.
-            let mut keys = Vec::new();
-            for VariableReference { path, .. } in body_parameters
-                .into_iter()
-                .chain(url_parameters)
-                .chain(selection_parameters)
-                .unique()
-                .filter(|var| var.namespace.namespace == namespace_filter)
-            {
-                // Arguments should be added to the synthesized key, since they are mandatory
-                // to resolving the output type. The synthesized key should only include the portions
-                // of the inputs actually used throughout the selections of the transport.
-                //
-                // Note that this only applies to connectors marked as an entity resolver, since only
-                // those should be allowed to fully resolve a type given the required arguments /
-                // synthesized keys.
-                //
-                // All sibling fields marked by $this in a transport must be carried over to the output type
-                // regardless of its use in the output selection.
-                let parts = path.iter().map(|part| part.part.as_ref());
-                let field_and_selection = FieldAndSelection::from_path(parts);
-                let field_name = Name::new(field_and_selection.field_name)?;
-                let field: Box<dyn Field> = match &key_for_type {
-                    TypeDefinitionPosition::Object(o)  => Box::new(o.field(field_name)),
-                    TypeDefinitionPosition::Interface(i) => Box::new(i.field(field_name)),
-                    TypeDefinitionPosition::Union(_) | TypeDefinitionPosition::InputObject(_)=> {
-                        return Err(FederationError::internal(
-                            "siblings of type interface, input object, or union are not yet handled",
-                        ))
-                    }
-                    other => {
-                        return Err(FederationError::internal(format!(
-                            "cannot select a sibling on a leaf type: {}",
-                            other.type_name()
-                        )))
-                    }
-                };
+            // This adds child types for all key fields
+            visitor.walk((
+                output_type.clone(),
+                parsed
+                    .next_subselection()
+                    .cloned()
+                    .ok_or(FederationError::internal(
+                        "empty selections are not allowed",
+                    ))?,
+            ))?;
 
-                let field_def = field.get(self.original_schema.schema())?;
+            // This actually adds the key fields if necessary, which is only
+            // when depending on sibling fields.
+            if let Some(sub) = parsed.next_subselection() {
+                for named in sub.selections_iter() {
+                    for field_name in named.names() {
+                        let field_name = Name::new(field_name)?;
+                        let field: Box<dyn Field> = match &key_for_type {
+                                TypeDefinitionPosition::Object(o)  => Box::new(o.field(field_name)),
+                                TypeDefinitionPosition::Interface(i) => Box::new(i.field(field_name)),
+                                TypeDefinitionPosition::Union(_) | TypeDefinitionPosition::InputObject(_)=> {
+                                    return Err(FederationError::internal(
+                                        "siblings of type interface, input object, or union are not yet handled",
+                                    ))
+                                }
+                                other => {
+                                    return Err(FederationError::internal(format!(
+                                        "cannot select a sibling on a leaf type: {}",
+                                        other.type_name()
+                                    )))
+                                }
+                            };
 
-                // Mark it as a required key for the output type
-                if !field_and_selection.sub_selection.is_empty() {
-                    // We'll also need to carry over the output type of this sibling if there is a sub
-                    // selection.
-                    let field_output = field_def.ty.inner_named_type();
-                    if to_schema.try_get_type(field_output.clone()).is_none() {
-                        // We use a fake JSONSelection here so that we can reuse the visitor
-                        // when generating the output types and their required members.
-                        let visitor = SchemaVisitor::new(
-                            self.original_schema,
-                            to_schema,
-                            &self.directive_deny_list,
-                        );
-                        let parsed = JSONSelection::parse(&field_and_selection.sub_selection)
-                            .map_err(|e| {
-                                FederationError::internal(format!(
-                                    "error creating key from `$this` variable: {e}"
-                                ))
-                            })?;
-
-                        let output_type = match self
-                            .original_schema
-                            .get_type(field_output.clone())?
-                        {
-                            TypeDefinitionPosition::Object(object) => object,
-
-                            other => {
-                                return Err(FederationError::internal(format!("connector output types currently only support object types: found {}", other.type_name())))
-                            }
-                        };
-
-                        visitor.walk((
-                            output_type,
-                            parsed.next_subselection().cloned().ok_or(
-                                FederationError::internal("empty selections are not allowed"),
-                            )?,
-                        ))?;
+                        let field_def = field.get(self.original_schema.schema())?;
+                        if field.get(to_schema.schema()).is_err() {
+                            field.insert(
+                                to_schema,
+                                Component::new(FieldDefinition {
+                                    description: field_def.description.clone(),
+                                    name: field_def.name.clone(),
+                                    arguments: field_def.arguments.clone(),
+                                    ty: field_def.ty.clone(),
+                                    directives: filter_directives(
+                                        &self.directive_deny_list,
+                                        &field_def.directives,
+                                    ),
+                                }),
+                            )?;
+                        }
                     }
                 }
-
-                keys.push(field_and_selection.to_key());
-
-                // Add the field if not already present in the output schema
-                if field.get(to_schema.schema()).is_err() {
-                    field.insert(
-                        to_schema,
-                        Component::new(FieldDefinition {
-                            description: field_def.description.clone(),
-                            name: field_def.name.clone(),
-                            arguments: field_def.arguments.clone(),
-                            ty: field_def.ty.clone(),
-                            directives: filter_directives(
-                                &self.directive_deny_list,
-                                &field_def.directives,
-                            ),
-                        }),
-                    )?;
-                }
-            }
+            };
 
             // If we have marked keys as being necessary for this output type, add them as an `@key`
             // directive now.
-            if !keys.is_empty() {
-                let key_directive = Directive {
-                    name: self.key_name.clone(),
-                    arguments: vec![Node::new(Argument {
-                        name: name!("fields"),
-                        value: Node::new(Value::String(keys.join(" "))),
-                    })],
-                };
+            let key_directive = Directive {
+                name: self.key_name.clone(),
+                arguments: vec![Node::new(Argument {
+                    name: name!("fields"),
+                    value: Node::new(Value::String(
+                        resolvable_key.serialize().no_indent().to_string(),
+                    )),
+                })],
+            };
 
-                match key_for_type {
-                    TypeDefinitionPosition::Object(o) => {
-                        o.insert_directive(to_schema, Component::new(key_directive))
-                    }
-                    TypeDefinitionPosition::Interface(i) => {
-                        i.insert_directive(to_schema, Component::new(key_directive))
-                    }
-
-                    TypeDefinitionPosition::Scalar(_)
-                    | TypeDefinitionPosition::Union(_)
-                    | TypeDefinitionPosition::Enum(_)
-                    | TypeDefinitionPosition::InputObject(_) => {
-                        return Err(FederationError::internal(
-                            "keys cannot be added to scalars, unions, enums, or input objects",
-                        ))
-                    }
-                }?;
-            } else {
-                self.copy_interface_object_keys(output_type_name, to_schema)?;
-            }
+            match &key_for_type {
+                TypeDefinitionPosition::Object(o) => {
+                    o.insert_directive(to_schema, Component::new(key_directive))
+                }
+                TypeDefinitionPosition::Interface(i) => {
+                    i.insert_directive(to_schema, Component::new(key_directive))
+                }
+                _ => {
+                    return Err(FederationError::internal(
+                        "keys cannot be added to scalars, unions, enums, or input objects",
+                    ))
+                }
+            }?;
 
             Ok(())
         }
@@ -820,16 +760,6 @@ mod helpers {
         }
     }
 
-    /// Extract all seen parameters from a JSONSelection
-    fn extract_params_from_selection(
-        selection: &JSONSelection,
-    ) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
-        selection
-            .external_var_paths()
-            .into_iter()
-            .flat_map(PathSelection::variable_reference)
-    }
-
     // TODO: contribute some code to `position.rs` to make those types more flexible rather than adding it here
     trait Field {
         fn get<'schema>(
@@ -876,77 +806,6 @@ mod helpers {
         ) -> Result<(), FederationError> {
             self.insert(schema, field)
         }
-    }
-}
-
-/// Represents a field and the subselection of that field, which can then be joined together into
-/// a full named selection (which is the same as a key, in simple cases).
-struct FieldAndSelection<'a> {
-    field_name: &'a str,
-    sub_selection: String,
-}
-
-impl<'a> FieldAndSelection<'a> {
-    /// Extract from a path like `a.b.c` into `a` and `b { c }`
-    fn from_path<I: IntoIterator<Item = &'a str>>(parts: I) -> Self {
-        let mut parts = parts.into_iter().peekable();
-        let field_name = parts.next().unwrap_or_default();
-        let mut sub_selection = String::new();
-        let mut closing_braces = 0;
-        while let Some(sub_path) = parts.next() {
-            sub_selection.push_str(sub_path);
-            if parts.peek().is_some() {
-                sub_selection.push_str(" { ");
-                closing_braces += 1;
-            }
-        }
-        for _ in 0..closing_braces {
-            sub_selection.push_str(" }");
-        }
-        FieldAndSelection {
-            field_name,
-            sub_selection,
-        }
-    }
-
-    fn to_key(&self) -> String {
-        if self.sub_selection.is_empty() {
-            self.field_name.to_string()
-        } else {
-            format!("{} {{ {} }}", self.field_name, self.sub_selection)
-        }
-    }
-}
-
-#[cfg(test)]
-mod test_field_and_selection {
-    use rstest::rstest;
-
-    #[rstest]
-    #[case::simple("a", "a", "")]
-    #[case::one("a.b", "a", "b")]
-    #[case::two("a.b.c", "a", "b { c }")]
-    #[case::three("a.b.c.d", "a", "b { c { d } }")]
-    fn from_path(
-        #[case] path: &str,
-        #[case] expected_field: &str,
-        #[case] expected_selection: &str,
-    ) {
-        let result = super::FieldAndSelection::from_path(path.split('.'));
-        assert_eq!(result.field_name, expected_field);
-        assert_eq!(result.sub_selection, expected_selection);
-    }
-
-    #[rstest]
-    #[case::simple("a", "", "a")]
-    #[case::one("a", "b", "a { b }")]
-    #[case::two("a", "b { c }", "a { b { c } }")]
-    fn to_key(#[case] field_name: &str, #[case] sub_selection: &str, #[case] expected_key: &str) {
-        let result = super::FieldAndSelection {
-            field_name,
-            sub_selection: sub_selection.to_string(),
-        };
-        assert_eq!(result.to_key(), expected_key);
     }
 }
 

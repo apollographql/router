@@ -14,7 +14,7 @@ use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-pub(super) use keys::make_key_field_set_from_variables;
+pub(super) use keys::field_set_error;
 pub(super) use keys::EntityKeyChecker;
 
 use super::coordinates::connect_directive_entity_argument_coordinate;
@@ -28,8 +28,6 @@ use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::variable::VariableReference;
-use crate::sources::connect::EntityResolver;
-use crate::sources::connect::Namespace;
 
 /// Applies additional validations to `@connect` if `entity` is `true`.
 ///
@@ -40,8 +38,6 @@ pub(super) fn validate_entity_arg(
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     category: ObjectCategory,
-    variables: &[VariableReference<Namespace>],
-    entity_checker: &mut EntityKeyChecker,
 ) -> Result<(), Message> {
     let connect_directive_name = &connect_directive.name;
 
@@ -143,16 +139,6 @@ pub(super) fn validate_entity_arg(
         field,
         entity_type: object_type,
     })?;
-
-    // Making a field set can fail, so this must occur after the visitor has validated the arguments
-    if let Some(fs) = make_key_field_set_from_variables(
-        schema,
-        field.ty.inner_named_type(),
-        variables,
-        EntityResolver::Explicit,
-    )? {
-        entity_checker.add_connector(fs);
-    };
 
     Ok(())
 }

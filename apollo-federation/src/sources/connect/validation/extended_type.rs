@@ -14,7 +14,6 @@ use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
-use super::entity::make_key_field_set_from_variables;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
@@ -24,34 +23,22 @@ use super::selection::validate_selection;
 use super::source_name::validate_source_name_arg;
 use super::source_name::SourceName;
 use super::Code;
-use super::EntityKeyChecker;
 use super::Message;
-use crate::sources::connect::json_selection::ExternalVarPaths;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::variable::VariableReference;
-use crate::sources::connect::EntityResolver;
-use crate::sources::connect::JSONSelection;
-use crate::sources::connect::Namespace;
-use crate::sources::connect::PathSelection;
 
 pub(super) fn validate_extended_type<'s>(
     extended_type: &'s ExtendedType,
     schema: &'s SchemaInfo,
     all_source_names: &[SourceName],
     seen_fields: &mut IndexSet<(Name, Name)>,
-    entity_checker: &mut EntityKeyChecker<'s>,
 ) -> Vec<Message> {
     match extended_type {
-        ExtendedType::Object(object) => validate_object_fields(
-            object,
-            schema,
-            all_source_names,
-            seen_fields,
-            entity_checker,
-        ),
+        ExtendedType::Object(object) => {
+            validate_object_fields(object, schema, all_source_names, seen_fields)
+        }
         ExtendedType::Union(union_type) => vec![validate_abstract_type(
             SourceSpan::recompose(union_type.location(), union_type.name.location()),
             &schema.sources,
@@ -80,7 +67,6 @@ fn validate_object_fields<'s>(
     schema: &'s SchemaInfo,
     source_names: &[SourceName],
     seen_fields: &mut IndexSet<(Name, Name)>,
-    entity_checker: &mut EntityKeyChecker<'s>,
 ) -> Vec<Message> {
     if object.is_built_in() {
         return Vec::new();
@@ -89,9 +75,7 @@ fn validate_object_fields<'s>(
     let keys_and_directives = resolvable_key_fields(object, schema);
 
     let mut selections: Vec<(Name, Selection)> = keys_and_directives
-        .flat_map(|(field_set, directive)| {
-            // Add resolvable keys so we can compare them to entity connectors later
-            entity_checker.add_key(&field_set, directive, &object.name);
+        .flat_map(|(field_set, _)| {
             field_set
                 .selection_set
                 .selections
@@ -161,7 +145,6 @@ fn validate_object_fields<'s>(
                 object,
                 schema,
                 seen_fields,
-                entity_checker,
             )
         })
         .collect()
@@ -174,7 +157,6 @@ fn validate_field<'s>(
     object: &'s Node<ObjectType>,
     schema: &'s SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
-    entity_checker: &mut EntityKeyChecker<'s>,
 ) -> Vec<Message> {
     let source_map = &schema.sources;
     let mut errors = Vec::new();
@@ -231,13 +213,7 @@ fn validate_field<'s>(
             field_coordinate,
         };
 
-        let json_selection = match validate_selection(connect_coordinate, schema, seen_fields) {
-            Ok(json) => Some(json),
-            Err(err) => {
-                errors.push(err);
-                None
-            }
-        };
+        errors.extend(validate_selection(connect_coordinate, schema, seen_fields).err());
 
         let Some((http_arg, http_arg_node)) = connect_directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
@@ -269,26 +245,21 @@ fn validate_field<'s>(
             }
         };
 
-        let body_selection = if let Some((_, body)) = http_arg
+        if let Some((_, body)) = http_arg
             .iter()
             .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
         {
-            match validate_body_selection(
-                connect_directive,
-                connect_coordinate,
-                object,
-                field,
-                schema,
-                body,
-            ) {
-                Ok(selection) => Some(selection),
-                Err(err) => {
-                    errors.push(err);
-                    None
-                }
-            }
-        } else {
-            None
+            errors.extend(
+                validate_body_selection(
+                    connect_directive,
+                    connect_coordinate,
+                    object,
+                    field,
+                    schema,
+                    body,
+                )
+                .err(),
+            );
         };
 
         if let Some(source_name) = connect_directive
@@ -342,54 +313,8 @@ fn validate_field<'s>(
             },
         ));
 
-        let all_variables = json_selection
-            .as_ref()
-            .map(extract_params_from_selection)
-            .into_iter()
-            .flatten()
-            .chain(
-                body_selection
-                    .as_ref()
-                    .map(extract_params_from_selection)
-                    .into_iter()
-                    .flatten(),
-            )
-            .chain(
-                url_template
-                    .as_ref()
-                    .map(|(u, _)| u.variables().cloned())
-                    .into_iter()
-                    .flatten(),
-            )
-            .collect_vec();
-
-        errors.extend(
-            validate_entity_arg(
-                field,
-                connect_directive,
-                object,
-                schema,
-                category,
-                &all_variables,
-                entity_checker,
-            )
-            .err(),
-        );
-
-        if category == ObjectCategory::Other {
-            match make_key_field_set_from_variables(
-                schema,
-                &object.name,
-                &all_variables,
-                EntityResolver::Implicit,
-            ) {
-                Ok(Some(field_set)) => {
-                    entity_checker.add_connector(field_set);
-                }
-                Err(err) => errors.push(err),
-                _ => {}
-            };
-        }
+        errors
+            .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
     }
     errors
 }
@@ -424,16 +349,4 @@ fn get_missing_connect_directive_message(
         ),
         locations: field.line_column_range(source_map).into_iter().collect(),
     }
-}
-
-/// Extract all seen parameters from a JSONSelection
-///
-/// TODO: this is copied from expand/mod.rs
-fn extract_params_from_selection(
-    selection: &JSONSelection,
-) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
-    selection
-        .external_var_paths()
-        .into_iter()
-        .flat_map(PathSelection::variable_reference)
 }
