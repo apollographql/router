@@ -1050,7 +1050,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
         &format!(
-            "plan:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:285740e3d6ca7533144f54f8395204d7c19c44ed16e48f22a3ea41195d60180b",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:285740e3d6ca7533144f54f8395204d7c19c44ed16e48f22a3ea41195d60180b",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1076,7 +1076,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
         &format!(
-            "plan:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9af18c8afd568c197050fc1a60c52a8c98656f1775016110516fabfbedc135fe",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9af18c8afd568c197050fc1a60c52a8c98656f1775016110516fabfbedc135fe",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1104,7 +1104,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
 
     // If the tests above are failing, this is the key that needs to be changed first.
     let starting_key = &format!(
-        "plan:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8f8ce6ad09f15c3d567a05f1c3d7230ab71b3366fcaebc9cc3bbfa356d55ac12",
+        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8f8ce6ad09f15c3d567a05f1c3d7230ab71b3366fcaebc9cc3bbfa356d55ac12",
         env!("CARGO_PKG_VERSION"),
     );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
