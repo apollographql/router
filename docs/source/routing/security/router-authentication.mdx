@@ -109,28 +109,51 @@ headers:
 - Each subgraph that contributes to resolving a request needs to authenticate that request.
 - If subgraphs are written in different languages, maintaining consistent authentication code for each is complex.
 
-## Use the JWT Authentication plugin
+## Use the JWT authentication plugin
 
 As of router v1.13, you can use the [JWT Authentication plugin](/router/configuration/authn-jwt) to validate JWT-based authentication tokens in your supergraph.
 
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
+When you use the JWT authentication plugin, the router requests keys from the [JWKS URL you configure](/graphos/routing/security/jwt#jwks) and caches them on start up.
+It then polls the JWKS endpoint at the [configured interval](/graphos/routing/security/jwt#jwks) and caches any updates.
+
 ```mermaid
 sequenceDiagram
-  Client->>Router: Request with JWT
-  Router->>JWKS Endpoint: Fetch key set
-  JWKS Endpoint->>Router: Public keys
-  note over Router: Validate JWT
-  note over Router: Extract claims in Rhai
-  Router->>Subgraph: Request with extracted claims in headers
-  note over Subgraph: Check claims on headers
+  participant Router
+  participant JWKS as JWKS Endpoint
+
+  Router->>JWKS: Fetch key set at startup
+  JWKS->>Router: Return public keys
+  loop Periodically
+    Router->>JWKS: Poll for updated keys
+    JWKS->>Router: Update cached keys (if any)
+  end
 ```
+
+Here is an example of a minimal configuration:
 
 ```yaml
 authentication:
   jwt:
     jwks:
       - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+      - poll_interval: 1hour
+```
+
+When the router receives a request, it uses the cached keys to validate any JWT requests.
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant Router
+  participant Subgraph
+
+  Client->>Router: Request with JWT
+  note over Router: Validate JWT using cached keys
+  note over Router: Extract claims in Rhai
+  Router->>Subgraph: Request with extracted claims in headers
+  note over Subgraph: Check claims on headers
 ```
 
 Pros:
