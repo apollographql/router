@@ -56,7 +56,7 @@ fn lookup_dir(
                 path.file_name().unwrap().to_str().unwrap()
             );
 
-            if path.join("plan.json").exists() {
+            let plan: Option<Plan> = if path.join("plan.json").exists() {
                 let mut file = File::open(path.join("plan.json")).map_err(|e| {
                     format!(
                         "could not open file at path '{:?}': {e}",
@@ -71,8 +71,8 @@ fn lookup_dir(
                     )
                 })?;
 
-                let plan: Plan = match serde_json::from_str(&s) {
-                    Ok(data) => data,
+                match serde_json::from_str(&s) {
+                    Ok(data) => Some(data),
                     Err(e) => {
                         return Err(format!(
                             "could not deserialize test plan at {}: {e}",
@@ -80,8 +80,37 @@ fn lookup_dir(
                         )
                         .into());
                     }
-                };
+                }
+            } else if path.join("plan.yaml").exists() {
+                let mut file = File::open(path.join("plan.yaml")).map_err(|e| {
+                    format!(
+                        "could not open file at path '{:?}': {e}",
+                        &path.join("plan.yaml")
+                    )
+                })?;
+                let mut s = String::new();
+                file.read_to_string(&mut s).map_err(|e| {
+                    format!(
+                        "could not read file at path: '{:?}': {e}",
+                        &path.join("plan.yaml")
+                    )
+                })?;
 
+                match serde_yaml::from_str(&s) {
+                    Ok(data) => Some(data),
+                    Err(e) => {
+                        return Err(format!(
+                            "could not deserialize test plan at {}: {e}",
+                            path.display()
+                        )
+                        .into());
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Some(plan) = plan {
                 if plan.enterprise
                     && !(std::env::var("TEST_APOLLO_KEY").is_ok()
                         && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok())
@@ -172,6 +201,7 @@ impl TestExecution {
                     .await
             }
             Action::Request {
+                description,
                 request,
                 query_path,
                 headers,
@@ -179,6 +209,7 @@ impl TestExecution {
                 expected_headers,
             } => {
                 self.request(
+                    description.clone(),
                     request.clone(),
                     query_path.as_deref(),
                     headers,
@@ -429,6 +460,7 @@ impl TestExecution {
     #[allow(clippy::too_many_arguments)]
     async fn request(
         &mut self,
+        description: Option<String>,
         mut request: Value,
         query_path: Option<&str>,
         headers: &HashMap<String, String>,
@@ -454,6 +486,11 @@ impl TestExecution {
             if let Some(req) = request.as_object_mut() {
                 req.insert("query".to_string(), query.into());
             }
+        }
+
+        writeln!(out).unwrap();
+        if let Some(description) = description {
+            writeln!(out, "description: {description}").unwrap();
         }
 
         writeln!(out, "query: {}\n", serde_json::to_string(&request).unwrap()).unwrap();
@@ -660,6 +697,7 @@ fn check_path(path: &Path, out: &mut String) -> Result<(), Failed> {
 
 #[derive(Deserialize)]
 #[allow(dead_code)]
+#[serde(deny_unknown_fields)]
 struct Plan {
     #[serde(default)]
     enterprise: bool,
@@ -669,7 +707,7 @@ struct Plan {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", deny_unknown_fields)]
 enum Action {
     Start {
         schema_path: String,
@@ -689,6 +727,7 @@ enum Action {
         update_url_overrides: bool,
     },
     Request {
+        description: Option<String>,
         request: Value,
         query_path: Option<String>,
         #[serde(default)]
@@ -705,17 +744,20 @@ enum Action {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Subgraph {
     requests: Vec<SubgraphRequestMock>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubgraphRequestMock {
     request: HttpRequest,
     response: HttpResponse,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HttpRequest {
     method: Option<String>,
     path: Option<String>,
@@ -725,6 +767,7 @@ struct HttpRequest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HttpResponse {
     status: Option<u16>,
     #[serde(default)]
