@@ -1,4 +1,5 @@
-#![allow(missing_docs)] // FIXME
+//! Structures for externalised data, communicating the state of the router pipeline at the
+//! different stages.
 
 use std::collections::HashMap;
 use std::fmt::Debug;
