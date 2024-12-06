@@ -12,7 +12,7 @@ use itertools::Itertools;
 
 use super::compare_keys::field_set_is_subset;
 use super::VariableReference;
-use super::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::Namespace;

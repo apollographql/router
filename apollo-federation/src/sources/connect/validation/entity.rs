@@ -1,8 +1,6 @@
 mod compare_keys;
 mod keys;
 
-use std::fmt::Debug;
-
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
@@ -22,7 +20,6 @@ use super::coordinates::field_with_connect_directive_entity_true_coordinate;
 use super::extended_type::ObjectCategory;
 use super::Code;
 use super::Message;
-use super::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
@@ -30,8 +27,6 @@ use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::variable::VariableReference;
 
 /// Applies additional validations to `@connect` if `entity` is `true`.
-///
-/// Also collects entity connectors for comparison with declared `@key`s.
 pub(super) fn validate_entity_arg(
     field: &Component<FieldDefinition>,
     connect_directive: &Node<Directive>,
@@ -138,9 +133,7 @@ pub(super) fn validate_entity_arg(
     .walk(Group::Root {
         field,
         entity_type: object_type,
-    })?;
-
-    Ok(())
+    })
 }
 
 #[derive(Clone, Debug)]
