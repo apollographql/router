@@ -78,6 +78,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
@@ -683,16 +684,6 @@ impl FetchDependencyGraphNodePath {
                 Ok(new_path)
             }
         }
-    }
-}
-
-/// If the `iter` yields a single element, return it. Else return `None`.
-fn iter_into_single_item<T>(mut iter: impl Iterator<Item = T>) -> Option<T> {
-    let item = iter.next()?;
-    if iter.next().is_none() {
-        Some(item)
-    } else {
-        None
     }
 }
 
@@ -2674,8 +2665,7 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation =
-            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
+        let operation = operation_compression.compress(operation)?;
         let operation_document = operation.try_into().map_err(|err| match err {
             FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
                 diagnostics,
@@ -3967,7 +3957,7 @@ fn compute_nodes_for_op_path_element<'a>(
             (stack_item.node_id, &stack_item.node_path),
             // If setting a context, add __typename to the site where we are retrieving context from
             // since the context rewrites path will start with a type condition.
-            if child.context_to_selection.is_some() {
+            if child.matching_context_ids.is_some() {
                 Some(edge_id)
             } else {
                 None
@@ -3976,12 +3966,12 @@ fn compute_nodes_for_op_path_element<'a>(
             created_nodes,
         )?;
 
-        if let Some(context_to_selection) = &child.context_to_selection {
+        if let Some(matching_context_ids) = &child.matching_context_ids {
             let mut condition_nodes = vec![conditions_node_data.conditions_merge_node_id];
             condition_nodes.extend(&conditions_node_data.created_node_ids);
             let mut context_to_condition_nodes =
                 stack_item.context_to_condition_nodes.deref().clone();
-            for context in context_to_selection {
+            for context in matching_context_ids {
                 context_to_condition_nodes.insert(context.clone(), condition_nodes.clone());
             }
             updated.context_to_condition_nodes = Arc::new(context_to_condition_nodes);
@@ -4006,17 +3996,17 @@ fn compute_nodes_for_op_path_element<'a>(
 
     // If the edge uses context variables, every context used must be set in a different parent
     // node or else we need to create a new one.
-    if let Some(parameter_to_context) = &child.parameter_to_context {
+    if let Some(arguments_to_context_usages) = &child.arguments_to_context_usages {
         let mut conditions_nodes: IndexSet<NodeIndex> = Default::default();
         let mut is_subgraph_jump_needed = false;
-        for context_entry in parameter_to_context.values() {
+        for context_usage in arguments_to_context_usages.values() {
             let Some(context_nodes) = updated
                 .context_to_condition_nodes
-                .get(&context_entry.context_id)
+                .get(&context_usage.context_id)
             else {
                 bail!(
                     "Could not find condition nodes for context {}",
-                    context_entry.context_id
+                    context_usage.context_id
                 );
             };
             conditions_nodes.extend(context_nodes);
@@ -4125,14 +4115,14 @@ fn compute_nodes_for_op_path_element<'a>(
             }
 
             // Add context renamers.
-            for context_entry in parameter_to_context.values() {
+            for context_entry in arguments_to_context_usages.values() {
                 let updated_node = FetchDependencyGraph::node_weight_mut(
                     &mut dependency_graph.graph,
                     updated.node_id,
                 )?;
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
-                    context_entry.subgraph_arg_type.clone(),
+                    context_entry.subgraph_argument_type.clone(),
                 )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),
@@ -4158,7 +4148,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 .iter()
                 .filter(|e| matches!((**e).deref(), OpPathElement::Field(_)))
                 .count();
-            for context_entry in parameter_to_context.values() {
+            for context_entry in arguments_to_context_usages.values() {
                 let new_relative_path = &context_entry.relative_path
                     [..(context_entry.relative_path.len() - num_fields)];
                 let updated_node = FetchDependencyGraph::node_weight_mut(
@@ -4167,7 +4157,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 )?;
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
-                    context_entry.subgraph_arg_type.clone(),
+                    context_entry.subgraph_argument_type.clone(),
                 )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),
