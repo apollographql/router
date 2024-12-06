@@ -111,6 +111,96 @@ fn eq_shape(
     Shape::bool()
 }
 
+impl_arrow_method!(ThenMethod, then_method, then_shape);
+fn then_method(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &WithRange<PathList>,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        if args.len() < 1 || args.len() > 2 {
+            (
+                None,
+                vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} requires one or two arguments",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            )
+        } else if is_truthy(data) {
+            args[0]
+                .apply_to_path(data, vars, input_path)
+                .and_then_collecting_errors(|value| tail.apply_to_path(&value, vars, input_path))
+        } else if args.len() > 1 {
+            args[1]
+                .apply_to_path(data, vars, input_path)
+                .and_then_collecting_errors(|value| tail.apply_to_path(&value, vars, input_path))
+        } else {
+            // Allows ... $(false)->then(expression) to have no output keys.
+            (None, Vec::new())
+        }
+    } else {
+        (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} requires one or two arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
+    }
+}
+fn then_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        match args.len() {
+            1 => Shape::one(&[
+                args[0].compute_output_shape(
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                ),
+                Shape::none(),
+            ]),
+            2 => Shape::one(&[
+                args[0].compute_output_shape(
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                ),
+                args[1].compute_output_shape(
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                ),
+            ]),
+            _ => Shape::error_with_range(
+                "Method ->then requires one or two arguments",
+                method_name.range(),
+            ),
+        }
+    } else {
+        Shape::error_with_range(
+            "Method ->then requires one or two arguments",
+            method_name.range(),
+        )
+    }
+}
+
 // Like ->match, but expects the first element of each pair to evaluate to a
 // boolean, returning the second element of the first pair whose first element
 // is true. This makes providing a final catch-all case easy, since the last

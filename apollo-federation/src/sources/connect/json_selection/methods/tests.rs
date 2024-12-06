@@ -3,6 +3,7 @@ use serde_json_bytes::json;
 
 use super::*;
 use crate::selection;
+use crate::sources::connect::JSONSelection;
 
 #[test]
 fn test_echo_method() {
@@ -219,6 +220,176 @@ fn test_missing_method() {
                 "range": [13, 18],
             }))],
         ),
+    );
+}
+
+#[test]
+fn test_then_method() {
+    assert_eq!(
+        selection!("$->then('ok', 'ko')").apply_to(&json!(true)),
+        (Some(json!("ok")), vec![]),
+    );
+
+    assert_eq!(
+        selection!("$->then('ok', 'ko')").apply_to(&json!(false)),
+        (Some(json!("ko")), vec![]),
+    );
+
+    assert_eq!(
+        selection!("$->then('ok', 'ko')").apply_to(&json!(null)),
+        (Some(json!("ko")), vec![]),
+    );
+
+    assert_eq!(
+        selection!("$->then('ok', 'ko')").apply_to(&json!(123)),
+        (Some(json!("ok")), vec![]),
+    );
+
+    assert_eq!(
+        selection!("$->then").apply_to(&json!(true)),
+        (
+            None,
+            vec![ApplyToError::from_json(&json!({
+                "message": "Method ->then requires one or two arguments",
+                "path": ["->then"],
+                "range": [3, 7],
+            }))]
+        ),
+    );
+
+    assert_eq!(
+        selection!("$->then(1, 2, 3)").apply_to(&json!(321)),
+        (
+            None,
+            vec![ApplyToError::from_json(&json!({
+                "message": "Method ->then requires one or two arguments",
+                "path": ["->then"],
+                "range": [3, 7],
+            }))]
+        ),
+    );
+
+    assert_eq!(
+        selection!("id ...kind->then($ { kind })").apply_to(&json!({
+            "id": 123,
+            "kind": "dog",
+        })),
+        (
+            Some(json!({
+                "id": 123,
+                "kind": "dog",
+            })),
+            vec![]
+        ),
+    );
+
+    assert_eq!(
+        selection!("id ...$->has('kind')->then($ { kind })").apply_to(&json!({
+            "id": 123,
+        })),
+        (
+            Some(json!({
+                "id": 123,
+            })),
+            vec![]
+        ),
+    );
+
+    {
+        let multi_then = JSONSelection::parse(
+            r#"
+            ... a->then({ a: 1, b: 'hi' }, { d: 4 })
+            ... b->then({ b: 'hola', c: true })
+            "#,
+        )
+        .expect("parse error");
+
+        assert_eq!(
+            multi_then.apply_to(&json!({
+                "a": false,
+                "b": false,
+            })),
+            (
+                Some(json!({
+                    "d": 4,
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            multi_then.apply_to(&json!({
+                "a": true,
+                "b": false,
+            })),
+            (
+                Some(json!({
+                    "a": 1,
+                    "b": "hi",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            multi_then.apply_to(&json!({
+                "a": false,
+                "b": true,
+            })),
+            (
+                Some(json!({
+                    "b": "hola",
+                    "c": true,
+                    "d": 4,
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            multi_then.apply_to(&json!({
+                "a": true,
+                "b": true,
+            })),
+            (
+                Some(json!({
+                    "a": 1,
+                    "b": "hola",
+                    "c": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+}
+
+#[test]
+fn test_then_shape() {
+    assert_eq!(
+        selection!("id ... $->has('kind')->then($ { kind })")
+            .static_shape()
+            .pretty_print(),
+        "One<{ id: $root.*.id, kind: $root.*.kind }, { id: $root.*.id }>",
+    );
+
+    assert_eq!(
+        selection!("id kind: $->has('kind')->then($.kind)")
+            .static_shape()
+            .pretty_print(),
+        "{ id: $root.*.id, kind: One<$root.*.kind, None> }",
+    );
+
+    let multi_then = JSONSelection::parse(
+        r#"
+        ... a->then({ a: 1, b: 'hi' }, { d: 4 })
+        ... b->then({ b: 'hola', c: true })
+        "#,
+    )
+    .expect("parse error");
+
+    assert_eq!(
+        multi_then.static_shape().pretty_print(),
+        "One<{ a: 1, b: All<\"hi\", \"hola\">, c: true }, { a: 1, b: \"hi\" }, { b: \"hola\", c: true, d: 4 }, { d: 4 }>",
     );
 }
 

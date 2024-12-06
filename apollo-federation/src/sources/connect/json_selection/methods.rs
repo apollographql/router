@@ -38,6 +38,7 @@ pub(super) enum ArrowMethod {
     // Future methods:
     TypeOf,
     Eq,
+    Then,
     MatchIf,
     Add,
     Sub,
@@ -147,6 +148,7 @@ impl std::ops::Deref for ArrowMethod {
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
             Self::Eq => &future::EqMethod,
+            Self::Then => &future::ThenMethod,
             Self::MatchIf => &future::MatchIfMethod,
             Self::Add => &future::AddMethod,
             Self::Sub => &future::SubMethod,
@@ -173,6 +175,7 @@ impl ArrowMethod {
             "echo" => Some(Self::Echo),
             "map" => Some(Self::Map),
             "eq" => Some(Self::Eq),
+            "then" => Some(Self::Then),
             "match" => Some(Self::Match),
             // As this case suggests, we can't necessarily provide a name()
             // method for ArrowMethod (the opposite of lookup), because method
