@@ -213,18 +213,6 @@ fn advanced_validations(
     Ok(messages)
 }
 
-fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Directive>)> {
-    schema
-        .types
-        .values()
-        .flat_map(|extended_type| match extended_type {
-            ExtendedType::Object(object) => Some(resolvable_key_fields(object, schema)),
-            _ => None,
-        })
-        .flatten()
-        .collect()
-}
-
 /// We'll avoid doing this work if there are bigger issues with the schema.
 /// Otherwise we might emit a large number of diagnostics that will
 /// distract from the main problems.
@@ -466,6 +454,18 @@ fn resolvable_key_fields<'a>(
                 None
             }
         })
+}
+
+fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Directive>)> {
+    schema
+        .types
+        .values()
+        .flat_map(|extended_type| match extended_type {
+            ExtendedType::Object(object) => Some(resolvable_key_fields(object, schema)),
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
 type DirectiveName = Name;

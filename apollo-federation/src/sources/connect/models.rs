@@ -34,6 +34,7 @@ use super::JSONSelection;
 use super::PathSelection;
 use super::URLTemplate;
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::link::Link;
 use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::header::HeaderValueError;
@@ -116,12 +117,15 @@ impl Connector {
         connect: ConnectDirectiveArguments,
         source_arguments: &[SourceDirectiveArguments],
     ) -> Result<(ConnectId, Self), FederationError> {
-        let source = connect.source.as_ref()
-            .and_then(|name| source_arguments.iter()
-                .find(|s| s.name == name));
+        let source = connect
+            .source
+            .as_ref()
+            .and_then(|name| source_arguments.iter().find(|s| s.name == *name));
 
         let source_name = source.map(|s| s.name.clone());
-        let connect_http = connect.http.expect("@connect http missing");
+        let connect_http = connect
+            .http
+            .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
 
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
@@ -187,7 +191,10 @@ impl Connector {
     }
 
     /// Create a field set for a `@key` using $args and $this variables.
-    pub(crate) fn resolvable_key(&self, schema: &Schema) -> Result<Option<Valid<FieldSet>>, ()> {
+    pub(crate) fn resolvable_key(
+        &self,
+        schema: &Schema,
+    ) -> Result<Option<Valid<FieldSet>>, FederationError> {
         match &self.entity_resolver {
             None => Ok(None),
             Some(EntityResolver::Explicit) => {
@@ -198,7 +205,11 @@ impl Connector {
                     .get(schema)
                     .map(|f| f.ty.inner_named_type())
                 else {
-                    return Ok(None);
+                    return Err(internal_error!(
+                        "Missing type on field {}.{}",
+                        self.id.directive.field.type_name(),
+                        self.id.directive.field.field_name()
+                    ));
                 };
                 make_key_field_set_from_variables(
                     schema,
@@ -206,7 +217,9 @@ impl Connector {
                     self.variable_references(),
                     EntityResolver::Explicit,
                 )
-                .map_err(|_| ())
+                .map_err(|_| {
+                    internal_error!("Failed to create key for connector {}", self.id.label)
+                })
             }
             Some(EntityResolver::Implicit) => make_key_field_set_from_variables(
                 schema,
@@ -214,7 +227,7 @@ impl Connector {
                 self.variable_references(),
                 EntityResolver::Implicit,
             )
-            .map_err(|_| ()),
+            .map_err(|_| internal_error!("Failed to create key for connector {}", self.id.label)),
         }
     }
 }
