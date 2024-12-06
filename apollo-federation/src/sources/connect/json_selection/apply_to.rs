@@ -354,17 +354,18 @@ impl ApplyToInternal for NamedSelection {
                         }
                         Some(value) => {
                             errors.push(ApplyToError::new(
-                                format!("Expected object or null, not {}", json_type_name(&value)),
+                                format!(
+                                    "Expected object, null, or nothing, not {}",
+                                    json_type_name(&value)
+                                ),
                                 input_path.to_vec(),
                                 path.range(),
                             ));
                         }
                         None => {
-                            errors.push(ApplyToError::new(
-                                "Expected object or null, not nothing".to_string(),
-                                input_path.to_vec(),
-                                path.range(),
-                            ));
+                            // Inlining a path expression that evaluated to None
+                            // has no effect (no output fields inlined).
+                            output = None;
                         }
                     }
                 } else {
@@ -2288,7 +2289,7 @@ mod tests {
                         Some(128..135),
                     ),
                     ApplyToError::new(
-                        "Expected object or null, not string".to_string(),
+                        "Expected object, null, or nothing, not string".to_string(),
                         vec![],
                         // This is the range of the whole
                         // `choices->first.message { role content }`
@@ -2323,20 +2324,11 @@ mod tests {
                 Some(json!({
                     "id": 2345,
                 })),
-                vec![
-                    ApplyToError::new(
-                        "Property .nonexistent not found in string".to_string(),
-                        vec![json!("nested"), json!("path"), json!("nonexistent")],
-                        Some(15..26),
-                    ),
-                    ApplyToError::new(
-                        "Expected object or null, not nothing".to_string(),
-                        vec![],
-                        // This is the range of the whole
-                        // `nested.path.nonexistent { name }` path selection.
-                        Some(3..35),
-                    ),
-                ],
+                vec![ApplyToError::new(
+                    "Property .nonexistent not found in string".to_string(),
+                    vec![json!("nested"), json!("path"), json!("nonexistent")],
+                    Some(15..26),
+                ),],
             ),
         );
 
