@@ -4,7 +4,7 @@ This folder contains a series of Router integration tests that can be defined en
 
 ## How to write a test
 
-One test is recognized as a folder containing a `plan.json` file. Any number of subfolders is accepted, and the test name will be the path to the test folder. If the folder contains a `README.md` file, it will be added to the captured output of the test, and displayed if the test failed.
+One test is recognized as a folder containing a `plan.json` (or `plan.yaml`) file. Any number of subfolders is accepted, and the test name will be the path to the test folder. If the folder contains a `README.md` file, it will be added to the captured output of the test, and displayed if the test failed.
 
 The `plan.json` file contains a top level JSON object with an `actions` field, containing an array of possible actions, that will be executed one by one:
 

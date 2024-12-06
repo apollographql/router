@@ -51,7 +51,10 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     }
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
-    let known_cache_key = "plan:cache:1:federation:v2.9.3:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:3ede629b6b9316f85d1525d17eafdc44549a028aaf9a598069d08180efe20753";
+    let known_cache_key = &format!(
+        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:3ede629b6b9316f85d1525d17eafdc44549a028aaf9a598069d08180efe20753",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -988,7 +991,10 @@ async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         // This configuration turns the fragment generation option *off*.
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:79752951c056a09552c7f44df4ef954fc787dd072644e1cd4ca5e9f02679c277",
+        &format!(
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:79752951c056a09552c7f44df4ef954fc787dd072644e1cd4ca5e9f02679c277",
+            env!("CARGO_PKG_VERSION")
+        ),
     )
     .await;
 }
@@ -1018,7 +1024,10 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fa0a3cba2dbf4e451174019c589b4e724b3c5e286c2a73567ebc7b88e5ecae5a",
+        &format!(
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fa0a3cba2dbf4e451174019c589b4e724b3c5e286c2a73567ebc7b88e5ecae5a",
+            env!("CARGO_PKG_VERSION")
+        ),
     )
     .await;
 }
@@ -1040,7 +1049,10 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8b0d609a26092aecbdfe7fb77f57f765b7f78ce18fda39e8a353f060b304973f",
+        &format!(
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8b0d609a26092aecbdfe7fb77f57f765b7f78ce18fda39e8a353f060b304973f",
+            env!("CARGO_PKG_VERSION")
+        ),
     )
     .await;
 }
@@ -1063,7 +1075,10 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9af18c8afd568c197050fc1a60c52a8c98656f1775016110516fabfbedc135fe",
+        &format!(
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9af18c8afd568c197050fc1a60c52a8c98656f1775016110516fabfbedc135fe",
+            env!("CARGO_PKG_VERSION")
+        ),
     )
     .await;
 }
@@ -1088,7 +1103,10 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.clear_redis_cache().await;
 
     // If the tests above are failing, this is the key that needs to be changed first.
-    let starting_key = "plan:cache:1:federation:v2.9.3:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:3ede629b6b9316f85d1525d17eafdc44549a028aaf9a598069d08180efe20753";
+    let starting_key = &format!(
+        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:3ede629b6b9316f85d1525d17eafdc44549a028aaf9a598069d08180efe20753",
+        env!("CARGO_PKG_VERSION")
+    );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
     router.execute_default_query().await;

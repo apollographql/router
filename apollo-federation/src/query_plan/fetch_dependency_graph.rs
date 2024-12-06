@@ -32,6 +32,7 @@ use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
@@ -1709,7 +1710,7 @@ impl FetchDependencyGraph {
                 children.push(child_index);
             } else {
                 let Some(child_defer_ref) = &child.defer_ref else {
-                    panic!(
+                    bail!(
                         "{} has defer_ref `{}`, so its child {} cannot have a top-level defer_ref.",
                         node.display(node_index),
                         DisplayOption(node.defer_ref.as_ref()),
@@ -2666,12 +2667,11 @@ impl FetchDependencyGraphNode {
         };
         let operation = operation_compression.compress(operation)?;
         let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError {
-                inner: SingleFederationError::InvalidGraphQL { diagnostics },
-                ..
-            } => FederationError::internal(format!(
+            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
+                diagnostics,
+            }) => internal_error!(
                 "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            )),
+            ),
             _ => err,
         })?;
 
@@ -3392,7 +3392,7 @@ impl DeferTracking {
 
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             let Some(parent_info) = self.deferred.get_mut(parent_ref) else {
-                panic!("Cannot find info for parent {parent_ref} or {label}");
+                bail!("Cannot find info for parent {parent_ref} or {label}")
             };
 
             parent_info.deferred.insert(label.clone());

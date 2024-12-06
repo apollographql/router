@@ -638,10 +638,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) config_mode: Arc<QueryHash>,
 }
 
-// Update this key every time the cache key or the query plan format has to change.
-// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 1;
-const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
+const ROUTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -660,8 +657,8 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
-            CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
+            "plan:router:{}:{}:opname:{}:metadata:{}",
+            ROUTER_VERSION, self.hash, operation, metadata,
         )
     }
 }

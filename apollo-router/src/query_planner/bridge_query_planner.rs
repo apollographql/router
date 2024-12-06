@@ -179,10 +179,7 @@ impl PlannerMode {
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
 
         match &result {
-            Err(FederationError::SingleFederationError {
-                inner: error,
-                trace: _,
-            }) => match error {
+            Err(FederationError::SingleFederationError(error)) => match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
@@ -855,9 +852,6 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-
     use serde_json::json;
     use test_log::test;
     use tower::Service;
@@ -1399,28 +1393,6 @@ mod tests {
                 doc,
             )
             .await
-    }
-
-    #[test]
-    fn router_bridge_dependency_is_pinned() {
-        let cargo_manifest: serde_json::Value = basic_toml::from_str(
-            &fs::read_to_string(PathBuf::from(&env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
-                .expect("could not read Cargo.toml"),
-        )
-        .expect("could not parse Cargo.toml");
-        let router_bridge_version = cargo_manifest
-            .get("dependencies")
-            .expect("Cargo.toml does not contain dependencies")
-            .as_object()
-            .expect("Cargo.toml dependencies key is not an object")
-            .get("router-bridge")
-            .expect("Cargo.toml dependencies does not have an entry for router-bridge")
-            .as_str()
-            .unwrap_or_default();
-        assert!(
-            router_bridge_version.contains('='),
-            "router-bridge in Cargo.toml is not pinned with a '=' prefix"
-        );
     }
 
     #[tokio::test]

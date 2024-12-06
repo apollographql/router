@@ -8,17 +8,21 @@ use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::StatusCode;
 use id_extractor::PersistedQueryIdExtractor;
+pub use manifest_poller::FullPersistedQueryOperationId;
+pub use manifest_poller::PersistedQueryManifest;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
 
 use self::manifest_poller::FreeformGraphQLAction;
 use super::query_analysis::ParsedDocument;
 use crate::graphql::Error as GraphQLError;
+use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::Configuration;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
+const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_queries::client_name";
 
 struct UsedQueryIdFromManifest;
 
@@ -110,9 +114,21 @@ impl PersistedQueryLayer {
         } else {
             // if there is no query, look up the persisted query in the manifest
             // and put the body on the `supergraph_request`
-            if let Some(persisted_query_body) =
-                manifest_poller.get_operation_body(persisted_query_id)
-            {
+            if let Some(persisted_query_body) = manifest_poller.get_operation_body(
+                persisted_query_id,
+                // Use the first one of these that exists:
+                // - The PQL-specific context name entry
+                //   `apollo_persisted_queries::client_name` (which can be set
+                //   by router_service plugins)
+                // - The same name used by telemetry (ie, the value of the
+                //   header named by `telemetry.apollo.client_name_header`,
+                //   which defaults to `apollographql-client-name` by default)
+                request
+                    .context
+                    .get(PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY)
+                    .unwrap_or_default()
+                    .or_else(|| request.context.get(CLIENT_NAME).unwrap_or_default()),
+            ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
                 body.extensions.remove("persistedQuery");
@@ -389,6 +405,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use maplit::hashmap;
     use serde_json::json;
 
     use super::*;
@@ -400,6 +417,7 @@ mod tests {
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::spec::Schema;
     use crate::test_harness::mocks::persisted_queries::*;
+    use crate::Context;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn disabled_pq_layer_has_no_poller() {
@@ -477,6 +495,84 @@ mod tests {
             .ok()
             .expect("pq layer returned response instead of putting the query on the request");
         assert_eq!(request.supergraph_request.body().query, Some(body));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn enabled_pq_layer_with_client_names() {
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&hashmap! {
+            FullPersistedQueryOperationId {
+                operation_id: "both-plain-and-cliented".to_string(),
+                client_name: None,
+            } => "query { bpac_no_client: __typename }".to_string(),
+            FullPersistedQueryOperationId {
+                operation_id: "both-plain-and-cliented".to_string(),
+                client_name: Some("web".to_string()),
+            } => "query { bpac_web_client: __typename }".to_string(),
+            FullPersistedQueryOperationId {
+                operation_id: "only-cliented".to_string(),
+                client_name: Some("web".to_string()),
+            } => "query { oc_web_client: __typename }".to_string(),
+        })
+        .await;
+
+        let pq_layer = PersistedQueryLayer::new(
+            &Configuration::fake_builder()
+                .persisted_query(PersistedQueries::builder().enabled(true).build())
+                .uplink(uplink_config)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let map_to_query = |operation_id: &str, client_name: Option<&str>| -> Option<String> {
+            let context = Context::new();
+            if let Some(client_name) = client_name {
+                context
+                    .insert(
+                        PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY,
+                        client_name.to_string(),
+                    )
+                    .unwrap();
+            }
+
+            let incoming_request = SupergraphRequest::fake_builder()
+                .extension(
+                    "persistedQuery",
+                    json!({"version": 1, "sha256Hash": operation_id.to_string()}),
+                )
+                .context(context)
+                .build()
+                .unwrap();
+
+            pq_layer
+                .supergraph_request(incoming_request)
+                .ok()
+                .expect("pq layer returned response instead of putting the query on the request")
+                .supergraph_request
+                .body()
+                .query
+                .clone()
+        };
+
+        assert_eq!(
+            map_to_query("both-plain-and-cliented", None),
+            Some("query { bpac_no_client: __typename }".to_string())
+        );
+        assert_eq!(
+            map_to_query("both-plain-and-cliented", Some("not-web")),
+            Some("query { bpac_no_client: __typename }".to_string())
+        );
+        assert_eq!(
+            map_to_query("both-plain-and-cliented", Some("web")),
+            Some("query { bpac_web_client: __typename }".to_string())
+        );
+        assert_eq!(
+            map_to_query("only-cliented", Some("web")),
+            Some("query { oc_web_client: __typename }".to_string())
+        );
+        assert_eq!(map_to_query("only-cliented", None), None);
+        assert_eq!(map_to_query("only-cliented", Some("not-web")), None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -690,11 +786,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn pq_layer_freeform_graphql_with_safelist() {
         let manifest = HashMap::from([(
-            "valid-syntax".to_string(),
+            FullPersistedQueryOperationId {
+              operation_id: "valid-syntax".to_string(),
+              client_name: None,
+            },
             "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah"
                 .to_string(),
         ), (
-            "invalid-syntax".to_string(),
+            FullPersistedQueryOperationId {
+              operation_id: "invalid-syntax".to_string(),
+              client_name: None,
+            },
             "}}}".to_string()),
         ]);
 
