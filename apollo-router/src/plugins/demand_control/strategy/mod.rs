@@ -4,7 +4,7 @@ use ahash::HashMap;
 use apollo_compiler::ExecutableDocument;
 
 use crate::graphql;
-use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
+use crate::plugins::demand_control::cost_calculator::schema2::DemandControlledSchema;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
 use crate::plugins::demand_control::DemandControlConfig;
