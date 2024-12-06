@@ -191,7 +191,6 @@ mod helpers {
     use apollo_compiler::schema::ScalarType;
     use apollo_compiler::Name;
     use apollo_compiler::Node;
-    use apollo_compiler::Schema;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
 
@@ -204,11 +203,9 @@ mod helpers {
     use crate::internal_error;
     use crate::link::spec::Identity;
     use crate::link::Link;
-    use crate::schema::position::InterfaceFieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
-    use crate::schema::position::PositionLookupError;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::position::SchemaRootDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
@@ -496,26 +493,26 @@ mod helpers {
             if let Some(sub) = parsed.next_subselection() {
                 for named in sub.selections_iter() {
                     for field_name in named.names() {
-                        let field_name = Name::new(field_name)?;
-                        let field: Box<dyn Field> = match &key_for_type {
-                                TypeDefinitionPosition::Object(o)  => Box::new(o.field(field_name)),
-                                TypeDefinitionPosition::Interface(i) => Box::new(i.field(field_name)),
-                                TypeDefinitionPosition::Union(_) | TypeDefinitionPosition::InputObject(_)=> {
-                                    return Err(FederationError::internal(
-                                        "siblings of type interface, input object, or union are not yet handled",
-                                    ))
-                                }
-                                other => {
-                                    return Err(FederationError::internal(format!(
-                                        "cannot select a sibling on a leaf type: {}",
-                                        other.type_name()
-                                    )))
-                                }
-                            };
+                        let field_def = self
+                            .original_schema
+                            .schema()
+                            .type_field(key_for_type.type_name(), field_name)
+                            .map_err(|_| {
+                                FederationError::internal(format!(
+                                    "field {} not found on type {}",
+                                    field_name,
+                                    key_for_type.type_name()
+                                ))
+                            })?;
 
-                        let field_def = field.get(self.original_schema.schema())?;
-                        if field.get(to_schema.schema()).is_err() {
-                            field.insert(
+                        // TODO: future support for interfaces
+                        let pos = ObjectFieldDefinitionPosition {
+                            type_name: key_for_type.type_name().clone(),
+                            field_name: Name::new(field_name)?,
+                        };
+
+                        if pos.get(to_schema.schema()).is_err() {
+                            pos.insert(
                                 to_schema,
                                 Component::new(FieldDefinition {
                                     description: field_def.description.clone(),
@@ -757,54 +754,6 @@ mod helpers {
             )?;
 
             Ok(())
-        }
-    }
-
-    // TODO: contribute some code to `position.rs` to make those types more flexible rather than adding it here
-    trait Field {
-        fn get<'schema>(
-            &self,
-            schema: &'schema Schema,
-        ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError>;
-
-        fn insert(
-            &self,
-            schema: &mut FederationSchema,
-            field: Component<FieldDefinition>,
-        ) -> Result<(), FederationError>;
-    }
-
-    impl Field for ObjectFieldDefinitionPosition {
-        fn get<'schema>(
-            &self,
-            schema: &'schema Schema,
-        ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
-            self.get(schema)
-        }
-
-        fn insert(
-            &self,
-            schema: &mut FederationSchema,
-            field: Component<FieldDefinition>,
-        ) -> Result<(), FederationError> {
-            self.insert(schema, field)
-        }
-    }
-
-    impl Field for InterfaceFieldDefinitionPosition {
-        fn get<'schema>(
-            &self,
-            schema: &'schema Schema,
-        ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
-            self.get(schema)
-        }
-
-        fn insert(
-            &self,
-            schema: &mut FederationSchema,
-            field: Component<FieldDefinition>,
-        ) -> Result<(), FederationError> {
-            self.insert(schema, field)
         }
     }
 }
