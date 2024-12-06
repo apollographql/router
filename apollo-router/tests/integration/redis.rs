@@ -52,7 +52,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
     let known_cache_key = &format!(
-        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:81b9c296d8ebc8adf4575b83a8d296621fd76de6d12d8c91f4552eda02d1dd9c"
+        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:81b9c296d8ebc8adf4575b83a8d296621fd76de6d12d8c91f4552eda02d1dd9c",
         env!("CARGO_PKG_VERSION")
     );
 
@@ -1104,7 +1104,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
 
     // If the tests above are failing, this is the key that needs to be changed first.
     let starting_key = &format!(
-        "plan:router:{}::5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:81b9c296d8ebc8adf4575b83a8d296621fd76de6d12d8c91f4552eda02d1dd9c",
+        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:81b9c296d8ebc8adf4575b83a8d296621fd76de6d12d8c91f4552eda02d1dd9c",
         env!("CARGO_PKG_VERSION")
     );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
