@@ -212,9 +212,10 @@ mod tests {
     use async_compression::tokio::write::GzipDecoder;
     use futures::stream;
     use http_body::Frame;
-    use http_body_util::StreamBody;
     use rand::Rng;
     use tokio::io::AsyncWriteExt;
+
+    use crate::services::router::body::from_result_stream;
 
     use super::*;
 
@@ -290,10 +291,10 @@ content-type: application/json
 
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: RouterBody = RouterBody::new(StreamBody::new(stream::iter(vec![
+        let body: RouterBody = from_result_stream(stream::iter(vec![
             Ok::<_, BoxError>(Frame::data(Bytes::from(primary_response))),
             Ok(Bytes::from(deferred_response)),
-        ])));
+        ]));
 
         let mut stream = compressor.process(body);
         let mut decoder = GzipDecoder::new(Vec::new());

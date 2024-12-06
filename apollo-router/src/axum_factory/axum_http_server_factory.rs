@@ -22,8 +22,6 @@ use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
-use http_body::Frame;
-use http_body_util::StreamBody;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
@@ -60,7 +58,7 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
+use crate::services::router::body::from_result_stream;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -641,12 +639,7 @@ async fn handle_graphql<RF: RouterFactory>(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    RouterBody::new(StreamBody::new(
-                        compressor
-                            .process(body)
-                            .map(|b| b.map(Frame::data))
-                            .map_err(axum::Error::new),
-                    ))
+                    from_result_stream(compressor.process(body))
                 }
             };
 

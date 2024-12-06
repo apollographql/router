@@ -22,8 +22,6 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use http_body::Frame;
-use http_body_util::StreamBody;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use tower::BoxError;
@@ -33,6 +31,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
+use super::body::from_result_stream;
 use super::Body;
 use super::ClientRequestAccepts;
 use crate::axum_factory::CanceledRequest;
@@ -59,7 +58,6 @@ use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
-use crate::services::router::body::RouterBody;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
@@ -337,19 +335,13 @@ impl RouterService {
                     let response = match response.subscribed {
                         Some(true) => http::Response::from_parts(
                             parts,
-                            RouterBody::new(StreamBody::new(
-                                Multipart::new(body, ProtocolMode::Subscription)
-                                    .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
-                            )),
+                            from_result_stream(Multipart::new(body, ProtocolMode::Subscription)),
                         ),
                         _ => http::Response::from_parts(
                             parts,
-                            RouterBody::new(StreamBody::new(
-                                Multipart::new(
-                                    once(ready(response)).chain(body),
-                                    ProtocolMode::Defer,
-                                )
-                                .map(|body| body.map(Frame::data).map_err(axum::Error::new)),
+                            from_result_stream(Multipart::new(
+                                once(ready(response)).chain(body),
+                                ProtocolMode::Defer,
                             )),
                         ),
                     };
