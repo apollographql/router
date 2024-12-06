@@ -69,7 +69,7 @@ expression: "serde_json::to_value(response).unwrap()"
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "b16f89d2eee20c8d9fb1afd66859246a966fc8e8cdf57c8dccd8ef9d592238f2",
+              "schemaAwareHash": "45b4beebcbf1df72ab950db7bd278417712b1aa39119317f44ad5b425bdb6997",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -109,7 +109,7 @@ expression: "serde_json::to_value(response).unwrap()"
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "cddc692383bb57789f5e614a1c7196ea1ef6742f526ccc1b82103824066b2227",
+                "schemaAwareHash": "645f3f8763133d2376e33ab3d1145be7ded0ccc8e94e20aba1fbaa34a51633da",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -156,7 +156,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "ae234717aeb613e731e62638e8be9817aa2f832a9e2bcc923b58e6dd522d6903",
+                    "schemaAwareHash": "a79f69245d777abc4afbd7d0a8fc434137fa4fd1079ef082edf4c7746b5a0fcd",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -200,7 +200,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "e24f90e734b7f13370d5eead3c347e4599a9f383302ca3b0fa1a4ee2b3109198",
+                    "schemaAwareHash": "5ad94764f288a41312e07745510bf5dade2b63fb82c3d896f7d00408dbbe5cce",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
