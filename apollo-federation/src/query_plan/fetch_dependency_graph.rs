@@ -1719,12 +1719,12 @@ impl FetchDependencyGraph {
                 children.push(child_index);
             } else {
                 let Some(child_defer_ref) = &child.defer_ref else {
-                    return Err(internal_error!(
+                    bail!(
                         "{} has defer_ref `{}`, so its child {} cannot have a top-level defer_ref.",
                         node.display(node_index),
                         DisplayOption(node.defer_ref.as_ref()),
                         child.display(child_index),
-                    ));
+                    );
                 };
 
                 if !node.selection_set.selection_set.selections.is_empty() {
@@ -2679,9 +2679,9 @@ impl FetchDependencyGraphNode {
         let operation_document = operation.try_into().map_err(|err| match err {
             FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
                 diagnostics,
-            }) => FederationError::internal(format!(
+            }) => internal_error!(
                 "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            )),
+            ),
             _ => err,
         })?;
 
@@ -3402,9 +3402,7 @@ impl DeferTracking {
 
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             let Some(parent_info) = self.deferred.get_mut(parent_ref) else {
-                return Err(internal_error!(
-                    "Cannot find info for parent {parent_ref} or {label}"
-                ));
+                bail!("Cannot find info for parent {parent_ref} or {label}")
             };
 
             parent_info.deferred.insert(label.clone());
