@@ -1,9 +1,13 @@
 use axum::Error as AxumError;
 use bytes::Bytes;
+use futures::Stream;
+use futures::StreamExt;
+use http_body::Frame;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
 use http_body_util::Full;
+use http_body_util::StreamBody;
 use hyper::body::Body as HttpBody;
 
 pub type RouterBody = UnsyncBoxBody<Bytes, AxumError>;
@@ -26,6 +30,18 @@ pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, AxumError> 
         .boxed_unsync()
 }
 
+pub(crate) fn from_result_stream<S, E>(data_stream: S) -> RouterBody
+where
+    S: Stream<Item = Result<Bytes, E>> + Send + 'static,
+    S: StreamExt,
+    E: Into<tower::BoxError>,
+{
+    RouterBody::new(StreamBody::new(
+        data_stream.map(|s| s.map(Frame::data).map_err(AxumError::new)),
+    ))
+}
+
+//
 // Useful Conversion notes:
 //  - If you have a body and want to convert it to BodyDataStream
 //    You can call `body.into_data_stream` from BodyExt
@@ -54,14 +70,5 @@ where
 
 pub(crate) fn from_data_stream(data_stream: BodyDataStream<RouterBody>) -> RouterBody {
     RouterBody::new(StreamBody::new(data_stream.map(|s| s.map(Frame::data))))
-}
-
-pub(crate) fn from_result_stream<S>(data_stream: S) -> RouterBody
-where
-    S: Stream<Item = Result<Bytes, AxumError>> + Send + 'static,
-{
-    RouterBody::new(StreamBody::new(
-        data_stream.map(|s| s.map(|body| Frame::data(body))),
-    ))
 }
 */

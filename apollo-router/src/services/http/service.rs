@@ -5,16 +5,13 @@ use std::time::Duration;
 
 use ::serde::Deserialize;
 use futures::future::BoxFuture;
-use futures::StreamExt;
 use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
-use http_body::Frame;
 use http_body_util::BodyExt;
-use http_body_util::StreamBody;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
@@ -43,6 +40,7 @@ use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
+use crate::services::router::body::from_result_stream;
 use crate::services::router::body::RouterBody;
 use crate::Configuration;
 use crate::Context;
@@ -281,11 +279,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let body = match opt_compressor {
             None => body,
-            Some(compressor) => RouterBody::new(StreamBody::new(
-                compressor
-                    .process(body)
-                    .map(|b| b.map(Frame::data).map_err(axum::Error::new)),
-            )),
+            Some(compressor) => from_result_stream(compressor.process(body)),
         };
 
         let mut http_request = http::Request::from_parts(parts, body);
