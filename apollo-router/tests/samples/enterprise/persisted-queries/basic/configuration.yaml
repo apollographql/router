@@ -10,3 +10,5 @@ telemetry:
 rhai:
   scripts: "tests/samples/enterprise/persisted-queries/basic/rhai"
   main: "main.rhai"
+include_subgraph_errors:
+  all: true

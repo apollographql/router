@@ -9,7 +9,7 @@ actions:
       requests:
       - request:
           body:
-            query: "query GetMyName__accounts__0{me{name}}"
+            query: "query GetMyName__accounts__0 { me { name } }"
         response:
           body:
             data:
@@ -17,7 +17,7 @@ actions:
                 name: "Ada Lovelace"
       - request:
           body:
-            query: "query GetMyName__accounts__0{me{mobileAlias:name}}"
+            query: "query GetMyName__accounts__0 { me { mobileAlias: name } }"
         response:
           body:
             data:
@@ -25,7 +25,7 @@ actions:
                 mobileAlias: "Ada Lovelace"
       - request:
           body:
-            query: "query GetYourName__accounts__0{you:me{name}}"
+            query: "query GetYourName__accounts__0 { you: me { name } }"
         response:
           body:
             data:
