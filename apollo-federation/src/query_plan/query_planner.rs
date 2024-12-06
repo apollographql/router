@@ -14,6 +14,7 @@ use tracing::trace;
 
 use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::operation::normalize_operation;
@@ -34,7 +35,6 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQ
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
-use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
@@ -120,11 +120,6 @@ pub struct QueryPlanIncrementalDeliveryConfig {
 
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerDebugConfig {
-    /// If used and the supergraph is built from a single subgraph, then user queries do not go
-    /// through the normal query planning and instead a fetch to the one subgraph is built directly
-    /// from the input query.
-    pub bypass_planner_for_single_subgraph: bool,
-
     /// Query planning is an exploratory process. Depending on the specificities and feature used by
     /// subgraphs, there could exist may different theoretical valid (if not always efficient) plans
     /// for a given query, and at a high level, the query planner generates those possible choices,
@@ -162,7 +157,6 @@ pub struct QueryPlannerDebugConfig {
 impl Default for QueryPlannerDebugConfig {
     fn default() -> Self {
         Self {
-            bypass_planner_for_single_subgraph: false,
             max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
         }
@@ -173,15 +167,6 @@ impl Default for QueryPlannerDebugConfig {
 #[derive(Debug, PartialEq, Default, Serialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
-}
-
-impl QueryPlannerConfig {
-    /// Panics if options are used together in unsupported ways.
-    fn assert_valid(&self) {
-        if self.incremental_delivery.enable_defer {
-            assert!(!self.debug.bypass_planner_for_single_subgraph, "Cannot use the `debug.bypass_planner_for_single_subgraph` query planner option when @defer support is enabled");
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -230,8 +215,6 @@ impl QueryPlanner {
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
-        config.assert_valid();
-
         let supergraph_schema = supergraph.schema.clone();
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: config.incremental_delivery.enable_defer,
@@ -356,32 +339,6 @@ impl QueryPlanner {
 
         let statistics = QueryPlanningStatistics::default();
 
-        if self.config.debug.bypass_planner_for_single_subgraph {
-            let mut subgraphs = self.federated_query_graph.subgraphs();
-            if let (Some((subgraph_name, _subgraph_schema)), None) =
-                (subgraphs.next(), subgraphs.next())
-            {
-                let node = FetchNode {
-                    subgraph_name: subgraph_name.clone(),
-                    operation_document: document.clone(),
-                    operation_name: operation.name.clone(),
-                    operation_kind: operation.operation_type,
-                    id: None,
-                    variable_usages: operation
-                        .variables
-                        .iter()
-                        .map(|var| var.name.clone())
-                        .collect(),
-                    requires: Default::default(),
-                    input_rewrites: Default::default(),
-                    output_rewrites: Default::default(),
-                    context_rewrites: Default::default(),
-                };
-
-                return Ok(QueryPlan::new(node, statistics));
-            }
-        }
-
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&document.fragments, &self.api_schema),
@@ -432,10 +389,10 @@ impl QueryPlanner {
             .root_kinds_to_nodes()?
             .get(&normalized_operation.root_kind)
         else {
-            panic!(
+            bail!(
                 "Shouldn't have a {0} operation if the subgraphs don't have a {0} root",
                 normalized_operation.root_kind
-            );
+            )
         };
 
         let operation_compression = if self.config.generate_query_fragments {
@@ -1196,67 +1153,6 @@ type User
                   },
                 },
               }
-        "###);
-    }
-
-    #[test]
-    fn bypass_planner_for_single_subgraph() {
-        let a = Subgraph::parse_and_expand(
-            "A",
-            "https://A",
-            r#"
-            type Query {
-                a: A
-            }
-            type A {
-                b: B
-            }
-            type B {
-                x: Int
-                y: String
-            }
-        "#,
-        )
-        .unwrap();
-        let subgraphs = vec![&a];
-        let supergraph = Supergraph::compose(subgraphs).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
-
-        let document = ExecutableDocument::parse_and_validate(
-            api_schema.schema(),
-            r#"
-            {
-                a {
-                    b {
-                        x
-                        y
-                    }
-                }
-            }
-            "#,
-            "",
-        )
-        .unwrap();
-
-        let mut config = QueryPlannerConfig::default();
-        config.debug.bypass_planner_for_single_subgraph = true;
-        let planner = QueryPlanner::new(&supergraph, config).unwrap();
-        let plan = planner
-            .build_query_plan(&document, None, Default::default())
-            .unwrap();
-        insta::assert_snapshot!(plan, @r###"
-        QueryPlan {
-          Fetch(service: "A") {
-            {
-              a {
-                b {
-                  x
-                  y
-                }
-              }
-            }
-          },
-        }
         "###);
     }
 

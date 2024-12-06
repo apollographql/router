@@ -165,23 +165,11 @@ impl PlannerMode {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
-        let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-            subgraph_graphql_validation: false,
-            generate_query_fragments: configuration.supergraph.generate_query_fragments,
-            incremental_delivery:
-                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
-                    enable_defer: configuration.supergraph.defer_support,
-                },
-            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
-            debug: Default::default(),
-        };
+        let config = configuration.rust_query_planner_config();
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
 
         match &result {
-            Err(FederationError::SingleFederationError {
-                inner: error,
-                trace: _,
-            }) => match error {
+            Err(FederationError::SingleFederationError(error)) => match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }

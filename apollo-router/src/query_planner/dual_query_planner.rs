@@ -7,11 +7,11 @@ use std::time::Instant;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 
 use crate::error::format_bridge_errors;
-use crate::executable::USING_CATCH_UNWIND;
 use crate::query_planner::bridge_query_planner::metric_query_planning_plan_duration;
 use crate::query_planner::bridge_query_planner::JS_QP_MODE;
 use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
@@ -63,47 +63,23 @@ impl BothModeComparisonJob {
     }
 
     fn execute(self) {
-        // TODO: once the Rust query planner does not use `todo!()` anymore,
-        // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
-        let rust_result = std::panic::catch_unwind(|| {
-            let name = self
-                .operation_name
-                .clone()
-                .map(Name::try_from)
-                .transpose()?;
-            USING_CATCH_UNWIND.set(true);
+        let start = Instant::now();
 
-            let start = Instant::now();
-
-            // No question mark operator or macro from here …
-            let result =
+        let rust_result = self
+            .operation_name
+            .as_deref()
+            .map(|n| Name::new(n).map_err(FederationError::from))
+            .transpose()
+            .and_then(|operation| {
                 self.rust_planner
-                    .build_query_plan(&self.document, name, self.plan_options);
+                    .build_query_plan(&self.document, operation, self.plan_options)
+            });
 
-            let elapsed = start.elapsed().as_secs_f64();
-            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-            metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
-            metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, self.js_duration);
-
-            // … to here, so the thread can only eiher reach here or panic.
-            // We unset USING_CATCH_UNWIND in both cases.
-            USING_CATCH_UNWIND.set(false);
-            result
-        })
-        .unwrap_or_else(|panic| {
-            USING_CATCH_UNWIND.set(false);
-            Err(apollo_federation::error::FederationError::internal(
-                format!(
-                    "query planner panicked: {}",
-                    panic
-                        .downcast_ref::<String>()
-                        .map(|s| s.as_str())
-                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                        .unwrap_or_default()
-                ),
-            ))
-        });
+        metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+        metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, self.js_duration);
 
         let name = self.operation_name.as_deref();
         let operation_desc = if let Ok(operation) = self.document.operations.get(name) {
