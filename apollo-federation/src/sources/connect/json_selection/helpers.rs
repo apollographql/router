@@ -1,5 +1,7 @@
+use apollo_compiler::collections::IndexSet;
 use nom::character::complete::multispace0;
 use nom::Slice;
+use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
 use super::location::Span;
@@ -79,6 +81,68 @@ pub(crate) fn json_type_name(v: &JSON) -> &str {
 pub(crate) fn vec_push<T>(mut vec: Vec<T>, item: T) -> Vec<T> {
     vec.push(item);
     vec
+}
+
+pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, Vec<String>) {
+    match (a, b) {
+        (Some(JSON::Object(a)), Some(JSON::Object(b))) => {
+            let mut merged = JSONMap::new();
+            let mut errors = Vec::new();
+
+            for key in IndexSet::from_iter(a.keys().chain(b.keys())) {
+                let (child_opt, child_errors) = json_merge(a.get(key), b.get(key));
+                if let Some(child) = child_opt {
+                    merged.insert(key.clone(), child);
+                }
+                errors.extend(child_errors);
+            }
+
+            (Some(JSON::Object(merged)), errors)
+        }
+
+        (Some(JSON::Array(a)), Some(JSON::Array(b))) => {
+            let max_len = a.len().max(b.len());
+            let mut merged = Vec::with_capacity(max_len);
+            let mut errors = Vec::new();
+
+            for i in 0..max_len {
+                let (child_opt, child_errors) = json_merge(a.get(i), b.get(i));
+                if let Some(child) = child_opt {
+                    merged.push(child);
+                }
+                errors.extend(child_errors);
+            }
+
+            (Some(JSON::Array(merged)), errors)
+        }
+
+        (Some(JSON::Null), _) => (Some(JSON::Null), Vec::new()),
+        (_, Some(JSON::Null)) => (Some(JSON::Null), Vec::new()),
+
+        (Some(a), Some(b)) => {
+            if a == b {
+                (Some(a.clone()), Vec::new())
+            } else {
+                let json_type_of_a = json_type_name(a);
+                let json_type_of_b = json_type_name(b);
+                (
+                    Some(b.clone()),
+                    if json_type_of_a == json_type_of_b {
+                        vec![]
+                    } else {
+                        vec![format!(
+                            "Lossy merge replacing {} with {}",
+                            json_type_of_a, json_type_of_b
+                        )]
+                    },
+                )
+            }
+        }
+
+        (None, Some(b)) => (Some(b.clone()), Vec::new()),
+        (Some(a), None) => (Some(a.clone()), Vec::new()),
+        (None, None) => (None, Vec::new()),
+    }
 }
 
 #[cfg(test)]

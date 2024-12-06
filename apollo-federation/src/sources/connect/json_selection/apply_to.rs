@@ -5,11 +5,13 @@ use std::hash::Hash;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::json;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
+use super::helpers::json_merge;
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
@@ -298,7 +300,7 @@ impl ApplyToInternal for NamedSelection {
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
-        let mut output = JSONMap::new();
+        let mut output: Option<JSON> = None;
         let mut errors = Vec::new();
 
         match self {
@@ -312,10 +314,10 @@ impl ApplyToInternal for NamedSelection {
                             selection.apply_to_path(child, vars, &input_path_with_key);
                         errors.extend(apply_errors);
                         if let Some(value) = value {
-                            output.insert(output_name, value);
+                            output = Some(json!({ output_name: value }));
                         }
                     } else {
-                        output.insert(output_name, child.clone());
+                        output = Some(json!({ output_name: child.clone() }));
                     }
                 } else {
                     errors.push(ApplyToError::new(
@@ -340,62 +342,34 @@ impl ApplyToInternal for NamedSelection {
                 if let Some(alias) = alias {
                     // Handle the NamedPathSelection case.
                     if let Some(value) = value_opt {
-                        output.insert(alias.name(), value);
+                        output = Some(json!({ alias.name(): value }));
                     }
-                } else if let Some(sub) = path.next_subselection() {
+                } else if *inline {
                     match value_opt {
-                        Some(JSON::Object(value)) => {
-                            // Handle the PathWithSubSelection case.
-                            // TODO Define merge semantics in case of key collisions?
-                            output.extend(value);
+                        Some(JSON::Object(map)) => {
+                            output = Some(JSON::Object(map.clone()));
                         }
-                        // To be consistent with NamedSelection::apply_to_path, we
-                        // also report errors accessing properties of the
-                        // non-object value, which are reported by
-                        // path_selection.apply_to_path above.
+                        Some(JSON::Null) => {
+                            output = Some(JSON::Null);
+                        }
                         Some(value) => {
                             errors.push(ApplyToError::new(
-                                format!("Expected object, not {}", json_type_name(&value)),
-                                // Since the path_selection.apply_to_path
-                                // execution stack has been unwound by this
-                                // point, input_path does not include the path
-                                // itself, but may include ancestor path items.
+                                format!("Expected object or null, not {}", json_type_name(&value)),
                                 input_path.to_vec(),
-                                sub.range(),
+                                path.range(),
                             ));
                         }
                         None => {
                             errors.push(ApplyToError::new(
-                                "Expected object, not nothing (see other errors)".to_string(),
+                                "Expected object or null, not nothing".to_string(),
                                 input_path.to_vec(),
-                                sub.range(),
+                                path.range(),
                             ));
                         }
-                    };
-                } else if *inline {
-                    if let Some(JSON::Object(map)) = value_opt {
-                        // TODO Handle collisions with existing values (merge logic)
-                        // TODO Gate this behavior on whether
-                        // path_selection.compute_output_shape() returns an object
-                        // with statically known fields, and potentially verify map
-                        // actually has those fields.
-                        output.extend(map);
-                    } else {
-                        // This error case should never happen if the selection was
-                        // constructed by parsing, because the presence of the
-                        // SubSelection (in the absence of an Alias) is enforced by
-                        // NamedSelection::parse_path.
-                        errors.push(ApplyToError::new(
-                            "Path inlined with ... must produce object".to_string(),
-                            input_path.to_vec(),
-                            path.range(),
-                        ));
                     }
                 } else {
-                    // If the path has no trailing SubSelection and was not
-                    // inlined with ... (and has no Alias), that's an error.
                     errors.push(ApplyToError::new(
-                        "Path must have an alias, a trailing subselection, or be inlined with ... and produce an object".to_string(),
+                        "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
                         input_path.to_vec(),
                         path.range(),
                     ));
@@ -405,12 +379,12 @@ impl ApplyToInternal for NamedSelection {
                 let (value_opt, apply_errors) = sub_selection.apply_to_path(data, vars, input_path);
                 errors.extend(apply_errors);
                 if let Some(value) = value_opt {
-                    output.insert(alias.name(), value);
+                    output = Some(json!({ alias.name(): value }));
                 }
             }
         };
 
-        (Some(JSON::Object(output)), errors)
+        (output, errors)
     }
 
     fn compute_output_shape(
@@ -858,35 +832,53 @@ impl ApplyToInternal for SubSelection {
             vars
         };
 
-        let mut output = JSONMap::new();
-        let mut errors = Vec::new();
-
-        if let Some(ranged_output_name) = &self.output_shape {
-            output.insert(
+        let mut output = match &self.output_shape {
+            Some(ranged_output_name) => {
+                let mut output_map = JSONMap::new();
                 // This "<?>" field holds the string value that may eventually
                 // be reported as __typename in the GraphQL response.
-                "<?>".to_string(),
-                JSON::String(ranged_output_name.as_str().into()),
-            );
-        }
+                output_map.insert(
+                    ByteString::from("<?>"),
+                    JSON::String(ranged_output_name.as_str().into()),
+                );
+                JSON::Object(output_map)
+            }
+            None => JSON::Object(JSONMap::new()),
+        };
+        let mut errors = Vec::new();
 
         for named_selection in self.selections.iter() {
-            let (value, apply_errors) = named_selection.apply_to_path(data, &vars, input_path);
+            let (named_output_opt, apply_errors) =
+                named_selection.apply_to_path(data, &vars, input_path);
             errors.extend(apply_errors);
-            // If value is an object, extend output with its keys and their values.
-            if let Some(JSON::Object(named_properties)) = value {
-                output.extend(named_properties);
+
+            let (merged, merge_errors) = json_merge(Some(&output), named_output_opt.as_ref());
+
+            errors.extend(
+                merge_errors
+                    .into_iter()
+                    .map(|message| ApplyToError::new(message, input_path.to_vec(), self.range())),
+            );
+
+            if let Some(merged) = merged {
+                output = merged;
             }
         }
 
-        // If data was a primitive value (neither array nor object), and no
-        // output properties were generated, return data as is, along with any
-        // errors that occurred.
-        if !matches!(data, JSON::Object(_)) && output.is_empty() {
-            return (Some(data.clone()), errors);
+        if !matches!(data, JSON::Object(_)) {
+            let output_is_empty = match &output {
+                JSON::Object(map) => map.is_empty(),
+                _ => false,
+            };
+            if output_is_empty {
+                // If data was a primitive value (neither array nor object), and
+                // no output properties were generated, return data as is, along
+                // with any errors that occurred.
+                return (Some(data.clone()), errors);
+            }
         }
 
-        (Some(JSON::Object(output)), errors)
+        (Some(output), errors)
     }
 
     fn compute_output_shape(
@@ -2296,10 +2288,12 @@ mod tests {
                         Some(128..135),
                     ),
                     ApplyToError::new(
-                        "Expected object, not string".to_string(),
+                        "Expected object or null, not string".to_string(),
                         vec![],
-                        // This is the range of the { role content } subselection.
-                        Some(121..137),
+                        // This is the range of the whole
+                        // `choices->first.message { role content }`
+                        // subselection.
+                        Some(98..137),
                     ),
                 ],
             );
@@ -2336,10 +2330,11 @@ mod tests {
                         Some(15..26),
                     ),
                     ApplyToError::new(
-                        "Expected object, not nothing (see other errors)".to_string(),
+                        "Expected object or null, not nothing".to_string(),
                         vec![],
-                        // This is the range of the { name } subselection.
-                        Some(27..35),
+                        // This is the range of the whole
+                        // `nested.path.nonexistent { name }` path selection.
+                        Some(3..35),
                     ),
                 ],
             ),
@@ -2377,7 +2372,7 @@ mod tests {
             (
                 Some(json!({})),
                 vec![ApplyToError::new(
-                    "Path must have an alias, a trailing subselection, or be inlined with ... and produce an object".to_string(),
+                    "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
                     vec![],
                     // No range because this is a manually constructed selection.
                     None,
@@ -2826,5 +2821,149 @@ mod tests {
                 vec![],
             ));
         }
+    }
+
+    #[test]
+    fn test_merging_objects() {
+        let sel = selection!(
+            r#"
+            author {
+                name
+                books { year }
+            }
+            "author" {
+                books { title }
+            }
+        "#
+        );
+
+        let data = json!({
+            "author": {
+                "name": "Yuval Noah Harari",
+                "books": [
+                    { "title": "Sapiens", "year": 2011 },
+                    { "title": "Nexus", "year": 2024 },
+                ],
+            },
+        });
+
+        assert_eq!(
+            sel.apply_to(&data),
+            (
+                Some(json!({
+                    "author": {
+                        "name": "Yuval Noah Harari",
+                        "books": [
+                            { "title": "Sapiens", "year": 2011 },
+                            { "title": "Nexus", "year": 2024 },
+                        ],
+                    },
+                })),
+                vec![],
+            ),
+        );
+
+        let nullifies = selection!(
+            r#"
+            author {
+                name
+                ... $(null)
+                books { title }
+            }
+        "#
+        );
+
+        assert_eq!(
+            nullifies.apply_to(&data),
+            (
+                Some(json!({
+                    "author": null,
+                })),
+                vec![],
+            ),
+        );
+
+        let empty_obj_expr = selection!(
+            r#"
+            author {
+                name
+                ... $({})
+                books { title }
+            }
+        "#
+        );
+
+        assert_eq!(
+            empty_obj_expr.apply_to(&data),
+            (
+                Some(json!({
+                    "author": {
+                        "name": "Yuval Noah Harari",
+                        "books": [
+                            { "title": "Sapiens" },
+                            { "title": "Nexus" },
+                        ],
+                    },
+                })),
+                vec![],
+            ),
+        );
+
+        let empty_sub_selection = selection!(
+            r#"
+            author {
+                name
+                ... $ {}
+                books { title }
+            }
+        "#
+        );
+
+        assert_eq!(
+            empty_sub_selection.apply_to(&data),
+            (
+                Some(json!({
+                    "author": {
+                        "name": "Yuval Noah Harari",
+                        "books": [
+                            { "title": "Sapiens" },
+                            { "title": "Nexus" },
+                        ],
+                    },
+                })),
+                vec![],
+            ),
+        );
+
+        let nested = selection!(
+            r#"
+            author {
+                name
+                ... $ {
+                    books {
+                        title
+                        ... $({ year: @.year })
+                    }
+                }
+                books { title }
+            }
+        "#
+        );
+
+        assert_eq!(
+            nested.apply_to(&data),
+            (
+                Some(json!({
+                    "author": {
+                        "name": "Yuval Noah Harari",
+                        "books": [
+                            { "title": "Sapiens", "year": 2011 },
+                            { "title": "Nexus", "year": 2024 },
+                        ],
+                    },
+                })),
+                vec![],
+            ),
+        );
     }
 }
