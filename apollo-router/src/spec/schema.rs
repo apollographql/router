@@ -20,6 +20,7 @@ use sha2::Sha256;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::query_planner::OperationKind;
+use crate::uplink::schema::SchemaState;
 use crate::Configuration;
 
 /// A GraphQL schema.
@@ -30,6 +31,7 @@ pub(crate) struct Schema {
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
     pub(crate) schema_id: Arc<String>,
+    pub(crate) launch_id: Option<Arc<String>>,
 }
 
 /// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
@@ -38,16 +40,16 @@ pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
 
 impl Schema {
     pub(crate) fn parse(raw_sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
-        Self::parse_arc(raw_sdl.to_owned().into(), config)
+        Self::parse_arc(raw_sdl.parse::<SchemaState>().unwrap().into(), config)
     }
 
     pub(crate) fn parse_arc(
-        raw_sdl: Arc<String>,
+        raw_sdl: Arc<SchemaState>,
         config: &Configuration,
     ) -> Result<Self, SchemaError> {
         let start = Instant::now();
         let mut parser = apollo_compiler::parser::Parser::new();
-        let result = parser.parse_ast(raw_sdl.as_ref(), "schema.graphql");
+        let result = parser.parse_ast(&raw_sdl.sdl, "schema.graphql");
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
@@ -110,7 +112,7 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
+        let schema_id = Arc::new(Schema::schema_id(&raw_sdl.sdl));
 
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
@@ -124,7 +126,12 @@ impl Schema {
             })?;
 
         Ok(Schema {
-            raw_sdl,
+            launch_id: raw_sdl
+                .launch_id
+                .as_ref()
+                .map(ToString::to_string)
+                .map(Arc::new),
+            raw_sdl: Arc::new(raw_sdl.sdl.to_string()),
             supergraph,
             subgraphs,
             implementers_map,
@@ -336,7 +343,8 @@ impl std::fmt::Debug for Schema {
             subgraphs,
             implementers_map,
             api_schema: _, // skip
-            schema_id: _,
+            schema_id: _,  // skip
+            launch_id: _,  // skip
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)

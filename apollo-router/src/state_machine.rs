@@ -39,6 +39,7 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
+use crate::uplink::schema::SchemaState;
 use crate::ApolloRouterError::NoLicense;
 
 const STATE_CHANGE: &str = "state change";
@@ -54,14 +55,14 @@ pub(crate) struct ListenAddresses {
 enum State<FA: RouterSuperServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
-        schema: Option<Arc<String>>,
+        schema: Option<Arc<SchemaState>>,
         license: Option<LicenseState>,
         listen_addresses_guard: OwnedRwLockWriteGuard<ListenAddresses>,
     },
     Running {
         configuration: Arc<Configuration>,
         _metrics: Option<Metrics>,
-        schema: Arc<String>,
+        schema: Arc<SchemaState>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
@@ -118,7 +119,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn update_inputs<S>(
         mut self,
         state_machine: &mut StateMachine<S, FA>,
-        new_schema: Option<Arc<String>>,
+        new_schema: Option<Arc<SchemaState>>,
         new_configuration: Option<Arc<Configuration>>,
         new_license: Option<LicenseState>,
     ) -> Self
@@ -308,7 +309,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         server_handle: &mut Option<HttpServerHandle>,
         previous_router_service_factory: Option<&FA::RouterFactory>,
         configuration: Arc<Configuration>,
-        sdl: Arc<String>,
+        schema_state: Arc<SchemaState>,
         license: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
@@ -318,7 +319,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         FA: RouterSuperServiceFactory,
     {
         let schema = Arc::new(
-            Schema::parse_arc(sdl.clone(), &configuration)
+            Schema::parse_arc(schema_state.clone(), &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
         // Check the license
@@ -422,7 +423,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         Ok(Running {
             configuration,
             _metrics: metrics,
-            schema: sdl,
+            schema: schema_state,
             license,
             server_handle: Some(server_handle),
             router_service_factory,
@@ -619,11 +620,15 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::RouterRequest;
+    use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
 
-    fn example_schema() -> String {
-        include_str!("testdata/supergraph.graphql").to_owned()
+    fn example_schema() -> SchemaState {
+        SchemaState {
+            sdl: include_str!("testdata/supergraph.graphql").to_owned(),
+            launch_id: None,
+        }
     }
 
     macro_rules! assert_matches {
@@ -877,7 +882,10 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     UpdateLicense(LicenseState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
@@ -900,9 +908,15 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
@@ -923,7 +937,10 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     UpdateLicense(LicenseState::default()),
                     UpdateLicense(LicenseState::Licensed),
                     Shutdown
@@ -1046,7 +1063,10 @@ mod tests {
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
@@ -1104,7 +1124,10 @@ mod tests {
                             .build()
                             .unwrap()
                     ),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ]),
             )
