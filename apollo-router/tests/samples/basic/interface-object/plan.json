@@ -170,7 +170,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf2__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                    "query": "query TestItf2__products__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on I { y } } }",
                                     "operationName": "TestItf2__products__1",
                                     "variables": {
                                         "representations": [
@@ -209,7 +209,7 @@
                                                 "__typename": "C",
                                                 "i": {
                                                     "x": 1,
-                                                    "y": null
+                                                    "y": 1
                                                 },
                                                 "id": "1"
                                             }
