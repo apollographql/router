@@ -1,11 +1,7 @@
-#![allow(deprecated)]
-use std::fmt::Debug;
-
 use axum::Error as AxumError;
 use bytes::Bytes;
 use futures::StreamExt;
 use http_body::Frame;
-use http_body::SizeHint;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyDataStream;
 use http_body_util::BodyExt;

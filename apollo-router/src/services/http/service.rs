@@ -1,5 +1,4 @@
 use std::fmt::Display;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -11,7 +10,6 @@ use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
-use http::HeaderName;
 use http::HeaderValue;
 use http::Request;
 use http_body::Frame;

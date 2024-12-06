@@ -5,7 +5,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
 use axum::extract::Extension;
@@ -25,8 +24,6 @@ use http::HeaderValue;
 use http::Request;
 use http_body::Frame;
 use http_body_util::StreamBody;
-use hyper_util::rt::TokioExecutor;
-use hyper_util::server::conn::auto::Builder;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
