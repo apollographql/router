@@ -16,14 +16,13 @@ use crate::sources::connect::Namespace;
 
 /// Given the variables relevant to entity fetching, synthesize a FieldSet
 /// appropriate for use in a @key directive.
-pub(crate) fn make_key_field_set_from_variables(
+pub(crate) fn make_key_field_set_from_variables<'a>(
     schema: &Schema,
     object_type_name: &Name,
-    variables: &[VariableReference<Namespace>],
+    variables: impl Iterator<Item = VariableReference<'a, Namespace>>,
     resolver: EntityResolver,
 ) -> Result<Option<Valid<FieldSet>>, WithErrors<FieldSet>> {
     let params = variables
-        .iter()
         .filter(|var| match resolver {
             EntityResolver::Explicit => var.namespace.namespace == Namespace::Args,
             EntityResolver::Implicit => var.namespace.namespace == Namespace::This,
@@ -102,14 +101,14 @@ mod tests {
         let result = make_key_field_set_from_variables(
             &Schema::parse_and_validate("type Query { t: T } type T { a: A b: ID } type A { b: B c: ID d: ID } type B { c: ID d: ID e: ID }", "").unwrap(),
             &name!("T"),
-            &vec![
+            vec![
                 VariableReference::parse("$args.a.b.c", 0).unwrap(),
                 VariableReference::parse("$args.a.b.d", 0).unwrap(),
                 VariableReference::parse("$args.a.b.e", 0).unwrap(),
                 VariableReference::parse("$args.a.c", 0).unwrap(),
                 VariableReference::parse("$args.a.d", 0).unwrap(),
                 VariableReference::parse("$args.b", 0).unwrap()
-            ],
+            ].into_iter(),
             super::EntityResolver::Explicit,
         )
         .unwrap()

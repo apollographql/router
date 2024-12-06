@@ -18,6 +18,7 @@ use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::error::FederationError;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::sources::connect::json_selection::JSONSelection;
@@ -52,36 +53,44 @@ pub(crate) fn extract_connect_directive_arguments(
         .types
         .iter()
         .filter_map(|(name, ty)| match ty {
-            apollo_compiler::schema::ExtendedType::Object(node) => Some((name, &node.fields)),
-            apollo_compiler::schema::ExtendedType::Interface(node) => Some((name, &node.fields)),
+            apollo_compiler::schema::ExtendedType::Object(node) => {
+                Some((name, &node.fields, /* is_interface */ false))
+            }
+            apollo_compiler::schema::ExtendedType::Interface(node) => {
+                Some((name, &node.fields, /* is_interface */ true))
+            }
             _ => None,
         })
-        .flat_map(|(type_name, fields)| {
+        .flat_map(|(type_name, fields, is_interface)| {
             fields.iter().flat_map(move |(field_name, field_def)| {
                 field_def
                     .directives
                     .iter()
                     .enumerate()
-                    .filter_map(move |(i, directive)| {
-                        if directive.name == *name {
-                            let field_pos = ObjectOrInterfaceFieldDefinitionPosition::Object(
+                    .filter(|(_, directive)| directive.name == *name)
+                    .map(move |(i, directive)| {
+                        let field_pos = if is_interface {
+                            ObjectOrInterfaceFieldDefinitionPosition::Interface(
+                                InterfaceFieldDefinitionPosition {
+                                    type_name: type_name.clone(),
+                                    field_name: field_name.clone(),
+                                },
+                            )
+                        } else {
+                            ObjectOrInterfaceFieldDefinitionPosition::Object(
                                 ObjectFieldDefinitionPosition {
                                     type_name: type_name.clone(),
                                     field_name: field_name.clone(),
                                 },
-                            );
+                            )
+                        };
 
-                            let position = ObjectOrInterfaceFieldDirectivePosition {
-                                field: field_pos,
-                                directive_name: directive.name.clone(),
-                                directive_index: i,
-                            };
-                            Some(ConnectDirectiveArguments::from_position_and_directive(
-                                position, directive,
-                            ))
-                        } else {
-                            None
-                        }
+                        let position = ObjectOrInterfaceFieldDirectivePosition {
+                            field: field_pos,
+                            directive_name: directive.name.clone(),
+                            directive_index: i,
+                        };
+                        ConnectDirectiveArguments::from_position_and_directive(position, directive)
                     })
             })
         })

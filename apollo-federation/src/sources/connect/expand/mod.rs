@@ -141,7 +141,7 @@ fn split_subgraph(
     subgraph: ValidFederationSubgraph,
     spec: ConnectSpec,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
-    let connector_map = Connector::from_valid_schema(&subgraph.schema, &subgraph.name, spec)?;
+    let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name, spec)?;
 
     let expander = helpers::Expander::new(link, &subgraph);
     connector_map
