@@ -132,7 +132,9 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -192,7 +194,9 @@ mod tests {
                     "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -251,7 +255,9 @@ mod tests {
                     "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -292,7 +298,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -400,7 +406,7 @@ mod tests {
                     Some("5678")
                 );
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -508,7 +514,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -565,7 +571,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -631,7 +637,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -710,7 +716,7 @@ mod tests {
                 assert_eq!(subgraph_id.as_str(), Some("5678"));
 
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
@@ -831,7 +837,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
@@ -944,7 +950,7 @@ mod tests {
         let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "SupergraphResponse",
@@ -1076,7 +1082,9 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1188,7 +1196,9 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1314,7 +1324,9 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1385,7 +1397,9 @@ mod tests {
                 }
                 );
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1464,7 +1478,9 @@ mod tests {
                 }
                 );
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(crate::services::router::body::full(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1592,7 +1608,9 @@ mod tests {
                       "sdl": "the sdl shouldnt change"
                     });
                     Ok(http::Response::builder()
-                        .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                        .body(crate::services::router::body::full(
+                            serde_json::to_string(&input).unwrap(),
+                        ))
                         .unwrap())
                 })
             });

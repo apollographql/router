@@ -624,7 +624,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -720,7 +720,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(crate::services::router::body::full(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -865,7 +865,9 @@ mod tests {
                       "sdl": "the sdl shouldn't change"
                     });
                     Ok(http::Response::builder()
-                        .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                        .body(crate::services::router::body::full(
+                            serde_json::to_string(&input).unwrap(),
+                        ))
                         .unwrap())
                 })
             });
@@ -977,7 +979,7 @@ mod tests {
                         );
 
                     Ok(http::Response::builder()
-                        .body(RouterBody::from(
+                        .body(crate::services::router::body::full(
                             serde_json::to_string(&deserialized_response).unwrap_or_default(),
                         ))
                         .unwrap())
