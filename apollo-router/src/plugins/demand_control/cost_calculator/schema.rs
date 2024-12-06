@@ -3,116 +3,84 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashMapExt;
+use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_federation::link::cost_spec_definition::CostDirective;
+use apollo_federation::link::cost_spec_definition::CostSpecDefinition;
+use apollo_federation::link::cost_spec_definition::ListSizeDirective;
+use apollo_federation::schema::ValidFederationSchema;
 
-use super::directives::get_apollo_directive_names;
-use super::directives::CostDirective;
-use super::directives::DefinitionListSizeDirective as ListSizeDirective;
 use super::directives::RequiresDirective;
 use crate::plugins::demand_control::DemandControlError;
 
 pub(crate) struct DemandControlledSchema {
-    directive_name_map: HashMap<Name, Name>,
-    inner: Arc<Valid<Schema>>,
-    type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>>,
-    type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>>,
-    type_field_requires_directives: HashMap<Name, HashMap<Name, RequiresDirective>>,
+    inner: ValidFederationSchema,
+    type_field_metadata: HashMap<Name, HashMap<Name, FieldDirectiveMetadata>>,
+    type_input_metadata: HashMap<Name, HashMap<Name, InputObjectDirectiveMetadata>>,
+}
+
+pub(crate) struct FieldDirectiveMetadata {
+    pub(crate) name: Name,
+    pub(crate) ty: ExtendedType,
+    pub(crate) cost_directive: Option<CostDirective>,
+    pub(crate) list_size_directive: Option<ListSizeDirective>,
+    pub(crate) requires_directive: Option<RequiresDirective>,
+    argument_directive_metadata: HashMap<Name, InputObjectDirectiveMetadata>,
+}
+
+impl FieldDirectiveMetadata {
+    pub(crate) fn argument_metadata(
+        &self,
+        arg_name: &str,
+    ) -> Result<&InputObjectDirectiveMetadata, DemandControlError> {
+        self.argument_directive_metadata
+            .get(arg_name)
+            .ok_or_else(|| DemandControlError::ArgumentLookupError {
+                field_name: self.name.to_string(),
+                arg_name: arg_name.to_string(),
+            })
+    }
+}
+
+pub(crate) struct InputObjectDirectiveMetadata {
+    pub(crate) ty: ExtendedType,
+    pub(crate) cost_directive: Option<CostDirective>,
 }
 
 impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
-        let directive_name_map = get_apollo_directive_names(&schema);
-
-        let mut type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>> =
-            HashMap::new();
-        let mut type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>> =
-            HashMap::new();
-        let mut type_field_requires_directives: HashMap<Name, HashMap<Name, RequiresDirective>> =
-            HashMap::new();
+        let fed_schema = ValidFederationSchema::new((*schema).clone())?;
+        let mut type_field_metadata: HashMap<Name, HashMap<Name, FieldDirectiveMetadata>> =
+            HashMap::with_hasher(ahash::RandomState::default());
+        let mut type_input_metadata: HashMap<Name, HashMap<Name, InputObjectDirectiveMetadata>> =
+            HashMap::with_hasher(ahash::RandomState::default());
 
         for (type_name, type_) in &schema.types {
-            let field_cost_directives = type_field_cost_directives
-                .entry(type_name.clone())
-                .or_default();
-            let field_list_size_directives = type_field_list_size_directives
-                .entry(type_name.clone())
-                .or_default();
-            let field_requires_directives = type_field_requires_directives
-                .entry(type_name.clone())
-                .or_default();
-
             match type_ {
                 ExtendedType::Interface(ty) => {
+                    let type_metadata = type_field_metadata.entry(type_name.clone()).or_default();
                     for field_name in ty.fields.keys() {
-                        let field_definition = schema.type_field(type_name, field_name)?;
-                        let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
-                            DemandControlError::QueryParseFailure(format!(
-                                "Field {} was found in query, but its type is missing from the schema.",
-                                field_name
-                            ))
-                        })?;
-
-                        if let Some(cost_directive) =
-                            CostDirective::from_field(&directive_name_map, field_definition)
-                                .or(CostDirective::from_type(&directive_name_map, field_type))
-                        {
-                            field_cost_directives.insert(field_name.clone(), cost_directive);
-                        }
-
-                        if let Some(list_size_directive) = ListSizeDirective::from_field_definition(
-                            &directive_name_map,
-                            field_definition,
-                        )? {
-                            field_list_size_directives
-                                .insert(field_name.clone(), list_size_directive);
-                        }
-
-                        if let Some(requires_directive) = RequiresDirective::from_field_definition(
-                            field_definition,
-                            type_name,
-                            &schema,
-                        )? {
-                            field_requires_directives
-                                .insert(field_name.clone(), requires_directive);
-                        }
+                        Self::record_field_metadata(&fed_schema, type_, field_name, type_metadata)?;
                     }
                 }
                 ExtendedType::Object(ty) => {
+                    let type_metadata = type_field_metadata.entry(type_name.clone()).or_default();
                     for field_name in ty.fields.keys() {
-                        let field_definition = schema.type_field(type_name, field_name)?;
-                        let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
-                            DemandControlError::QueryParseFailure(format!(
-                                "Field {} was found in query, but its type is missing from the schema.",
-                                field_name
-                            ))
-                        })?;
-
-                        if let Some(cost_directive) =
-                            CostDirective::from_field(&directive_name_map, field_definition)
-                                .or(CostDirective::from_type(&directive_name_map, field_type))
-                        {
-                            field_cost_directives.insert(field_name.clone(), cost_directive);
-                        }
-
-                        if let Some(list_size_directive) = ListSizeDirective::from_field_definition(
-                            &directive_name_map,
+                        Self::record_field_metadata(&fed_schema, type_, field_name, type_metadata)?;
+                    }
+                }
+                ExtendedType::InputObject(ty) => {
+                    let type_metadata = type_input_metadata.entry(type_name.clone()).or_default();
+                    for (field_name, field_definition) in &ty.fields {
+                        Self::record_input_object_metadata(
+                            &fed_schema,
+                            field_name,
                             field_definition,
-                        )? {
-                            field_list_size_directives
-                                .insert(field_name.clone(), list_size_directive);
-                        }
-
-                        if let Some(requires_directive) = RequiresDirective::from_field_definition(
-                            field_definition,
-                            type_name,
-                            &schema,
-                        )? {
-                            field_requires_directives
-                                .insert(field_name.clone(), requires_directive);
-                        }
+                            type_metadata,
+                        )?;
                     }
                 }
                 _ => {
@@ -122,52 +90,122 @@ impl DemandControlledSchema {
         }
 
         Ok(Self {
-            directive_name_map,
-            inner: schema,
-            type_field_cost_directives,
-            type_field_list_size_directives,
-            type_field_requires_directives,
+            inner: fed_schema,
+            type_field_metadata,
+            type_input_metadata,
         })
     }
 
-    pub(in crate::plugins::demand_control) fn directive_name_map(&self) -> &HashMap<Name, Name> {
-        &self.directive_name_map
+    fn record_field_metadata(
+        schema: &ValidFederationSchema,
+        ty: &ExtendedType,
+        field_name: &Name,
+        type_metadata: &mut HashMap<Name, FieldDirectiveMetadata>,
+    ) -> Result<(), DemandControlError> {
+        let field_definition = schema.schema().type_field(ty.name(), field_name)?;
+        let field_type = schema
+            .schema()
+            .types
+            .get(field_definition.ty.inner_named_type())
+            .ok_or_else(|| DemandControlError::FieldLookupError {
+                type_name: ty.name().to_string(),
+                field_name: field_name.to_string(),
+            })?;
+
+        let field_metadata =
+            type_metadata
+                .entry(field_name.clone())
+                .or_insert_with(|| FieldDirectiveMetadata {
+                    name: field_name.clone(),
+                    ty: field_type.clone(),
+                    cost_directive: None,
+                    list_size_directive: None,
+                    requires_directive: None,
+                    argument_directive_metadata: HashMap::with_hasher(ahash::RandomState::default()),
+                });
+        field_metadata.cost_directive =
+            CostSpecDefinition::cost_directive_from_field(schema, field_definition, field_type)?;
+        field_metadata.list_size_directive =
+            CostSpecDefinition::list_size_directive_from_field_definition(
+                schema,
+                field_definition,
+            )?;
+        field_metadata.requires_directive =
+            RequiresDirective::from_field_definition(field_definition, ty.name(), schema.schema())?;
+
+        for argument_definition in &field_definition.arguments {
+            Self::record_input_object_metadata(
+                schema,
+                field_name,
+                argument_definition,
+                &mut field_metadata.argument_directive_metadata,
+            )?;
+        }
+
+        Ok(())
     }
 
-    pub(in crate::plugins::demand_control) fn type_field_cost_directive(
+    fn record_input_object_metadata(
+        schema: &ValidFederationSchema,
+        field_name: &Name,
+        argument_definition: &InputValueDefinition,
+        field_metadata: &mut HashMap<Name, InputObjectDirectiveMetadata>,
+    ) -> Result<(), DemandControlError> {
+        let argument_ty = schema
+            .schema()
+            .types
+            .get(argument_definition.ty.inner_named_type())
+            .ok_or_else(|| DemandControlError::ArgumentLookupError {
+                field_name: field_name.to_string(),
+                arg_name: argument_definition.name.to_string(),
+            })?;
+        field_metadata.insert(
+            argument_definition.name.clone(),
+            InputObjectDirectiveMetadata {
+                ty: argument_ty.clone(),
+                cost_directive: CostSpecDefinition::cost_directive_from_argument(
+                    schema,
+                    argument_definition,
+                    argument_ty,
+                )?,
+            },
+        );
+
+        Ok(())
+    }
+
+    pub(in crate::plugins::demand_control) fn type_field_metadata(
         &self,
         type_name: &str,
         field_name: &str,
-    ) -> Option<&CostDirective> {
-        self.type_field_cost_directives
-            .get(type_name)?
-            .get(field_name)
+    ) -> Result<&FieldDirectiveMetadata, DemandControlError> {
+        self.type_field_metadata
+            .get(type_name)
+            .and_then(|m| m.get(field_name))
+            .ok_or_else(|| DemandControlError::FieldLookupError {
+                type_name: type_name.to_string(),
+                field_name: field_name.to_string(),
+            })
     }
 
-    pub(in crate::plugins::demand_control) fn type_field_list_size_directive(
+    pub(in crate::plugins::demand_control) fn type_input_metadata(
         &self,
         type_name: &str,
         field_name: &str,
-    ) -> Option<&ListSizeDirective> {
-        self.type_field_list_size_directives
-            .get(type_name)?
-            .get(field_name)
-    }
-
-    pub(in crate::plugins::demand_control) fn type_field_requires_directive(
-        &self,
-        type_name: &str,
-        field_name: &str,
-    ) -> Option<&RequiresDirective> {
-        self.type_field_requires_directives
-            .get(type_name)?
-            .get(field_name)
+    ) -> Result<&InputObjectDirectiveMetadata, DemandControlError> {
+        self.type_input_metadata
+            .get(type_name)
+            .and_then(|m| m.get(field_name))
+            .ok_or_else(|| DemandControlError::FieldLookupError {
+                type_name: type_name.to_string(),
+                field_name: field_name.to_string(),
+            })
     }
 }
 
 impl AsRef<Valid<Schema>> for DemandControlledSchema {
     fn as_ref(&self) -> &Valid<Schema> {
-        &self.inner
+        self.inner.schema()
     }
 }
 
@@ -175,6 +213,6 @@ impl Deref for DemandControlledSchema {
     type Target = Schema;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        self.inner.schema()
     }
 }
