@@ -189,9 +189,13 @@ impl Selection {
         })
     }
 
-    pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
+    pub(crate) fn matching_error_path_length(
+        &self,
+        path: &[PathElement],
+        fragments: &Fragments,
+    ) -> usize {
         match (path.first(), self) {
-            (None, _) => true,
+            (None, _) => 0,
             (
                 Some(PathElement::Key(key, _)),
                 Selection::Field {
@@ -204,13 +208,19 @@ impl Selection {
                 if alias.as_ref().unwrap_or(name).as_str() == key.as_str() {
                     match selection_set {
                         // if we don't select after that field, the path should stop there
-                        None => path.len() == 1,
-                        Some(set) => set
-                            .iter()
-                            .any(|selection| selection.contains_error_path(&path[1..], fragments)),
+                        None => 1,
+                        Some(set) => {
+                            set.iter()
+                                .map(|selection| {
+                                    selection.matching_error_path_length(&path[1..], fragments)
+                                })
+                                .max()
+                                .unwrap_or(0)
+                                + 1
+                        }
                     }
                 } else {
-                    false
+                    0
                 }
             }
             (
@@ -224,9 +234,14 @@ impl Selection {
                 if fragment.as_str() == type_condition.as_str() {
                     selection_set
                         .iter()
-                        .any(|selection| selection.contains_error_path(&path[1..], fragments))
+                        .map(|selection| {
+                            selection.matching_error_path_length(&path[1..], fragments)
+                        })
+                        .max()
+                        .unwrap_or(0)
+                        + 1
                 } else {
-                    false
+                    0
                 }
             }
             (Some(PathElement::Fragment(fragment)), Self::FragmentSpread { name, .. }) => {
@@ -234,32 +249,43 @@ impl Selection {
                     if fragment.as_str() == f.type_condition.as_str() {
                         f.selection_set
                             .iter()
-                            .any(|selection| selection.contains_error_path(&path[1..], fragments))
+                            .map(|selection| {
+                                selection.matching_error_path_length(&path[1..], fragments)
+                            })
+                            .max()
+                            .unwrap_or(0)
+                            + 1
                     } else {
-                        false
+                        0
                     }
                 } else {
-                    false
+                    0
                 }
             }
             (_, Self::FragmentSpread { name, .. }) => {
                 if let Some(f) = fragments.get(name) {
                     f.selection_set
                         .iter()
-                        .any(|selection| selection.contains_error_path(path, fragments))
+                        .map(|selection| selection.matching_error_path_length(path, fragments))
+                        .max()
+                        .unwrap_or(0)
+                        + 1
                 } else {
-                    false
+                    0
                 }
             }
             (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten(_)), _) => {
-                self.contains_error_path(&path[1..], fragments)
+                self.matching_error_path_length(&path[1..], fragments) + 1
             }
             (Some(PathElement::Key(_, _)), Selection::InlineFragment { selection_set, .. }) => {
                 selection_set
                     .iter()
-                    .any(|selection| selection.contains_error_path(path, fragments))
+                    .map(|selection| selection.matching_error_path_length(path, fragments))
+                    .max()
+                    .unwrap_or(0)
+                    + 1
             }
-            (Some(PathElement::Fragment(_)), Selection::Field { .. }) => false,
+            (Some(PathElement::Fragment(_)), Selection::Field { .. }) => 0,
         }
     }
 }
