@@ -4483,6 +4483,13 @@ expression: "&schema"
             "both_best_effort"
           ],
           "type": "string"
+        },
+        {
+          "description": "Use the new Rust-based implementation but fall back to the legacy one for supergraph schemas composed with legacy Apollo Federation 1.",
+          "enum": [
+            "new_best_effort"
+          ],
+          "type": "string"
         }
       ]
     },

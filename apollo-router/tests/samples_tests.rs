@@ -519,6 +519,7 @@ impl TestExecution {
             }
         }
         if failed {
+            self.print_received_requests(out).await;
             let f: Failed = out.clone().into();
             return Err(f);
         }
@@ -597,22 +598,7 @@ impl TestExecution {
         };
 
         if expected_response != &graphql_response {
-            if let Some(requests) = self
-                .subgraphs_server
-                .as_ref()
-                .unwrap()
-                .received_requests()
-                .await
-            {
-                writeln!(out, "subgraphs received requests:").unwrap();
-                for request in requests {
-                    writeln!(out, "\tmethod: {}", request.method).unwrap();
-                    writeln!(out, "\tpath: {}", request.url).unwrap();
-                    writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
-                }
-            } else {
-                writeln!(out, "subgraphs received no requests").unwrap();
-            }
+            self.print_received_requests(out).await;
 
             writeln!(out, "assertion `left == right` failed").unwrap();
             writeln!(
@@ -631,6 +617,25 @@ impl TestExecution {
         }
 
         Ok(())
+    }
+
+    async fn print_received_requests(&mut self, out: &mut String) {
+        if let Some(requests) = self
+            .subgraphs_server
+            .as_ref()
+            .unwrap()
+            .received_requests()
+            .await
+        {
+            writeln!(out, "subgraphs received requests:").unwrap();
+            for request in requests {
+                writeln!(out, "\tmethod: {}", request.method).unwrap();
+                writeln!(out, "\tpath: {}", request.url).unwrap();
+                writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
+            }
+        } else {
+            writeln!(out, "subgraphs received no requests").unwrap();
+        }
     }
 
     async fn endpoint_request(
