@@ -211,11 +211,11 @@ impl Encode for Compressor {
 mod tests {
     use async_compression::tokio::write::GzipDecoder;
     use futures::stream;
-    use http_body::Frame;
     use rand::Rng;
     use tokio::io::AsyncWriteExt;
 
     use crate::services::router::body::from_result_stream;
+    use crate::services::router::body::full;
 
     use super::*;
 
@@ -224,11 +224,12 @@ mod tests {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
         let mut rng = rand::thread_rng();
-        let body: RouterBody = std::iter::repeat(())
-            .map(|_| rng.gen_range(0u8..3))
-            .take(5000)
-            .collect::<Vec<_>>()
-            .into();
+        let body: RouterBody = full(
+            std::iter::repeat(())
+                .map(|_| rng.gen_range(0u8..3))
+                .take(5000)
+                .collect::<Vec<_>>(),
+        );
 
         let mut stream = compressor.process(body);
         let mut decoder = GzipDecoder::new(Vec::new());
@@ -248,7 +249,7 @@ mod tests {
     async fn small_input() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: RouterBody = vec![0u8, 1, 2, 3].into();
+        let body: RouterBody = full(vec![0u8, 1, 2, 3]);
 
         let mut stream = compressor.process(body);
         let mut decoder = GzipDecoder::new(Vec::new());
@@ -268,7 +269,7 @@ mod tests {
     #[tokio::test]
     async fn gzip_header_writing() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
-        let body: RouterBody = r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#.into();
+        let body: RouterBody = full(r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#);
 
         let mut stream = compressor.process(body);
         let _ = stream.next().await.unwrap().unwrap();
@@ -292,7 +293,7 @@ content-type: application/json
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
         let body: RouterBody = from_result_stream(stream::iter(vec![
-            Ok::<_, BoxError>(Frame::data(Bytes::from(primary_response))),
+            Ok::<_, BoxError>(Bytes::from(primary_response)),
             Ok(Bytes::from(deferred_response)),
         ]));
 
