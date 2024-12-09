@@ -4,7 +4,6 @@ use std::task::Poll;
 
 use async_compression::tokio::bufread::BrotliDecoder;
 use axum::body::Body;
-use futures::stream::poll_fn;
 use futures::Future;
 use futures::Stream;
 use futures::StreamExt;

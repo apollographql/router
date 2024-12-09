@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use apollo_router::services::router::body::RouterBody;
-use futures::stream::StreamExt;
 use http_body_util::BodyExt;
 use http_body_util::Full;
 use hyper_util::rt::TokioExecutor;
@@ -215,7 +214,7 @@ struct ShutdownOnDrop(Option<tokio::sync::mpsc::Sender<()>>);
 impl Drop for ShutdownOnDrop {
     fn drop(&mut self) {
         if let Some(tx) = self.0.take() {
-            let _ = tx.send(());
+            drop(tx.send(()));
         }
     }
 }

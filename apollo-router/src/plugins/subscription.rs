@@ -759,7 +759,7 @@ mod tests {
             .unwrap();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
-            .body(Default::default())
+            .body(http_body_util::Empty::<bytes::Bytes>::new())
             .unwrap();
         let mut web_endpoint = dyn_plugin
             .web_endpoints()
@@ -772,6 +772,7 @@ mod tests {
             .unwrap()
             .into_router();
         let resp = web_endpoint
+            .as_service()
             .ready()
             .await
             .unwrap()
@@ -788,16 +789,13 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(
-            router::body::full(
-                serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
-                    id: new_sub_id.clone(),
-                    verifier: verifier.clone(),
-                }))
-                .unwrap(),
-            )
-            .into_inner(),
-        )
+        .body(router::body::full(
+            serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
+                id: new_sub_id.clone(),
+                verifier: verifier.clone(),
+            }))
+            .unwrap(),
+        ))
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
@@ -820,7 +818,7 @@ mod tests {
                 verifier: verifier.clone(),
             }))
             .unwrap(),
-        ).into_inner())
+        ))
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -849,7 +847,7 @@ mod tests {
                 verifier: verifier.clone(),
             }))
             .unwrap(),
-         ).into_inner())
+        ))
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
@@ -858,19 +856,16 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(
-            router::body::full(
-                serde_json::to_vec(&CallbackPayload::Subscription(
-                    SubscriptionPayload::Heartbeat {
-                        id: new_sub_id.clone(),
-                        ids: vec![new_sub_id, "FAKE_SUB_ID".to_string()],
-                        verifier: verifier.clone(),
-                    },
-                ))
-                .unwrap(),
-            )
-            .into_inner(),
-        )
+        .body(router::body::full(
+            serde_json::to_vec(&CallbackPayload::Subscription(
+                SubscriptionPayload::Heartbeat {
+                    id: new_sub_id.clone(),
+                    ids: vec![new_sub_id, "FAKE_SUB_ID".to_string()],
+                    verifier: verifier.clone(),
+                },
+            ))
+            .unwrap(),
+        ))
         .unwrap();
         let resp = web_endpoint.oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
@@ -906,7 +901,7 @@ mod tests {
             .unwrap();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
-            .body(Default::default())
+            .body(http_body_util::Empty::<bytes::Bytes>::new())
             .unwrap();
         let mut web_endpoint = dyn_plugin
             .web_endpoints()
@@ -919,6 +914,7 @@ mod tests {
             .unwrap()
             .into_router();
         let resp = web_endpoint
+            .as_service()
             .ready()
             .await
             .unwrap()
@@ -935,16 +931,13 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(
-            router::body::full(
-                serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
-                    id: new_sub_id.clone(),
-                    verifier: verifier.clone(),
-                }))
-                .unwrap(),
-            )
-            .into_inner(),
-        )
+        .body(router::body::full(
+            serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
+                id: new_sub_id.clone(),
+                verifier: verifier.clone(),
+            }))
+            .unwrap(),
+        ))
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
@@ -961,7 +954,7 @@ mod tests {
                 verifier: verifier.clone(),
             }))
             .unwrap(),
-        ).into_inner())
+        ))
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
@@ -997,7 +990,7 @@ mod tests {
             .unwrap();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
-            .body(Default::default())
+            .body(http_body_util::Empty::<bytes::Bytes>::new())
             .unwrap();
         let mut web_endpoint = dyn_plugin
             .web_endpoints()
@@ -1010,6 +1003,7 @@ mod tests {
             .unwrap()
             .into_router();
         let resp = web_endpoint
+            .as_service()
             .ready()
             .await
             .unwrap()
@@ -1027,16 +1021,13 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(
-            router::body::full(
-                serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
-                    id: new_sub_id.clone(),
-                    verifier: verifier.clone(),
-                }))
-                .unwrap(),
-            )
-            .into_inner(),
-        )
+        .body(router::body::full(
+            serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
+                id: new_sub_id.clone(),
+                verifier: verifier.clone(),
+            }))
+            .unwrap(),
+        ))
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
@@ -1050,7 +1041,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(crate::services::router::Body::from(
+        .body(router::body::full(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1077,22 +1068,19 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(
-            router::body::full(
-                serde_json::to_vec(&CallbackPayload::Subscription(
-                    SubscriptionPayload::Complete {
-                        id: new_sub_id.clone(),
-                        errors: Some(vec![graphql::Error::builder()
-                            .message("cannot complete the subscription")
-                            .extension_code("SUBSCRIPTION_ERROR")
-                            .build()]),
-                        verifier: verifier.clone(),
-                    },
-                ))
-                .unwrap(),
-            )
-            .into_inner(),
-        )
+        .body(router::body::full(
+            serde_json::to_vec(&CallbackPayload::Subscription(
+                SubscriptionPayload::Complete {
+                    id: new_sub_id.clone(),
+                    errors: Some(vec![graphql::Error::builder()
+                        .message("cannot complete the subscription")
+                        .extension_code("SUBSCRIPTION_ERROR")
+                        .build()]),
+                    verifier: verifier.clone(),
+                },
+            ))
+            .unwrap(),
+        ))
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::ACCEPTED);
@@ -1121,7 +1109,7 @@ mod tests {
                 verifier,
             }))
             .unwrap(),
-        ).into_inner())
+        ))
         .unwrap();
         let resp = web_endpoint.oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
