@@ -836,10 +836,12 @@ impl ApplyToInternal for SubSelection {
         let mut output = match &self.output_shape {
             Some(ranged_output_name) => {
                 let mut output_map = JSONMap::new();
-                // This "<?>" field holds the string value that may eventually
-                // be reported as __typename in the GraphQL response.
                 output_map.insert(
-                    ByteString::from("<?>"),
+                    // We could probably work with any well-known internal key
+                    // here, but it's convenient to reuse GraphQL's __typename
+                    // field name, since it requires less processing in the
+                    // GraphQL case.
+                    ByteString::from("__typename"),
                     JSON::String(ranged_output_name.as_str().into()),
                 );
                 JSON::Object(output_map)
@@ -919,12 +921,19 @@ impl ApplyToInternal for SubSelection {
 
         // Build up the merged object shape using Shape::all to merge the
         // individual named_selection object shapes.
-        let mut all_shape = ShapeCase::Object {
-            fields: Shape::empty_map(),
-            rest: Shape::none(),
-            output_shape: self.output_shape.as_ref().map(|r| Shape::name(r.as_str())),
-        }
-        .simplify();
+        let mut all_shape = Shape::object(
+            {
+                let mut fields = Shape::empty_map();
+                if let Some(output_shape) = self.output_shape.as_ref() {
+                    fields.insert(
+                        "__typename".to_string(),
+                        Shape::string_value(output_shape.as_str()),
+                    );
+                }
+                fields
+            },
+            Shape::none(),
+        );
 
         for named_selection in self.selections.iter() {
             // Simplifying as we go with Shape::all keeps all_shape relatively
@@ -2610,7 +2619,14 @@ mod tests {
     fn test_match_output_shape() {
         assert_eq!(
             selection!("<Product>").static_shape().pretty_print(),
-            "{ <Product> }",
+            "{ __typename: \"Product\" }",
+        );
+
+        assert_eq!(
+            selection!("__typename: $('Product')")
+                .static_shape()
+                .pretty_print(),
+            "{ __typename: \"Product\" }",
         );
 
         assert_eq!(
@@ -2635,7 +2651,7 @@ mod tests {
                     [@, ${ <Unknown> }],
                 )
             "#).static_shape().pretty_print(),
-            "One<{ <Book> title: $root.*.title, upc: $root.*.upc }, { <Film> director: $root.*.director, upc: $root.*.upc }, { <Album> artist: $root.*.artist, upc: $root.*.upc }, { <Unknown> upc: $root.*.upc }>",
+            "One<{ __typename: \"Book\", title: $root.*.title, upc: $root.*.upc }, { __typename: \"Film\", director: $root.*.director, upc: $root.*.upc }, { __typename: \"Album\", artist: $root.*.artist, upc: $root.*.upc }, { __typename: \"Unknown\", upc: $root.*.upc }>",
         );
 
         assert_eq!(
@@ -2651,7 +2667,7 @@ mod tests {
             "#).static_shape().pretty_print(),
             // Note All<Book, Product> would theoretically simplify down to just
             // Book if the shape system knows Book is a subtype of Product.
-            "One<{ <All<Book, Product>> price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { <All<Film, Product>> director: $root.*.director, price: $root.*.cost, upc: $root.*.upc }, { <Product> price: $root.*.cost, upc: $root.*.upc }>",
+            "One<{ __typename: All<\"Book\", \"Product\">, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { __typename: All<\"Film\", \"Product\">, director: $root.*.director, price: $root.*.cost, upc: $root.*.upc }, { __typename: \"Product\", price: $root.*.cost, upc: $root.*.upc }>",
         );
 
         assert_eq!(
@@ -2663,7 +2679,7 @@ mod tests {
                 Some(json!({
                     // Here's how we find out which concrete runtime shape was
                     // actually returned.
-                    "<?>": "Product",
+                    "__typename": "Product",
                     "upc": "9780593734223",
                 })),
                 vec![],
@@ -2689,7 +2705,7 @@ mod tests {
             })),
             (
                 Some(json!({
-                    "<?>": "Book",
+                    "__typename": "Book",
                     "upc": "9780593734223",
                     "title": "Sapiens",
                 })),
@@ -2731,44 +2747,56 @@ mod tests {
             "#
             );
 
-            assert_eq!(selection.apply_to(&book_data), (
-                Some(json!({
-                    "__typename": "Book",
-                    "upc": "9780593734223",
-                    "title": "Sapiens",
-                })),
-                vec![],
-            ));
+            assert_eq!(
+                selection.apply_to(&book_data),
+                (
+                    Some(json!({
+                        "__typename": "Book",
+                        "upc": "9780593734223",
+                        "title": "Sapiens",
+                    })),
+                    vec![],
+                )
+            );
 
-            assert_eq!(selection.apply_to(&film_data), (
-                Some(json!({
-                    "__typename": "Film",
-                    "upc": "9780593734223",
-                    "director": "Ridley Scott",
-                })),
-                vec![],
-            ));
+            assert_eq!(
+                selection.apply_to(&film_data),
+                (
+                    Some(json!({
+                        "__typename": "Film",
+                        "upc": "9780593734223",
+                        "director": "Ridley Scott",
+                    })),
+                    vec![],
+                )
+            );
 
-            assert_eq!(selection.apply_to(&album_data), (
-                Some(json!({
-                    "__typename": "Album",
-                    "upc": "9780593734223",
-                    "artist": "The Beatles",
-                })),
-                vec![],
-            ));
+            assert_eq!(
+                selection.apply_to(&album_data),
+                (
+                    Some(json!({
+                        "__typename": "Album",
+                        "upc": "9780593734223",
+                        "artist": "The Beatles",
+                    })),
+                    vec![],
+                )
+            );
 
-            assert_eq!(selection.apply_to(&unknown_data), (
-                Some(json!({
-                    "__typename": "Product",
-                    "upc": "9780593734223",
-                })),
-                vec![ApplyToError::new(
-                    "Method ->match did not match any [candidate, value] pair".to_string(),
-                    vec![json!("->match")],
-                    Some(84..262),
-                )],
-            ));
+            assert_eq!(
+                selection.apply_to(&unknown_data),
+                (
+                    Some(json!({
+                        "__typename": "Product",
+                        "upc": "9780593734223",
+                    })),
+                    vec![ApplyToError::new(
+                        "Method ->match did not match any [candidate, value] pair".to_string(),
+                        vec![json!("->match")],
+                        Some(84..262),
+                    )],
+                )
+            );
 
             let selection_with_unknown_match_case = selection!(
                 r#"
@@ -2783,13 +2811,16 @@ mod tests {
             "#
             );
 
-            assert_eq!(selection_with_unknown_match_case.apply_to(&unknown_data), (
-                Some(json!({
-                    "__typename": "Unknown",
-                    "upc": "9780593734223",
-                })),
-                vec![],
-            ));
+            assert_eq!(
+                selection_with_unknown_match_case.apply_to(&unknown_data),
+                (
+                    Some(json!({
+                        "__typename": "Unknown",
+                        "upc": "9780593734223",
+                    })),
+                    vec![],
+                )
+            );
 
             let default_whole_match = selection!(
                 r#"
@@ -2805,13 +2836,16 @@ mod tests {
             "#
             );
 
-            assert_eq!(default_whole_match.apply_to(&unknown_data), (
-                Some(json!({
-                    "__typename": "Product",
-                    "upc": "9780593734223",
-                })),
-                vec![],
-            ));
+            assert_eq!(
+                default_whole_match.apply_to(&unknown_data),
+                (
+                    Some(json!({
+                        "__typename": "Product",
+                        "upc": "9780593734223",
+                    })),
+                    vec![],
+                )
+            );
         }
     }
 
