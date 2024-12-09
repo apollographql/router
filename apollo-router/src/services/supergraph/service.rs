@@ -140,6 +140,9 @@ impl Service<SupergraphRequest> for SupergraphService {
             let errors = vec![crate::error::Error {
                 message: error.to_string(),
                 extensions: serde_json_bytes::json!({
+                    // NOTE to self: If a federation error is returned from the QP, it will always
+                    // be converted into a `BoxError`, find its way here, and be marked as an
+                    // internal server error. This is incorrect.
                     "code": "INTERNAL_SERVER_ERROR",
                 })
                 .as_object()

@@ -34,6 +34,7 @@ use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
+use crate::error::TempFederationError;
 use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::introspection::IntrospectionCache;
@@ -182,12 +183,9 @@ impl PlannerMode {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
-                SingleFederationError::UnsupportedFeature { message: _, kind } => match kind {
-                    apollo_federation::error::UnsupportedFeatureKind::Context => {
-                        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT))
-                    }
-                    _ => metric_rust_qp_init(Some(INTERNAL_INIT_ERROR)),
-                },
+                SingleFederationError::UnsupportedFeature { message: _, kind } => {
+                    metric_rust_qp_init(Some(INTERNAL_INIT_ERROR))
+                }
                 _ => {
                     metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
                 }
@@ -280,8 +278,7 @@ impl PlannerMode {
                             1
                         );
                     }
-                    let result =
-                        result.map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+                    let result = result.map_err(TempFederationError::from);
 
                     let elapsed = start.elapsed().as_secs_f64();
                     metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
