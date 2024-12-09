@@ -19,8 +19,8 @@ use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::router_bridge::PlanOptions;
-use crate::router_bridge::UsageReporting;
+use crate::services::query_planner::PlanOptions;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
 

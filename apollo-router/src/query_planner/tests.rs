@@ -25,7 +25,7 @@ use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
-use crate::router_bridge::UsageReporting;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::services::SubgraphResponse;

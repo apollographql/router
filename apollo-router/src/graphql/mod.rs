@@ -26,7 +26,6 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
-pub use crate::router_bridge::Location;
 
 /// An asynchronous [`Stream`] of GraphQL [`Response`]s.
 ///
@@ -37,6 +36,17 @@ pub use crate::router_bridge::Location;
 /// We represent this in Rust as a stream,
 /// even if that stream happens to only contain one item.
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
+
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+/// The error location
+pub struct Location {
+    /// The line number
+    pub line: u32,
+    /// The column number
+    pub column: u32,
+}
 
 /// A [GraphQL error](https://spec.graphql.org/October2021/#sec-Errors)
 /// as may be found in the `errors` field of a GraphQL [`Response`].

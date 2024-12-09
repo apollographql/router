@@ -13,6 +13,7 @@ use thiserror::Error;
 use tokio::task::JoinError;
 use tower::BoxError;
 
+use crate::apollo_studio_interop::UsageReporting;
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
@@ -21,7 +22,6 @@ use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::router_bridge::UsageReporting;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
 

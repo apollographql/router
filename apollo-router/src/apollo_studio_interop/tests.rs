@@ -4,8 +4,8 @@ use test_log::test;
 use super::*;
 use crate::Configuration;
 
-fn assert_expected_signature(actual: &ComparableUsageReporting, expected_sig: &str) {
-    assert_eq!(actual.result.stats_report_key, expected_sig);
+fn assert_expected_signature(actual: &UsageReporting, expected_sig: &str) {
+    assert_eq!(actual.stats_report_key, expected_sig);
 }
 
 macro_rules! assert_extended_references {
@@ -35,7 +35,7 @@ fn generate_enhanced(
     doc: &ExecutableDocument,
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
-) -> ComparableUsageReporting {
+) -> UsageReporting {
     generate_usage_reporting(
         doc,
         doc,

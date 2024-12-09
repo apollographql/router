@@ -641,7 +641,7 @@ mod tests {
     use crate::introspection::IntrospectionCache;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::BridgeQueryPlanner;
-    use crate::router_bridge::PlanOptions;
+    use crate::services::query_planner::PlanOptions;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;

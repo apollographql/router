@@ -280,7 +280,7 @@ mod tests {
     use serde_json_bytes::json as bjson;
 
     use super::*;
-    use crate::router_bridge::Location;
+    use crate::graphql::Location;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {

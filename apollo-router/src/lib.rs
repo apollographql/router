@@ -75,7 +75,6 @@ mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
 mod router;
-mod router_bridge;
 mod router_factory;
 pub mod services;
 pub(crate) mod spec;

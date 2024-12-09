@@ -12,8 +12,15 @@ use super::layers::query_analysis::ParsedDocument;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
-use crate::router_bridge::PlanOptions;
 use crate::Context;
+
+/// Options for planning a query
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlanOptions {
+    /// Which labels to override during query planning
+    pub(crate) override_conditions: Vec<String>,
+}
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.

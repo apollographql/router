@@ -41,10 +41,9 @@ use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::router_bridge::PlanOptions;
-use crate::router_bridge::UsageReporting;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
+use crate::services::query_planner::PlanOptions;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -324,18 +323,13 @@ impl BridgeQueryPlanner {
             doc.clone()
         };
 
-        let generated_usage_reporting = generate_usage_reporting(
+        let usage_reporting = generate_usage_reporting(
             &signature_doc.executable,
             &doc.executable,
             &operation,
             self.schema.supergraph_schema(),
             &self.signature_normalization_algorithm,
         );
-
-        let usage_reporting = UsageReporting {
-            stats_report_key: generated_usage_reporting.result.stats_report_key,
-            referenced_fields_by_type: generated_usage_reporting.result.referenced_fields_by_type,
-        };
 
         if let Some(node) = node {
             u64_histogram!(
