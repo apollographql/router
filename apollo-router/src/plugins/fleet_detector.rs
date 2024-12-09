@@ -52,14 +52,12 @@ impl SystemGetter {
     }
 
     fn get_system(&mut self) -> &System {
-        if self.start.elapsed() < REFRESH_INTERVAL {
-            &self.system
-        } else {
+        if self.start.elapsed() >= REFRESH_INTERVAL {
             self.start = Instant::now();
             self.system.refresh_cpu_all();
             self.system.refresh_memory();
-            &self.system
         }
+        &self.system
     }
 }
 
@@ -72,7 +70,7 @@ enum GaugeStore {
 }
 
 impl GaugeStore {
-    fn active() -> GaugeStore {
+    fn active(opts: &GaugeOptions) -> GaugeStore {
         let system_getter = Arc::new(Mutex::new(SystemGetter::new()));
         let meter = meter_provider().meter("apollo/router");
 
@@ -119,14 +117,14 @@ impl GaugeStore {
                         "The CPU frequency of the underlying instance the router is deployed to",
                     )
                     .with_unit(Unit::new("Mhz"))
-                    .with_callback(move |i| {
+                    .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock().unwrap();
                         let system = system_getter.get_system();
                         let cpus = system.cpus();
                         let cpu_freq =
                             cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64;
-                        i.observe(cpu_freq, &[])
+                        gauge.observe(cpu_freq, &[])
                     })
                     .init(),
             );
@@ -140,12 +138,12 @@ impl GaugeStore {
                     .with_description(
                         "The number of CPUs reported by the instance the router is running on",
                     )
-                    .with_callback(move |i| {
+                    .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock().unwrap();
                         let system = system_getter.get_system();
                         let cpu_count = detect_cpu_count(system);
-                        i.observe(cpu_count, &[KeyValue::new("host.arch", get_otel_arch())])
+                        gauge.observe(cpu_count, &[KeyValue::new("host.arch", get_otel_arch())])
                     })
                     .init(),
             );
@@ -159,11 +157,11 @@ impl GaugeStore {
                     .with_description(
                         "The amount of memory reported by the instance the router is running on",
                     )
-                    .with_callback(move |i| {
+                    .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock().unwrap();
                         let system = system_getter.get_system();
-                        i.observe(
+                        gauge.observe(
                             system.total_memory(),
                             &[KeyValue::new("host.arch", get_otel_arch())],
                         )
@@ -172,20 +170,51 @@ impl GaugeStore {
                     .init(),
             );
         }
+        {
+            let opts = opts.clone();
+            gauges.push(
+                meter
+                    .u64_observable_gauge("apollo.router.instance.schema")
+                    .with_description("Details about the current in-use schema")
+                    .with_callback(move |gauge| {
+                        // NOTE: this is a fixed gauge. We only care about observing the included
+                        // attributes.
+                        let mut attributes: Vec<KeyValue> = vec![KeyValue::new(
+                            "schema_hash",
+                            opts.supergraph_schema_hash.clone(),
+                        )];
+                        if let Some(launch_id) = opts.launch_id.as_ref() {
+                            attributes.push(KeyValue::new("launch_id", launch_id.to_string()));
+                        }
+                        gauge.observe(1, attributes.as_slice())
+                    })
+                    .init(),
+            )
+        }
         GaugeStore::Active(gauges)
     }
+}
+
+#[derive(Clone, Default)]
+struct GaugeOptions {
+    supergraph_schema_hash: String,
+    launch_id: Option<String>,
 }
 
 #[derive(Default)]
 struct FleetDetector {
     enabled: bool,
     gauge_store: Mutex<GaugeStore>,
+
+    // Options passed to the gauge_store during activation.
+    gauge_options: GaugeOptions,
 }
+
 #[async_trait::async_trait]
 impl PluginPrivate for FleetDetector {
     type Config = Conf;
 
-    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(plugin: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
         if let Ok(val) = env::var(APOLLO_TELEMETRY_DISABLED) {
             if val == "true" {
@@ -194,16 +223,22 @@ impl PluginPrivate for FleetDetector {
             }
         }
 
+        let gauge_options = GaugeOptions {
+            supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
+            launch_id: plugin.launch_id.map(|s| s.to_string()),
+        };
+
         Ok(FleetDetector {
             enabled: true,
             gauge_store: Mutex::new(GaugeStore::Pending),
+            gauge_options,
         })
     }
 
     fn activate(&self) {
         let mut store = self.gauge_store.lock().expect("lock poisoned");
         if matches!(*store, GaugeStore::Pending) {
-            *store = GaugeStore::active();
+            *store = GaugeStore::active(&self.gauge_options);
         }
     }
 
