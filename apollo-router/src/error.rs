@@ -316,11 +316,11 @@ pub(crate) enum QueryPlannerError {
     PoolProcessing(String),
 
     /// Federation error: {0}
-    FederationError(TempFederationError),
+    FederationError(FederationErrorBridge),
 }
 
-impl From<TempFederationError> for QueryPlannerError {
-    fn from(value: TempFederationError) -> Self {
+impl From<FederationErrorBridge> for QueryPlannerError {
+    fn from(value: FederationErrorBridge) -> Self {
         Self::FederationError(value)
     }
 }
@@ -328,10 +328,11 @@ impl From<TempFederationError> for QueryPlannerError {
 /// A temporary error type used to extract a few variants from `apollo-federation`'s
 /// `FederationError`. For backwards compatability, these other variant need to be extracted so
 /// that the correct status code (GRAPHQL_VALIDATION_ERROR) can be added to the response. For
-/// router 2.0, this should probably be changed such that all `FederationError`s are returned with
-/// INTERNAL_SERVER_ERROR status codes or are handled more systematically.
+/// router 2.0, apollo-federation should split its error type into internal and external types.
+/// When this happens, this temp type should be replaced with that type.
+// TODO(@TylerBloom): See the comment above
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
-pub(crate) enum TempFederationError {
+pub(crate) enum FederationErrorBridge {
     /// {0}
     UnknownOperation(String),
     /// {0}
@@ -340,7 +341,7 @@ pub(crate) enum TempFederationError {
     Other(String),
 }
 
-impl From<FederationError> for TempFederationError {
+impl From<FederationError> for FederationErrorBridge {
     fn from(value: FederationError) -> Self {
         match &value {
             err @ FederationError::SingleFederationError(
@@ -354,16 +355,16 @@ impl From<FederationError> for TempFederationError {
     }
 }
 
-impl IntoGraphQLErrors for TempFederationError {
+impl IntoGraphQLErrors for FederationErrorBridge {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            TempFederationError::UnknownOperation(msg) => {
+            FederationErrorBridge::UnknownOperation(msg) => {
                 Ok(vec![Error::builder()
                     .message(msg)
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()])
             }
-            TempFederationError::OperationNameNotProvided(msg) => {
+            FederationErrorBridge::OperationNameNotProvided(msg) => {
                 Ok(vec![Error::builder()
                     .message(msg)
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
