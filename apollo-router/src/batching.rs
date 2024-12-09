@@ -482,12 +482,14 @@ mod tests {
     use super::assemble_batch;
     use super::Batch;
     use super::BatchQueryInfo;
+    use crate::batching::get_body_bytes;
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
     use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
+    use crate::services::router::body::full;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
@@ -545,7 +547,7 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&request.into_body().to_bytes().await.unwrap()).unwrap(),
+            std::str::from_utf8(&get_body_bytes(request.into_body()).await.unwrap()).unwrap(),
         )
         .unwrap();
 
@@ -845,7 +847,7 @@ mod tests {
                 .method("POST")
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json")
-                .body(serde_json::to_vec(&request).unwrap().into())
+                .body(full(serde_json::to_vec(&request).unwrap()))
                 .unwrap(),
         };
 

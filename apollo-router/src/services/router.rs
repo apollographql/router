@@ -490,7 +490,6 @@ mod test {
     use std::task::Context;
     use std::task::Poll;
 
-    use http::HeaderMap;
     use http_body::Frame;
     use tower::BoxError;
 
