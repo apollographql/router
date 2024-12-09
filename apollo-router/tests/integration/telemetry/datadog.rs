@@ -2,17 +2,18 @@ extern crate core;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::trace::TraceId;
+use opentelemetry_api::Context;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
-use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wiremock::ResponseTemplate;
 
 use crate::integration::common::graph_os_enabled;
@@ -28,6 +29,9 @@ struct TraceSpec {
     span_names: HashSet<&'static str>,
     measured_spans: HashSet<&'static str>,
     unmeasured_spans: HashSet<&'static str>,
+    priority_sampled: Option<&'static str>,
+    // Not the metrics but the otel attribute
+    no_priority_sampled_attribute: Option<bool>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -35,8 +39,8 @@ async fn test_no_sample() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
-    let subgraph_was_sampled = std::sync::Arc::new(AtomicBool::new(false));
-    let subgraph_was_sampled_callback = subgraph_was_sampled.clone();
+    let context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let context_clone = context.clone();
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!("fixtures/datadog_no_sample.router.yaml"))
@@ -44,8 +48,10 @@ async fn test_no_sample() -> Result<(), BoxError> {
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
         .subgraph_callback(Box::new(move || {
-            let sampled = Span::current().context().span().span_context().is_sampled();
-            subgraph_was_sampled_callback.store(sampled, std::sync::atomic::Ordering::SeqCst);
+            let context = Context::current();
+            let span = context.span();
+            let span_context = span.span_context();
+            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
         }))
         .build()
         .await;
@@ -54,11 +60,315 @@ async fn test_no_sample() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (_id, result) = router.execute_untraced_query(&query).await;
+    let (_id, result) = router.execute_untraced_query(&query, None).await;
     router.graceful_shutdown().await;
     assert!(result.status().is_success());
-    assert!(!subgraph_was_sampled.load(std::sync::atomic::Ordering::SeqCst));
+    let context = context
+        .lock()
+        .expect("poisoned")
+        .as_ref()
+        .expect("state")
+        .clone();
+    assert!(context.is_sampled());
+    assert_eq!(context.trace_state().get("psr"), Some("0"));
 
+    Ok(())
+}
+
+// We want to check we're able to override the behavior of preview_datadog_agent_sampling configuration even if we set a datadog exporter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let context_clone = context.clone();
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled.router.yaml"
+        ))
+        .responder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ))
+        .subgraph_callback(Box::new(move || {
+            let context = Context::current();
+            let span = context.span();
+            let span_context = span.span_context();
+            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
+        }))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_untraced_query(&query, None).await;
+    router.graceful_shutdown().await;
+    assert!(result.status().is_success());
+    let _context = context
+        .lock()
+        .expect("poisoned")
+        .as_ref()
+        .expect("state")
+        .clone();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    TraceSpec::builder()
+        .services([].into())
+        .build()
+        .validate_trace(id)
+        .await?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let context_clone = context.clone();
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .responder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ))
+        .subgraph_callback(Box::new(move || {
+            let context = Context::current();
+            let span = context.span();
+            let span_context = span.span_context();
+            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
+        }))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Parent based sampling. psr MUST be populated with the value that we pass in.
+    test_psr(
+        &context,
+        &mut router,
+        Some("-1"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("-1")
+            .build(),
+    )
+    .await?;
+    test_psr(
+        &context,
+        &mut router,
+        Some("0"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("0")
+            .build(),
+    )
+    .await?;
+    test_psr(
+        &context,
+        &mut router,
+        Some("1"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("1")
+            .build(),
+    )
+    .await?;
+    test_psr(
+        &context,
+        &mut router,
+        Some("2"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("2")
+            .build(),
+    )
+    .await?;
+
+    // No psr was passed in the router is free to set it. This will be 1 as we are going to sample here.
+    test_psr(
+        &context,
+        &mut router,
+        None,
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("1")
+            .build(),
+    )
+    .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_propagated_otel_request() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let context_clone = context.clone();
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .responder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ))
+        .subgraph_callback(Box::new(move || {
+            let context = Context::current();
+            let span = context.span();
+            let span_context = span.span_context();
+            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
+        }))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_query(&query).await;
+    assert_eq!(
+        result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        id.to_datadog()
+    );
+    TraceSpec::builder()
+        .services(["router"].into())
+        .priority_sampled("1")
+        .build()
+        .validate_trace(id)
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let context_clone = context.clone();
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_no_parent_sampler.router.yaml"
+        ))
+        .responder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ))
+        .subgraph_callback(Box::new(move || {
+            let context = Context::current();
+            let span = context.span();
+            let span_context = span.span_context();
+            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
+        }))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // The router will ignore the upstream PSR as parent based sampling is disabled.
+    test_psr(
+        &context,
+        &mut router,
+        Some("-1"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("1")
+            .build(),
+    )
+    .await?;
+    test_psr(
+        &context,
+        &mut router,
+        Some("0"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("1")
+            .build(),
+    )
+    .await?;
+    test_psr(
+        &context,
+        &mut router,
+        Some("1"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("1")
+            .build(),
+    )
+    .await?;
+    test_psr(
+        &context,
+        &mut router,
+        Some("2"),
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("1")
+            .build(),
+    )
+    .await?;
+
+    test_psr(
+        &context,
+        &mut router,
+        None,
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .priority_sampled("1")
+            .build(),
+    )
+    .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+async fn test_psr(
+    context: &Arc<Mutex<Option<SpanContext>>>,
+    router: &mut IntegrationTest,
+    psr: Option<&str>,
+    trace_spec: TraceSpec,
+) -> Result<(), BoxError> {
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let headers = if let Some(psr) = psr {
+        vec![("x-datadog-sampling-priority".to_string(), psr.to_string())]
+    } else {
+        vec![]
+    };
+    let (id, result) = router
+        .execute_query_with_headers(&query, headers.into_iter().collect())
+        .await;
+
+    assert!(result.status().is_success());
+    let context = context
+        .lock()
+        .expect("poisoned")
+        .as_ref()
+        .expect("state")
+        .clone();
+
+    assert_eq!(
+        context.trace_state().get("psr"),
+        trace_spec.priority_sampled
+    );
+    trace_spec.validate_trace(id).await?;
     Ok(())
 }
 
@@ -506,7 +816,7 @@ impl TraceSpec {
     async fn validate_trace(&self, id: TraceId) -> Result<(), BoxError> {
         let datadog_id = id.to_datadog();
         let url = format!("http://localhost:8126/test/traces?trace_ids={datadog_id}");
-        for _ in 0..10 {
+        for _ in 0..20 {
             if self.find_valid_trace(&url).await.is_ok() {
                 return Ok(());
             }
@@ -533,11 +843,12 @@ impl TraceSpec {
         tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
         self.verify_trace_participants(&trace)?;
         self.verify_spans_present(&trace)?;
-        self.validate_measured_spans(&trace)?;
+        self.verify_measured_spans(&trace)?;
         self.verify_operation_name(&trace)?;
         self.verify_priority_sampled(&trace)?;
+        self.verify_priority_sampled_attribute(&trace)?;
         self.verify_version(&trace)?;
-        self.validate_span_kinds(&trace)?;
+        self.verify_span_kinds(&trace)?;
         Ok(())
     }
 
@@ -556,7 +867,7 @@ impl TraceSpec {
         Ok(())
     }
 
-    fn validate_measured_spans(&self, trace: &Value) -> Result<(), BoxError> {
+    fn verify_measured_spans(&self, trace: &Value) -> Result<(), BoxError> {
         for expected in &self.measured_spans {
             assert!(
                 self.measured_span(trace, expected)?,
@@ -591,11 +902,13 @@ impl TraceSpec {
             .unwrap_or_default())
     }
 
-    fn validate_span_kinds(&self, trace: &Value) -> Result<(), BoxError> {
+    fn verify_span_kinds(&self, trace: &Value) -> Result<(), BoxError> {
         // Validate that the span.kind has been propagated. We can just do this for a selection of spans.
-        self.validate_span_kind(trace, "router", "server")?;
-        self.validate_span_kind(trace, "supergraph", "internal")?;
-        self.validate_span_kind(trace, "http_request", "client")?;
+        if self.services.contains("router") {
+            self.validate_span_kind(trace, "router", "server")?;
+            self.validate_span_kind(trace, "supergraph", "internal")?;
+            self.validate_span_kind(trace, "http_request", "client")?;
+        }
         Ok(())
     }
 
@@ -652,19 +965,24 @@ impl TraceSpec {
             trace.select_path(&format!("$..[?(@.name == '{}')].meta.['span.kind']", name))?;
         let binding = binding1.first().or(binding2.first());
 
-        assert!(
-            binding.is_some(),
-            "span.kind missing or incorrect {}, {}",
-            name,
-            trace
-        );
-        assert_eq!(
-            binding
-                .expect("expected binding")
-                .as_str()
-                .expect("expected string"),
-            kind
-        );
+        if binding.is_none() {
+            return Err(BoxError::from(format!(
+                "span.kind missing or incorrect {}, {}",
+                name, trace
+            )));
+        }
+
+        let binding = binding
+            .expect("expected binding")
+            .as_str()
+            .expect("expected string");
+        if binding != kind {
+            return Err(BoxError::from(format!(
+                "span.kind mismatch, expected {} got {}",
+                kind, binding
+            )));
+        }
+
         Ok(())
     }
 
@@ -685,17 +1003,35 @@ impl TraceSpec {
     }
 
     fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError> {
-        let binding = trace.select_path("$.._sampling_priority_v1")?;
-        let sampling_priority = binding.first();
-        // having this priority set to 1.0 everytime is not a problem as we're doing pre sampling in the full telemetry stack
-        // So basically if the trace was not sampled it wouldn't get to this stage and so nothing would be sent
-        assert_eq!(
-            sampling_priority
-                .expect("sampling priority expected")
-                .as_f64()
-                .expect("sampling priority must be a number"),
-            1.0
-        );
+        if let Some(psr) = self.priority_sampled {
+            let binding =
+                trace.select_path("$..[?(@.service=='router')].metrics._sampling_priority_v1")?;
+            if binding.is_empty() {
+                return Err(BoxError::from("missing sampling priority"));
+            }
+            for sampling_priority in binding {
+                assert_eq!(
+                    sampling_priority
+                        .as_f64()
+                        .expect("psr not string")
+                        .to_string(),
+                    psr
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_priority_sampled_attribute(&self, trace: &Value) -> Result<(), BoxError> {
+        if self.no_priority_sampled_attribute.unwrap_or_default() {
+            let binding =
+                trace.select_path("$..[?(@.service=='router')].meta['sampling.priority']")?;
+            if binding.is_empty() {
+                return Ok(());
+            } else {
+                return Err(BoxError::from("sampling priority attribute exists"));
+            }
+        }
         Ok(())
     }
 }
