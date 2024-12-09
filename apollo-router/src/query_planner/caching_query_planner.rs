@@ -145,6 +145,12 @@ where
                 ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
                     .hash(&mut hasher);
             }
+            crate::configuration::QueryPlannerMode::NewBestEffort => {
+                "PLANNER-NEW-BEST-EFFORT".hash(&mut hasher);
+                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
+                    .hash(&mut hasher);
+            }
         };
         let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
 
@@ -632,10 +638,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) config_mode: Arc<QueryHash>,
 }
 
-// Update this key every time the cache key or the query plan format has to change.
-// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 1;
-const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
+const ROUTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -654,8 +657,8 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
-            CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
+            "plan:router:{}:{}:opname:{}:metadata:{}",
+            ROUTER_VERSION, self.hash, operation, metadata,
         )
     }
 }

@@ -64,7 +64,7 @@ persisted_queries:
   log_unknown: true
 ```
 
-If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.required_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.required_id`](#require_id) is turned on, operations can be rejected even when registered because they use operation IDs rather than operation strings.
+If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.require_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.require_id`](#require_id) is turned on, operations can be rejected even when registered because they use operation IDs rather than operation strings.
 
 #### `experimental_prewarm_query_plan_cache`
 
@@ -114,7 +114,7 @@ To enable safelisting, you _must_ turn off [automatic persisted queries](/router
 
 </Note>
 
-By default, the [`require_id`](#required_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is registered.
+By default, the [`require_id`](#require_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is registered.
 
 #### `require_id`
 
@@ -137,6 +137,30 @@ apq:
 To enable safelisting, you _must_ turn off [automatic persisted queries](/router/configuration/in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
 
 </Note>
+
+### Customization via request context
+
+GraphOS Router can be [customized](/graphos/routing/customization/overview) via several mechanisms such as [Rhai scripts](/graphos/routing/customization/rhai) and [coprocessors](/graphos/routing/customization/coprocessor). These plugins can affect your router's persistent query processing by writing to the request context.
+
+#### `apollo_persisted_queries::client_name`
+
+When publishing operations to a PQL, you can specify a client name associated with the operation (by including a `clientName` field in the individual operation in your [manifest](/graphos/platform/security/persisted-queries#per-operation-properties), or by including the `--for-client-name` option to `rover persisted-queries publish`). If an operation has a client name, it will only be executed by requests that specify that client name. (Your PQL can contain multiple operations with the same ID and different client names.)
+
+Your customization (Rhai script, coprocessor, etc) can examine a request during the [Router Service stage](/graphos/routing/customization/overview#request-path) of the request path and set the `apollo_persisted_queries::client_name` value in the request context to the request's client name.
+
+If this context value is not set by a customization, your router will use the same client name used for [client awareness](/graphos/routing/observability/client-awareness) in observability. This client name is read from an HTTP header specified by `telemetry.apollo.client_name_header`, or `apollographql-client-name` by default.
+
+If your request specifies an ID and a client name but there is no operation in the PQL with that ID and client name, your router will look to see if there is an operation with that ID and no client name specified, and use that if it finds it.
+
+#### `apollo_persisted_queries::safelist::skip_enforcement`
+
+If safelisting is enabled, you can still opt out of safelist enforcement on a per-request basis.
+
+Your customization (Rhai script, coprocessor, etc) can examine a request during the [Router Service stage](/graphos/routing/customization/overview#request-path) of the request path and set the `apollo_persisted_queries::safelist::skip_enforcement` value in the request context to the boolean value `true`.
+
+For any request where you set this value, Router will skip safelist enforcement: requests with a full operation string will be allowed even if they are not in the safelist, and even if [`safelist.required_id`](#require_id) is enabled.
+
+This does not affect the behavior of the [`log_unknown` option](#log_unknown): unknown operations will still be logged if that option is set.
 
 ## Limitations
 

@@ -141,7 +141,7 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "61632fc2833efa5fa0c26669f3b8f33e9d872b21d819c0e6749337743de088ed",
+              "schemaAwareHash": "b74616ae898acf3abefb83e24bde5faf0de0f9475d703b105b60c18c7372ab13",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -203,7 +203,7 @@ expression: response
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "39b0b589769858e72a545b4eda572dad33f38dd8f70c39c8165d49c6a5c0ab3f",
+                    "schemaAwareHash": "31465e7b7e358ea9407067188249b51fd7342088e6084360ed0df28199cef5cc",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -263,7 +263,7 @@ expression: response
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "4f18d534604c5aba52dcb0a30973a79fc311a6940a56a29acb826e6f5084da26",
+                    "schemaAwareHash": "550ad525da9bb9497fb0d51bf7a64b7d5d73ade5ee7d2e425573dc7e2e248e99",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],

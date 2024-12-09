@@ -378,8 +378,10 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.graphql_error = 1u64,
+                    u64_counter!(
+                        "apollo.router.graphql_error",
+                        "Number of GraphQL error responses returned by the router",
+                        1,
                         code = "INVALID_ACCEPT_HEADER"
                     );
                     // Useful for selector in spans/instruments/events
@@ -781,12 +783,18 @@ impl RouterService {
         for (code, count) in map {
             match code {
                 None => {
-                    tracing::info!(monotonic_counter.apollo.router.graphql_error = count,);
+                    u64_counter!(
+                        "apollo.router.graphql_error",
+                        "Number of GraphQL error responses returned by the router",
+                        count
+                    );
                 }
                 Some(code) => {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.graphql_error = count,
-                        code = code
+                    u64_counter!(
+                        "apollo.router.graphql_error",
+                        "Number of GraphQL error responses returned by the router",
+                        count,
+                        code = code.to_string()
                     );
                 }
             }

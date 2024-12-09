@@ -8,6 +8,8 @@ import { Link } from "gatsby";
 
 The GraphOS Router and Apollo Router Core support [client awareness](/graphos/metrics/client-awareness/) by default. If the client sets the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests, GraphOS Studio can separate the metrics and operations per client.
 
+This client name is also used by the [Persisted Queries](/graphos/routing/security/persisted-queries) feature.
+
 ## Overriding client awareness headers
 
 Different header names can be used by updating the configuration file. If those headers will be sent by a browser, they must be allowed in the [CORS (Cross Origin Resource Sharing) configuration](/router/configuration/cors), as follows:
