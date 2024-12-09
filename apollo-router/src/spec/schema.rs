@@ -54,14 +54,6 @@ impl Schema {
     ) -> Result<Self, SchemaError> {
         let start = Instant::now();
 
-        let mut parser = apollo_compiler::parser::Parser::new();
-
-        let result = parser.parse_ast(&raw_sdl.sdl, "schema.graphql");
-
-        // Trace log recursion limit data
-        let recursion_limit = parser.recursion_reached();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
         let expansion = expand_connectors(&raw_sdl.sdl).map_err(SchemaError::Connector)?;
         let preserved_launch_id = raw_sdl.launch_id.clone();
         let (raw_sdl, api_schema, connectors) = match expansion {
@@ -79,6 +71,15 @@ impl Schema {
             ),
             ExpansionResult::Unchanged => (raw_sdl, None, None),
         };
+
+        let mut parser = apollo_compiler::parser::Parser::new();
+
+        let result = parser.parse_ast(&raw_sdl.sdl, "schema.graphql");
+
+        // Trace log recursion limit data
+        let recursion_limit = parser.recursion_reached();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
         let definitions = result
             .map_err(|invalid| {
                 SchemaError::Parse(ParseErrors {
