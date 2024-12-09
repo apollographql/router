@@ -19,6 +19,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
@@ -32,7 +33,6 @@ use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::BridgeQueryPlannerPool;
-use crate::apollo_studio_interop::UsageReporting;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -676,9 +676,9 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::apollo_studio_interop::UsageReporting;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
-    use crate::apollo_studio_interop::UsageReporting;
     use crate::spec::Query;
     use crate::spec::Schema;
     use crate::Configuration;

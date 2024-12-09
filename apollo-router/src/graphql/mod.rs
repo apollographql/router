@@ -37,7 +37,6 @@ pub use crate::json_ext::PathElement as JsonPathElement;
 /// even if that stream happens to only contain one item.
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
 
-
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(rename_all = "camelCase")]
 /// The error location

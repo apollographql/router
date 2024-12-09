@@ -24,6 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
@@ -47,7 +48,6 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
-use crate::apollo_studio_interop::UsageReporting;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;

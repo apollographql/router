@@ -83,6 +83,7 @@ use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -132,7 +133,6 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATI
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
-use crate::apollo_studio_interop::UsageReporting;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;

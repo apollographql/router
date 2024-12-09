@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::compute_job;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -27,7 +28,6 @@ use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
-use crate::apollo_studio_interop::UsageReporting;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
