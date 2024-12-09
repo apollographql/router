@@ -30,14 +30,10 @@ pub(crate) mod logging;
 pub(crate) mod selectors;
 pub(crate) mod spans;
 
-pub(crate) trait Selectors {
-    type Request;
-    type Response;
-    type EventResponse;
-
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
-    fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
+pub(crate) trait Selectors<Request, Response, EventResponse> {
+    fn on_request(&self, request: &Request) -> Vec<KeyValue>;
+    fn on_response(&self, response: &Response) -> Vec<KeyValue>;
+    fn on_response_event(&self, _response: &EventResponse, _ctx: &Context) -> Vec<KeyValue> {
         Vec::with_capacity(0)
     }
     fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue>;
