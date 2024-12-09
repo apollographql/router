@@ -27,6 +27,7 @@
 
 mod api_schema;
 mod compat;
+pub mod correctness;
 mod display_helpers;
 pub mod error;
 pub mod link;

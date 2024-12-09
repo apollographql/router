@@ -327,6 +327,13 @@ impl QueryPlanner {
             .operations
             .get(operation_name.as_ref().map(|name| name.as_str()))?;
 
+        #[cfg(test)]
+        let supergraph_paths = crate::correctness::supergraph_query_paths(
+            &self.supergraph_schema,
+            document,
+            operation_name.as_deref(),
+        )?;
+
         if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
             // We could panic here but we are returning a `Result` already anyways, so shrug!
@@ -493,6 +500,12 @@ impl QueryPlanner {
             plan.statistics,
             "QueryPlanningStatistics from build_query_plan"
         );
+
+        #[cfg(test)]
+        {
+            let plan_paths = crate::correctness::query_plan_paths(&self.supergraph_schema, &plan)?;
+            crate::correctness::compare_paths(&supergraph_paths, &plan_paths)?;
+        }
 
         Ok(plan)
     }
