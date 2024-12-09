@@ -1,0 +1,4 @@
+supergraph:
+  query_planning:
+    experimental_parallelism: 2
+experimental_query_planner_mode: legacy
