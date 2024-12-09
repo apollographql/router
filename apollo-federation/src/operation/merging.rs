@@ -47,14 +47,14 @@ impl<'a> FieldSelectionValue<'a> {
                 return Err(SingleFederationError::InternalUnmergeableFields {
                     message: format!(
                         "Cannot merge field selection for field \"{}\" into a field selection for \
-                        field \"{}\". This is a known query planning bug that was silently ignored \
-                        in the old  Javascript query planner. The new Rust-native query planner \
-                        does not fix this bug at this time, but in some cases does catch when this \
-                        bug occurs. If you're seeing this message, this bug was likely triggered \
-                        by one of the field selections mentioned previously having an alias that \
-                        was the same name as the field in the other field selection. The \
-                        recommended workaround is to change this alias to a different one in your \
-                        operation.",
+                        field \"{}\". This is a known query planning bug in the old Javascript \
+                        query planner that was silently ignored. The Rust-native query planner \
+                        does not address this bug at this time, but in some cases does catch when \
+                        this bug occurs. If you're seeing this message, this bug was likely \
+                        triggered by one of the field selections mentioned previously having an \
+                        alias that was the same name as the field in the other field selection. \
+                        The recommended workaround is to change this alias to a different one in \
+                        your operation.",
                         other_field.field_position, self_field.field_position,
                     ),
                 }
