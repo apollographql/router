@@ -100,21 +100,6 @@ pub(crate) fn directive_optional_boolean_argument(
     }
 }
 
-pub(crate) fn directive_required_boolean_argument(
-    application: &Node<Directive>,
-    name: &Name,
-) -> Result<bool, FederationError> {
-    directive_optional_boolean_argument(application, name)?.ok_or_else(|| {
-        SingleFederationError::Internal {
-            message: format!(
-                "Required argument \"{}\" of directive \"@{}\" was not present.",
-                name, application.name
-            ),
-        }
-        .into()
-    })
-}
-
 pub(crate) fn directive_optional_variable_boolean_argument(
     application: &Node<Directive>,
     name: &Name,

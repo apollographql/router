@@ -327,7 +327,7 @@ impl QueryPlanner {
             .operations
             .get(operation_name.as_ref().map(|name| name.as_str()))
             .map_err(|_| {
-                if let Some(name) = operation_name {
+                if operation_name.is_some() {
                     SingleFederationError::UnknownOperation
                 } else {
                     SingleFederationError::OperationNameNotProvided

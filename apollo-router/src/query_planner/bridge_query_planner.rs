@@ -30,11 +30,11 @@ use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
 use crate::configuration::QueryPlannerMode;
+use crate::error::FederationErrorBridge;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
-use crate::error::TempFederationError;
 use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::introspection::IntrospectionCache;
@@ -64,7 +64,6 @@ use crate::Configuration;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 pub(crate) const JS_QP_MODE: &str = "js";
-const UNSUPPORTED_CONTEXT: &str = "context";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
@@ -183,9 +182,10 @@ impl PlannerMode {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
-                SingleFederationError::UnsupportedFeature { message: _, kind } => {
-                    metric_rust_qp_init(Some(INTERNAL_INIT_ERROR))
-                }
+                SingleFederationError::UnsupportedFeature {
+                    message: _,
+                    kind: _,
+                } => metric_rust_qp_init(Some(INTERNAL_INIT_ERROR)),
                 _ => {
                     metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
                 }
@@ -278,7 +278,7 @@ impl PlannerMode {
                             1
                         );
                     }
-                    let result = result.map_err(TempFederationError::from);
+                    let result = result.map_err(FederationErrorBridge::from);
 
                     let elapsed = start.elapsed().as_secs_f64();
                     metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
@@ -1480,13 +1480,6 @@ mod tests {
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.is_success" = true
-        );
-        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT));
-        assert_counter!(
-            "apollo.router.lifecycle.query_planner.init",
-            1,
-            "init.error_kind" = "context",
-            "init.is_success" = false
         );
         metric_rust_qp_init(Some(UNSUPPORTED_FED1));
         assert_counter!(
