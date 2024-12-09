@@ -3,8 +3,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
-use router_bridge::planner::PlanOptions;
-use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -21,6 +19,8 @@ use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
+use crate::router_bridge::PlanOptions;
+use crate::router_bridge::UsageReporting;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
 

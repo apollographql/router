@@ -9,4 +9,3 @@ supergraph:
         ttl: 10s
   experimental_reuse_query_fragments: true
   generate_query_fragments: false
-experimental_query_planner_mode: legacy

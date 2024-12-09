@@ -162,10 +162,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the query planner implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_query_planner_mode: QueryPlannerMode,
-
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -197,40 +193,6 @@ impl PartialEq for Configuration {
     }
 }
 
-/// Query planner modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum QueryPlannerMode {
-    /// Use the new Rust-based implementation.
-    ///
-    /// Raises an error at Router startup if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use primarily the Javascript-based implementation,
-    /// but also schedule background jobs to run the Rust implementation and compare results,
-    /// logging warnings if the implementations disagree.
-    ///
-    /// Raises an error at Router startup if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    Both,
-    /// Use primarily the Javascript-based implementation,
-    /// but also schedule on a best-effort basis background jobs
-    /// to run the Rust implementation and compare results,
-    /// logging warnings if the implementations disagree.
-    ///
-    /// Falls back to `legacy` with a warning
-    /// if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    BothBestEffort,
-    /// Use the new Rust-based implementation but fall back to the legacy one
-    /// for supergraph schemas composed with legacy Apollo Federation 1.
-    #[default]
-    NewBestEffort,
-}
-
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -256,7 +218,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
-            experimental_query_planner_mode: QueryPlannerMode,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -283,7 +244,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
-            experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -329,7 +289,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
-        experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
@@ -344,7 +303,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -394,27 +352,6 @@ impl Configuration {
                 ])
                 .build()
             ).build())
-    }
-
-    pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
-        router_bridge::planner::QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments,
-            generate_query_fragments: Some(self.supergraph.generate_query_fragments),
-            incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
-                enable_defer: Some(self.supergraph.defer_support),
-            }),
-            graphql_validation: false,
-            debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
-                bypass_planner_for_single_subgraph: None,
-                max_evaluated_plans: self
-                    .supergraph
-                    .query_planning
-                    .experimental_plans_limit
-                    .or(Some(10000)),
-                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
-            }),
-            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
-        }
     }
 
     pub(crate) fn rust_query_planner_config(
@@ -475,7 +412,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
-        experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -486,7 +422,6 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -732,22 +667,9 @@ const fn default_generate_query_fragments() -> bool {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", untagged)]
-pub(crate) enum AvailableParallelism {
-    Auto(Auto),
-    Fixed(NonZeroUsize),
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Auto {
     Auto,
-}
-
-impl Default for AvailableParallelism {
-    fn default() -> Self {
-        Self::Fixed(NonZeroUsize::new(1).expect("cannot fail"))
-    }
 }
 
 fn default_defer_support() -> bool {
@@ -944,19 +866,6 @@ pub(crate) struct QueryPlanning {
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
-
-    /// Set the size of a pool of workers to enable query planning parallelism.
-    /// Default: 1.
-    pub(crate) experimental_parallelism: AvailableParallelism,
-}
-
-impl QueryPlanning {
-    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
-        match self.experimental_parallelism {
-            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
-            AvailableParallelism::Fixed(n) => Ok(n),
-        }
-    }
 }
 
 /// Cache configuration

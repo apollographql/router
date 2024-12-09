@@ -11,7 +11,6 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
-use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
 use crate::apollo_studio_interop::generate_extended_references;
@@ -28,6 +27,7 @@ use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
+use crate::router_bridge::UsageReporting;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;

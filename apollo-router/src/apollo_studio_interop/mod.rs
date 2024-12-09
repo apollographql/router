@@ -26,13 +26,13 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use router_bridge::planner::ReferencedFieldsForType;
-use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
+use crate::router_bridge::ReferencedFieldsForType;
+use crate::router_bridge::UsageReporting;
 use crate::spec::Fragments;
 use crate::spec::Query;
 use crate::spec::Selection as SpecSelection;

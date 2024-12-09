@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use derivative::Derivative;
-use router_bridge::planner::PlanOptions;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
@@ -13,6 +12,7 @@ use super::layers::query_analysis::ParsedDocument;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
+use crate::router_bridge::PlanOptions;
 use crate::Context;
 
 assert_impl_all!(Request: Send);

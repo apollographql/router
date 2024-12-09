@@ -1,6 +1,5 @@
 // The redis cache keys in this file have to change whenever the following change:
 // * the supergraph schema
-// * experimental_query_planner_mode
 // * federation version
 //
 // How to get the new cache key:

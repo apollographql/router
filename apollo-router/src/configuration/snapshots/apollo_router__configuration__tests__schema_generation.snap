@@ -307,25 +307,6 @@ expression: "&schema"
         }
       ]
     },
-    "Auto": {
-      "enum": [
-        "auto"
-      ],
-      "type": "string"
-    },
-    "AvailableParallelism": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Auto",
-          "description": "#/definitions/Auto"
-        },
-        {
-          "format": "uint",
-          "minimum": 1.0,
-          "type": "integer"
-        }
-      ]
-    },
     "BatchProcessorConfig": {
       "description": "Batch processor configuration",
       "properties": {
@@ -4453,46 +4434,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "QueryPlannerMode": {
-      "description": "Query planner modes.",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use primarily the Javascript-based implementation, but also schedule background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "both_best_effort"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the new Rust-based implementation but fall back to the legacy one for supergraph schemas composed with legacy Apollo Federation 1.",
-          "enum": [
-            "new_best_effort"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "QueryPlanning": {
       "additionalProperties": false,
       "description": "Query planning cache configuration",
@@ -4500,10 +4441,6 @@ expression: "&schema"
         "cache": {
           "$ref": "#/definitions/QueryPlanCache",
           "description": "#/definitions/QueryPlanCache"
-        },
-        "experimental_parallelism": {
-          "$ref": "#/definitions/AvailableParallelism",
-          "description": "#/definitions/AvailableParallelism"
         },
         "experimental_paths_limit": {
           "default": null,
@@ -8375,10 +8312,6 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
-    },
-    "experimental_query_planner_mode": {
-      "$ref": "#/definitions/QueryPlannerMode",
-      "description": "#/definitions/QueryPlannerMode"
     },
     "experimental_type_conditioned_fetching": {
       "default": false,
