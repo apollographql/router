@@ -269,7 +269,6 @@ impl Selection {
                         .map(|selection| selection.matching_error_path_length(path, fragments))
                         .max()
                         .unwrap_or(0)
-                        + 1
                 } else {
                     0
                 }
@@ -283,7 +282,6 @@ impl Selection {
                     .map(|selection| selection.matching_error_path_length(path, fragments))
                     .max()
                     .unwrap_or(0)
-                    + 1
             }
             (Some(PathElement::Fragment(_)), Selection::Field { .. }) => 0,
         }
