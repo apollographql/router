@@ -13,7 +13,7 @@ use apollo_compiler::Node;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -123,10 +123,9 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
-        let name =
-            Self::cost_directive_name(schema)?.ok_or_else(|| 
-                internal_error!("The \"@cost\" directive is undefined in the target schema")
-            )?;
+        let name = Self::cost_directive_name(schema)?.ok_or_else(|| {
+            internal_error!("The \"@cost\" directive is undefined in the target schema")
+        })?;
 
         Ok(Directive { name, arguments })
     }
@@ -135,9 +134,9 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
-        let name = Self::list_size_directive_name(schema)?.ok_or_else(||
-                internal_error!("The \"@listSize\" directive is undefined in the target schema")
-        )?;
+        let name = Self::list_size_directive_name(schema)?.ok_or_else(|| {
+            internal_error!("The \"@listSize\" directive is undefined in the target schema")
+        })?;
 
         Ok(Directive { name, arguments })
     }
