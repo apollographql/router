@@ -10,14 +10,21 @@ redirectFrom:
   - /graphos/routing/observability/client-awareness
 ---
 
-Understanding client usage is critical for maintaining an evolving GraphQL schema. 
+Metrics about GraphQL schema usage are more insightful when information about clients using the schema is available. Understanding client usage can help you reshape your schema to serve clients more efficiently.
 As part of GraphOS Studio metrics reporting, servers can [tag reported operations with the requesting client's name and version](/graphos/metrics/client-awareness).
 This **client awareness** helps graph maintainers understand which clients are using which fields in the schema.
 
 Apollo's GraphOS Router and Apollo Server can enable client awareness by requiring metadata about requesting clients.
-The router supports client awareness by default. If the client sets the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests, GraphOS Studio can separate the metrics and operations per client. This client name is also used by the persisted queries feature.
+The router supports client awareness by default. If the client sets its name and version with the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests, GraphOS Studio can separate the metrics and operations per client. 
 
-Clients can (and should) [name their GraphQL operations](/react/data/operation-best-practices/#name-all-operations), which provides more context around how and where data is being used.
+<Note>
+
+The client name is also used by the persisted queries feature.
+
+</Note>
+
+
+Clients should [name their GraphQL operations](/react/data/operation-best-practices/#name-all-operations) to provide more context around how and where data is being used.
 
 ## Why enforce client reporting?
 
@@ -27,7 +34,7 @@ Client metadata enables better insights into schema usage, such as:
 - **Understanding traffic patterns**: This helps optimize schema design based on real-world client behavior.
 - **Improving operation-level observability**: This provides details for debugging and performance improvements.
 
-Apollo strongly recommends requiring client details (name and version) and operation names in all incoming GraphQL requests.
+Apollo strongly recommends requiring client name, client version, and operation names in all incoming GraphQL requests.
 
 ## Enforcing in GraphOS Router
 
@@ -37,7 +44,7 @@ You can use a Rhai script to _enforce_ that clients include metadata.
 
 ### Customizing client awareness headers
 
-Different header names can be used by updating the configuration file. If those headers will be sent by a browser, they must be allowed in the [CORS (Cross Origin Resource Sharing) configuration](/router/configuration/cors), as follows:
+If headers with customized names need to be sent by a browser, they must be allowed in the [CORS (Cross Origin Resource Sharing) configuration](/router/configuration/cors), as follows:
 
 ```yaml title="router.yaml"
 telemetry:
