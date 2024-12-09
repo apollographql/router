@@ -308,6 +308,10 @@ impl SingleFederationError {
             // TODO(@goto-bus-stop): this should have a different error code: it's not invalid,
             // just unsupported due to internal limitations.
             SingleFederationError::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
+            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
+            // that's invalid, but the operation name
+            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
+            SingleFederationError::OperationNameNotProvided => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
@@ -479,10 +483,6 @@ impl SingleFederationError {
                 ErrorCode::InterfaceKeyMissingImplementationType
             }
             SingleFederationError::DeferredSubscriptionUnsupported => ErrorCode::Internal,
-            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
-            // that's invalid, but the operation name
-            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
-            SingleFederationError::OperationNameNotProvided => ErrorCode::InvalidGraphQL,
         }
     }
 }

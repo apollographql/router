@@ -358,18 +358,14 @@ impl From<FederationError> for FederationErrorBridge {
 impl IntoGraphQLErrors for FederationErrorBridge {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            FederationErrorBridge::UnknownOperation(msg) => {
-                Ok(vec![Error::builder()
-                    .message(msg)
-                    .extension_code("GRAPHQL_VALIDATION_FAILED")
-                    .build()])
-            }
-            FederationErrorBridge::OperationNameNotProvided(msg) => {
-                Ok(vec![Error::builder()
-                    .message(msg)
-                    .extension_code("GRAPHQL_VALIDATION_FAILED")
-                    .build()])
-            }
+            FederationErrorBridge::UnknownOperation(msg) => Ok(vec![Error::builder()
+                .message(msg)
+                .extension_code("GRAPHQL_VALIDATION_FAILED")
+                .build()]),
+            FederationErrorBridge::OperationNameNotProvided(msg) => Ok(vec![Error::builder()
+                .message(msg)
+                .extension_code("GRAPHQL_VALIDATION_FAILED")
+                .build()]),
             // All other errors will be pushed on and be treated as internal server errors
             err => Err(err),
         }
