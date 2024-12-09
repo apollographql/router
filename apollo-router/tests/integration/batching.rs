@@ -445,7 +445,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__b__0{{entryB(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__b__0 {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -683,7 +683,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -785,7 +785,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -927,7 +927,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -943,7 +943,7 @@ mod helper {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    "query op{index}__{}__0 {{ entry{}(count: {count}) {{ index }} }}",
                     subgraph.to_lowercase(),
                     subgraph
                 ))
@@ -971,7 +971,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -1010,7 +1010,7 @@ mod helper {
 
         // Extract info about this operation
         let (_, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())

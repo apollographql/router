@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Instant;
@@ -140,6 +139,13 @@ impl PlannerMode {
                     Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
                 }
             }
+            QueryPlannerMode::NewBestEffort => {
+                if let Some(rust) = rust_planner {
+                    Self::Rust(rust)
+                } else {
+                    Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
+                }
+            }
         })
     }
 
@@ -152,13 +158,15 @@ impl PlannerMode {
             QueryPlannerMode::New | QueryPlannerMode::Both => {
                 Ok(Some(Self::rust(schema, configuration)?))
             }
-            QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
-                Ok(planner) => Ok(Some(planner)),
-                Err(error) => {
-                    tracing::info!("Falling back to the legacy query planner: {error}");
-                    Ok(None)
+            QueryPlannerMode::BothBestEffort | QueryPlannerMode::NewBestEffort => {
+                match Self::rust(schema, configuration) {
+                    Ok(planner) => Ok(Some(planner)),
+                    Err(error) => {
+                        tracing::info!("Falling back to the legacy query planner: {error}");
+                        Ok(None)
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -784,33 +792,6 @@ impl QueryPlanResult {
 pub(super) struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     pub(super) node: Option<Arc<PlanNode>>,
-}
-
-// Note: Reexported under `apollo_router::_private`
-pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
-    let mut output = String::new();
-    for diff_line in differences {
-        match diff_line {
-            diff::Result::Left(l) => {
-                let trimmed = l.trim();
-                if !trimmed.starts_with('#') && !trimmed.is_empty() {
-                    writeln!(&mut output, "-{l}").expect("write will never fail");
-                } else {
-                    writeln!(&mut output, " {l}").expect("write will never fail");
-                }
-            }
-            diff::Result::Both(l, _) => {
-                writeln!(&mut output, " {l}").expect("write will never fail");
-            }
-            diff::Result::Right(r) => {
-                let trimmed = r.trim();
-                if trimmed != "---" && !trimmed.is_empty() {
-                    writeln!(&mut output, "+{r}").expect("write will never fail");
-                }
-            }
-        }
-    }
-    output
 }
 
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
