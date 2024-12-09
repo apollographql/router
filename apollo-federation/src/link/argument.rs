@@ -100,7 +100,6 @@ pub(crate) fn directive_optional_boolean_argument(
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn directive_required_boolean_argument(
     application: &Node<Directive>,
     name: &Name,

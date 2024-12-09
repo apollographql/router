@@ -3,7 +3,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
-use apollo_compiler::executable::GetOperationError;
+use serde::Serialize;
+use serde::Deserialize;
+
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
@@ -106,17 +108,13 @@ impl From<SchemaRootKind> for String {
     }
 }
 
-#[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
+#[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnsupportedFeatureKind {
-    #[strum(to_string = "defer")]
-    Defer,
-    #[strum(to_string = "context")]
-    Context,
     #[strum(to_string = "alias")]
     Alias,
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
 pub enum SingleFederationError {
     #[error(
         "An internal error has occurred, please report this bug to Apollo.\n\nDetails: {message}"
@@ -124,18 +122,32 @@ pub enum SingleFederationError {
     Internal { message: String },
     #[error("An internal error has occurred, please report this bug to Apollo. Details: {0}")]
     #[allow(private_interfaces)] // users should not inspect this.
+    // TODO(@TylerBloom): There are many fields in `RebaseError` that do not implement
+    // (De)Serailize, and implementing it is not necessary for GA. Instead, in router, this variant
+    // is cast into a string and treated as an internal error.
+    #[serde(skip_serializing, skip_deserializing)]
     InternalRebaseError(#[from] crate::operation::RebaseError),
     // This is a known bug that will take time to fix, and does not require reporting.
     #[error("{message}")]
     InternalUnmergeableFields { message: String },
     #[error("{diagnostics}")]
+    // TODO(@TylerBloom): `DiagnosticList` does not implement (De)Serialize and implementing it is
+    // not necessary for GA. Instead, in router, this variant is cast into a string and treated as
+    // an internal error.
+    #[serde(skip_serializing, skip_deserializing)]
     InvalidGraphQL { diagnostics: DiagnosticList },
     #[error(transparent)]
+    // TODO(@TylerBloom): Currently, this error is only used in the `Self::code` method, so it can
+    // never be returned to the router. So, we can skip serializing it. When we split the error
+    // type into a public and private types, we should make sure this variant is private only.
+    #[serde(skip_serializing, skip_deserializing)]
     InvalidGraphQLName(#[from] InvalidNameError),
     #[error("Subgraph invalid: {message}")]
     InvalidSubgraph { message: String },
     #[error("Operation name not found")]
     UnknownOperation,
+    #[error("Must provide operation name if query contains multiple operations")]
+    OperationNameNotProvided,
     #[error("Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.")]
     UnsupportedSpreadDirective { name: Name },
     #[error("{message}")]
@@ -308,9 +320,6 @@ impl SingleFederationError {
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
-            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
-            // that's invalid, but the operation name
-            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
             // TODO(@goto-bus-stop): this should have a different error code: it's not invalid,
             // just unsupported due to internal limitations.
             SingleFederationError::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
@@ -485,6 +494,10 @@ impl SingleFederationError {
                 ErrorCode::InterfaceKeyMissingImplementationType
             }
             SingleFederationError::DeferredSubscriptionUnsupported => ErrorCode::Internal,
+            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
+            // that's invalid, but the operation name
+            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
+            SingleFederationError::OperationNameNotProvided => ErrorCode::InvalidGraphQL,
         }
     }
 }
@@ -492,12 +505,6 @@ impl SingleFederationError {
 impl From<InvalidNameError> for FederationError {
     fn from(err: InvalidNameError) -> Self {
         SingleFederationError::from(err).into()
-    }
-}
-
-impl From<GetOperationError> for FederationError {
-    fn from(_: GetOperationError) -> Self {
-        SingleFederationError::UnknownOperation.into()
     }
 }
 
@@ -518,7 +525,7 @@ impl From<FederationSpecError> for FederationError {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
 pub struct MultipleFederationErrors {
     pub errors: Vec<SingleFederationError>,
 }
@@ -570,7 +577,7 @@ impl FromIterator<SingleFederationError> for MultipleFederationErrors {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
 pub struct AggregateFederationError {
     pub code: String,
     pub message: String,
@@ -598,7 +605,7 @@ impl Display for AggregateFederationError {
 // of GraphQLErrors, or take a vector of GraphQLErrors and group them together under an
 // AggregateGraphQLError which itself would have a specific error message and code, and throw that.
 // We represent all these cases with an enum, and delegate to the members.
-#[derive(thiserror::Error)]
+#[derive(Clone, thiserror::Error, Serialize, Deserialize)]
 pub enum FederationError {
     #[error(transparent)]
     SingleFederationError(#[from] SingleFederationError),

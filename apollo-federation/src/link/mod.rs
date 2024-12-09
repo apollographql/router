@@ -67,13 +67,12 @@ pub enum Purpose {
 
 impl Purpose {
     pub fn from_value(value: &Value) -> Result<Purpose, LinkError> {
-        if let Value::Enum(value) = value {
-            Ok(value.parse::<Purpose>()?)
-        } else {
-            Err(LinkError::BootstrapError(
-                "invalid `purpose` value, should be an enum".to_string(),
-            ))
-        }
+        value
+            .as_enum()
+            .ok_or_else(|| {
+                LinkError::BootstrapError("invalid `purpose` value, should be an enum".to_string())
+            })
+            .and_then(|value| value.parse())
     }
 }
 
@@ -85,8 +84,7 @@ impl str::FromStr for Purpose {
             "SECURITY" => Ok(Purpose::SECURITY),
             "EXECUTION" => Ok(Purpose::EXECUTION),
             _ => Err(LinkError::BootstrapError(format!(
-                "invalid/unrecognized `purpose` value '{}'",
-                s
+                "invalid/unrecognized `purpose` value '{s}'"
             ))),
         }
     }
@@ -156,11 +154,13 @@ impl Import {
                         _ => Err(LinkError::BootstrapError(format!("unknown field `{k}` in @link(import:) argument")))?
                     }
                 }
-                if let Some(element) = name {
+                let Some(element) = name else {
+                    return Err(LinkError::BootstrapError("invalid entry in @link(import:) argument, missing mandatory `name` field".to_string()))
+                };
                     if let Some(directive_name) = element.strip_prefix('@') {
                         if let Some(alias_str) = alias.as_ref() {
                             let Some(alias_str) = alias_str.strip_prefix('@') else {
-                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should start with '@' since the imported name does", alias_str, element)));
+                                return Err(LinkError::BootstrapError(format!("invalid alias '{alias_str}' for import name '{element}': should start with '@' since the imported name does")));
                             };
                             alias = Some(alias_str);
                         }
@@ -172,7 +172,7 @@ impl Import {
                     } else {
                         if let Some(alias) = &alias {
                             if alias.starts_with('@') {
-                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should not start with '@' (or, if {} is a directive, then the name should start with '@')", alias, element, element)));
+                                return Err(LinkError::BootstrapError(format!("invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')")));
                             }
                         }
                         Ok(Import {
@@ -181,9 +181,6 @@ impl Import {
                             alias: alias.map(Name::new).transpose()?,
                         })
                     }
-                } else {
-                    Err(LinkError::BootstrapError("invalid entry in @link(import:) argument, missing mandatory `name` field".to_string()))
-                }
             },
             _ => Err(LinkError::BootstrapError("invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: \"<importedElement>\", as: \"<alias>\" }.".to_string()))
         }
