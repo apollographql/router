@@ -11,7 +11,7 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query private__accounts__0{me{name}}"}
+                                "body": {"query":"query private__accounts__0 { me { name } }"}
                             },
                             "response": {
                                 "headers": {
@@ -48,7 +48,7 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query private__accounts__0{me{name}}"}
+                                "body": {"query":"query private__accounts__0 { me { name } }"}
                             },
                             "response": {
                                 "headers": {

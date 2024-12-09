@@ -175,11 +175,15 @@ async fn service_call(
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
+        // We cannot assume that the query is present as it may have been modified by coprocessors or plugins.
+        // There is a deeper issue here in that query analysis is doing a bunch of stuff that it should not and
+        // places the results in context. Therefore plugins that have modified the query won't actually take effect.
+        // However, this can't be resolved before looking at the pipeline again.
         req.supergraph_request
             .body()
             .query
             .clone()
-            .expect("query presence was checked before"),
+            .unwrap_or_default(),
     )
     .await
     {

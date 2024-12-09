@@ -328,7 +328,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                        } =>
                        {
                          ... on U {
-                           field(a: $contextualArgument_1_0)
+                           field(a: $contextualArgument_2_0)
                          }
                        }
                      },
@@ -337,13 +337,33 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
                }
                "###
     );
-
-    node_assert!(
-        plan,
-        1,
-        "contextualArgument_1_0",
-        ["..", "... on T", "prop"]
-    );
+    match plan.node {
+        Some(TopLevelPlanNode::Sequence(node)) => match node.nodes.get(1) {
+            Some(PlanNode::Flatten(node)) => match &*node.node {
+                PlanNode::Fetch(node) => {
+                    assert_eq!(
+                        node.context_rewrites,
+                        vec![Arc::new(FetchDataRewrite::KeyRenamer(
+                            FetchDataKeyRenamer {
+                                rename_key_to: Name::new("contextualArgument_2_0").unwrap(),
+                                path: vec![
+                                    FetchDataPathElement::Parent,
+                                    FetchDataPathElement::TypenameEquals(Name::new("T").unwrap()),
+                                    FetchDataPathElement::Key(
+                                        Name::new("prop").unwrap(),
+                                        Default::default()
+                                    ),
+                                ],
+                            }
+                        )),]
+                    );
+                }
+                _ => panic!("failed to get fetch node"),
+            },
+            _ => panic!("failed to get flatten node"),
+        },
+        _ => panic!("failed to get sequence node"),
+    }
 }
 
 #[test]
@@ -1130,7 +1150,7 @@ fn set_context_test_before_key_resolution_transition() {
             } =>
             {
               ... on Child {
-                prop(legacyUserId: $contextualArgument_1_0)
+                prop(legacyUserId: $contextualArgument_2_0)
               }
             }
           },
@@ -1262,7 +1282,7 @@ fn set_context_test_efficiently_merge_fetch_groups() {
             {
               ... on Customer {
                 accounts {
-                  foo(ctx_id5: $contextualArgument_1_0, ctx_mid: $contextualArgument_1_1) {
+                  foo(ctx_id5: $contextualArgument_3_0, ctx_mid: $contextualArgument_3_1) {
                     id
                   }
                 }
@@ -1278,9 +1298,9 @@ fn set_context_test_efficiently_merge_fetch_groups() {
     node_assert!(
         plan,
         1,
-        "contextualArgument_1_0",
+        "contextualArgument_3_0",
         ["identifiers", "id5"],
-        "contextualArgument_1_1",
+        "contextualArgument_3_1",
         ["mid"]
     );
 }

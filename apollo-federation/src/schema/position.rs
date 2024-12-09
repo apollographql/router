@@ -232,6 +232,21 @@ impl TypeDefinitionPosition {
             )),
         }
     }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Component<Directive>,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.insert_directive(schema, directive),
+            TypeDefinitionPosition::Object(type_) => type_.insert_directive(schema, directive),
+            TypeDefinitionPosition::Interface(type_) => type_.insert_directive(schema, directive),
+            TypeDefinitionPosition::Union(type_) => type_.insert_directive(schema, directive),
+            TypeDefinitionPosition::Enum(type_) => type_.insert_directive(schema, directive),
+            TypeDefinitionPosition::InputObject(type_) => type_.insert_directive(schema, directive),
+        }
+    }
 }
 
 fallible_conversions!(TypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
@@ -399,6 +414,24 @@ impl CompositeTypeDefinitionPosition {
                 name.clone(),
                 self.describe(),
             )),
+        }
+    }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Component<Directive>,
+    ) -> Result<(), FederationError> {
+        match self {
+            CompositeTypeDefinitionPosition::Object(type_) => {
+                type_.insert_directive(schema, directive)
+            }
+            CompositeTypeDefinitionPosition::Interface(type_) => {
+                type_.insert_directive(schema, directive)
+            }
+            CompositeTypeDefinitionPosition::Union(type_) => {
+                type_.insert_directive(schema, directive)
+            }
         }
     }
 }
