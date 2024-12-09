@@ -124,9 +124,9 @@ impl CostSpecDefinition {
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
         let name =
-            Self::cost_directive_name(schema)?.ok_or_else(|| SingleFederationError::Internal {
-                message: "The \"@cost\" directive is undefined in the target schema".to_string(),
-            })?;
+            Self::cost_directive_name(schema)?.ok_or_else(|| 
+                internal_error!("The \"@cost\" directive is undefined in the target schema")
+            )?;
 
         Ok(Directive { name, arguments })
     }
@@ -135,12 +135,9 @@ impl CostSpecDefinition {
         schema: &FederationSchema,
         arguments: Vec<Node<Argument>>,
     ) -> Result<Directive, FederationError> {
-        let name = Self::list_size_directive_name(schema)?.ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "The \"@listSize\" directive is undefined in the target schema"
-                    .to_string(),
-            }
-        })?;
+        let name = Self::list_size_directive_name(schema)?.ok_or_else(||
+                internal_error!("The \"@listSize\" directive is undefined in the target schema")
+        )?;
 
         Ok(Directive { name, arguments })
     }
