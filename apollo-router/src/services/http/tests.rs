@@ -73,9 +73,11 @@ async fn tls_server(
 
     loop {
         let (stream, _) = listener.accept().await.expect("accepting connections");
+        let acceptor = acceptor.clone();
 
         tokio::spawn(async move {
-            let tokio_stream = TokioIo::new(stream);
+            let acceptor_stream = acceptor.accept(stream).await.expect("accepted stream");
+            let tokio_stream = TokioIo::new(acceptor_stream);
 
             let hyper_service =
                 hyper::service::service_fn(move |_request: Request<Incoming>| async {
