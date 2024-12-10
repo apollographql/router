@@ -8,9 +8,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::Context;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
@@ -30,6 +28,8 @@ struct TraceSpec {
     measured_spans: HashSet<&'static str>,
     unmeasured_spans: HashSet<&'static str>,
     priority_sampled: Option<&'static str>,
+    subgraph_sampled: Option<bool>,
+    subgraph_context: Option<Arc<Mutex<Option<SpanContext>>>>,
     // Not the metrics but the otel attribute
     no_priority_sampled_attribute: Option<bool>,
 }
@@ -40,19 +40,13 @@ async fn test_no_sample() -> Result<(), BoxError> {
         return Ok(());
     }
     let context = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let context_clone = context.clone();
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!("fixtures/datadog_no_sample.router.yaml"))
         .responder(ResponseTemplate::new(200).set_body_json(
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
-        .subgraph_callback(Box::new(move || {
-            let context = Context::current();
-            let span = context.span();
-            let span_context = span.span_context();
-            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
-        }))
+        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -63,14 +57,12 @@ async fn test_no_sample() -> Result<(), BoxError> {
     let (_id, result) = router.execute_untraced_query(&query, None).await;
     router.graceful_shutdown().await;
     assert!(result.status().is_success());
-    let context = context
-        .lock()
-        .expect("poisoned")
-        .as_ref()
-        .expect("state")
-        .clone();
-    assert!(context.is_sampled());
-    assert_eq!(context.trace_state().get("psr"), Some("0"));
+    let context = context.lock().expect("poisoned");
+    assert!(!context.as_ref().unwrap().is_sampled());
+    assert_eq!(
+        context.as_ref().unwrap().trace_state().get("psr"),
+        Some("0")
+    );
 
     Ok(())
 }
@@ -82,7 +74,6 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
         return Ok(());
     }
     let context = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let context_clone = context.clone();
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!(
@@ -91,12 +82,7 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
         .responder(ResponseTemplate::new(200).set_body_json(
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
-        .subgraph_callback(Box::new(move || {
-            let context = Context::current();
-            let span = context.span();
-            let span_context = span.span_context();
-            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
-        }))
+        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -107,20 +93,14 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
     let (id, result) = router.execute_untraced_query(&query, None).await;
     router.graceful_shutdown().await;
     assert!(result.status().is_success());
-    let _context = context
-        .lock()
-        .expect("poisoned")
-        .as_ref()
-        .expect("state")
-        .clone();
-
     tokio::time::sleep(Duration::from_secs(2)).await;
+
     TraceSpec::builder()
         .services([].into())
+        .subgraph_sampled(false)
         .build()
         .validate_trace(id)
         .await?;
-
     Ok(())
 }
 
@@ -130,19 +110,13 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
         return Ok(());
     }
     let context = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let context_clone = context.clone();
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!("fixtures/datadog.router.yaml"))
         .responder(ResponseTemplate::new(200).set_body_json(
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
-        .subgraph_callback(Box::new(move || {
-            let context = Context::current();
-            let span = context.span();
-            let span_context = span.span_context();
-            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
-        }))
+        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -151,41 +125,41 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
 
     // Parent based sampling. psr MUST be populated with the value that we pass in.
     test_psr(
-        &context,
         &mut router,
         Some("-1"),
         TraceSpec::builder()
-            .services(["client", "router", "subgraph"].into())
+            .services(["client", "router"].into())
+            .subgraph_sampled(false)
             .priority_sampled("-1")
             .build(),
     )
     .await?;
     test_psr(
-        &context,
         &mut router,
         Some("0"),
         TraceSpec::builder()
-            .services(["client", "router", "subgraph"].into())
+            .services(["client", "router"].into())
+            .subgraph_sampled(false)
             .priority_sampled("0")
             .build(),
     )
     .await?;
     test_psr(
-        &context,
         &mut router,
         Some("1"),
         TraceSpec::builder()
             .services(["client", "router", "subgraph"].into())
+            .subgraph_sampled(true)
             .priority_sampled("1")
             .build(),
     )
     .await?;
     test_psr(
-        &context,
         &mut router,
         Some("2"),
         TraceSpec::builder()
             .services(["client", "router", "subgraph"].into())
+            .subgraph_sampled(true)
             .priority_sampled("2")
             .build(),
     )
@@ -193,11 +167,11 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
 
     // No psr was passed in the router is free to set it. This will be 1 as we are going to sample here.
     test_psr(
-        &context,
         &mut router,
         None,
         TraceSpec::builder()
             .services(["client", "router", "subgraph"].into())
+            .subgraph_sampled(true)
             .priority_sampled("1")
             .build(),
     )
@@ -214,19 +188,13 @@ async fn test_priority_sampling_propagated_otel_request() -> Result<(), BoxError
         return Ok(());
     }
     let context = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let context_clone = context.clone();
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
         .config(include_str!("fixtures/datadog.router.yaml"))
         .responder(ResponseTemplate::new(200).set_body_json(
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
-        .subgraph_callback(Box::new(move || {
-            let context = Context::current();
-            let span = context.span();
-            let span_context = span.span_context();
-            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
-        }))
+        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -261,7 +229,6 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
         return Ok(());
     }
     let context = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let context_clone = context.clone();
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!(
@@ -270,12 +237,7 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
         .responder(ResponseTemplate::new(200).set_body_json(
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
-        .subgraph_callback(Box::new(move || {
-            let context = Context::current();
-            let span = context.span();
-            let span_context = span.span_context();
-            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
-        }))
+        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -284,7 +246,6 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
 
     // The router will ignore the upstream PSR as parent based sampling is disabled.
     test_psr(
-        &context,
         &mut router,
         Some("-1"),
         TraceSpec::builder()
@@ -294,7 +255,6 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     )
     .await?;
     test_psr(
-        &context,
         &mut router,
         Some("0"),
         TraceSpec::builder()
@@ -304,7 +264,6 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     )
     .await?;
     test_psr(
-        &context,
         &mut router,
         Some("1"),
         TraceSpec::builder()
@@ -314,7 +273,6 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     )
     .await?;
     test_psr(
-        &context,
         &mut router,
         Some("2"),
         TraceSpec::builder()
@@ -325,7 +283,6 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     .await?;
 
     test_psr(
-        &context,
         &mut router,
         None,
         TraceSpec::builder()
@@ -341,7 +298,6 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
 }
 
 async fn test_psr(
-    context: &Arc<Mutex<Option<SpanContext>>>,
     router: &mut IntegrationTest,
     psr: Option<&str>,
     trace_spec: TraceSpec,
@@ -355,19 +311,7 @@ async fn test_psr(
     let (id, result) = router
         .execute_query_with_headers(&query, headers.into_iter().collect())
         .await;
-
     assert!(result.status().is_success());
-    let context = context
-        .lock()
-        .expect("poisoned")
-        .as_ref()
-        .expect("state")
-        .clone();
-
-    assert_eq!(
-        context.trace_state().get("psr"),
-        trace_spec.priority_sampled
-    );
     trace_spec.validate_trace(id).await?;
     Ok(())
 }
@@ -823,6 +767,19 @@ impl TraceSpec {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         self.find_valid_trace(&url).await?;
+
+        if let Some(subgraph_context) = &self.subgraph_context {
+            let subgraph_context = subgraph_context.lock().expect("poisoned");
+            let subgraph_span_context = subgraph_context.as_ref().expect("state").clone();
+
+            assert_eq!(
+                subgraph_span_context.trace_state().get("psr"),
+                self.priority_sampled
+            );
+            if let Some(sampled) = self.subgraph_sampled {
+                assert_eq!(subgraph_span_context.is_sampled(), sampled);
+            }
+        }
         Ok(())
     }
 

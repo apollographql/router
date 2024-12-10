@@ -80,6 +80,7 @@ pub struct IntegrationTest {
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
     telemetry: Telemetry,
+    extra_propagator: Telemetry,
 
     pub _tracer_provider_client: TracerProvider,
     pub _tracer_provider_subgraph: TracerProvider,
@@ -105,11 +106,15 @@ struct TracedResponder {
     telemetry: Telemetry,
     subscriber_subgraph: Dispatch,
     subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
+    subgraph_context: Arc<Mutex<Option<SpanContext>>>,
 }
 
 impl Respond for TracedResponder {
     fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
         let context = self.telemetry.extract_context(request);
+        *self.subgraph_context.lock().expect("lock poisoned") =
+            Some(context.span().span_context().clone());
+
         tracing_core::dispatcher::with_default(&self.subscriber_subgraph, || {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
@@ -285,11 +290,7 @@ impl Telemetry {
                     context = context.with_remote_span_context(SpanContext::new(
                         context.span().span_context().trace_id(),
                         context.span().span_context().span_id(),
-                        context
-                            .span()
-                            .span_context()
-                            .trace_flags()
-                            .with_sampled(true),
+                        context.span().span_context().trace_flags(),
                         true,
                         state,
                     ));
@@ -316,7 +317,9 @@ impl IntegrationTest {
     pub async fn new(
         config: String,
         telemetry: Option<Telemetry>,
+        extra_propagator: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
+        subgraph_context: Option<Arc<Mutex<Option<SpanContext>>>>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
@@ -325,6 +328,7 @@ impl IntegrationTest {
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
+        let extra_propagator = extra_propagator.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
         let subscriber_client = Self::dispatch(&tracer_provider_client);
         let tracer_provider_subgraph = telemetry.tracer_provider("subgraph");
@@ -355,7 +359,8 @@ impl IntegrationTest {
                 ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
                 telemetry: telemetry.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
-                subgraph_callback
+                subgraph_callback,
+                subgraph_context: subgraph_context.unwrap_or_default()
             })
             .mount(&subgraphs)
             .await;
@@ -390,6 +395,7 @@ impl IntegrationTest {
             subscriber_client,
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
+            extra_propagator,
             redis_namespace,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
         }
@@ -595,6 +601,7 @@ impl IntegrationTest {
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
         let telemetry = self.telemetry.clone();
+        let extra_propagator = self.extra_propagator.clone();
 
         let query = query.clone();
         let url = format!("http://{}", self.bind_address());
@@ -624,6 +631,7 @@ impl IntegrationTest {
 
                 let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
+                extra_propagator.inject_context(&mut request);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {

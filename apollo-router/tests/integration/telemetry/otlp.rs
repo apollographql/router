@@ -2,9 +2,12 @@ extern crate core;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
@@ -67,6 +70,7 @@ async fn test_basic() -> Result<(), BoxError> {
                 ]
                 .into(),
             )
+            .subgraph_sampled(true)
             .build()
             .validate_trace(id, &mock_server)
             .await?;
@@ -106,6 +110,7 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
     Spec::builder()
         .services(["client", "router", "subgraph"].into())
         .priority_sampled("1")
+        .subgraph_sampled(true)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -136,6 +141,7 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
     let (id, _) = router.execute_query(&query).await;
     Spec::builder()
         .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -169,6 +175,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
     Spec::builder()
         .services(["client", "router", "subgraph"].into())
         .priority_sampled("1")
+        .subgraph_sampled(true)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -194,6 +201,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("0")
+        .subgraph_sampled(true)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -214,6 +222,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
     Spec::builder()
         .services(["router", "subgraph"].into())
         .priority_sampled("1")
+        .subgraph_sampled(true)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -254,6 +263,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("1")
+        .subgraph_sampled(true)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -281,6 +291,7 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("0")
+        .subgraph_sampled(false)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -306,6 +317,7 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("1")
+        .subgraph_sampled(true)
         .build()
         .validate_trace(id, &mock_server)
         .await?;
@@ -352,13 +364,18 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_propagation.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let context = Arc::new(Mutex::new(None));
     let mut router = IntegrationTest::builder()
         // We're using datadog propagation as this is what we are trying to test.
-        .telemetry(Telemetry::Datadog)
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .extra_propagator(Telemetry::Datadog)
         .config(config)
         .responder(ResponseTemplate::new(200).set_body_json(
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
+        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -367,41 +384,49 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
 
     // Parent based sampling. psr MUST be populated with the value that we pass in.
     test_psr(
+        &context,
         &mut router,
         Some("-1"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router"].into())
             .priority_sampled("-1")
+            .subgraph_sampled(false)
             .build(),
         &mock_server,
     )
     .await?;
     test_psr(
+        &context,
         &mut router,
         Some("0"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router"].into())
             .priority_sampled("0")
+            .subgraph_sampled(false)
             .build(),
         &mock_server,
     )
     .await?;
     test_psr(
+        &context,
         &mut router,
         Some("1"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("1")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
     .await?;
     test_psr(
+        &context,
         &mut router,
         Some("2"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("2")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
@@ -409,11 +434,13 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
 
     // No psr was passed in the router is free to set it. This will be 1 as we are going to sample here.
     test_psr(
+        &context,
         &mut router,
         None,
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("1")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
@@ -432,12 +459,17 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_propagation_no_parent_sampler.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let context = Arc::new(Mutex::new(None));
     let mut router = IntegrationTest::builder()
-        .telemetry(Telemetry::Datadog)
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .extra_propagator(Telemetry::Datadog)
         .config(config)
         .responder(ResponseTemplate::new(200).set_body_json(
             json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
         ))
+        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -446,52 +478,62 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
 
     // The router will ignore the upstream PSR as parent based sampling is disabled.
     test_psr(
+        &context,
         &mut router,
         Some("-1"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("1")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
     .await?;
     test_psr(
+        &context,
         &mut router,
         Some("0"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("1")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
     .await?;
     test_psr(
+        &context,
         &mut router,
         Some("1"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("1")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
     .await?;
     test_psr(
+        &context,
         &mut router,
         Some("2"),
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("1")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
     .await?;
 
     test_psr(
+        &context,
         &mut router,
         None,
         Spec::builder()
-            .services(["router"].into())
+            .services(["client", "router", "subgraph"].into())
             .priority_sampled("1")
+            .subgraph_sampled(true)
             .build(),
         &mock_server,
     )
@@ -503,6 +545,7 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
 }
 
 async fn test_psr(
+    context: &Arc<Mutex<Option<SpanContext>>>,
     router: &mut IntegrationTest,
     psr: Option<&str>,
     trace_spec: Spec,
@@ -519,12 +562,14 @@ async fn test_psr(
         .await;
 
     assert!(result.status().is_success());
+
     trace_spec.validate_trace(id, mock_server).await?;
     Ok(())
 }
 
 #[derive(buildstructor::Builder)]
 struct Spec {
+    subgraph_context: Option<Arc<Mutex<Option<SpanContext>>>>,
     operation_name: Option<String>,
     version: Option<String>,
     services: HashSet<&'static str>,
@@ -532,6 +577,7 @@ struct Spec {
     measured_spans: HashSet<&'static str>,
     unmeasured_spans: HashSet<&'static str>,
     priority_sampled: Option<&'static str>,
+    subgraph_sampled: Option<bool>,
 }
 
 impl Spec {
@@ -544,6 +590,20 @@ impl Spec {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         self.find_valid_trace(id, mock_server).await?;
+
+        if let Some(subgraph_context) = &self.subgraph_context {
+            let subgraph_context = subgraph_context.lock().expect("poisoned");
+            let subgraph_span_context = subgraph_context.as_ref().expect("state").clone();
+
+            assert_eq!(
+                subgraph_span_context.trace_state().get("psr"),
+                self.priority_sampled
+            );
+            if let Some(sampled) = self.subgraph_sampled {
+                assert_eq!(subgraph_span_context.is_sampled(), sampled);
+            }
+        }
+
         Ok(())
     }
 
