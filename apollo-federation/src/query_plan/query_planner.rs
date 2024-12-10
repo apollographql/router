@@ -1,21 +1,25 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
+use tracing::trace;
 
+use super::fetch_dependency_graph::FetchIdGenerator;
+use super::ConditionNode;
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
+use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
@@ -24,13 +28,13 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
-use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
@@ -47,37 +51,18 @@ use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
-pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
-pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
-pub(crate) const JOIN_FIELD: &str = "join__field";
-
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
-    /// Whether the query planner should try to reused the named fragments of the planned query in
-    /// subgraph fetches.
-    ///
-    /// This is often a good idea as it can prevent very large subgraph queries in some cases (named
-    /// fragments can make some relatively small queries (using said fragments) expand to a very large
-    /// query if all the spreads are inline). However, due to architecture of the query planner, this
-    /// optimization is done as an additional pass on the subgraph queries of the generated plan and
-    /// can thus increase the latency of building a plan. As long as query plans are sufficiently
-    /// cached, this should not be a problem, which is why this option is enabled by default, but if
-    /// the distribution of inbound queries prevents efficient caching of query plans, this may become
-    /// an undesirable trade-off and can be disabled in that case.
-    ///
-    /// Defaults to true.
-    pub reuse_query_fragments: bool,
-
-    /// NOTE: **not implemented yet**
-    ///
     /// If enabled, the query planner will extract inline fragments into fragment
     /// definitions before sending queries to subgraphs. This can significantly
-    /// reduce the size of the query sent to subgraphs, but may increase the time
-    /// it takes to plan the query.
+    /// reduce the size of the query sent to subgraphs.
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
 
+    /// **TODO:** This option is not implemented, and the behaviour is *always enabled*.
+    /// <https://github.com/apollographql/router/pull/5871>
+    ///
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
     ///
@@ -95,38 +80,46 @@ pub struct QueryPlannerConfig {
     /// in this sub-set are provided without guarantees of stability (they may be dangerous) or
     /// continued support (they may be removed without warning).
     pub debug: QueryPlannerDebugConfig,
+
+    /// Enables type conditioned fetching.
+    /// This flag is a workaround, which may yield significant
+    /// performance degradation when computing query plans,
+    /// and increase query plan size.
+    ///
+    /// If you aren't aware of this flag, you probably don't need it.
+    pub type_conditioned_fetching: bool,
 }
 
+#[allow(clippy::derivable_impls)] // it's derivable right now, but we might change the defaults
 impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
-            reuse_query_fragments: true,
-            subgraph_graphql_validation: false,
             generate_query_fragments: false,
+            subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
+            type_conditioned_fetching: false,
         }
     }
 }
 
-#[derive(Debug, Clone, Default, Hash)]
+#[derive(Debug, Clone, Default, Hash, Serialize)]
 pub struct QueryPlanIncrementalDeliveryConfig {
-    /// Enables @defer support by the query planner.
+    /// Enables `@defer` support in the query planner, breaking up the query plan with [DeferNode]s
+    /// as appropriate.
     ///
-    /// If set, then the query plan for queries having some @defer will contains some `DeferNode`
-    /// (see `query_plan/mod.rs`).
+    /// If false, operations with `@defer` are still accepted, but are planned as if they did not
+    /// contain `@defer` directives.
     ///
-    /// Defaults to false (meaning that the @defer are ignored).
+    /// Defaults to false.
+    ///
+    /// [DeferNode]: crate::query_plan::DeferNode
+    #[serde(default)]
     pub enable_defer: bool,
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerDebugConfig {
-    /// If used and the supergraph is built from a single subgraph, then user queries do not go
-    /// through the normal query planning and instead a fetch to the one subgraph is built directly
-    /// from the input query.
-    pub bypass_planner_for_single_subgraph: bool,
-
     /// Query planning is an exploratory process. Depending on the specificities and feature used by
     /// subgraphs, there could exist may different theoretical valid (if not always efficient) plans
     /// for a given query, and at a high level, the query planner generates those possible choices,
@@ -164,7 +157,6 @@ pub struct QueryPlannerDebugConfig {
 impl Default for QueryPlannerDebugConfig {
     fn default() -> Self {
         Self {
-            bypass_planner_for_single_subgraph: false,
             max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
         }
@@ -177,12 +169,25 @@ pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
 }
 
-impl QueryPlannerConfig {
-    /// Panics if options are used together in unsupported ways.
-    fn assert_valid(&self) {
-        if self.incremental_delivery.enable_defer {
-            assert!(!self.debug.bypass_planner_for_single_subgraph, "Cannot use the `debug.bypass_planner_for_single_subgraph` query planner option when @defer support is enabled");
-        }
+#[derive(Debug, Default, Clone)]
+pub struct QueryPlanOptions {
+    /// A set of labels which will be used _during query planning_ to
+    /// enable/disable edges with a matching label in their override condition.
+    /// Edges with override conditions require their label to be present or absent
+    /// from this set in order to be traversable. These labels enable the
+    /// progressive @override feature.
+    // PORT_NOTE: In JS implementation this was a Map
+    pub override_conditions: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct EnabledOverrideConditions(IndexSet<String>);
+
+impl Deref for EnabledOverrideConditions {
+    type Target = IndexSet<String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -191,8 +196,6 @@ pub struct QueryPlanner {
     federated_query_graph: Arc<QueryGraph>,
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
-    subgraph_federation_spec_definitions:
-        Arc<IndexMap<Arc<str>, &'static FederationSpecDefinition>>,
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
@@ -212,9 +215,6 @@ impl QueryPlanner {
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
-        config.assert_valid();
-        Self::check_unsupported_features(supergraph)?;
-
         let supergraph_schema = supergraph.schema.clone();
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: config.incremental_delivery.enable_defer,
@@ -298,19 +298,11 @@ impl QueryPlanner {
             .filter(|position| is_inconsistent(position.clone()))
             .collect::<IndexSet<_>>();
 
-        // PORT_NOTE: JS prepares a map of override conditions here, which is
-        // a map where the keys are all `@join__field(overrideLabel:)` argument values
-        // and the values are all initialised to `false`. Instead of doing that, we should
-        // be able to use a Set where presence means `true` and absence means `false`.
-
         Ok(Self {
             config,
             federated_query_graph: Arc::new(query_graph),
             supergraph_schema,
             api_schema,
-            // TODO(@goto-bus-stop): not sure how this is going to be used,
-            // keeping empty for the moment
-            subgraph_federation_spec_definitions: Default::default(),
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
         })
@@ -329,48 +321,26 @@ impl QueryPlanner {
         &self,
         document: &Valid<ExecutableDocument>,
         operation_name: Option<Name>,
+        options: QueryPlanOptions,
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
             .operations
-            .get(operation_name.as_ref().map(|name| name.as_str()))?;
-
+            .get(operation_name.as_ref().map(|name| name.as_str()))
+            .map_err(|_| {
+                if operation_name.is_some() {
+                    SingleFederationError::UnknownOperation
+                } else {
+                    SingleFederationError::OperationNameNotProvided
+                }
+            })?;
         if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            // We could panic here but we are returning a `Result` already anyways, so shrug!
-            return Err(FederationError::internal(
-                "Invalid operation: empty selection set",
-            ));
+            crate::bail!("Invalid operation: empty selection set")
         }
 
         let is_subscription = operation.is_subscription();
 
         let statistics = QueryPlanningStatistics::default();
-
-        if self.config.debug.bypass_planner_for_single_subgraph {
-            let mut subgraphs = self.federated_query_graph.subgraphs();
-            if let (Some((subgraph_name, _subgraph_schema)), None) =
-                (subgraphs.next(), subgraphs.next())
-            {
-                let node = FetchNode {
-                    subgraph_name: subgraph_name.clone(),
-                    operation_document: document.clone(),
-                    operation_name: operation.name.clone(),
-                    operation_kind: operation.operation_type,
-                    id: None,
-                    variable_usages: operation
-                        .variables
-                        .iter()
-                        .map(|var| var.name.clone())
-                        .collect(),
-                    requires: Default::default(),
-                    input_rewrites: Default::default(),
-                    output_rewrites: Default::default(),
-                    context_rewrites: Default::default(),
-                };
-
-                return Ok(QueryPlan::new(node, statistics));
-            }
-        }
 
         let normalized_operation = normalize_operation(
             operation,
@@ -379,37 +349,29 @@ impl QueryPlanner {
             &self.interface_types_with_interface_objects,
         )?;
 
-        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) = (
-            normalized_operation.without_defer(),
-            None,
-            None::<IndexMap<String, IndexSet<String>>>,
-            false,
-        );
-        /* TODO(TylerBloom): After defer is impl-ed and after the private preview, the call
-         * above needs to be replaced with this if-else expression.
-        if self.config.incremental_delivery.enable_defer {
-            let NormalizedDefer {
-                operation,
-                assigned_defer_labels,
-                defer_conditions,
-                has_defers,
-            } = normalized_operation.with_normalized_defer();
-            if has_defers && is_subscription {
-                return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
-            }
-            (
-                operation,
-                Some(assigned_defer_labels),
-                Some(defer_conditions),
-                has_defers,
-            )
-        } else {
-            // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
-            // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
-            // to end up passing through a @defer to a subgraph by mistake).
-            (normalized_operation.without_defer(), None, None, false)
-        };
-        */
+        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
+            if self.config.incremental_delivery.enable_defer {
+                let NormalizedDefer {
+                    operation,
+                    assigned_defer_labels,
+                    defer_conditions,
+                    has_defers,
+                } = normalized_operation.with_normalized_defer()?;
+                if has_defers && is_subscription {
+                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+                }
+                (
+                    operation,
+                    Some(assigned_defer_labels),
+                    Some(defer_conditions),
+                    has_defers,
+                )
+            } else {
+                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
+                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
+                // to end up passing through a @defer to a subgraph by mistake).
+                (normalized_operation.without_defer()?, None, None, false)
+            };
 
         if normalized_operation.selection_set.is_empty() {
             return Ok(QueryPlan::default());
@@ -430,24 +392,14 @@ impl QueryPlanner {
             .root_kinds_to_nodes()?
             .get(&normalized_operation.root_kind)
         else {
-            panic!(
+            bail!(
                 "Shouldn't have a {0} operation if the subgraphs don't have a {0} root",
                 normalized_operation.root_kind
-            );
+            )
         };
 
         let operation_compression = if self.config.generate_query_fragments {
             SubgraphOperationCompression::GenerateFragments
-        } else if self.config.reuse_query_fragments {
-            // For all subgraph fetches we query `__typename` on every abstract types (see
-            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
-            // fragments, we should make sure those fragments also query `__typename` for every
-            // abstract type.
-            SubgraphOperationCompression::ReuseFragments(RebasedFragments::new(
-                normalized_operation
-                    .named_fragments
-                    .add_typename_field_for_abstract_types_in_named_fragments()?,
-            ))
         } else {
             SubgraphOperationCompression::Disabled
         };
@@ -472,12 +424,19 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            // PORT_NOTE: JS provides `override_conditions` here: see port note in `QueryPlanner::new`.
+            override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
+                options.override_conditions,
+            )),
+            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
         };
 
         let root_node = match defer_conditions {
             Some(defer_conditions) if !defer_conditions.is_empty() => {
-                compute_plan_for_defer_conditionals(&mut parameters, defer_conditions)?
+                compute_plan_for_defer_conditionals(
+                    &mut parameters,
+                    &mut processor,
+                    defer_conditions,
+                )?
             }
             _ => compute_plan_internal(&mut parameters, &mut processor, has_defers)?,
         };
@@ -528,7 +487,15 @@ impl QueryPlanner {
             statistics,
         };
 
-        snapshot!(plan, "query plan");
+        snapshot!(
+            "QueryPlan",
+            plan.to_string(),
+            "QueryPlan from build_query_plan"
+        );
+        snapshot!(
+            plan.statistics,
+            "QueryPlanningStatistics from build_query_plan"
+        );
 
         Ok(plan)
     }
@@ -536,89 +503,6 @@ impl QueryPlanner {
     /// Get Query Planner's API Schema.
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
-    }
-
-    fn check_unsupported_features(supergraph: &Supergraph) -> Result<(), FederationError> {
-        // We have a *progressive* override when `join__field` has a
-        // non-null value for `overrideLabel` field.
-        //
-        // This looks at object types' fields and their directive
-        // applications, looking specifically for `@join__field`
-        // arguments list.
-        let has_progressive_overrides = supergraph
-            .schema
-            .schema()
-            .types
-            .values()
-            .filter_map(|extended_type| {
-                // The override label args can be only on ObjectTypes
-                if let ExtendedType::Object(object_type) = extended_type {
-                    Some(object_type)
-                } else {
-                    None
-                }
-            })
-            .flat_map(|object_type| &object_type.fields)
-            .flat_map(|(_, field)| {
-                field
-                    .directives
-                    .iter()
-                    .filter(|d| d.name.as_str() == JOIN_FIELD)
-            })
-            .any(|join_directive| {
-                if let Some(override_label_arg) =
-                    join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
-                {
-                    // Any argument value for `overrideLabel` that's not
-                    // null can be considered as progressive override usage
-                    if !override_label_arg.is_null() {
-                        return true;
-                    }
-                    return false;
-                }
-                false
-            });
-        if has_progressive_overrides {
-            let message = "\
-                `experimental_query_planner_mode: new` or `both` cannot yet \
-                be used with progressive overrides. \
-                Remove uses of progressive overrides to try the experimental query planner, \
-                otherwise switch back to `legacy` or `both_best_effort`.\
-            ";
-            return Err(SingleFederationError::UnsupportedFeature {
-                message: message.to_owned(),
-                kind: crate::error::UnsupportedFeatureKind::ProgressiveOverrides,
-            }
-            .into());
-        }
-
-        // We will only check for `@context` direcive, since
-        // `@fromContext` can only be used if `@context` is already
-        // applied, and we assume a correctly composed supergraph.
-        //
-        // `@context` can only be applied on Object Types, Interface
-        // Types and Unions. For simplicity of this function, we just
-        // check all 'extended_type` directives.
-        let has_set_context = supergraph
-            .schema
-            .schema()
-            .types
-            .values()
-            .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
-        if has_set_context {
-            let message = "\
-                `experimental_query_planner_mode: new` or `both` cannot yet \
-                be used with `@context`. \
-                Remove uses of `@context` to try the experimental query planner, \
-                otherwise switch back to `legacy` or `both_best_effort`.\
-            ";
-            return Err(SingleFederationError::UnsupportedFeature {
-                message: message.to_owned(),
-                kind: crate::error::UnsupportedFeatureKind::Context,
-            }
-            .into());
-        }
-        Ok(())
     }
 }
 
@@ -644,7 +528,6 @@ fn compute_root_serial_dependency_graph(
     // We have to serially compute a plan for each top-level selection.
     let mut split_roots = operation.selection_set.clone().split_top_level_fields();
     let mut digest = Vec::new();
-    let mut starting_fetch_id = 0;
     let selection_set = split_roots
         .next()
         .ok_or_else(|| FederationError::internal("Empty top level fields"))?;
@@ -676,19 +559,19 @@ fn compute_root_serial_dependency_graph(
                 supergraph_schema.clone(),
                 federated_query_graph.clone(),
                 root_type.clone(),
-                starting_fetch_id,
+                fetch_dependency_graph.fetch_id_generation.clone(),
             );
             compute_root_fetch_groups(
                 operation.root_kind,
                 &mut fetch_dependency_graph,
                 &prev_path,
+                parameters.config.type_conditioned_fetching,
             )?;
         } else {
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
             // the current ID that is inside the fetch dep graph's ID generator, or to use the
             // starting ID. Because this method ensure uniqueness between IDs, this approach was
             // taken; however, it could be the case that this causes unforseen issues.
-            starting_fetch_id = fetch_dependency_graph.next_fetch_id();
             digest.push(std::mem::replace(
                 &mut fetch_dependency_graph,
                 new_dep_graph,
@@ -719,6 +602,7 @@ pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
+    type_conditioned_fetching_enabled: bool,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
@@ -731,7 +615,7 @@ pub(crate) fn compute_root_fetch_groups(
         let (_source_node, target_node) = path.graph.edge_endpoints(edge)?;
         let target_node = path.graph.node_weight(target_node)?;
         let subgraph_name = &target_node.source;
-        let root_type = match &target_node.type_ {
+        let root_type: CompositeTypeDefinitionPosition = match &target_node.type_ {
             QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(object)) => {
                 object.clone().into()
             }
@@ -741,14 +625,25 @@ pub(crate) fn compute_root_fetch_groups(
                 )))
             }
         };
-        let fetch_dependency_node =
-            dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
-        snapshot!(dependency_graph, "tree_with_root_node");
+        let fetch_dependency_node = dependency_graph.get_or_create_root_node(
+            subgraph_name,
+            root_kind,
+            root_type.clone(),
+        )?;
+        snapshot!(
+            "FetchDependencyGraph",
+            dependency_graph.to_dot(),
+            "tree_with_root_node"
+        );
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
             fetch_dependency_node,
-            Default::default(),
+            FetchDependencyGraphNodePath::new(
+                dependency_graph.supergraph_schema.clone(),
+                type_conditioned_fetching_enabled,
+                root_type,
+            )?,
             Default::default(),
             &Default::default(),
         )?;
@@ -760,16 +655,13 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
-    snapshot!(
-        "FetchDependencyGraph",
-        "Empty",
-        "Starting process to construct a parallel fetch dependency graph"
-    );
+    trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
     snapshot!(
-        best_plan.fetch_dependency_graph,
-        "Plan returned from compute_root_parallel_best_plan"
+        "FetchDependencyGraph",
+        best_plan.fetch_dependency_graph.to_dot(),
+        "Fetch dependency graph returned from compute_root_parallel_best_plan"
     );
     Ok(best_plan.fetch_dependency_graph)
 }
@@ -830,7 +722,8 @@ fn compute_plan_internal(
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
-            dependency_graph,
+            "FetchDependencyGraph",
+            dependency_graph.to_dot(),
             "Plan after calling FetchDependencyGraph::process"
         );
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
@@ -849,69 +742,56 @@ fn compute_plan_internal(
     }
 }
 
-// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
-    _parameters: &mut QueryPlanningParameters,
-    _defer_conditions: IndexMap<String, IndexSet<String>>,
+    parameters: &mut QueryPlanningParameters,
+    processor: &mut FetchDependencyGraphToQueryPlanProcessor,
+    defer_conditions: IndexMap<Name, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    Err(SingleFederationError::UnsupportedFeature {
-        message: String::from("@defer is currently not supported"),
-        kind: crate::error::UnsupportedFeatureKind::Defer,
-    }
-    .into())
+    generate_condition_nodes(
+        parameters.operation.clone(),
+        defer_conditions.iter(),
+        &mut |op| {
+            parameters.operation = op;
+            compute_plan_internal(parameters, processor, true)
+        },
+    )
 }
 
-/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
-pub(crate) struct RebasedFragments {
-    original_fragments: NamedFragments,
-    /// Map key: subgraph name
-    rebased_fragments: IndexMap<Arc<str>, NamedFragments>,
-}
-
-impl RebasedFragments {
-    fn new(fragments: NamedFragments) -> Self {
-        Self {
-            original_fragments: fragments,
-            rebased_fragments: Default::default(),
+fn generate_condition_nodes<'a>(
+    op: Arc<Operation>,
+    mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
+    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
+) -> Result<Option<PlanNode>, FederationError> {
+    match conditions.next() {
+        None => on_final_operation(op),
+        Some((cond, labels)) => {
+            let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels)?;
+            let if_op = op;
+            let node = ConditionNode {
+                condition_variable: cond.clone(),
+                if_clause: generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?
+                    .map(Box::new),
+                else_clause: generate_condition_nodes(
+                    Arc::new(else_op),
+                    conditions.clone(),
+                    on_final_operation,
+                )?
+                .map(Box::new),
+            };
+            Ok(Some(PlanNode::Condition(Box::new(node))))
         }
-    }
-
-    fn for_subgraph(
-        &mut self,
-        subgraph_name: impl Into<Arc<str>>,
-        subgraph_schema: &ValidFederationSchema,
-    ) -> &NamedFragments {
-        self.rebased_fragments
-            .entry(subgraph_name.into())
-            .or_insert_with(|| {
-                self.original_fragments
-                    .rebase_on(subgraph_schema)
-                    .unwrap_or_default()
-            })
     }
 }
 
 pub(crate) enum SubgraphOperationCompression {
-    ReuseFragments(RebasedFragments),
     GenerateFragments,
     Disabled,
 }
 
 impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
-    pub(crate) fn compress(
-        &mut self,
-        subgraph_name: &Arc<str>,
-        subgraph_schema: &ValidFederationSchema,
-        operation: Operation,
-    ) -> Result<Operation, FederationError> {
+    pub(crate) fn compress(&mut self, operation: Operation) -> Result<Operation, FederationError> {
         match self {
-            Self::ReuseFragments(fragments) => {
-                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
-                let mut operation = operation;
-                operation.reuse_fragments(rebased)?;
-                Ok(operation)
-            }
             Self::GenerateFragments => {
                 let mut operation = operation;
                 operation.generate_fragments()?;
@@ -1083,7 +963,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
@@ -1115,7 +997,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
@@ -1204,7 +1088,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
               QueryPlan {
                 Parallel {
@@ -1274,66 +1160,7 @@ type User
     }
 
     #[test]
-    fn bypass_planner_for_single_subgraph() {
-        let a = Subgraph::parse_and_expand(
-            "A",
-            "https://A",
-            r#"
-            type Query {
-                a: A
-            }
-            type A {
-                b: B
-            }
-            type B {
-                x: Int
-                y: String
-            }
-        "#,
-        )
-        .unwrap();
-        let subgraphs = vec![&a];
-        let supergraph = Supergraph::compose(subgraphs).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
-
-        let document = ExecutableDocument::parse_and_validate(
-            api_schema.schema(),
-            r#"
-            {
-                a {
-                    b {
-                        x
-                        y
-                    }
-                }
-            }
-            "#,
-            "",
-        )
-        .unwrap();
-
-        let mut config = QueryPlannerConfig::default();
-        config.debug.bypass_planner_for_single_subgraph = true;
-        let planner = QueryPlanner::new(&supergraph, config).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
-        insta::assert_snapshot!(plan, @r###"
-        QueryPlan {
-          Fetch(service: "A") {
-            {
-              a {
-                b {
-                  x
-                  y
-                }
-              }
-            }
-          },
-        }
-        "###);
-    }
-
-    #[test]
-    fn test_optimize_basic() {
+    fn test_optimize_no_fragments_generated() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
         let document = ExecutableDocument::parse_and_validate(
@@ -1358,144 +1185,27 @@ type User
         )
         .unwrap();
 
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let config = QueryPlannerConfig {
+            generate_query_fragments: true,
+            ..Default::default()
+        };
+        let planner = QueryPlanner::new(&supergraph, config).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
             {
               userById(id: 1) {
-                ...userFields
                 id
+                name
+                email
               }
               another_user: userById(id: 2) {
-                ...userFields
-              }
-            }
-
-            fragment userFields on User {
-              name
-              email
-            }
-          },
-        }
-        "###);
-    }
-
-    #[test]
-    fn test_optimize_inline_fragment() {
-        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
-        let document = ExecutableDocument::parse_and_validate(
-            api_schema.schema(),
-            r#"
-            {
-                userById(id: 1) {
-                    id
-                    ...userFields
-                },
-                partial_optimize: userById(id: 2) {
-                    ... on User {
-                        id
-                        name
-                        email
-                    }
-                },
-                full_optimize: userById(id: 3) {
-                    ... on User {
-                        name
-                        email
-                    }
-                }
-            }
-            fragment userFields on User {
                 name
                 email
-            }
-            "#,
-            "operation.graphql",
-        )
-        .unwrap();
-
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
-        insta::assert_snapshot!(plan, @r###"
-        QueryPlan {
-          Fetch(service: "accounts") {
-            {
-              userById(id: 1) {
-                ...userFields
-                id
               }
-              partial_optimize: userById(id: 2) {
-                ...userFields
-                id
-              }
-              full_optimize: userById(id: 3) {
-                ...userFields
-              }
-            }
-
-            fragment userFields on User {
-              name
-              email
-            }
-          },
-        }
-        "###);
-    }
-
-    #[test]
-    fn test_optimize_fragment_definition() {
-        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
-        let document = ExecutableDocument::parse_and_validate(
-            api_schema.schema(),
-            r#"
-            {
-                userById(id: 1) {
-                    ...F1
-                    ...F2
-                },
-                case2: userById(id: 2) {
-                    id
-                    name
-                    email
-                },
-            }
-            fragment F1 on User {
-                name
-                email
-            }
-            fragment F2 on User {
-                id
-                name
-                email
-            }
-            "#,
-            "operation.graphql",
-        )
-        .unwrap();
-
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
-        // Make sure `fragment F2` contains `...F1`.
-        insta::assert_snapshot!(plan, @r###"
-        QueryPlan {
-          Fetch(service: "accounts") {
-            {
-              userById(id: 1) {
-                ...F2
-              }
-              case2: userById(id: 2) {
-                ...F2
-              }
-            }
-
-            fragment F2 on User {
-              name
-              email
-              id
             }
           },
         }
@@ -1535,7 +1245,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "Subgraph1") {

@@ -14,6 +14,9 @@ use std::process::ExitCode;
 use libtest_mimic::Arguments;
 use libtest_mimic::Failed;
 use libtest_mimic::Trial;
+use mediatype::MediaTypeList;
+use mediatype::ReadParams;
+use multer::Multipart;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -53,7 +56,7 @@ fn lookup_dir(
                 path.file_name().unwrap().to_str().unwrap()
             );
 
-            if path.join("plan.json").exists() {
+            let plan: Option<Plan> = if path.join("plan.json").exists() {
                 let mut file = File::open(path.join("plan.json")).map_err(|e| {
                     format!(
                         "could not open file at path '{:?}': {e}",
@@ -68,8 +71,8 @@ fn lookup_dir(
                     )
                 })?;
 
-                let plan: Plan = match serde_json::from_str(&s) {
-                    Ok(data) => data,
+                match serde_json::from_str(&s) {
+                    Ok(data) => Some(data),
                     Err(e) => {
                         return Err(format!(
                             "could not deserialize test plan at {}: {e}",
@@ -77,8 +80,37 @@ fn lookup_dir(
                         )
                         .into());
                     }
-                };
+                }
+            } else if path.join("plan.yaml").exists() {
+                let mut file = File::open(path.join("plan.yaml")).map_err(|e| {
+                    format!(
+                        "could not open file at path '{:?}': {e}",
+                        &path.join("plan.yaml")
+                    )
+                })?;
+                let mut s = String::new();
+                file.read_to_string(&mut s).map_err(|e| {
+                    format!(
+                        "could not read file at path: '{:?}': {e}",
+                        &path.join("plan.yaml")
+                    )
+                })?;
 
+                match serde_yaml::from_str(&s) {
+                    Ok(data) => Some(data),
+                    Err(e) => {
+                        return Err(format!(
+                            "could not deserialize test plan at {}: {e}",
+                            path.display()
+                        )
+                        .into());
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Some(plan) = plan {
                 if plan.enterprise
                     && !(std::env::var("TEST_APOLLO_KEY").is_ok()
                         && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok())
@@ -161,18 +193,28 @@ impl TestExecution {
             Action::ReloadSchema { schema_path } => {
                 self.reload_schema(schema_path, path, out).await
             }
-            Action::ReloadSubgraphs { subgraphs } => self.reload_subgraphs(subgraphs, out).await,
+            Action::ReloadSubgraphs {
+                subgraphs,
+                update_url_overrides,
+            } => {
+                self.reload_subgraphs(subgraphs, *update_url_overrides, out)
+                    .await
+            }
             Action::Request {
+                description,
                 request,
                 query_path,
                 headers,
                 expected_response,
+                expected_headers,
             } => {
                 self.request(
+                    description.clone(),
                     request.clone(),
                     query_path.as_deref(),
                     headers,
                     expected_response,
+                    expected_headers,
                     path,
                     out,
                 )
@@ -193,50 +235,11 @@ impl TestExecution {
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
-        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-        let address = listener.local_addr().unwrap();
-        let url = format!("http://{address}/");
+        self.subgraphs = subgraphs.clone();
+        let (mut subgraphs_server, url) = self.start_subgraphs(out).await;
 
-        let subgraphs_server = wiremock::MockServer::builder()
-            .listener(listener)
-            .start()
-            .await;
-
-        writeln!(out, "subgraphs listening on {url}").unwrap();
-
-        let mut subgraph_overrides = HashMap::new();
-
-        for (name, subgraph) in subgraphs {
-            for SubgraphRequestMock { request, response } in &subgraph.requests {
-                let mut builder = Mock::given(body_partial_json(&request.body));
-
-                if let Some(s) = request.method.as_deref() {
-                    builder = builder.and(method(s));
-                }
-
-                if let Some(s) = request.path.as_deref() {
-                    builder = builder.and(wiremock::matchers::path(s));
-                }
-
-                for (header_name, header_value) in &request.headers {
-                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
-                }
-
-                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
-                for (header_name, header_value) in &response.headers {
-                    res = res.append_header(header_name.as_str(), header_value.as_str());
-                }
-                builder
-                    .respond_with(res.set_body_json(&response.body))
-                    .mount(&subgraphs_server)
-                    .await;
-            }
-
-            // Add a default override for products, if not specified
-            subgraph_overrides
-                .entry(name.to_string())
-                .or_insert(url.clone());
-        }
+        let subgraph_overrides = self.load_subgraph_mocks(&mut subgraphs_server, &url).await;
+        writeln!(out, "got subgraph mocks: {subgraph_overrides:?}").unwrap();
 
         let config = open_file(&path.join(configuration_path), out)?;
         let schema_path = path.join(schema_path);
@@ -253,7 +256,6 @@ impl TestExecution {
 
         self.router = Some(router);
         self.subgraphs_server = Some(subgraphs_server);
-        self.subgraphs = subgraphs.clone();
         self.configuration_path = Some(configuration_path.to_string());
 
         Ok(())
@@ -265,6 +267,37 @@ impl TestExecution {
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
+        if let Some(requests) = self
+            .subgraphs_server
+            .as_ref()
+            .unwrap()
+            .received_requests()
+            .await
+        {
+            writeln!(out, "Will reload config, subgraphs received requests:").unwrap();
+            for request in requests {
+                writeln!(out, "\tmethod: {}", request.method).unwrap();
+                writeln!(out, "\tpath: {}", request.url).unwrap();
+                writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
+            }
+        } else {
+            writeln!(out, "subgraphs received no requests").unwrap();
+        }
+        let mut subgraphs_server = match self.subgraphs_server.take() {
+            Some(subgraphs_server) => subgraphs_server,
+            None => self.start_subgraphs(out).await.0,
+        };
+        subgraphs_server.reset().await;
+
+        let subgraph_url = Self::subgraph_url(&subgraphs_server);
+        let subgraph_overrides = self
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .await;
+
+        let config = open_file(&path.join(configuration_path), out)?;
+        self.configuration_path = Some(configuration_path.to_string());
+        self.subgraphs_server = Some(subgraphs_server);
+
         let router = match self.router.as_mut() {
             None => {
                 writeln!(
@@ -277,6 +310,14 @@ impl TestExecution {
             Some(router) => router,
         };
 
+        router.update_subgraph_overrides(subgraph_overrides);
+        router.update_config(&config).await;
+        router.assert_reloaded().await;
+
+        Ok(())
+    }
+
+    async fn start_subgraphs(&mut self, out: &mut String) -> (MockServer, String) {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let address = listener.local_addr().unwrap();
         let url = format!("http://{address}/");
@@ -288,6 +329,18 @@ impl TestExecution {
 
         writeln!(out, "subgraphs listening on {url}").unwrap();
 
+        (subgraphs_server, url)
+    }
+
+    fn subgraph_url(server: &MockServer) -> String {
+        format!("http://{}/", server.address())
+    }
+
+    async fn load_subgraph_mocks(
+        &mut self,
+        subgraphs_server: &mut MockServer,
+        url: &str,
+    ) -> HashMap<String, String> {
         let mut subgraph_overrides = HashMap::new();
 
         for (name, subgraph) in &self.subgraphs {
@@ -312,61 +365,57 @@ impl TestExecution {
                 }
                 builder
                     .respond_with(res.set_body_json(&response.body))
-                    .mount(&subgraphs_server)
+                    .mount(subgraphs_server)
                     .await;
             }
 
             // Add a default override for products, if not specified
             subgraph_overrides
                 .entry(name.to_string())
-                .or_insert(url.clone());
+                .or_insert(url.to_owned());
         }
 
-        let config = open_file(&path.join(configuration_path), out)?;
-        self.configuration_path = Some(configuration_path.to_string());
-        self.subgraphs_server = Some(subgraphs_server);
-
-        router.update_config(&config).await;
-        router.assert_reloaded().await;
-
-        Ok(())
+        subgraph_overrides
     }
 
     async fn reload_subgraphs(
         &mut self,
         subgraphs: &HashMap<String, Subgraph>,
+        update_url_overrides: bool,
         out: &mut String,
     ) -> Result<(), Failed> {
         writeln!(out, "reloading subgraphs with: {subgraphs:?}").unwrap();
 
-        let subgraphs_server = self.subgraphs_server.as_mut().unwrap();
+        let mut subgraphs_server = match self.subgraphs_server.take() {
+            Some(subgraphs_server) => subgraphs_server,
+            None => self.start_subgraphs(out).await.0,
+        };
         subgraphs_server.reset().await;
 
-        for subgraph in subgraphs.values() {
-            for SubgraphRequestMock { request, response } in &subgraph.requests {
-                let mut builder = Mock::given(body_partial_json(&request.body));
+        self.subgraphs = subgraphs.clone();
 
-                if let Some(s) = request.method.as_deref() {
-                    builder = builder.and(method(s));
-                }
+        let subgraph_url = Self::subgraph_url(&subgraphs_server);
+        let subgraph_overrides = self
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .await;
+        self.subgraphs_server = Some(subgraphs_server);
 
-                if let Some(s) = request.path.as_deref() {
-                    builder = builder.and(wiremock::matchers::path(s));
-                }
-
-                for (header_name, header_value) in &request.headers {
-                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
-                }
-
-                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
-                for (header_name, header_value) in &response.headers {
-                    res = res.append_header(header_name.as_str(), header_value.as_str());
-                }
-                builder
-                    .respond_with(res.set_body_json(&response.body))
-                    .mount(subgraphs_server)
-                    .await;
+        let router = match self.router.as_mut() {
+            None => {
+                writeln!(
+                    out,
+                    "cannot reload subgraph overrides: router was not started"
+                )
+                .unwrap();
+                return Err(out.into());
             }
+            Some(router) => router,
+        };
+
+        if update_url_overrides {
+            router.update_subgraph_overrides(subgraph_overrides);
+            router.touch_config().await;
+            router.assert_reloaded().await;
         }
 
         Ok(())
@@ -408,12 +457,15 @@ impl TestExecution {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn request(
         &mut self,
+        description: Option<String>,
         mut request: Value,
         query_path: Option<&str>,
         headers: &HashMap<String, String>,
         expected_response: &Value,
+        expected_headers: &HashMap<String, String>,
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
@@ -436,38 +488,117 @@ impl TestExecution {
             }
         }
 
+        writeln!(out).unwrap();
+        if let Some(description) = description {
+            writeln!(out, "description: {description}").unwrap();
+        }
+
         writeln!(out, "query: {}\n", serde_json::to_string(&request).unwrap()).unwrap();
+        writeln!(out, "header: {:?}\n", headers).unwrap();
+
         let (_, response) = router
             .execute_query_with_headers(&request, headers.clone())
             .await;
-        let body = response.bytes().await.map_err(|e| {
-            writeln!(out, "could not get graphql response data: {e}").unwrap();
+        writeln!(out, "response headers: {:?}", response.headers()).unwrap();
+
+        let mut failed = false;
+        for (key, value) in expected_headers {
+            if !response.headers().contains_key(key) {
+                failed = true;
+                writeln!(out, "expected header {} to be present", key).unwrap();
+            } else if response.headers().get(key).unwrap() != value {
+                failed = true;
+                writeln!(
+                    out,
+                    "expected header {} to be {}, got {:?}",
+                    key,
+                    value,
+                    response.headers().get(key).unwrap()
+                )
+                .unwrap();
+            }
+        }
+        if failed {
+            self.print_received_requests(out).await;
             let f: Failed = out.clone().into();
-            f
-        })?;
-        let graphql_response: Value = serde_json::from_slice(&body).map_err(|e| {
-            writeln!(out, "could not deserialize graphql response data: {e}").unwrap();
-            let f: Failed = out.clone().into();
-            f
-        })?;
+            return Err(f);
+        }
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let mut is_multipart = false;
+        let mut boundary = None;
+        for mime in MediaTypeList::new(content_type).flatten() {
+            if mime.ty == mediatype::names::MULTIPART && mime.subty == mediatype::names::MIXED {
+                is_multipart = true;
+                boundary = mime.get_param(mediatype::names::BOUNDARY).map(|v| {
+                    // multer does not strip quotes from the boundary: https://github.com/rwf2/multer/issues/64
+                    let mut s = v.as_str();
+                    if s.starts_with('\"') && s.ends_with('\"') {
+                        s = &s[1..s.len() - 1];
+                    }
+
+                    s.to_string()
+                });
+            }
+        }
+
+        let graphql_response: Value = if !is_multipart {
+            let body = response.bytes().await.map_err(|e| {
+                writeln!(out, "could not get graphql response data: {e}").unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })?;
+            serde_json::from_slice(&body).map_err(|e| {
+                writeln!(
+                    out,
+                    "could not deserialize graphql response data: {e}\nfrom:\n{}",
+                    std::str::from_utf8(&body).unwrap()
+                )
+                .unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })?
+        } else {
+            let mut chunks = Vec::new();
+
+            let mut multipart = Multipart::new(response.bytes_stream(), boundary.unwrap());
+
+            // Iterate over the fields, use `next_field()` to get the next field.
+            while let Some(mut field) = multipart.next_field().await.map_err(|e| {
+                writeln!(out, "could not get next field from multipart body: {e}",).unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })? {
+                while let Some(chunk) = field.chunk().await.map_err(|e| {
+                    writeln!(out, "could not get next chunk from multipart body: {e}",).unwrap();
+                    let f: Failed = out.clone().into();
+                    f
+                })? {
+                    writeln!(out, "multipart chunk: {:?}\n", std::str::from_utf8(&chunk)).unwrap();
+
+                    let parsed: Value = serde_json::from_slice(&chunk).map_err(|e| {
+                        writeln!(
+                            out,
+                            "could not deserialize graphql response data: {e}\nfrom:\n{}",
+                            std::str::from_utf8(&chunk).unwrap()
+                        )
+                        .unwrap();
+                        let f: Failed = out.clone().into();
+                        f
+                    })?;
+                    chunks.push(parsed);
+                }
+            }
+            Value::Array(chunks)
+        };
 
         if expected_response != &graphql_response {
-            if let Some(requests) = self
-                .subgraphs_server
-                .as_ref()
-                .unwrap()
-                .received_requests()
-                .await
-            {
-                writeln!(out, "subgraphs received requests:").unwrap();
-                for request in requests {
-                    writeln!(out, "\tmethod: {}", request.method).unwrap();
-                    writeln!(out, "\tpath: {}", request.url).unwrap();
-                    writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
-                }
-            } else {
-                writeln!(out, "subgraphs received no requests").unwrap();
-            }
+            self.print_received_requests(out).await;
 
             writeln!(out, "assertion `left == right` failed").unwrap();
             writeln!(
@@ -486,6 +617,25 @@ impl TestExecution {
         }
 
         Ok(())
+    }
+
+    async fn print_received_requests(&mut self, out: &mut String) {
+        if let Some(requests) = self
+            .subgraphs_server
+            .as_ref()
+            .unwrap()
+            .received_requests()
+            .await
+        {
+            writeln!(out, "subgraphs received requests:").unwrap();
+            for request in requests {
+                writeln!(out, "\tmethod: {}", request.method).unwrap();
+                writeln!(out, "\tpath: {}", request.url).unwrap();
+                writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
+            }
+        } else {
+            writeln!(out, "subgraphs received no requests").unwrap();
+        }
     }
 
     async fn endpoint_request(
@@ -552,6 +702,7 @@ fn check_path(path: &Path, out: &mut String) -> Result<(), Failed> {
 
 #[derive(Deserialize)]
 #[allow(dead_code)]
+#[serde(deny_unknown_fields)]
 struct Plan {
     #[serde(default)]
     enterprise: bool,
@@ -561,7 +712,7 @@ struct Plan {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", deny_unknown_fields)]
 enum Action {
     Start {
         schema_path: String,
@@ -576,13 +727,19 @@ enum Action {
     },
     ReloadSubgraphs {
         subgraphs: HashMap<String, Subgraph>,
+        // set to true if subgraph URL overrides should be updated (ex: a new subgraph is added)
+        #[serde(default)]
+        update_url_overrides: bool,
     },
     Request {
+        description: Option<String>,
         request: Value,
         query_path: Option<String>,
         #[serde(default)]
         headers: HashMap<String, String>,
         expected_response: Value,
+        #[serde(default)]
+        expected_headers: HashMap<String, String>,
     },
     EndpointRequest {
         url: url::Url,
@@ -592,17 +749,20 @@ enum Action {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Subgraph {
     requests: Vec<SubgraphRequestMock>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubgraphRequestMock {
     request: HttpRequest,
     response: HttpResponse,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HttpRequest {
     method: Option<String>,
     path: Option<String>,
@@ -612,6 +772,7 @@ struct HttpRequest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HttpResponse {
     status: Option<u16>,
     #[serde(default)]

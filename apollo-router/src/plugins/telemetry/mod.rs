@@ -93,9 +93,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::demand_control;
+use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -132,9 +131,8 @@ use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
-use crate::register_plugin;
+use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -173,12 +171,13 @@ pub(crate) mod tracing;
 pub(crate) mod utils;
 
 // Tracing consts
-const CLIENT_NAME: &str = "apollo_telemetry::client_name";
+pub(crate) const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
+pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -198,6 +197,7 @@ pub(crate) const APOLLO_PRIVATE_QUERY_ROOT_FIELDS: Key =
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
     pub(crate) config: Arc<config::Conf>,
+    supergraph_schema_id: Arc<String>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
@@ -279,7 +279,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 }
 
 #[async_trait::async_trait]
-impl Plugin for Telemetry {
+impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -315,6 +315,7 @@ impl Plugin for Telemetry {
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
+            supergraph_schema_id: init.supergraph_schema_id,
             field_level_instrumentation_ratio,
             activation: Mutex::new(TelemetryActivation {
                 tracer_provider: Some(tracer_provider),
@@ -341,6 +342,7 @@ impl Plugin for Telemetry {
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let config = self.config.clone();
+        let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
         let span_mode = config.instrumentation.spans.mode;
@@ -393,6 +395,10 @@ impl Plugin for Telemetry {
             }))
             .map_future_with_request_data(
                 move |request: &router::Request| {
+                    let _ = request.context.insert(
+                        SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY,
+                        supergraph_schema_id.clone(),
+                    );
                     if !use_legacy_request_span {
                         let span = Span::current();
 
@@ -519,6 +525,8 @@ impl Plugin for Telemetry {
                                     .map(|u| {
                                         u.stats_report_key == "## GraphQLValidationFailure\n"
                                             || u.stats_report_key == "## GraphQLParseFailure\n"
+                                            || u.stats_report_key
+                                                == "## GraphQLUnknownOperationName\n"
                                     })
                                     .unwrap_or(false)
                             }) {
@@ -697,30 +705,21 @@ impl Plugin for Telemetry {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
-                let operation_kind = req
-                    .query_plan
-                    .query
-                    .operation(req.supergraph_request.body().operation_name.as_deref())
-                    .map(|op| *op.kind());
+                let operation_kind = req.query_plan.query.operation.kind();
 
                 match operation_kind {
-                    Some(operation_kind) => match operation_kind {
-                        OperationKind::Subscription => info_span!(
-                            EXECUTION_SPAN_NAME,
-                            "otel.kind" = "INTERNAL",
-                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                            "apollo_private.operation.subtype" =
-                                OperationSubType::SubscriptionRequest.as_str(),
-                        ),
-                        _ => info_span!(
-                            EXECUTION_SPAN_NAME,
-                            "otel.kind" = "INTERNAL",
-                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                        ),
-                    },
-                    None => {
-                        info_span!(EXECUTION_SPAN_NAME, "otel.kind" = "INTERNAL",)
-                    }
+                    OperationKind::Subscription => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                        "apollo_private.operation.subtype" =
+                            OperationSubType::SubscriptionRequest.as_str(),
+                    ),
+                    _ => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                    ),
                 }
             })
             .service(service)
@@ -853,10 +852,8 @@ impl Plugin for Telemetry {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
     }
-}
 
-impl Telemetry {
-    pub(crate) fn activate(&self) {
+    fn activate(&self) {
         let mut activation = self.activation.lock();
         if activation.is_active {
             return;
@@ -910,7 +907,9 @@ impl Telemetry {
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;
     }
+}
 
+impl Telemetry {
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
         let propagation = &config.exporters.tracing.propagation;
 
@@ -1409,7 +1408,13 @@ impl Telemetry {
                                     config.apollo.experimental_local_field_metrics,
                                     ctx.unsupported_executable_document(),
                                 ) {
-                                    local_stat_recorder.visit(&query, &response);
+                                    local_stat_recorder.visit(
+                                        &query,
+                                        &response,
+                                        &ctx.get_demand_control_context()
+                                            .map(|c| c.variables)
+                                            .unwrap_or_default(),
+                                    );
                                 }
 
                                 if operation_kind == OperationKind::Subscription {
@@ -1512,14 +1517,13 @@ impl Telemetry {
                 let traces = Self::subgraph_ftv1_traces(context);
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
+                let strategy = context.get_demand_control_context().map(|c| c.strategy);
                 let limits_stats = context.extensions().with_lock(|guard| {
-                    let strategy = guard.get::<demand_control::strategy::Strategy>();
-                    let cost_ctx = guard.get::<demand_control::CostContext>();
                     let query_limits = guard.get::<OperationLimits<u32>>();
                     SingleLimitsStats {
                         strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
-                        cost_estimated: cost_ctx.map(|ctx| ctx.estimated),
-                        cost_actual: cost_ctx.map(|ctx| ctx.actual),
+                        cost_estimated: context.get_estimated_cost().ok().flatten(),
+                        cost_actual: context.get_actual_cost().ok().flatten(),
 
                         // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
                         depth: query_limits.map_or(0, |ql| ql.depth as u64),
@@ -1742,28 +1746,32 @@ impl Telemetry {
     }
 
     fn plugin_metrics(config: &Arc<Conf>) {
-        let metrics_prom_used = config.exporters.metrics.prometheus.enabled;
-        let metrics_otlp_used = MetricsConfigurator::enabled(&config.exporters.metrics.otlp);
-        let tracing_otlp_used = TracingConfigurator::enabled(&config.exporters.tracing.otlp);
-        let tracing_datadog_used = config.exporters.tracing.datadog.enabled();
-        let tracing_jaeger_used = config.exporters.tracing.jaeger.enabled();
-        let tracing_zipkin_used = config.exporters.tracing.zipkin.enabled();
+        let mut attributes = Vec::new();
+        if MetricsConfigurator::enabled(&config.exporters.metrics.otlp) {
+            attributes.push(KeyValue::new("telemetry.metrics.otlp", true));
+        }
+        if config.exporters.metrics.prometheus.enabled {
+            attributes.push(KeyValue::new("telemetry.metrics.prometheus", true));
+        }
+        if TracingConfigurator::enabled(&config.exporters.tracing.otlp) {
+            attributes.push(KeyValue::new("telemetry.tracing.otlp", true));
+        }
+        if config.exporters.tracing.datadog.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
+        }
+        if config.exporters.tracing.jaeger.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.jaeger", true));
+        }
+        if config.exporters.tracing.zipkin.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
+        }
 
-        if metrics_prom_used
-            || metrics_otlp_used
-            || tracing_jaeger_used
-            || tracing_otlp_used
-            || tracing_zipkin_used
-            || tracing_datadog_used
-        {
-            ::tracing::info!(
-                monotonic_counter.apollo.router.operations.telemetry = 1u64,
-                telemetry.metrics.otlp = metrics_otlp_used.or_empty(),
-                telemetry.metrics.prometheus = metrics_prom_used.or_empty(),
-                telemetry.tracing.otlp = tracing_otlp_used.or_empty(),
-                telemetry.tracing.datadog = tracing_datadog_used.or_empty(),
-                telemetry.tracing.jaeger = tracing_jaeger_used.or_empty(),
-                telemetry.tracing.zipkin = tracing_zipkin_used.or_empty(),
+        if !attributes.is_empty() {
+            u64_counter!(
+                "apollo.router.operations.telemetry",
+                "Telemetry exporters enabled",
+                1,
+                attributes
             );
         }
     }
@@ -1974,7 +1982,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
     }
 }
 
-register_plugin!("apollo", "telemetry", Telemetry);
+register_private_plugin!("apollo", "telemetry", Telemetry);
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     if req
@@ -2174,8 +2182,11 @@ mod tests {
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::plugins::demand_control::CostContext;
     use crate::plugins::demand_control::DemandControlError;
+    use crate::plugins::demand_control::COST_ACTUAL_KEY;
+    use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+    use crate::plugins::demand_control::COST_RESULT_KEY;
+    use crate::plugins::demand_control::COST_STRATEGY_KEY;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
     use crate::services::router::body::get_body_bytes;
@@ -3247,6 +3258,14 @@ mod tests {
         );
     }
 
+    #[derive(Clone)]
+    struct CostContext {
+        pub(crate) estimated: f64,
+        pub(crate) actual: f64,
+        pub(crate) result: &'static str,
+        pub(crate) strategy: &'static str,
+    }
+
     async fn make_failed_demand_control_request(plugin: &dyn DynPlugin, cost_details: CostContext) {
         let mut mock_service = MockSupergraphService::new();
         mock_service
@@ -3256,6 +3275,18 @@ mod tests {
                 req.context.extensions().with_lock(|mut lock| {
                     lock.insert(cost_details.clone());
                 });
+                req.context
+                    .insert(COST_ESTIMATED_KEY, cost_details.estimated)
+                    .unwrap();
+                req.context
+                    .insert(COST_ACTUAL_KEY, cost_details.actual)
+                    .unwrap();
+                req.context
+                    .insert(COST_RESULT_KEY, cost_details.result.to_string())
+                    .unwrap();
+                req.context
+                    .insert(COST_STRATEGY_KEY, cost_details.strategy.to_string())
+                    .unwrap();
 
                 let errors = if cost_details.result == "COST_ESTIMATED_TOO_EXPENSIVE" {
                     DemandControlError::EstimatedCostTooExpensive {

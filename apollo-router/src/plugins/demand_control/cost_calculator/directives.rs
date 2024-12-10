@@ -1,111 +1,19 @@
 use ahash::HashMap;
 use ahash::HashMapExt;
 use ahash::HashSet;
-use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::name;
 use apollo_compiler::parser::Parser;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use apollo_federation::link::spec::APOLLO_SPEC_DOMAIN;
-use apollo_federation::link::Link;
+use apollo_federation::link::cost_spec_definition::ListSizeDirective as ParsedListSizeDirective;
 use tower::BoxError;
 
-use super::DemandControlError;
-
-const COST_DIRECTIVE_NAME: Name = name!("cost");
-const COST_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__cost");
-const COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
-
-const LIST_SIZE_DIRECTIVE_NAME: Name = name!("listSize");
-const LIST_SIZE_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__listSize");
-const LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME: Name = name!("assumedSize");
-const LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME: Name = name!("slicingArguments");
-const LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME: Name = name!("sizedFields");
-const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
-    name!("requireOneSlicingArgument");
-
-pub(in crate::plugins::demand_control) fn get_apollo_directive_names(
-    schema: &Schema,
-) -> HashMap<Name, Name> {
-    let mut hm: HashMap<Name, Name> = HashMap::new();
-    for directive in &schema.schema_definition.directives {
-        if directive.name.as_str() == "link" {
-            if let Ok(link) = Link::from_directive_application(directive) {
-                if link.url.identity.domain != APOLLO_SPEC_DOMAIN {
-                    continue;
-                }
-                for import in link.imports {
-                    hm.insert(import.element.clone(), import.imported_name().clone());
-                }
-            }
-        }
-    }
-    hm
-}
-
-pub(in crate::plugins::demand_control) struct CostDirective {
-    weight: i32,
-}
-
-impl CostDirective {
-    pub(in crate::plugins::demand_control) fn weight(&self) -> f64 {
-        self.weight as f64
-    }
-
-    pub(in crate::plugins::demand_control) fn from_argument(
-        directive_name_map: &HashMap<Name, Name>,
-        argument: &InputValueDefinition,
-    ) -> Option<Self> {
-        Self::from_directives(directive_name_map, &argument.directives)
-    }
-
-    pub(in crate::plugins::demand_control) fn from_field(
-        directive_name_map: &HashMap<Name, Name>,
-        field: &FieldDefinition,
-    ) -> Option<Self> {
-        Self::from_directives(directive_name_map, &field.directives)
-    }
-
-    pub(in crate::plugins::demand_control) fn from_type(
-        directive_name_map: &HashMap<Name, Name>,
-        ty: &ExtendedType,
-    ) -> Option<Self> {
-        Self::from_schema_directives(directive_name_map, ty.directives())
-    }
-
-    fn from_directives(
-        directive_name_map: &HashMap<Name, Name>,
-        directives: &DirectiveList,
-    ) -> Option<Self> {
-        directive_name_map
-            .get(&COST_DIRECTIVE_NAME)
-            .and_then(|name| directives.get(name))
-            .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
-            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
-            .and_then(|weight| weight.to_i32())
-            .map(|weight| Self { weight })
-    }
-
-    pub(in crate::plugins::demand_control) fn from_schema_directives(
-        directive_name_map: &HashMap<Name, Name>,
-        directives: &apollo_compiler::schema::DirectiveList,
-    ) -> Option<Self> {
-        directive_name_map
-            .get(&COST_DIRECTIVE_NAME)
-            .and_then(|name| directives.get(name))
-            .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
-            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
-            .and_then(|weight| weight.to_i32())
-            .map(|weight| Self { weight })
-    }
-}
+use crate::json_ext::Object;
+use crate::json_ext::ValueExt;
+use crate::plugins::demand_control::DemandControlError;
 
 pub(in crate::plugins::demand_control) struct IncludeDirective {
     pub(in crate::plugins::demand_control) is_included: bool,
@@ -118,7 +26,7 @@ impl IncludeDirective {
         let directive = field
             .directives
             .get("include")
-            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|skip| skip.specified_argument_by_name("if"))
             .and_then(|arg| arg.to_bool())
             .map(|cond| Self { is_included: cond });
 
@@ -132,83 +40,13 @@ pub(in crate::plugins::demand_control) struct ListSizeDirective<'schema> {
 }
 
 impl<'schema> ListSizeDirective<'schema> {
-    pub(in crate::plugins::demand_control) fn size_of(&self, field: &Field) -> Option<i32> {
-        if self
-            .sized_fields
-            .as_ref()
-            .is_some_and(|sf| sf.contains(field.name.as_str()))
-        {
-            self.expected_size
-        } else {
-            None
-        }
-    }
-}
-
-/// The `@listSize` directive from a field definition, which can be converted to
-/// `ListSizeDirective` with a concrete field from a request.
-pub(in crate::plugins::demand_control) struct DefinitionListSizeDirective {
-    assumed_size: Option<i32>,
-    slicing_argument_names: Option<HashSet<String>>,
-    sized_fields: Option<HashSet<String>>,
-    require_one_slicing_argument: bool,
-}
-
-impl DefinitionListSizeDirective {
-    pub(in crate::plugins::demand_control) fn from_field_definition(
-        directive_name_map: &HashMap<Name, Name>,
-        definition: &FieldDefinition,
-    ) -> Result<Option<Self>, DemandControlError> {
-        let directive = directive_name_map
-            .get(&LIST_SIZE_DIRECTIVE_NAME)
-            .and_then(|name| definition.directives.get(name))
-            .or(definition.directives.get(&LIST_SIZE_DIRECTIVE_DEFAULT_NAME));
-        if let Some(directive) = directive {
-            let assumed_size = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
-                .and_then(|arg| arg.to_i32());
-            let slicing_argument_names = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
-                .and_then(|arg| arg.as_list())
-                .map(|arg_list| {
-                    arg_list
-                        .iter()
-                        .flat_map(|arg| arg.as_str())
-                        .map(String::from)
-                        .collect()
-                });
-            let sized_fields = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
-                .and_then(|arg| arg.as_list())
-                .map(|arg_list| {
-                    arg_list
-                        .iter()
-                        .flat_map(|arg| arg.as_str())
-                        .map(String::from)
-                        .collect()
-                });
-            let require_one_slicing_argument = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME)
-                .and_then(|arg| arg.to_bool())
-                .unwrap_or(true);
-
-            Ok(Some(Self {
-                assumed_size,
-                slicing_argument_names,
-                sized_fields,
-                require_one_slicing_argument,
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub(in crate::plugins::demand_control) fn with_field(
-        &self,
+    pub(in crate::plugins::demand_control) fn new(
+        parsed: &'schema ParsedListSizeDirective,
         field: &Field,
-    ) -> Result<ListSizeDirective, DemandControlError> {
+        variables: &Object,
+    ) -> Result<Self, DemandControlError> {
         let mut slicing_arguments: HashMap<&str, i32> = HashMap::new();
-        if let Some(slicing_argument_names) = self.slicing_argument_names.as_ref() {
+        if let Some(slicing_argument_names) = parsed.slicing_argument_names.as_ref() {
             // First, collect the default values for each argument
             for argument in &field.definition.arguments {
                 if slicing_argument_names.contains(argument.name.as_str()) {
@@ -224,11 +62,18 @@ impl DefinitionListSizeDirective {
                 if slicing_argument_names.contains(argument.name.as_str()) {
                     if let Some(numeric_value) = argument.value.to_i32() {
                         slicing_arguments.insert(&argument.name, numeric_value);
+                    } else if let Some(numeric_value) = argument
+                        .value
+                        .as_variable()
+                        .and_then(|variable_name| variables.get(variable_name.as_str()))
+                        .and_then(|variable| variable.as_i32())
+                    {
+                        slicing_arguments.insert(&argument.name, numeric_value);
                     }
                 }
             }
 
-            if self.require_one_slicing_argument && slicing_arguments.len() != 1 {
+            if parsed.require_one_slicing_argument && slicing_arguments.len() != 1 {
                 return Err(DemandControlError::QueryParseFailure(format!(
                     "Exactly one slicing argument is required, but found {}",
                     slicing_arguments.len()
@@ -240,15 +85,27 @@ impl DefinitionListSizeDirective {
             .values()
             .max()
             .cloned()
-            .or(self.assumed_size);
+            .or(parsed.assumed_size);
 
-        Ok(ListSizeDirective {
+        Ok(Self {
             expected_size,
-            sized_fields: self
+            sized_fields: parsed
                 .sized_fields
                 .as_ref()
                 .map(|set| set.iter().map(|s| s.as_str()).collect()),
         })
+    }
+
+    pub(in crate::plugins::demand_control) fn size_of(&self, field: &Field) -> Option<i32> {
+        if self
+            .sized_fields
+            .as_ref()
+            .is_some_and(|sf| sf.contains(field.name.as_str()))
+        {
+            self.expected_size
+        } else {
+            None
+        }
     }
 }
 
@@ -265,7 +122,7 @@ impl RequiresDirective {
         let requires_arg = definition
             .directives
             .get("join__field")
-            .and_then(|requires| requires.argument_by_name("requires"))
+            .and_then(|requires| requires.specified_argument_by_name("requires"))
             .and_then(|arg| arg.as_str());
 
         if let Some(arg) = requires_arg {
@@ -292,7 +149,7 @@ impl SkipDirective {
         let directive = field
             .directives
             .get("skip")
-            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|skip| skip.specified_argument_by_name("if"))
             .and_then(|arg| arg.to_bool())
             .map(|cond| Self { is_skipped: cond });
 

@@ -1,0 +1,28 @@
+---
+title: Router Resource Estimator
+subtitle: Estimate the system resources to allocate for the GraphOS Router
+description: Estimate the system resources you need to allocate for the Apollo GraphOS Router to run production traffic.
+published: 2023-12-15
+id: TN0045
+toc: false
+tags: [router]
+redirectFrom:
+  - /technotes/TN0045-router_resource_estimator/
+---
+
+import RouterResourceEstimator from '../../components/TechNotes/RouterResourceEstimator';
+
+The _router resource estimator_ estimates the system resources you need to allocate for the GraphOS Router to run production traffic. The resource estimator can help you get a starting baseline that you can then iterate on.
+
+## Usage
+
+To use the estimator:
+
+1. Enter your estimated **request rate per second** and **peak request rate per second**.
+2. Adjust the other parameters to match your estimated production load.
+   - When selecting the **number of instances**, select fewer for efficiency, more for safety.
+3. Be sure to test and iterate.
+
+## Router resource estimator
+
+<RouterResourceEstimator />

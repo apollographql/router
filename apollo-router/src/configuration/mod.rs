@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
+pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
@@ -51,8 +53,6 @@ use crate::plugins::limits;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
-use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
@@ -162,10 +162,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the Apollo usage report signature and referenced field generation implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
-
     /// Set the query planner implementation to use.
     #[serde(default)]
     pub(crate) experimental_query_planner_mode: QueryPlannerMode,
@@ -201,21 +197,6 @@ impl PartialEq for Configuration {
     }
 }
 
-/// Apollo usage report signature and referenced field generation modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum ApolloMetricsGenerationMode {
-    /// Use the new Rust-based implementation.
-    #[default]
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
-    Both,
-}
-
 /// Query planner modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
@@ -243,8 +224,11 @@ pub(crate) enum QueryPlannerMode {
     /// Falls back to `legacy` with a warning
     /// if the the new planner does not support the schema
     /// (such as using legacy Apollo Federation 1)
-    #[default]
     BothBestEffort,
+    /// Use the new Rust-based implementation but fall back to the legacy one
+    /// for supergraph schemas composed with legacy Apollo Federation 1.
+    #[default]
+    NewBestEffort,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -272,7 +256,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
-            experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
             experimental_query_planner_mode: QueryPlannerMode,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -299,8 +282,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             persisted_queries: ad_hoc.persisted_queries,
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
-            experimental_apollo_metrics_generation_mode: ad_hoc
-                .experimental_apollo_metrics_generation_mode,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
             plugins: ad_hoc.plugins,
@@ -348,7 +329,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
-        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
@@ -364,8 +344,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_apollo_metrics_generation_mode:
-                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -438,6 +416,35 @@ impl Configuration {
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
         }
     }
+
+    pub(crate) fn rust_query_planner_config(
+        &self,
+    ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+        use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
+
+        let max_evaluated_plans = self
+            .supergraph
+            .query_planning
+            .experimental_plans_limit
+            // Fails if experimental_plans_limit is zero; use our default.
+            .and_then(NonZeroU32::new)
+            .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
+
+        QueryPlannerConfig {
+            subgraph_graphql_validation: false,
+            generate_query_fragments: self.supergraph.generate_query_fragments,
+            incremental_delivery: QueryPlanIncrementalDeliveryConfig {
+                enable_defer: self.supergraph.defer_support,
+            },
+            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+            debug: QueryPlannerDebugConfig {
+                max_evaluated_plans,
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            },
+        }
+    }
 }
 
 impl Default for Configuration {
@@ -468,7 +475,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
-        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -480,8 +486,6 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_apollo_metrics_generation_mode:
-                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -505,6 +509,14 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        #[cfg(not(feature = "hyper_header_limits"))]
+        if self.limits.http1_max_request_headers.is_some() {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "'limits.http1_max_request_headers' requires 'hyper_header_limits' feature",
+                error: "enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'".to_string(),
+            });
+        }
+
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
@@ -581,53 +593,6 @@ impl Configuration {
                     error: "either set persisted_queries.log_unknown: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
             }
-        }
-
-        if self.experimental_query_planner_mode == QueryPlannerMode::New
-            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
-        {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
-                error: "either change to some other query planner mode, or change to new metrics generation".into()
-            });
-        }
-
-        let apollo_telemetry_config = match self.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<crate::plugins::telemetry::config::Conf>(
-                    telemetry_config.clone(),
-                ) {
-                    Ok(conf) => Some(conf.apollo),
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-
-        if let Some(config) = apollo_telemetry_config {
-            if matches!(
-                config.experimental_apollo_signature_normalization_algorithm,
-                ApolloSignatureNormalizationAlgorithm::Enhanced
-            ) && self.experimental_apollo_metrics_generation_mode
-                != ApolloMetricsGenerationMode::New
-            {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
-                    error: "either change to the legacy signature normalization mode, or change to new metrics generation".into()
-                });
-            }
-
-            if matches!(
-                config.experimental_apollo_metrics_reference_mode,
-                ApolloMetricsReferenceMode::Extended
-            ) && self.experimental_apollo_metrics_generation_mode
-                != ApolloMetricsGenerationMode::New
-            {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`",
-                    error: "either change to the standard reference generation mode, or change to new metrics generation".into()
-                });
-            };
         }
 
         Ok(self)
@@ -736,12 +701,13 @@ pub(crate) struct Supergraph {
     pub(crate) introspection: bool,
 
     /// Enable reuse of query fragments
-    /// Default: depends on the federation version
+    /// This feature is deprecated and will be removed in next release.
+    /// The config can only be set when the legacy query planner is explicitly enabled.
     #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: Option<bool>,
 
     /// Enable QP generation of fragments for subgraph requests
-    /// Default: false
+    /// Default: true
     pub(crate) generate_query_fragments: bool,
 
     /// Set to false to disable defer support
@@ -759,6 +725,10 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+}
+
+const fn default_generate_query_fragments() -> bool {
+    true
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -813,7 +783,8 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -850,7 +821,8 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -935,7 +907,7 @@ impl Default for Apq {
 }
 
 /// Query planning cache configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -976,32 +948,6 @@ pub(crate) struct QueryPlanning {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
     pub(crate) experimental_parallelism: AvailableParallelism,
-
-    /// Activates introspection response caching
-    /// Historically, the Router has executed introspection queries in the query planner, and cached their
-    /// response in its cache because they were expensive. This will change soon as introspection will be
-    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
-    /// the cache, this option can be used to deactivate it.
-    /// Default: true
-    pub(crate) legacy_introspection_caching: bool,
-}
-
-impl Default for QueryPlanning {
-    fn default() -> Self {
-        Self {
-            cache: QueryPlanCache::default(),
-            warmed_up_queries: Default::default(),
-            experimental_plans_limit: Default::default(),
-            experimental_parallelism: Default::default(),
-            experimental_paths_limit: Default::default(),
-            experimental_reuse_query_plans: Default::default(),
-            legacy_introspection_caching: default_legacy_introspection_caching(),
-        }
-    }
-}
-
-const fn default_legacy_introspection_caching() -> bool {
-    true
 }
 
 impl QueryPlanning {
@@ -1062,11 +1008,19 @@ pub(crate) struct QueryPlanRedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_query_planner_cache_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_query_plan_cache_ttl() -> Duration {
     // Default TTL set to 30 days
     Duration::from_secs(86400 * 30)
+}
+
+fn default_query_planner_cache_pool_size() -> u32 {
+    1
 }
 
 /// Cache configuration
@@ -1140,10 +1094,18 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_required_to_start() -> bool {
     false
+}
+
+fn default_pool_size() -> u32 {
+    1
 }
 
 impl From<QueryPlanRedisCache> for RedisCache {
@@ -1158,6 +1120,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             tls: value.tls,
             required_to_start: value.required_to_start,
             reset_ttl: value.reset_ttl,
+            pool_size: value.pool_size,
         }
     }
 }

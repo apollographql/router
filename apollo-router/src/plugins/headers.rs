@@ -396,19 +396,20 @@ impl<S> HeadersService<S> {
                     rename,
                     default,
                 }) => {
-                    if !already_propagated.contains(named.as_str()) {
+                    let target_header = rename.as_ref().unwrap_or(named);
+                    if !already_propagated.contains(target_header.as_str()) {
                         let headers = req.subgraph_request.headers_mut();
                         let values = req.supergraph_request.headers().get_all(named);
                         if values.iter().count() == 0 {
                             if let Some(default) = default {
-                                headers.append(rename.as_ref().unwrap_or(named), default.clone());
+                                headers.append(target_header, default.clone());
                             }
                         } else {
                             for value in values {
-                                headers.append(rename.as_ref().unwrap_or(named), value.clone());
+                                headers.append(target_header, value.clone());
                             }
                         }
-                        already_propagated.insert(named.as_str());
+                        already_propagated.insert(target_header.as_str());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
@@ -454,6 +455,7 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use subgraph::SubgraphRequestId;
     use tower::BoxError;
 
     use super::*;
@@ -787,6 +789,49 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_propagate_multiple() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("ra", "vda"),
+                    ("rb", "vda"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("rb".try_into()?),
+                    default: None,
+                }),
+                // This should not take effect as the header is already propagated
+                Operation::Propagate(Propagate::Named {
+                    named: "db".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+            ]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_propagate_exact_default() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
         mock.expect_call()
@@ -863,6 +908,7 @@ mod test {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
+            id: SubgraphRequestId(String::new()),
         };
         service.modify_request(&mut request);
         let headers = request
@@ -935,6 +981,7 @@ mod test {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
+            id: SubgraphRequestId(String::new()),
         };
         service.modify_request(&mut request);
         let headers = request
@@ -956,6 +1003,7 @@ mod test {
             http::Response::default(),
             Context::new(),
             req.subgraph_name.unwrap_or_default(),
+            SubgraphRequestId(String::new()),
         ))
     }
 
@@ -998,6 +1046,7 @@ mod test {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
+            id: SubgraphRequestId(String::new()),
         }
     }
 

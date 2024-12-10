@@ -1,13 +1,13 @@
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
 use crate::graphql::Response;
+use crate::json_ext::Object;
 
 pub(crate) trait ResponseVisitor {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
+        variables: &Object,
         _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -15,11 +15,17 @@ pub(crate) trait ResponseVisitor {
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_list_item(request, field.ty().inner_named_type(), field, item);
+                    self.visit_list_item(
+                        request,
+                        variables,
+                        field.ty().inner_named_type(),
+                        field,
+                        item,
+                    );
                 }
             }
             Value::Object(children) => {
-                self.visit_selections(request, &field.selection_set, children);
+                self.visit_selections(request, variables, &field.selection_set, children);
             }
             _ => {}
         }
@@ -28,6 +34,7 @@ pub(crate) trait ResponseVisitor {
     fn visit_list_item(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
+        variables: &Object,
         _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -35,17 +42,22 @@ pub(crate) trait ResponseVisitor {
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_list_item(request, _ty, field, item);
+                    self.visit_list_item(request, variables, _ty, field, item);
                 }
             }
             Value::Object(children) => {
-                self.visit_selections(request, &field.selection_set, children);
+                self.visit_selections(request, variables, &field.selection_set, children);
             }
             _ => {}
         }
     }
 
-    fn visit(&mut self, request: &apollo_compiler::ExecutableDocument, response: &Response) {
+    fn visit(
+        &mut self,
+        request: &apollo_compiler::ExecutableDocument,
+        response: &Response,
+        variables: &Object,
+    ) {
         if response.path.is_some() {
             // TODO: In this case, we need to find the selection inside `request` corresponding to the path so we can start zipping.
             // Exiting here means any implementing visitor will not operate on deffered responses.
@@ -54,10 +66,10 @@ pub(crate) trait ResponseVisitor {
 
         if let Some(Value::Object(children)) = &response.data {
             if let Some(operation) = &request.operations.anonymous {
-                self.visit_selections(request, &operation.selection_set, children);
+                self.visit_selections(request, variables, &operation.selection_set, children);
             }
             for operation in request.operations.named.values() {
-                self.visit_selections(request, &operation.selection_set, children);
+                self.visit_selections(request, variables, &operation.selection_set, children);
             }
         }
     }
@@ -65,30 +77,35 @@ pub(crate) trait ResponseVisitor {
     fn visit_selections(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
+        variables: &Object,
         selection_set: &apollo_compiler::executable::SelectionSet,
-        fields: &Map<ByteString, Value>,
+        fields: &Object,
     ) {
         for selection in &selection_set.selections {
             match selection {
                 apollo_compiler::executable::Selection::Field(inner_field) => {
                     if let Some(value) = fields.get(inner_field.name.as_str()) {
-                        self.visit_field(request, &selection_set.ty, inner_field.as_ref(), value);
-                    } else {
-                        tracing::warn!("The response did not include a field corresponding to query field {:?}", inner_field);
+                        self.visit_field(
+                            request,
+                            variables,
+                            &selection_set.ty,
+                            inner_field.as_ref(),
+                            value,
+                        );
                     }
                 }
                 apollo_compiler::executable::Selection::FragmentSpread(fragment_spread) => {
                     if let Some(fragment) = fragment_spread.fragment_def(request) {
-                        self.visit_selections(request, &fragment.selection_set, fields);
-                    } else {
-                        tracing::warn!(
-                            "The fragment {} was not found in the query document.",
-                            fragment_spread.fragment_name
-                        );
+                        self.visit_selections(request, variables, &fragment.selection_set, fields);
                     }
                 }
                 apollo_compiler::executable::Selection::InlineFragment(inline_fragment) => {
-                    self.visit_selections(request, &inline_fragment.selection_set, fields);
+                    self.visit_selections(
+                        request,
+                        variables,
+                        &inline_fragment.selection_set,
+                        fields,
+                    );
                 }
             }
         }
@@ -121,7 +138,7 @@ mod tests {
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
-        visitor.visit(&request, &response);
+        visitor.visit(&request, &response, &Default::default());
         insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
@@ -136,7 +153,7 @@ mod tests {
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
-        visitor.visit(&request, &response);
+        visitor.visit(&request, &response, &Default::default());
         insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
@@ -151,7 +168,7 @@ mod tests {
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
-        visitor.visit(&request, &response);
+        visitor.visit(&request, &response, &Default::default());
         insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
@@ -166,7 +183,7 @@ mod tests {
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
-        visitor.visit(&request, &response);
+        visitor.visit(&request, &response, &Default::default());
         insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
@@ -186,6 +203,7 @@ mod tests {
         fn visit_field(
             &mut self,
             request: &ExecutableDocument,
+            variables: &Object,
             _ty: &apollo_compiler::executable::NamedType,
             field: &apollo_compiler::executable::Field,
             value: &Value,
@@ -195,11 +213,17 @@ mod tests {
             match value {
                 Value::Array(items) => {
                     for item in items {
-                        self.visit_list_item(request, field.ty().inner_named_type(), field, item);
+                        self.visit_list_item(
+                            request,
+                            variables,
+                            field.ty().inner_named_type(),
+                            field,
+                            item,
+                        );
                     }
                 }
                 Value::Object(children) => {
-                    self.visit_selections(request, &field.selection_set, children);
+                    self.visit_selections(request, variables, &field.selection_set, children);
                 }
                 _ => {}
             }

@@ -1,3 +1,9 @@
+#![allow(dead_code)]
+// NOTE: There are several (technically) unused fields, type aliases, and methods in this module.
+// Unfortunely, there is not a good way to clean this up because of how `` it is used for testing.
+// Rather than littering this module with `#[allow(dead_code)]`s or adding a config_atr to the
+// crate wide directive, allowing dead code here seems like the best options
+
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
@@ -20,8 +26,6 @@ use apollo_compiler::Node;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::link::spec::Version;
-use crate::link::spec_definition::SpecDefinition;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -37,16 +41,16 @@ use crate::schema::FederationSchema;
 /// Schema-dependent argument specification
 #[derive(Clone)]
 pub(crate) struct ArgumentSpecification {
-    pub name: Name,
+    pub(crate) name: Name,
     // PORT_NOTE: In TS, get_type returns `InputType`.
-    pub get_type: fn(schema: &FederationSchema) -> Result<Type, SingleFederationError>,
-    pub default_value: Option<Value>,
+    pub(crate) get_type: fn(schema: &FederationSchema) -> Result<Type, SingleFederationError>,
+    pub(crate) default_value: Option<Value>,
 }
 
 /// The resolved version of `ArgumentSpecification`
 pub(crate) struct ResolvedArgumentSpecification {
-    pub name: Name,
-    pub ty: Type,
+    pub(crate) name: Name,
+    pub(crate) ty: Type,
     default_value: Option<Value>,
 }
 
@@ -66,9 +70,9 @@ impl From<&ResolvedArgumentSpecification> for InputValueDefinition {
 }
 
 pub(crate) struct FieldSpecification {
-    pub name: Name,
-    pub ty: Type,
-    pub arguments: Vec<ResolvedArgumentSpecification>,
+    pub(crate) name: Name,
+    pub(crate) ty: Type,
+    pub(crate) arguments: Vec<ResolvedArgumentSpecification>,
 }
 
 impl From<&FieldSpecification> for FieldDefinition {
@@ -96,7 +100,7 @@ pub(crate) trait TypeAndDirectiveSpecification {
 }
 
 pub(crate) struct ScalarTypeSpecification {
-    pub name: Name, // Type's name
+    pub(crate) name: Name, // Type's name
 }
 
 impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
@@ -123,8 +127,8 @@ impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
 }
 
 pub(crate) struct ObjectTypeSpecification {
-    pub name: Name,
-    pub fields: fn(&FederationSchema) -> Vec<FieldSpecification>,
+    pub(crate) name: Name,
+    pub(crate) fields: fn(&FederationSchema) -> Vec<FieldSpecification>,
 }
 
 impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
@@ -174,8 +178,8 @@ pub(crate) struct UnionTypeSpecification<F>
 where
     F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
 {
-    pub name: Name,
-    pub members: F,
+    pub(crate) name: Name,
+    pub(crate) members: F,
 }
 
 impl<F> TypeAndDirectiveSpecification for UnionTypeSpecification<F>
@@ -241,13 +245,13 @@ where
 }
 
 pub(crate) struct EnumValueSpecification {
-    pub name: Name,
-    pub description: Option<String>,
+    pub(crate) name: Name,
+    pub(crate) description: Option<String>,
 }
 
 pub(crate) struct EnumTypeSpecification {
-    pub name: Name,
-    pub values: Vec<EnumValueSpecification>,
+    pub(crate) name: Name,
+    pub(crate) values: Vec<EnumValueSpecification>,
 }
 
 impl TypeAndDirectiveSpecification for EnumTypeSpecification {
@@ -322,29 +326,32 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
 
 #[derive(Clone)]
 pub(crate) struct DirectiveArgumentSpecification {
-    pub base_spec: ArgumentSpecification,
-    pub composition_strategy: Option<ArgumentCompositionStrategy>,
+    pub(crate) base_spec: ArgumentSpecification,
+    pub(crate) composition_strategy: Option<ArgumentCompositionStrategy>,
 }
 
 type ArgumentMergerFn = dyn Fn(&str, &[Value]) -> Value;
 
 pub(crate) struct ArgumentMerger {
-    pub merge: Box<ArgumentMergerFn>,
-    pub to_string: Box<dyn Fn() -> String>,
+    pub(crate) merge: Box<ArgumentMergerFn>,
+    pub(crate) to_string: Box<dyn Fn() -> String>,
 }
 
 type ArgumentMergerFactory =
     dyn Fn(&FederationSchema) -> Result<ArgumentMerger, SingleFederationError>;
 
 pub(crate) struct DirectiveCompositionSpecification {
-    pub supergraph_specification: fn(federation_version: Version) -> Box<dyn SpecDefinition>,
+    pub(crate) supergraph_specification:
+        fn(
+            federation_version: crate::link::spec::Version,
+        ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
     /// Factory function returning an actual argument merger for given federation schema.
-    pub argument_merger: Option<Box<ArgumentMergerFactory>>,
+    pub(crate) argument_merger: Option<Box<ArgumentMergerFactory>>,
 }
 
 pub(crate) struct DirectiveSpecification {
-    pub name: Name,
-    pub composition: Option<DirectiveCompositionSpecification>,
+    pub(crate) name: Name,
+    pub(crate) composition: Option<DirectiveCompositionSpecification>,
     args: Vec<DirectiveArgumentSpecification>,
     repeatable: bool,
     locations: Vec<DirectiveLocation>,
@@ -354,14 +361,16 @@ pub(crate) struct DirectiveSpecification {
 // composition.
 // https://apollographql.atlassian.net/browse/FED-172
 impl DirectiveSpecification {
-    pub fn new(
+    pub(crate) fn new(
         name: Name,
         args: &[DirectiveArgumentSpecification],
         repeatable: bool,
         locations: &[DirectiveLocation],
         composes: bool,
         supergraph_specification: Option<
-            fn(federation_version: Version) -> Box<dyn SpecDefinition>,
+            fn(
+                federation_version: crate::link::spec::Version,
+            ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
         >,
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;

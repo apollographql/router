@@ -19,6 +19,7 @@ mod execution;
 pub(crate) mod fetch;
 mod labeler;
 mod plan;
+pub(crate) mod plan_compare;
 pub(crate) mod rewrites;
 mod selection;
 mod subgraph_context;

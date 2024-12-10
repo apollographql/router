@@ -1,4 +1,5 @@
 //! Router errors.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::validation::DiagnosticList;
@@ -25,6 +26,11 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
+
+/// Return up to this many GraphQL parsing or validation errors.
+///
+/// Any remaining errors get silently dropped.
+const MAX_VALIDATION_ERRORS: usize = 100;
 
 /// Error types for execution.
 ///
@@ -310,8 +316,60 @@ pub(crate) enum QueryPlannerError {
     PoolProcessing(String),
 
     /// Federation error: {0}
-    // TODO: make `FederationError` serializable and store it as-is?
-    FederationError(String),
+    FederationError(FederationErrorBridge),
+}
+
+impl From<FederationErrorBridge> for QueryPlannerError {
+    fn from(value: FederationErrorBridge) -> Self {
+        Self::FederationError(value)
+    }
+}
+
+/// A temporary error type used to extract a few variants from `apollo-federation`'s
+/// `FederationError`. For backwards compatability, these other variant need to be extracted so
+/// that the correct status code (GRAPHQL_VALIDATION_ERROR) can be added to the response. For
+/// router 2.0, apollo-federation should split its error type into internal and external types.
+/// When this happens, this temp type should be replaced with that type.
+// TODO(@TylerBloom): See the comment above
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+pub(crate) enum FederationErrorBridge {
+    /// {0}
+    UnknownOperation(String),
+    /// {0}
+    OperationNameNotProvided(String),
+    /// {0}
+    Other(String),
+}
+
+impl From<FederationError> for FederationErrorBridge {
+    fn from(value: FederationError) -> Self {
+        match &value {
+            err @ FederationError::SingleFederationError(
+                apollo_federation::error::SingleFederationError::UnknownOperation,
+            ) => Self::UnknownOperation(err.to_string()),
+            err @ FederationError::SingleFederationError(
+                apollo_federation::error::SingleFederationError::OperationNameNotProvided,
+            ) => Self::OperationNameNotProvided(err.to_string()),
+            err => Self::Other(err.to_string()),
+        }
+    }
+}
+
+impl IntoGraphQLErrors for FederationErrorBridge {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        match self {
+            FederationErrorBridge::UnknownOperation(msg) => Ok(vec![Error::builder()
+                .message(msg)
+                .extension_code("GRAPHQL_VALIDATION_FAILED")
+                .build()]),
+            FederationErrorBridge::OperationNameNotProvided(msg) => Ok(vec![Error::builder()
+                .message(msg)
+                .extension_code("GRAPHQL_VALIDATION_FAILED")
+                .build()]),
+            // All other errors will be pushed on and be treated as internal server errors
+            err => Err(err),
+        }
+    }
 }
 
 impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
@@ -333,6 +391,7 @@ impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect())
     }
 }
@@ -401,7 +460,23 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 );
                 Ok(errors)
             }
+            QueryPlannerError::FederationError(err) => err
+                .into_graphql_errors()
+                .map_err(QueryPlannerError::FederationError),
             err => Err(err),
+        }
+    }
+}
+
+impl QueryPlannerError {
+    pub(crate) fn usage_reporting(&self) -> Option<UsageReporting> {
+        match self {
+            QueryPlannerError::PlanningErrors(pe) => Some(pe.usage_reporting.clone()),
+            QueryPlannerError::SpecError(e) => Some(UsageReporting {
+                stats_report_key: e.get_error_key().to_string(),
+                referenced_fields_by_type: HashMap::new(),
+            }),
+            _ => None,
         }
     }
 }
@@ -554,7 +629,7 @@ pub(crate) enum SchemaError {
     /// GraphQL validation error: {0}
     Validate(ValidationErrors),
     /// Federation error: {0}
-    FederationError(apollo_federation::error::FederationError),
+    FederationError(FederationError),
     /// Api error(s): {0}
     #[from(ignore)]
     Api(String),
@@ -605,6 +680,7 @@ impl IntoGraphQLErrors for ParseErrors {
                     .extension_code("GRAPHQL_PARSING_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect())
     }
 }
@@ -635,6 +711,7 @@ impl ValidationErrors {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
+            .take(MAX_VALIDATION_ERRORS)
             .collect()
     }
 }
@@ -647,7 +724,11 @@ impl IntoGraphQLErrors for ValidationErrors {
 impl From<DiagnosticList> for ValidationErrors {
     fn from(errors: DiagnosticList) -> Self {
         Self {
-            errors: errors.iter().map(|e| e.unstable_to_json_compat()).collect(),
+            errors: errors
+                .iter()
+                .map(|e| e.unstable_to_json_compat())
+                .take(MAX_VALIDATION_ERRORS)
+                .collect(),
         }
     }
 }

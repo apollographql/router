@@ -176,7 +176,7 @@ impl<'a> TestHarness<'a> {
             ),
         };
 
-        self.extra_plugins.push((name, Box::new(plugin)));
+        self.extra_plugins.push((name, plugin.into()));
         self
     }
 
@@ -283,6 +283,7 @@ impl<'a> TestHarness<'a> {
                     let empty_response = subgraph::Response::builder()
                         .extensions(crate::json_ext::Object::new())
                         .context(request.context)
+                        .id(request.id)
                         .build();
                     std::future::ready(Ok(empty_response))
                 })

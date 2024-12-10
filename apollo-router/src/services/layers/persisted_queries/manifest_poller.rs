@@ -21,8 +21,25 @@ use crate::uplink::stream_from_uplink_transforming_new_response;
 use crate::uplink::UplinkConfig;
 use crate::Configuration;
 
+/// The full identifier for an operation in a PQ list consists of an operation
+/// ID and an optional client name.
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+pub struct FullPersistedQueryOperationId {
+    /// The operation ID (usually a hash).
+    pub operation_id: String,
+    /// The client name associated with the operation; if None, can be any client.
+    pub client_name: Option<String>,
+}
+
 /// An in memory cache of persisted queries.
-pub(crate) type PersistedQueryManifest = HashMap<String, String>;
+pub type PersistedQueryManifest = HashMap<FullPersistedQueryOperationId, String>;
+
+/// Describes whether the router should allow or deny a given request.
+/// with an error, or allow it but log the operation as unknown.
+pub(crate) struct FreeformGraphQLAction {
+    pub(crate) should_allow: bool,
+    pub(crate) should_log: bool,
+}
 
 /// How the router should respond to requests that are not resolved as the IDs
 /// of an operation in the manifest. (For the most part this means "requests
@@ -48,49 +65,43 @@ pub(crate) enum FreeformGraphQLBehavior {
     },
 }
 
-/// Describes what the router should do for a given request: allow it, deny it
-/// with an error, or allow it but log the operation as unknown.
-pub(crate) enum FreeformGraphQLAction {
-    Allow,
-    Deny,
-    AllowAndLog,
-    DenyAndLog,
-}
-
 impl FreeformGraphQLBehavior {
     fn action_for_freeform_graphql(
         &self,
         ast: Result<&ast::Document, &str>,
     ) -> FreeformGraphQLAction {
         match self {
-            FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction::Allow,
+            FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction {
+                should_allow: true,
+                should_log: false,
+            },
             // Note that this branch doesn't get called in practice, because we catch
             // DenyAll at an earlier phase with never_allows_freeform_graphql.
-            FreeformGraphQLBehavior::DenyAll { log_unknown, .. } => {
-                if *log_unknown {
-                    FreeformGraphQLAction::DenyAndLog
-                } else {
-                    FreeformGraphQLAction::Deny
-                }
-            }
+            FreeformGraphQLBehavior::DenyAll { log_unknown, .. } => FreeformGraphQLAction {
+                should_allow: false,
+                should_log: *log_unknown,
+            },
             FreeformGraphQLBehavior::AllowIfInSafelist {
                 safelist,
                 log_unknown,
                 ..
             } => {
                 if safelist.is_allowed(ast) {
-                    FreeformGraphQLAction::Allow
-                } else if *log_unknown {
-                    FreeformGraphQLAction::DenyAndLog
+                    FreeformGraphQLAction {
+                        should_allow: true,
+                        should_log: false,
+                    }
                 } else {
-                    FreeformGraphQLAction::Deny
+                    FreeformGraphQLAction {
+                        should_allow: false,
+                        should_log: *log_unknown,
+                    }
                 }
             }
             FreeformGraphQLBehavior::LogUnlessInSafelist { safelist, .. } => {
-                if safelist.is_allowed(ast) {
-                    FreeformGraphQLAction::Allow
-                } else {
-                    FreeformGraphQLAction::AllowAndLog
+                FreeformGraphQLAction {
+                    should_allow: true,
+                    should_log: !safelist.is_allowed(ast),
                 }
             }
         }
@@ -212,7 +223,7 @@ impl PersistedQueryManifestPoller {
             if manifest_files.is_empty() {
                 return Err("no local persisted query list files specified".into());
             }
-            let mut manifest: HashMap<String, String> = PersistedQueryManifest::new();
+            let mut manifest = PersistedQueryManifest::new();
 
             for local_pq_list in manifest_files {
                 tracing::info!(
@@ -250,7 +261,13 @@ impl PersistedQueryManifestPoller {
                 }
 
                 for operation in manifest_file.operations {
-                    manifest.insert(operation.id, operation.body);
+                    manifest.insert(
+                        FullPersistedQueryOperationId {
+                            operation_id: operation.id,
+                            client_name: operation.client_name,
+                        },
+                        operation.body,
+                    );
                 }
             }
 
@@ -343,15 +360,35 @@ impl PersistedQueryManifestPoller {
         }
     }
 
-    pub(crate) fn get_operation_body(&self, persisted_query_id: &str) -> Option<String> {
+    pub(crate) fn get_operation_body(
+        &self,
+        persisted_query_id: &str,
+        client_name: Option<String>,
+    ) -> Option<String> {
         let state = self
             .state
             .read()
             .expect("could not acquire read lock on persisted query manifest state");
-        state
+        if let Some(body) = state
             .persisted_query_manifest
-            .get(persisted_query_id)
+            .get(&FullPersistedQueryOperationId {
+                operation_id: persisted_query_id.to_string(),
+                client_name: client_name.clone(),
+            })
             .cloned()
+        {
+            Some(body)
+        } else if client_name.is_some() {
+            state
+                .persisted_query_manifest
+                .get(&FullPersistedQueryOperationId {
+                    operation_id: persisted_query_id.to_string(),
+                    client_name: None,
+                })
+                .cloned()
+        } else {
+            None
+        }
     }
 
     pub(crate) fn get_all_operations(&self) -> Vec<String> {
@@ -588,7 +625,13 @@ async fn add_chunk_to_operations(
         match fetch_chunk(http_client.clone(), chunk_url).await {
             Ok(chunk) => {
                 for operation in chunk.operations {
-                    operations.insert(operation.id, operation.body);
+                    operations.insert(
+                        FullPersistedQueryOperationId {
+                            operation_id: operation.id,
+                            client_name: operation.client_name,
+                        },
+                        operation.body,
+                    );
                 }
                 return Ok(());
             }
@@ -674,9 +717,11 @@ pub(crate) struct SignedUrlChunk {
 
 /// A single operation containing an ID and a body,
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Operation {
     pub(crate) id: String,
     pub(crate) body: String,
+    pub(crate) client_name: Option<String>,
 }
 
 #[cfg(test)]
@@ -686,7 +731,6 @@ mod tests {
     use super::*;
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
-    use crate::configuration::PersistedQueriesSafelist;
     use crate::test_harness::mocks::persisted_queries::*;
     use crate::uplink::Endpoints;
 
@@ -702,7 +746,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(manifest_manager.get_operation_body(&id), Some(body))
+        assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body))
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -735,18 +779,26 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(manifest_manager.get_operation_body(&id), Some(body))
+        assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body))
     }
 
     #[test]
     fn safelist_body_normalization() {
-        let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from([(
-            "valid-syntax".to_string(),
-            "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah"
-                .to_string(),
-        ), (
-            "invalid-syntax".to_string(),
-            "}}}".to_string()),
+        let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from([
+            (
+                FullPersistedQueryOperationId {
+                    operation_id: "valid-syntax".to_string(),
+                    client_name: None,
+                },
+                "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah".to_string(),
+            ),
+            (
+                FullPersistedQueryOperationId {
+                    operation_id: "invalid-syntax".to_string(),
+                    client_name: None,
+                },
+                "}}}".to_string(),
+            ),
         ]));
 
         let is_allowed = |body: &str| -> bool {
@@ -783,20 +835,19 @@ mod tests {
         let manifest_manager = PersistedQueryManifestPoller::new(
             Configuration::fake_builder()
                 .apq(Apq::fake_new(Some(false)))
-                .persisted_query(PersistedQueries::new(
-                    Some(true),
-                    Some(false),
-                    Some(PersistedQueriesSafelist::default()),
-                    Some(false),
-                    Some(vec![
-                        "tests/fixtures/persisted-queries-manifest.json".to_string()
-                    ]),
-                ))
+                .persisted_query(
+                    PersistedQueries::builder()
+                        .enabled(true)
+                        .experimental_local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        ])
+                        .build(),
+                )
                 .build()
                 .unwrap(),
         )
         .await
         .unwrap();
-        assert_eq!(manifest_manager.get_operation_body(&id), Some(body))
+        assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body))
     }
 }

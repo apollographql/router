@@ -7,6 +7,7 @@ use serde_json_bytes::path::JsonPathInst;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
+use super::attributes::SubgraphRequestResendCountKey;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -14,7 +15,6 @@ use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
-use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::cost::CostValue;
@@ -124,6 +124,17 @@ pub(crate) enum RouterSelector {
     RequestMethod {
         /// The request method enabled or not
         request_method: bool,
+    },
+    /// A value from context.
+    RequestContext {
+        /// The request context key.
+        request_context: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
     },
     /// A header from the response
     ResponseHeader {
@@ -516,6 +527,12 @@ pub(crate) enum SubgraphSelector {
         /// The subgraph http response status code.
         subgraph_response_status: ResponseStatus,
     },
+    SubgraphResendCount {
+        /// The subgraph http resend count
+        subgraph_resend_count: bool,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
     SupergraphOperationName {
         /// The supergraph query operation name.
         supergraph_operation_name: OperationName,
@@ -661,6 +678,16 @@ impl Selector for RouterSelector {
             RouterSelector::RequestMethod { request_method } if *request_method => {
                 Some(request.router_request.method().to_string().into())
             }
+            RouterSelector::RequestContext {
+                request_context,
+                default,
+                ..
+            } => request
+                .context
+                .get_json_value(request_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::RequestHeader {
                 request_header,
                 default,
@@ -812,6 +839,7 @@ impl Selector for RouterSelector {
                 matches!(
                     self,
                     RouterSelector::RequestHeader { .. }
+                        | RouterSelector::RequestContext { .. }
                         | RouterSelector::RequestMethod { .. }
                         | RouterSelector::TraceId { .. }
                         | RouterSelector::StudioOperationId { .. }
@@ -1048,25 +1076,6 @@ impl Selector for SupergraphSelector {
         ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
-            SupergraphSelector::Query { query, .. } => {
-                let limits_opt = ctx
-                    .extensions()
-                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
-                match query {
-                    Query::Aliases => {
-                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
-                    }
-                    Query::Depth => {
-                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
-                    }
-                    Query::Height => {
-                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
-                    }
-                    Query::RootFields => limits_opt
-                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
-                    Query::String => None,
-                }
-            }
             SupergraphSelector::ResponseData {
                 response_data,
                 default,
@@ -1090,14 +1099,28 @@ impl Selector for SupergraphSelector {
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::Cost { cost } => ctx.extensions().with_lock(|lock| {
-                lock.get::<CostContext>().map(|cost_result| match cost {
-                    CostValue::Estimated => cost_result.estimated.into(),
-                    CostValue::Actual => cost_result.actual.into(),
-                    CostValue::Delta => cost_result.delta().into(),
-                    CostValue::Result => cost_result.result.into(),
-                })
-            }),
+            SupergraphSelector::Cost { cost } => match cost {
+                CostValue::Estimated => ctx
+                    .get_estimated_cost()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Actual => ctx
+                    .get_actual_cost()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Delta => ctx
+                    .get_cost_delta()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Result => ctx
+                    .get_cost_result()
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+            },
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
                 if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
                     == Some(serde_json_bytes::Value::Bool(true))
@@ -1561,6 +1584,18 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::OnGraphQLError {
                 subgraph_on_graphql_error: on_graphql_error,
             } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
+            SubgraphSelector::SubgraphResendCount {
+                subgraph_resend_count,
+                default,
+            } if *subgraph_resend_count => {
+                response
+                    .context
+                    .get::<_, usize>(SubgraphRequestResendCountKey::new(&response.id))
+                    .ok()
+                    .flatten()
+                    .map(|v| opentelemetry::Value::from(v as i64))
+            }
+            .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::Cache { cache, entity_type } => {
@@ -1755,12 +1790,14 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SubgraphQuery;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphRequestResendCountKey;
     use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::spec::operation_limits::OperationLimits;
 
@@ -1840,6 +1877,98 @@ mod test {
             None
         );
     }
+
+    #[test]
+    fn router_request_context() {
+        let selector = RouterSelector::RequestContext {
+            request_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn router_response_context() {
+        let selector = RouterSelector::ResponseContext {
+            response_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_request(
+                &crate::services::RouterRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
     #[test]
     fn router_response_header() {
         let selector = RouterSelector::ResponseHeader {
@@ -2167,55 +2296,6 @@ mod test {
     }
 
     #[test]
-    fn router_response_context() {
-        let selector = RouterSelector::ResponseContext {
-            response_context: "context_key".to_string(),
-            redact: None,
-            default: Some("defaulted".into()),
-        };
-        let context = crate::context::Context::new();
-        let _ = context.insert("context_key".to_string(), "context_value".to_string());
-        assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::RouterResponse::fake_builder()
-                        .context(context.clone())
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
-            "context_value".into()
-        );
-
-        assert_eq!(
-            selector
-                .on_error(&BoxError::from(String::from("my error")), &context)
-                .unwrap(),
-            "context_value".into()
-        );
-
-        assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::RouterResponse::fake_builder()
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
-            "defaulted".into()
-        );
-        assert_eq!(
-            selector.on_request(
-                &crate::services::RouterRequest::fake_builder()
-                    .context(context)
-                    .build()
-                    .unwrap()
-            ),
-            None
-        );
-    }
-
-    #[test]
     fn supergraph_request_context() {
         let selector = SupergraphSelector::RequestContext {
             request_context: "context_key".to_string(),
@@ -2415,6 +2495,41 @@ mod test {
                     .build()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn subgraph_resend_count() {
+        let selector = SubgraphSelector::SubgraphResendCount {
+            subgraph_resend_count: true,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        let subgraph_req_id = SubgraphRequestId(String::from("test"));
+        let _ = context.insert(SubgraphRequestResendCountKey::new(&subgraph_req_id), 2usize);
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context.clone())
+                        .id(subgraph_req_id)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            2i64.into()
         );
     }
 
@@ -3208,12 +3323,6 @@ mod test {
                         .build()
                         .unwrap()
                 )
-                .unwrap(),
-            4.into()
-        );
-        assert_eq!(
-            selector
-                .on_response_event(&crate::graphql::Response::builder().build(), &context)
                 .unwrap(),
             4.into()
         );

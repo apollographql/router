@@ -62,14 +62,14 @@ expression: "serde_json::to_value(response).unwrap()"
               "variableUsages": [
                 "first"
               ],
-              "operation": "query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}",
+              "operation": "query TopProducts__products__0($first: Int) { topProducts(first: $first) { __typename upc name } }",
               "operationName": "TopProducts__products__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "39cac6386a951cd4dbdfc9c91d7d24cc1061481ab03b72c483422446e09cba32",
+              "schemaAwareHash": "45b4beebcbf1df72ab950db7bd278417712b1aa39119317f44ad5b425bdb6997",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -102,14 +102,14 @@ expression: "serde_json::to_value(response).unwrap()"
                   }
                 ],
                 "variableUsages": [],
-                "operation": "query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}",
+                "operation": "query TopProducts__reviews__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { id product { __typename upc } author { __typename id } } } } }",
                 "operationName": "TopProducts__reviews__1",
                 "operationKind": "query",
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "ee6ac550117eed7d8fcaf66c83fd5177bf03a9d5761f484e2664ea4e66149127",
+                "schemaAwareHash": "645f3f8763133d2376e33ab3d1145be7ded0ccc8e94e20aba1fbaa34a51633da",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -120,50 +120,6 @@ expression: "serde_json::to_value(response).unwrap()"
             {
               "kind": "Parallel",
               "nodes": [
-                {
-                  "kind": "Flatten",
-                  "path": [
-                    "topProducts",
-                    "@",
-                    "reviews",
-                    "@",
-                    "product"
-                  ],
-                  "node": {
-                    "kind": "Fetch",
-                    "serviceName": "products",
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "Product",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "upc"
-                          }
-                        ]
-                      }
-                    ],
-                    "variableUsages": [],
-                    "operation": "query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}",
-                    "operationName": "TopProducts__products__2",
-                    "operationKind": "query",
-                    "id": null,
-                    "inputRewrites": null,
-                    "outputRewrites": null,
-                    "contextRewrites": null,
-                    "schemaAwareHash": "76d400fc6a494cbe05a44751923e570ee31928f0fb035ea36c14d4d6f4545482",
-                    "authorization": {
-                      "is_authenticated": false,
-                      "scopes": [],
-                      "policies": []
-                    }
-                  }
-                },
                 {
                   "kind": "Flatten",
                   "path": [
@@ -193,14 +149,58 @@ expression: "serde_json::to_value(response).unwrap()"
                       }
                     ],
                     "variableUsages": [],
-                    "operation": "query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
-                    "operationName": "TopProducts__accounts__3",
+                    "operation": "query TopProducts__accounts__2($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                    "operationName": "TopProducts__accounts__2",
                     "operationKind": "query",
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "66c61f60e730b77cd0a58908fee01dc7a0742c47e9f847037e01297d37918821",
+                    "schemaAwareHash": "a79f69245d777abc4afbd7d0a8fc434137fa4fd1079ef082edf4c7746b5a0fcd",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                },
+                {
+                  "kind": "Flatten",
+                  "path": [
+                    "topProducts",
+                    "@",
+                    "reviews",
+                    "@",
+                    "product"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "products",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "Product",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "upc"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [],
+                    "operation": "query TopProducts__products__3($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { name } } }",
+                    "operationName": "TopProducts__products__3",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "contextRewrites": null,
+                    "schemaAwareHash": "5ad94764f288a41312e07745510bf5dade2b63fb82c3d896f7d00408dbbe5cce",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -213,7 +213,7 @@ expression: "serde_json::to_value(response).unwrap()"
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"products\") {\n      {\n        topProducts(first: $first) {\n          __typename\n          upc\n          name\n        }\n      }\n    },\n    Flatten(path: \"topProducts.@\") {\n      Fetch(service: \"reviews\") {\n        {\n          ... on Product {\n            __typename\n            upc\n          }\n        } =>\n        {\n          ... on Product {\n            reviews {\n              id\n              product {\n                __typename\n                upc\n              }\n              author {\n                __typename\n                id\n              }\n            }\n          }\n        }\n      },\n    },\n    Parallel {\n      Flatten(path: \"topProducts.@.reviews.@.product\") {\n        Fetch(service: \"products\") {\n          {\n            ... on Product {\n              __typename\n              upc\n            }\n          } =>\n          {\n            ... on Product {\n              name\n            }\n          }\n        },\n      },\n      Flatten(path: \"topProducts.@.reviews.@.author\") {\n        Fetch(service: \"accounts\") {\n          {\n            ... on User {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on User {\n              name\n            }\n          }\n        },\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"products\") {\n      {\n        topProducts(first: $first) {\n          __typename\n          upc\n          name\n        }\n      }\n    },\n    Flatten(path: \"topProducts.@\") {\n      Fetch(service: \"reviews\") {\n        {\n          ... on Product {\n            __typename\n            upc\n          }\n        } =>\n        {\n          ... on Product {\n            reviews {\n              id\n              product {\n                __typename\n                upc\n              }\n              author {\n                __typename\n                id\n              }\n            }\n          }\n        }\n      },\n    },\n    Parallel {\n      Flatten(path: \"topProducts.@.reviews.@.author\") {\n        Fetch(service: \"accounts\") {\n          {\n            ... on User {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on User {\n              name\n            }\n          }\n        },\n      },\n      Flatten(path: \"topProducts.@.reviews.@.product\") {\n        Fetch(service: \"products\") {\n          {\n            ... on Product {\n              __typename\n              upc\n            }\n          } =>\n          {\n            ... on Product {\n              name\n            }\n          }\n        },\n      },\n    },\n  },\n}"
     }
   }
 }

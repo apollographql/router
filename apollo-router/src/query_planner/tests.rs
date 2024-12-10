@@ -575,34 +575,7 @@ async fn defer_if_condition() {
 
 #[tokio::test]
 async fn dependent_mutations() {
-    let schema = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1"),
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-      {
-        query: Query
-        mutation: Mutation
-      }
-
-      directive @core(feature: String!) repeatable on SCHEMA
-      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-      directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-      directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-      scalar join__FieldSet
-
-      enum join__Graph {
-        A @join__graph(name: "A" url: "http://localhost:4001")
-        B @join__graph(name: "B" url: "http://localhost:4004")
-      }
-
-      type Mutation {
-          mutationA: Mutation @join__field(graph: A)
-          mutationB: Boolean @join__field(graph: B)
-      }
-
-      type Query {
-          query: Boolean @join__field(graph: A)
-      }"#;
+    let schema = include_str!("../testdata/a_b_supergraph.graphql");
 
     let query_plan: QueryPlan = QueryPlan {
         // generated from:
@@ -848,7 +821,13 @@ async fn alias_renaming() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1291,7 +1270,13 @@ async fn missing_typename_and_fragments_in_requires2() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1578,7 +1563,13 @@ async fn typename_propagation() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)
@@ -1675,7 +1666,13 @@ async fn typename_propagation2() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)
@@ -1773,7 +1770,13 @@ async fn typename_propagation3() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(TYPENAME_PROPAGATION_SCHEMA)
         .extra_plugin(subgraphs)

@@ -13,29 +13,21 @@
 
 use std::sync::Arc;
 
-use apollo_compiler::executable::Directive;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::name;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
-
-use crate::link::database::links_metadata;
-use crate::link::spec::Identity;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
-use crate::link::Link;
 
 // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
 // to define the ground work for that in `apollo-at-link` first.
-pub fn federation_link_identity() -> Identity {
-    Identity {
-        domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: name!("federation"),
+#[cfg(test)]
+pub(crate) fn federation_link_identity() -> crate::link::spec::Identity {
+    crate::link::spec::Identity {
+        domain: crate::link::spec::APOLLO_SPEC_DOMAIN.to_string(),
+        name: apollo_compiler::name!("federation"),
     }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct Key {
-    pub type_name: Name,
+pub(crate) struct Key {
+    pub(crate) type_name: apollo_compiler::Name,
     // TODO: this should _not_ be an Option below; but we don't know how to build the SelectionSet,
     // so until we have a solution, we use None to have code that compiles.
     selections: Option<Arc<SelectionSet>>,
@@ -45,13 +37,14 @@ impl Key {
     // TODO: same remark as above: not meant to be `Option`
     // TODO remove suppression OR use method in final version
     #[allow(dead_code)]
-    pub fn selections(&self) -> Option<Arc<SelectionSet>> {
+    pub(crate) fn selections(&self) -> Option<Arc<SelectionSet>> {
         self.selections.clone()
     }
 
+    #[cfg(test)]
     pub(crate) fn from_directive_application(
-        type_name: &Name,
-        directive: &Directive,
+        type_name: &apollo_compiler::Name,
+        directive: &apollo_compiler::executable::Directive,
     ) -> Option<Key> {
         directive
             .arguments
@@ -66,8 +59,9 @@ impl Key {
     }
 }
 
-pub fn federation_link(schema: &Schema) -> Arc<Link> {
-    links_metadata(schema)
+#[cfg(test)]
+pub(crate) fn federation_link(schema: &apollo_compiler::Schema) -> Arc<crate::link::Link> {
+    crate::link::database::links_metadata(schema)
         // TODO: error handling?
         .unwrap_or_default()
         .unwrap_or_default()
@@ -78,11 +72,16 @@ pub fn federation_link(schema: &Schema) -> Arc<Link> {
 /// The name of the @key directive in this subgraph.
 /// This will either return 'federation__key' if the `@key` directive is not imported,
 /// or whatever never it is imported under otherwise. Commonly, this would just be `key`.
-pub fn key_directive_name(schema: &Schema) -> Name {
-    federation_link(schema).directive_name_in_schema(&name!("key"))
+#[cfg(test)]
+pub(crate) fn key_directive_name(schema: &apollo_compiler::Schema) -> apollo_compiler::Name {
+    federation_link(schema).directive_name_in_schema(&apollo_compiler::name!("key"))
 }
 
-pub fn keys(schema: &Schema, type_name: &Name) -> Vec<Key> {
+#[cfg(test)]
+pub(crate) fn keys(
+    schema: &apollo_compiler::Schema,
+    type_name: &apollo_compiler::Name,
+) -> Vec<Key> {
     let key_name = key_directive_name(schema);
     if let Some(type_def) = schema.types.get(type_name) {
         type_def

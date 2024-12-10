@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
@@ -9,10 +10,15 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::attributes::StandardAttribute;
 use super::instruments::Increment;
 use super::instruments::StaticInstrument;
+use crate::graphql;
 use crate::metrics;
-use crate::plugins::demand_control::CostContext;
+use crate::plugins::demand_control::COST_ACTUAL_KEY;
+use crate::plugins::demand_control::COST_DELTA_KEY;
+use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+use crate::plugins::demand_control::COST_RESULT_KEY;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -37,38 +43,32 @@ pub(crate) const APOLLO_PRIVATE_COST_STRATEGY: Key =
 pub(crate) const APOLLO_PRIVATE_COST_RESULT: Key =
     Key::from_static_str("apollo_private.cost.result");
 
-static COST_ESTIMATED: &str = "cost.estimated";
-static COST_ACTUAL: &str = "cost.actual";
-static COST_DELTA: &str = "cost.delta";
-
 /// Attributes for Cost
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphCostAttributes {
     /// The estimated cost of the operation using the currently configured cost model
     #[serde(rename = "cost.estimated")]
-    cost_estimated: Option<bool>,
+    cost_estimated: Option<StandardAttribute>,
     /// The actual cost of the operation using the currently configured cost model
     #[serde(rename = "cost.actual")]
-    cost_actual: Option<bool>,
+    cost_actual: Option<StandardAttribute>,
     /// The delta (estimated - actual) cost of the operation using the currently configured cost model
     #[serde(rename = "cost.delta")]
-    cost_delta: Option<bool>,
+    cost_delta: Option<StandardAttribute>,
     /// The cost result, this is an error code returned by the cost calculation or COST_OK
     #[serde(rename = "cost.result")]
-    cost_result: Option<bool>,
+    cost_result: Option<StandardAttribute>,
 }
 
-impl Selectors for SupergraphCostAttributes {
-    type Request = supergraph::Request;
-    type Response = supergraph::Response;
-    type EventResponse = crate::graphql::Response;
-
-    fn on_request(&self, _request: &Self::Request) -> Vec<KeyValue> {
+impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Response>
+    for SupergraphCostAttributes
+{
+    fn on_request(&self, _request: &supergraph::Request) -> Vec<KeyValue> {
         Vec::default()
     }
 
-    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, _response: &supergraph::Response) -> Vec<KeyValue> {
         Vec::default()
     }
 
@@ -76,26 +76,63 @@ impl Selectors for SupergraphCostAttributes {
         Vec::default()
     }
 
-    fn on_response_event(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_event(
+        &self,
+        _response: &crate::graphql::Response,
+        ctx: &Context,
+    ) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
-        let cost_result = ctx
-            .extensions()
-            .with_lock(|lock| lock.get::<CostContext>().cloned());
-        if let Some(cost_result) = cost_result {
-            if let Some(true) = self.cost_estimated {
-                attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
-            }
-            if let Some(true) = self.cost_actual {
-                attrs.push(KeyValue::new("cost.actual", cost_result.actual));
-            }
-            if let Some(true) = self.cost_delta {
-                attrs.push(KeyValue::new("cost.delta", cost_result.delta()));
-            }
-            if let Some(true) = self.cost_result {
-                attrs.push(KeyValue::new("cost.result", cost_result.result));
-            }
+        if let Some(estimated_cost) = self.estimated_cost_if_configured(ctx) {
+            attrs.push(estimated_cost);
+        }
+        if let Some(actual_cost) = self.actual_cost_if_configured(ctx) {
+            attrs.push(actual_cost);
+        }
+        if let Some(cost_delta) = self.cost_delta_if_configured(ctx) {
+            attrs.push(cost_delta);
+        }
+        if let Some(cost_result) = self.cost_result_if_configured(ctx) {
+            attrs.push(cost_result);
         }
         attrs
+    }
+}
+
+impl SupergraphCostAttributes {
+    fn estimated_cost_if_configured(&self, ctx: &Context) -> Option<KeyValue> {
+        let key = self
+            .cost_estimated
+            .as_ref()?
+            .key(Key::from_static_str(COST_ESTIMATED_KEY))?;
+        let value = ctx.get_estimated_cost().ok()??;
+        Some(KeyValue::new(key, value))
+    }
+
+    fn actual_cost_if_configured(&self, ctx: &Context) -> Option<KeyValue> {
+        let key = self
+            .cost_actual
+            .as_ref()?
+            .key(Key::from_static_str(COST_ACTUAL_KEY))?;
+        let value = ctx.get_actual_cost().ok()??;
+        Some(KeyValue::new(key, value))
+    }
+
+    fn cost_delta_if_configured(&self, ctx: &Context) -> Option<KeyValue> {
+        let key = self
+            .cost_delta
+            .as_ref()?
+            .key(Key::from_static_str("cost.delta"))?;
+        let value = ctx.get_cost_delta().ok()??;
+        Some(KeyValue::new(key, value))
+    }
+
+    fn cost_result_if_configured(&self, ctx: &Context) -> Option<KeyValue> {
+        let key = self
+            .cost_result
+            .as_ref()?
+            .key(Key::from_static_str(COST_RESULT_KEY))?;
+        let value = ctx.get_cost_result().ok()??;
+        Some(KeyValue::new(key, value))
     }
 }
 
@@ -122,14 +159,14 @@ impl CostInstrumentsConfig {
             .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
 
         [(
-            COST_ESTIMATED.to_string(),
-            StaticInstrument::Histogram(meter.f64_histogram(COST_ESTIMATED).with_description("Estimated cost of the operation using the currently configured cost model").init()),
+            COST_ESTIMATED_KEY.to_string(),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_ESTIMATED_KEY).with_description("Estimated cost of the operation using the currently configured cost model").init()),
         ),(
-            COST_ACTUAL.to_string(),
-            StaticInstrument::Histogram(meter.f64_histogram(COST_ACTUAL).with_description("Actual cost of the operation using the currently configured cost model").init()),
+            COST_ACTUAL_KEY.to_string(),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_ACTUAL_KEY).with_description("Actual cost of the operation using the currently configured cost model").init()),
         ),(
-            COST_DELTA.to_string(),
-            StaticInstrument::Histogram(meter.f64_histogram(COST_DELTA).with_description("Delta between the estimated and actual cost of the operation using the currently configured cost model").init()),
+            COST_DELTA_KEY.to_string(),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_DELTA_KEY).with_description("Delta between the estimated and actual cost of the operation using the currently configured cost model").init()),
         )]
         .into_iter()
         .collect()
@@ -141,7 +178,7 @@ impl CostInstrumentsConfig {
     ) -> CostInstruments {
         let cost_estimated = self.cost_estimated.is_enabled().then(|| {
             Self::histogram(
-                COST_ESTIMATED,
+                COST_ESTIMATED_KEY,
                 &self.cost_estimated,
                 SupergraphSelector::Cost {
                     cost: CostValue::Estimated,
@@ -152,7 +189,7 @@ impl CostInstrumentsConfig {
 
         let cost_actual = self.cost_actual.is_enabled().then(|| {
             Self::histogram(
-                COST_ACTUAL,
+                COST_ACTUAL_KEY,
                 &self.cost_actual,
                 SupergraphSelector::Cost {
                     cost: CostValue::Actual,
@@ -163,7 +200,7 @@ impl CostInstrumentsConfig {
 
         let cost_delta = self.cost_delta.is_enabled().then(|| {
             Self::histogram(
-                COST_DELTA,
+                COST_DELTA_KEY,
                 &self.cost_delta,
                 SupergraphSelector::Cost {
                     cost: CostValue::Delta,
@@ -183,7 +220,13 @@ impl CostInstrumentsConfig {
         config: &DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
         selector: SupergraphSelector,
         static_instruments: &Arc<HashMap<String, StaticInstrument>>,
-    ) -> CustomHistogram<Request, Response, SupergraphAttributes, SupergraphSelector> {
+    ) -> CustomHistogram<
+        Request,
+        Response,
+        graphql::Response,
+        SupergraphAttributes,
+        SupergraphSelector,
+    > {
         let mut nb_attributes = 0;
         let selectors = match config {
             DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
@@ -208,6 +251,7 @@ impl CostInstrumentsConfig {
                 selector: Some(Arc::new(selector)),
                 selectors,
                 updated: false,
+                _phantom: PhantomData,
             }),
         }
     }
@@ -221,6 +265,7 @@ pub(crate) struct CostInstruments {
         CustomHistogram<
             supergraph::Request,
             supergraph::Response,
+            crate::graphql::Response,
             SupergraphAttributes,
             SupergraphSelector,
         >,
@@ -231,6 +276,7 @@ pub(crate) struct CostInstruments {
         CustomHistogram<
             supergraph::Request,
             supergraph::Response,
+            crate::graphql::Response,
             SupergraphAttributes,
             SupergraphSelector,
         >,
@@ -240,6 +286,7 @@ pub(crate) struct CostInstruments {
         CustomHistogram<
             supergraph::Request,
             supergraph::Response,
+            crate::graphql::Response,
             SupergraphAttributes,
             SupergraphSelector,
         >,
@@ -314,26 +361,30 @@ pub(crate) enum CostValue {
 }
 
 pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
-    context.extensions().with_lock(|c| {
-        if let Some(cost) = c.get::<CostContext>() {
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_ESTIMATED.clone(),
-                AttributeValue::F64(cost.estimated),
-            ));
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_ACTUAL.clone(),
-                AttributeValue::F64(cost.actual),
-            ));
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_RESULT.clone(),
-                AttributeValue::String(cost.result.into()),
-            ));
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_STRATEGY.clone(),
-                AttributeValue::String(cost.strategy.into()),
-            ));
-        }
-    });
+    if let Ok(Some(cost)) = context.get_estimated_cost() {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_ESTIMATED.clone(),
+            AttributeValue::F64(cost),
+        ));
+    }
+    if let Ok(Some(cost)) = context.get_actual_cost() {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_ACTUAL.clone(),
+            AttributeValue::F64(cost),
+        ));
+    }
+    if let Ok(Some(result)) = context.get_cost_result() {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_RESULT.clone(),
+            AttributeValue::String(result),
+        ));
+    }
+    if let Ok(Some(strategy)) = context.get_cost_strategy() {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_STRATEGY.clone(),
+            AttributeValue::String(strategy),
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -341,7 +392,6 @@ mod test {
     use std::sync::Arc;
 
     use crate::context::OPERATION_NAME;
-    use crate::plugins::demand_control::CostContext;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
     use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -446,13 +496,11 @@ mod test {
 
     fn make_request(instruments: &CostInstruments) {
         let context = Context::new();
-        context.extensions().with_lock(|mut lock| {
-            lock.insert(CostContext::default());
-            let cost_result = lock.get_or_default_mut::<CostContext>();
-            cost_result.estimated = 100.0;
-            cost_result.actual = 10.0;
-            cost_result.result = "COST_TOO_EXPENSIVE"
-        });
+        context.insert_estimated_cost(100.0).unwrap();
+        context.insert_actual_cost(10.0).unwrap();
+        context
+            .insert_cost_result("COST_TOO_EXPENSIVE".to_string())
+            .unwrap();
         let _ = context.insert(OPERATION_NAME, "Test".to_string()).unwrap();
         instruments.on_request(
             &supergraph::Request::fake_builder()

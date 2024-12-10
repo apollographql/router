@@ -1,13 +1,13 @@
-directive @tag(name: String!) repeatable on
-  | FIELD_DEFINITION
-  | INTERFACE
-  | OBJECT
-  | UNION
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.3"
+    import: ["@key", "@external", "@requires"]
+  )
 
-extend type Product @key(fields: "upc") {
-  upc: String! @external
+type Product @key(fields: "upc") {
+  upc: String!
   weight: Int @external
   price: Int @external
-  inStock: Boolean @tag(name: "private")
+  inStock: Boolean
   shippingEstimate: Int @requires(fields: "price weight")
 }

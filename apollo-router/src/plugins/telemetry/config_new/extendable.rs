@@ -181,16 +181,13 @@ where
     }
 }
 
-impl<A, E, Request, Response, EventResponse> Selectors for Extendable<A, E>
+impl<A, E, Request, Response, EventResponse> Selectors<Request, Response, EventResponse>
+    for Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    A: Default + Selectors<Request, Response, EventResponse>,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
-    type Request = Request;
-    type Response = Response;
-    type EventResponse = EventResponse;
-
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -202,7 +199,7 @@ where
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_response(response);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -226,7 +223,7 @@ where
         attrs
     }
 
-    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_event(&self, response: &EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_response_event(response, ctx);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -258,7 +255,7 @@ where
 
 impl<A, E, Request, Response, EventResponse> Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    A: Default + Selectors<Request, Response, EventResponse>,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
@@ -283,6 +280,7 @@ mod test {
     use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
     use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
     use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
+    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -312,8 +310,8 @@ mod test {
             extendable_conf.attributes,
             SupergraphAttributes {
                 graphql_document: None,
-                graphql_operation_name: Some(true),
-                graphql_operation_type: Some(true),
+                graphql_operation_name: Some(StandardAttribute::Bool(true)),
+                graphql_operation_type: Some(StandardAttribute::Bool(true)),
                 cost: Default::default()
             }
         );
@@ -384,12 +382,12 @@ mod test {
                 trace_id: None,
                 baggage: None,
                 common: HttpCommonAttributes {
-                    http_request_method: Some(true),
-                    http_response_status_code: Some(true),
+                    http_request_method: Some(StandardAttribute::Bool(true)),
+                    http_response_status_code: Some(StandardAttribute::Bool(true)),
                     ..Default::default()
                 },
                 server: HttpServerAttributes {
-                    url_path: Some(true),
+                    url_path: Some(StandardAttribute::Bool(true)),
                     ..Default::default()
                 }
             }

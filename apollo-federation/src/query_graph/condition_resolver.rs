@@ -3,15 +3,34 @@
 //            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
+use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
+use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
+
+#[derive(Debug, Clone)]
+pub(crate) struct ContextMapEntry {
+    pub(crate) levels_in_data_path: usize,
+    pub(crate) levels_in_query_path: usize,
+    pub(crate) path_tree: Option<Arc<OpPathTree>>,
+    pub(crate) selection_set: SelectionSet,
+    // PORT_NOTE: This field was renamed from the JS name (`paramName`) to better align with naming
+    // in ContextCondition.
+    pub(crate) argument_name: Name,
+    // PORT_NOTE: This field was renamed from the JS name (`argType`) to better align with naming in
+    // ContextCondition.
+    pub(crate) argument_type: Node<Type>,
+    pub(crate) context_id: Name,
+}
 
 /// Note that `ConditionResolver`s are guaranteed to be only called for edge with conditions.
 pub(crate) trait ConditionResolver {
@@ -21,6 +40,7 @@ pub(crate) trait ConditionResolver {
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
     ) -> Result<ConditionResolution, FederationError>;
 }
 
@@ -29,8 +49,11 @@ pub(crate) enum ConditionResolution {
     Satisfied {
         cost: QueryPlanCost,
         path_tree: Option<Arc<OpPathTree>>,
+        context_map: Option<IndexMap<Name, ContextMapEntry>>,
     },
     Unsatisfied {
+        // NOTE: This seems to be a false positive...
+        #[allow(dead_code)]
         reason: Option<UnsatisfiedConditionReason>,
     },
 }
@@ -38,6 +61,7 @@ pub(crate) enum ConditionResolution {
 #[derive(Debug, Clone)]
 pub(crate) enum UnsatisfiedConditionReason {
     NoPostRequireKey,
+    NoSetContext,
 }
 
 impl ConditionResolution {
@@ -45,6 +69,7 @@ impl ConditionResolution {
         Self::Satisfied {
             cost: 0.0,
             path_tree: None,
+            context_map: None,
         }
     }
 
@@ -53,7 +78,7 @@ impl ConditionResolution {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::IsVariant)]
 pub(crate) enum ConditionResolutionCacheResult {
     /// Cache hit.
     Hit(ConditionResolution),
@@ -61,20 +86,6 @@ pub(crate) enum ConditionResolutionCacheResult {
     Miss,
     /// The value can't be cached; Or, an incompatible value is already in cache.
     NotApplicable,
-}
-
-impl ConditionResolutionCacheResult {
-    pub(crate) fn is_hit(&self) -> bool {
-        matches!(self, Self::Hit(_))
-    }
-
-    pub(crate) fn is_miss(&self) -> bool {
-        matches!(self, Self::Miss)
-    }
-
-    pub(crate) fn is_not_applicable(&self) -> bool {
-        matches!(self, Self::NotApplicable)
-    }
 }
 
 pub(crate) struct ConditionResolverCache {
@@ -103,7 +114,11 @@ impl ConditionResolverCache {
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
     ) -> ConditionResolutionCacheResult {
+        if extra_conditions.is_some() {
+            return ConditionResolutionCacheResult::NotApplicable;
+        }
         // We don't cache if there is a context or excluded conditions because those would impact the resolution and
         // we don't want to cache a value per-context and per-excluded-conditions (we also don't cache per-excluded-edges though
         // instead we cache a value only for the first-see excluded edges; see above why that work in practice).
@@ -162,7 +177,8 @@ mod tests {
                 edge1,
                 &empty_context,
                 &empty_destinations,
-                &empty_conditions
+                &empty_conditions,
+                None
             )
             .is_miss());
 
@@ -177,9 +193,10 @@ mod tests {
                 edge1,
                 &empty_context,
                 &empty_destinations,
-                &empty_conditions
+                &empty_conditions,
+                None
             )
-            .is_hit());
+            .is_hit(),);
 
         let edge2 = EdgeIndex::new(2);
 
@@ -188,7 +205,8 @@ mod tests {
                 edge2,
                 &empty_context,
                 &empty_destinations,
-                &empty_conditions
+                &empty_conditions,
+                None
             )
             .is_miss());
     }

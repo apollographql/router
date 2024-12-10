@@ -437,7 +437,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = AuthenticatedVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             dry_run,
         ) {
@@ -475,7 +474,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = ScopeFilteringVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             scopes.iter().cloned().collect(),
             dry_run,
@@ -510,7 +508,6 @@ impl AuthorizationPlugin {
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
         if let Some(mut visitor) = PolicyFilteringVisitor::new(
             schema.supergraph_schema(),
-            doc,
             &schema.implementers_map,
             policies.iter().cloned().collect(),
             dry_run,
@@ -559,8 +556,10 @@ impl Plugin for AuthorizationPlugin {
                         Ok(ControlFlow::Continue(request))
                     } else {
                         // This is a metric and will not appear in the logs
-                        tracing::info!(
-                            monotonic_counter.apollo_require_authentication_failure_count = 1u64,
+                        u64_counter!(
+                            "apollo_require_authentication_failure_count",
+                            "Number of unauthenticated requests (deprecated)",
+                            1
                         );
                         tracing::error!("rejecting unauthenticated request");
                         let response = supergraph::Response::error_builder()
@@ -591,11 +590,13 @@ impl Plugin for AuthorizationPlugin {
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
 
                 if needs_authenticated || needs_requires_scopes {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.authorization = 1u64,
+                    u64_counter!(
+                        "apollo.router.operations.authorization",
+                        "Number of subgraph requests requiring authorization",
+                        1,
                         authorization.filtered = filtered,
                         authorization.needs_authenticated = needs_authenticated,
-                        authorization.needs_requires_scopes = needs_requires_scopes,
+                        authorization.needs_requires_scopes = needs_requires_scopes
                     );
                 }
 

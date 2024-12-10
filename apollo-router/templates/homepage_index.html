@@ -41,7 +41,7 @@
                 <h1>Welcome to the Apollo Router</h1>
                 <p>It appears that you might be offline. POST to this endpoint to query your graph:</p>
             </div>
-            <script>window.landingPage = `{"isProd": true, "footer": false, "graphRef": {% if graph_ref.is_empty() %}null{% else %}"{{ graph_ref }}"{% endif %} }`;</script>
+            <script>window.landingPage = `{"isProd": true, "footer": false, "graphRef": {{GRAPH_REF}} }`;</script>
             <script src="https://apollo-server-landing-page.cdn.apollographql.com/_latest/static/js/main.js"></script>
         </div>
     </body>

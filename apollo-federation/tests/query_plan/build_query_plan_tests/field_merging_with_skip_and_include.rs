@@ -146,7 +146,7 @@ fn merging_skip_and_include_directives_multiple_applications_differing_order() {
               hello: Hello!
               extraFieldToPreventSkipIncludeNodes: String!
           }
-    
+
           type Hello {
               world: String!
               goodbye: String!
@@ -222,6 +222,88 @@ fn merging_skip_and_include_directives_multiple_applications_differing_quantity(
                 }
                 extraFieldToPreventSkipIncludeNodes
               }
+            },
+          }
+        "###
+    );
+}
+
+#[test]
+fn fields_are_not_overwritten_when_directives_are_removed() {
+    let planner = planner!(
+        SubgraphSkip: r#"
+          type Query {
+            foo: Foo
+          }
+
+          type Foo {
+            bar: Bar
+          }
+
+          type Bar {
+            things: String
+            name: String
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query Test($b: Boolean!) {
+            foo @include(if: $b) {
+              bar {
+                name
+              }
+              bar @include(if: $b) {
+                things
+              }
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Include(if: $b) {
+              Fetch(service: "SubgraphSkip") {
+                {
+                  foo {
+                    bar {
+                      name
+                      things
+                    }
+                  }
+                }
+              },
+            },
+          }
+        "###
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query Test($b: Boolean!) {
+            foo @skip(if: $b) {
+              bar {
+                name
+              }
+              bar @skip(if: $b) {
+                things
+              }
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Skip(if: $b) {
+              Fetch(service: "SubgraphSkip") {
+                {
+                  foo {
+                    bar {
+                      name
+                      things
+                    }
+                  }
+                }
+              },
             },
           }
         "###

@@ -67,7 +67,7 @@ pub(crate) struct Config {
     #[schemars(skip)]
     pub(crate) apollo_graph_ref: Option<String>,
 
-    /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
+    /// The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_name_header: HeaderName,
@@ -107,11 +107,10 @@ pub(crate) struct Config {
     pub(crate) errors: ErrorsConfiguration,
 
     /// Set the signature normalization algorithm to use when sending Apollo usage reports.
-    pub(crate) experimental_apollo_signature_normalization_algorithm:
-        ApolloSignatureNormalizationAlgorithm,
+    pub(crate) signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
 
     /// Set the Apollo usage report reference reporting mode to use.
-    pub(crate) experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
+    pub(crate) metrics_reference_mode: ApolloMetricsReferenceMode,
 
     /// Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.
     pub(crate) experimental_local_field_metrics: bool,
@@ -215,10 +214,9 @@ impl Default for Config {
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
             errors: ErrorsConfiguration::default(),
-            experimental_apollo_signature_normalization_algorithm:
-                ApolloSignatureNormalizationAlgorithm::default(),
+            signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
-            experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode::default(),
+            metrics_reference_mode: ApolloMetricsReferenceMode::default(),
         }
     }
 }

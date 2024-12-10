@@ -1,0 +1,107 @@
+---
+title: Health Checks
+subtitle: Determining the router's status
+description: Learn how to run health checks to determine whether an Apollo GraphOS Router or Apollo Router Core is available and ready to start serving traffic.
+---
+
+Health checks are often used by load balancers to determine whether a server is available and ready to start serving traffic.
+
+GraphOS Router and Apollo Router Core support a basic HTTP-level health check. This is enabled by default and is served on port `8088` at the URL path `/health`. This returns a `200` status code if the HTTP server is successfully serving.
+You can change this by setting `health_check`:
+```yaml title="router.yaml"
+health_check:
+  listen: 127.0.0.1:8088
+  enabled: true
+  path: /health # Optional, default: /health
+```
+
+Each option is configurable. For example, we can set our health check endpoint to `127.0.0.1:8090/healthz`:
+
+```yaml title="router.yaml"
+health_check:
+  listen: 127.0.0.1:8090
+  enabled: true
+  path: /healthz
+```
+
+We can also disable the health check endpoint:
+
+```yaml title="router.yaml"
+health_check:
+  enabled: false
+```
+
+## Testing with `curl`
+
+The following example demonstrates using the `curl` command to send a basic health check query to a router instance running at `127.0.0.1:4000`:
+
+```sh
+$ curl -v "http://127.0.0.1:8088/health"
+*   Trying 127.0.0.1:8088...
+* Connected to 127.0.0.1 (127.0.0.1) port 8088 (#0)
+> GET /health HTTP/1.1
+> Host: 127.0.0.1:8088
+> User-Agent: curl/7.79.1
+> Accept: */*
+> 
+* Mark bundle as not supporting multiuse
+< HTTP/1.1 200 OK
+< vary: origin
+< content-type: application/json
+< content-length: 15
+< date: Wed, 21 Sep 2022 17:10:45 GMT
+< 
+* Connection #0 to host 127.0.0.1 left intact
+{"status":"UP"}
+```
+
+## Logging
+
+If you start the router with trace logging enabled, you will see a log from the router for each health check:
+
+```sh
+--log apollo_router=trace
+
+2023-01-23T17:42:04.640501Z apollo-router/src/axum_factory/axum_http_server_factory.rs:100 TRACE apollo_router::axum_factory::axum_http_server_factory: health check health=Health { status: Up } request=Request { method: GET, uri: /health, version: HTTP/1.1, headers: {"host": "127.0.0.1:8088", "user-agent": "curl/7.85.0", "accept": "*/*"}, body: Body(Empty) }
+
+```
+
+This may be helpful with confirming that health-checks are working correctly.
+
+## Using in a containers environment
+
+The health check listens to 127.0.0.1 by default, which won't allow connections issued from a network.
+While this is a safe default, *other containers won't be able to perform health checks*, which will prevent the router pod from switching to a healthy state.
+
+You can change this by setting `health_check`:
+```yaml title="router.yaml"
+health_check:
+  listen: 0.0.0.0:8088
+  enabled: true
+```
+
+## Using with Kubernetes
+In Kubernetes, you can configure health checks by setting `readinessProbe` and `livenessProbe` on the `containers` object of the resource definition:
+```yaml
+      # ... snipped for partial example ...
+      containers:
+        - name: router
+          # ... snipped for partial example ...
+          livenessProbe:
+            httpGet:
+              path: "/health"
+              port: 8088
+          readinessProbe:
+            httpGet:
+              path: "/health"
+              port: 8088
+          # ... snipped for partial example ...
+```
+See a more complete example in our [Kubernetes documentation](/router/containerization/kubernetes/).
+## Using with Docker
+Docker has a `HEALTHCHECK` instruction that tells Docker how to test whether a container is still working. These are defined in the `Dockerfile` when building your container:
+```
+HEALTHCHECK CMD curl --fail \
+  "http://127.0.0.1:8088/health" || exit 1
+```
+We don't define these in our example `Dockerfile`s, because they aren't commonly used. You can add them to your own images as needed.

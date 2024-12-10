@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Service;
+use tracing::Span;
 use tracing_futures::Instrument;
 
 use super::entity::Subgraph;
@@ -19,9 +20,14 @@ use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::cache::invalidation::InvalidationRequest;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::ListenAddr;
+
+pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
@@ -39,6 +45,20 @@ pub(crate) struct InvalidationEndpointConfig {
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
+    #[serde(default = "default_scan_count")]
+    /// Number of keys to return at once from a redis SCAN command
+    pub(crate) scan_count: u32,
+    #[serde(default = "concurrent_requests_count")]
+    /// Number of concurrent invalidation requests
+    pub(crate) concurrent_requests: u32,
+}
+
+fn default_scan_count() -> u32 {
+    1000
+}
+
+fn concurrent_requests_count() -> u32 {
+    10
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -82,12 +102,13 @@ impl Service<router::Request> for InvalidationService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        let mut invalidation = self.invalidation.clone();
+        let invalidation = self.invalidation.clone();
         let config = self.config.clone();
         Box::pin(
             async move {
                 let (parts, body) = req.router_request.into_parts();
                 if !parts.headers.contains_key(AUTHORIZATION) {
+                    Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                     return Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::UNAUTHORIZED)
@@ -100,6 +121,7 @@ impl Service<router::Request> for InvalidationService {
                     Method::POST => {
                         let body = Into::<RouterBody>::into(body)
                             .to_bytes()
+                            .instrument(tracing::info_span!("to_bytes"))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -116,14 +138,26 @@ impl Service<router::Request> for InvalidationService {
                             .headers
                             .get(AUTHORIZATION)
                             .ok_or("cannot find authorization header")?
-                            .to_str()?;
+                            .to_str()
+                            .inspect_err(|_err| {
+                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            })?;
                         match body {
                             Ok(body) => {
+                                Span::current().record(
+                                    "invalidation.request.kinds",
+                                    body.iter()
+                                        .map(|i| i.kind())
+                                        .collect::<Vec<&'static str>>()
+                                        .join(", "),
+                                );
                                 let valid_shared_key =
                                     body.iter().map(|b| b.subgraph_name()).any(|subgraph_name| {
                                         valid_shared_key(&config, shared_key, subgraph_name)
                                     });
                                 if !valid_shared_key {
+                                    Span::current()
+                                        .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::UNAUTHORIZED)
@@ -134,6 +168,7 @@ impl Service<router::Request> for InvalidationService {
                                 }
                                 match invalidation
                                     .invalidate(InvalidationOrigin::Endpoint, body)
+                                    .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {
                                     Ok(count) => Ok(router::Response {
@@ -148,34 +183,48 @@ impl Service<router::Request> for InvalidationService {
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     }),
-                                    Err(err) => Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::BAD_REQUEST)
-                                            .body(err.to_string().into())
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    }),
+                                    Err(err) => {
+                                        Span::current()
+                                            .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                        Ok(router::Response {
+                                            response: http::Response::builder()
+                                                .status(StatusCode::BAD_REQUEST)
+                                                .body(err.to_string().into())
+                                                .map_err(BoxError::from)?,
+                                            context: req.context,
+                                        })
+                                    }
                                 }
                             }
-                            Err(err) => Ok(router::Response {
-                                response: http::Response::builder()
-                                    .status(StatusCode::BAD_REQUEST)
-                                    .body(err.into())
-                                    .map_err(BoxError::from)?,
-                                context: req.context,
-                            }),
+                            Err(err) => {
+                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                Ok(router::Response {
+                                    response: http::Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(err.into())
+                                        .map_err(BoxError::from)?,
+                                    context: req.context,
+                                })
+                            }
                         }
                     }
-                    _ => Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body("".into())
-                            .map_err(BoxError::from)?,
-                        context: req.context,
-                    }),
+                    _ => {
+                        Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                        Ok(router::Response {
+                            response: http::Response::builder()
+                                .status(StatusCode::METHOD_NOT_ALLOWED)
+                                .body("".into())
+                                .map_err(BoxError::from)?,
+                            context: req.context,
+                        })
+                    }
                 }
             }
-            .instrument(tracing::info_span!("invalidation_endpoint")),
+            .instrument(tracing::info_span!(
+                INVALIDATION_ENDPOINT_SPAN_NAME,
+                "invalidation.request.kinds" = ::tracing::field::Empty,
+                "otel.status_code" = OTEL_STATUS_CODE_OK,
+            )),
         )
     }
 }
@@ -203,31 +252,24 @@ fn valid_shared_key(
 mod tests {
     use std::collections::HashMap;
 
-    use tokio::sync::broadcast::Sender;
-    use tokio_stream::StreamExt;
     use tower::ServiceExt;
 
     use super::*;
-    use crate::plugins::cache::invalidation::InvalidationError;
-    use crate::plugins::cache::invalidation::InvalidationTopic;
-    use crate::Notify;
+    use crate::cache::redis::RedisCacheStorage;
+    use crate::plugins::cache::entity::Storage;
+    use crate::plugins::cache::tests::MockStore;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
             .await
             .unwrap();
-        let invalidation = Invalidation { handle };
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await.unwrap();
+
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -264,163 +306,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_invalidation_service_good_sub_shared_key() {
-        #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
-            .await
-            .unwrap();
-        let h = handle.clone();
-
-        tokio::task::spawn(async move {
-            let mut handle = h.into_stream();
-            let mut called = false;
-            while let Some((requests, origin, response_tx)) = handle.next().await {
-                called = true;
-                if requests
-                    != [
-                        InvalidationRequest::Subgraph {
-                            subgraph: String::from("test"),
-                        },
-                        InvalidationRequest::Type {
-                            subgraph: String::from("test"),
-                            r#type: String::from("Test"),
-                        },
-                    ]
-                {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation requests : {requests:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                if origin != InvalidationOrigin::Endpoint {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation origin : {origin:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                response_tx.send(Ok(0)).unwrap();
-            }
-            assert!(called);
-        });
-
-        let invalidation = Invalidation {
-            handle: handle.clone(),
-        };
-        let config = Arc::new(SubgraphConfiguration {
-            all: Subgraph {
-                ttl: None,
-                enabled: true,
-                redis: None,
-                private_id: None,
-                invalidation: Some(SubgraphInvalidationConfig {
-                    enabled: true,
-                    shared_key: String::from("test"),
-                }),
-            },
-            subgraphs: [(
-                String::from("test"),
-                Subgraph {
-                    ttl: None,
-                    redis: None,
-                    enabled: true,
-                    private_id: None,
-                    invalidation: Some(SubgraphInvalidationConfig {
-                        enabled: true,
-                        shared_key: String::from("test_test"),
-                    }),
-                },
-            )]
-            .into_iter()
-            .collect(),
-        });
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
-            .method(http::Method::POST)
-            .header(AUTHORIZATION, "test_test")
-            .body(
-                serde_json::to_vec(&[
-                    InvalidationRequest::Subgraph {
-                        subgraph: String::from("test"),
-                    },
-                    InvalidationRequest::Type {
-                        subgraph: String::from("test"),
-                        r#type: String::from("Test"),
-                    },
-                ])
-                .unwrap(),
-            )
-            .build()
-            .unwrap();
-        let res = service.oneshot(req).await.unwrap();
-        assert_eq!(res.response.status(), StatusCode::ACCEPTED);
-        let h = handle.clone();
-
-        tokio::task::spawn(async move {
-            let mut handle = h.into_stream();
-            let mut called = false;
-            while let Some((requests, origin, response_tx)) = handle.next().await {
-                called = true;
-                if requests
-                    != [
-                        InvalidationRequest::Subgraph {
-                            subgraph: String::from("test"),
-                        },
-                        InvalidationRequest::Type {
-                            subgraph: String::from("test"),
-                            r#type: String::from("Test"),
-                        },
-                    ]
-                {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation requests : {requests:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                if origin != InvalidationOrigin::Endpoint {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation origin : {origin:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                response_tx.send(Ok(0)).unwrap();
-            }
-            assert!(called);
-        });
-    }
-
-    #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
             .await
             .unwrap();
-        let invalidation = Invalidation { handle };
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await.unwrap();
+
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -463,103 +358,5 @@ mod tests {
             .unwrap();
         let res = service.oneshot(req).await.unwrap();
         assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn test_invalidation_service() {
-        #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
-            .await
-            .unwrap();
-        let h = handle.clone();
-
-        tokio::task::spawn(async move {
-            let mut handle = h.into_stream();
-            let mut called = false;
-            while let Some((requests, origin, response_tx)) = handle.next().await {
-                called = true;
-                if requests
-                    != [
-                        InvalidationRequest::Subgraph {
-                            subgraph: String::from("test"),
-                        },
-                        InvalidationRequest::Type {
-                            subgraph: String::from("test"),
-                            r#type: String::from("Test"),
-                        },
-                    ]
-                {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation requests : {requests:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                if origin != InvalidationOrigin::Endpoint {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation origin : {origin:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                response_tx.send(Ok(2)).unwrap();
-            }
-            assert!(called);
-        });
-
-        let invalidation = Invalidation { handle };
-        let config = Arc::new(SubgraphConfiguration {
-            all: Subgraph {
-                ttl: None,
-                enabled: true,
-                private_id: None,
-                redis: None,
-                invalidation: Some(SubgraphInvalidationConfig {
-                    enabled: true,
-                    shared_key: String::from("test"),
-                }),
-            },
-            subgraphs: HashMap::new(),
-        });
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
-            .method(http::Method::POST)
-            .header(AUTHORIZATION, "test")
-            .body(
-                serde_json::to_vec(&[
-                    InvalidationRequest::Subgraph {
-                        subgraph: String::from("test"),
-                    },
-                    InvalidationRequest::Type {
-                        subgraph: String::from("test"),
-                        r#type: String::from("Test"),
-                    },
-                ])
-                .unwrap(),
-            )
-            .build()
-            .unwrap();
-        let res = service.oneshot(req).await.unwrap();
-        assert_eq!(res.response.status(), StatusCode::ACCEPTED);
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap()
-            )
-            .unwrap(),
-            serde_json::json!({"count": 2})
-        );
     }
 }
