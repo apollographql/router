@@ -494,7 +494,7 @@ mod test {
     use buildstructor::buildstructor;
     use futures::StreamExt;
     use graphql_client::GraphQLQuery;
-    use http::StatusCode;
+    use http_0_2::StatusCode;
     use insta::assert_yaml_snapshot;
     use serde_json::json;
     use test_query::FetchErrorCode;

@@ -1,6 +1,6 @@
 //! HTTP-based connector implementation types.
 
-use hyper::body::HttpBody;
+use http_body::Body as HttpBody;
 
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::make_requests::ResponseKey;

@@ -1,5 +1,6 @@
 use bytesize::ByteSize;
 use thiserror::Error;
+use tower::BoxError;
 
 use crate::graphql;
 
@@ -54,6 +55,12 @@ pub(super) enum FileUploadError {
 
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
+
+    #[error("{0}")]
+    BoxError(#[from] BoxError),
+
+    #[error("{0}")]
+    AxumError(#[from] axum::Error),
 }
 
 impl From<FileUploadError> for graphql::Error {

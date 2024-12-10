@@ -9,9 +9,13 @@ use std::time::Duration;
 
 use axum::response::*;
 use axum::Router;
+use bytesize::ByteSize;
 use futures::channel::oneshot;
 use futures::prelude::*;
-use hyper::server::conn::Http;
+use hyper_util::rt::TokioExecutor;
+use hyper_util::rt::TokioIo;
+use hyper_util::rt::TokioTimer;
+use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -198,7 +202,8 @@ pub(super) async fn get_extra_listeners(
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     router: axum::Router,
-    http_config: Http,
+    opt_max_headers: Option<usize>,
+    opt_max_buf_size: Option<ByteSize>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -229,7 +234,6 @@ pub(super) fn serve_router_on_listen_addr(
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
 
-                            let mut http_config = http_config.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
@@ -248,8 +252,26 @@ pub(super) fn serve_router_on_listen_addr(
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
+                                        let tokio_stream = TokioIo::new(stream);
+                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                            app.clone().call(request)
+                                        });
 
-                                        let connection = http_config.serve_connection(stream, app);
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .timer(TokioTimer::new())
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
+
+                                        let connection = http_config.serve_connection(tokio_stream, hyper_service);
                                         tokio::pin!(connection);
                                         tokio::select! {
                                             // the connection finished first
@@ -259,8 +281,9 @@ pub(super) fn serve_router_on_listen_addr(
                                             // so we tell the connection to do a graceful shutdown
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
+                                                // XXX Not sure if this does anything anymore
+                                                // let c = connection.as_mut();
+                                                // c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
@@ -275,7 +298,24 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
-                                        let connection = http_config.serve_connection(stream, app);
+                                        let tokio_stream = TokioIo::new(stream);
+                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                            app.clone().call(request)
+                                        });
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .timer(TokioTimer::new())
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
+                                        let connection = http_config.serve_connection(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -286,8 +326,9 @@ pub(super) fn serve_router_on_listen_addr(
                                             // so we tell the connection to do a graceful shutdown
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
+                                                // XXX Not sure if this does anything anymore
+                                                // let c = connection.as_mut();
+                                                // c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
@@ -308,12 +349,29 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-                                            let protocol = stream.get_ref().1.alpn_protocol();
-                                            let http2 = protocol == Some(&b"h2"[..]);
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        if stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]) {
+                                            builder = builder.http2_only();
+                                        }
 
+                                        let tokio_stream = TokioIo::new(stream);
+                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                            app.clone().call(request)
+                                        });
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .timer(TokioTimer::new())
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
                                         let connection = http_config
-                                            .http2_only(http2)
-                                            .serve_connection(stream, app);
+                                            .serve_connection(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -324,8 +382,9 @@ pub(super) fn serve_router_on_listen_addr(
                                             // so we tell the connection to do a graceful shutdown
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
+                                                // XXX Not sure if this does anything anymore
+                                                // let c = connection.as_mut();
+                                                // c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
@@ -420,12 +479,13 @@ pub(super) fn serve_router_on_listen_addr(
     (server, shutdown_sender)
 }
 
+#[derive(Clone)]
 struct IdleConnectionChecker<S> {
     received_request: Arc<AtomicBool>,
     inner: S,
 }
 
-impl<S> IdleConnectionChecker<S> {
+impl<S: Clone> IdleConnectionChecker<S> {
     fn new(b: Arc<AtomicBool>, service: S) -> Self {
         IdleConnectionChecker {
             received_request: b,
@@ -470,6 +530,7 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
+    use crate::services::router::body;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
@@ -499,7 +560,7 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>("this is a test".to_string().into())
+                    .body::<crate::services::router::Body>(body::full("this is a test".to_string()))
                     .unwrap(),
                 context: req.context,
             })
@@ -538,7 +599,7 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>("this is a test".to_string().into())
+                    .body::<crate::services::router::Body>(body::full("this is a test".to_string()))
                     .unwrap(),
                 context: req.context,
             })

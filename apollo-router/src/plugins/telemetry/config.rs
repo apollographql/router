@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
-use axum::headers::HeaderName;
+use axum_extra::headers::HeaderName;
 use derivative::Derivative;
 use num_traits::ToPrimitive;
 use opentelemetry::sdk::metrics::new_view;

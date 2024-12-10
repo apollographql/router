@@ -689,7 +689,6 @@ mod tests {
     use axum::extract::WebSocketUpgrade;
     use axum::routing::get;
     use axum::Router;
-    use axum::Server;
     use futures::FutureExt;
     use http::HeaderValue;
     use tokio_tungstenite::connect_async;
@@ -827,13 +826,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
@@ -924,13 +922,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
@@ -958,7 +955,7 @@ mod tests {
         let socket_addr =
             emulate_correct_websocket_server_new_protocol(send_ping, heartbeat_interval, port)
                 .await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{}/ws", socket_addr);
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -1025,7 +1022,7 @@ mod tests {
 
     async fn test_ws_connection_old_proto(send_ping: bool, port: Option<u16>) {
         let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping, port).await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{}/ws", socket_addr);
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,

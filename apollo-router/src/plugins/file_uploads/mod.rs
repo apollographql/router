@@ -29,6 +29,7 @@ use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
 use crate::services::execution;
 use crate::services::router;
+use crate::services::router::body::from_result_stream;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -174,7 +175,7 @@ async fn router_layer(
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
 
-        let mut multipart = MultipartRequest::new(request_body.into(), boundary, limits);
+        let mut multipart = MultipartRequest::new(request_body, boundary, limits);
         let operations_stream = multipart.operations_field().await?;
 
         req.context
@@ -191,9 +192,9 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        let request_body = RouterBody::wrap_stream(operations_stream);
+        let request_body = from_result_stream(operations_stream);
         return Ok(router::Request::from((
-            http::Request::from_parts(request_parts, request_body.into_inner()),
+            http::Request::from_parts(request_parts, request_body),
             req.context,
         )));
     }
@@ -361,8 +362,9 @@ pub(crate) async fn http_request_wrapper(
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
-        let body = RouterBody::wrap_stream(form.into_stream(operations).await);
-        return http::Request::from_parts(request_parts, body);
+        let request_body = from_result_stream(form.into_stream(operations).await);
+
+        return http::Request::from_parts(request_parts, request_body);
     }
     req
 }

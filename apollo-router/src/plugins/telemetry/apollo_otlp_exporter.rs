@@ -23,6 +23,7 @@ use sys_info::hostname;
 use tonic::codec::CompressionEncoding;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
+use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 

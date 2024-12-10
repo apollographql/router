@@ -245,6 +245,7 @@ mod test {
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
+    use crate::services::router::body;
     use crate::services::router::body::get_body_bytes;
 
     #[tokio::test]
@@ -253,7 +254,7 @@ mod test {
         let resp = plugin
             .call_router(
                 router::Request::fake_builder()
-                    .body("This is a test")
+                    .body(body::full("This is a test"))
                     .build()
                     .unwrap(),
                 |r| async {
@@ -283,7 +284,10 @@ mod test {
         let plugin = plugin().await;
         let resp = plugin
             .call_router(
-                router::Request::fake_builder().body("").build().unwrap(),
+                router::Request::fake_builder()
+                    .body(body::empty())
+                    .build()
+                    .unwrap(),
                 |r| async {
                     let body = r.router_request.into_body();
                     let body = get_body_bytes(body).await;
@@ -315,7 +319,7 @@ mod test {
             .call_router(
                 router::Request::fake_builder()
                     .header("Content-Length", "100")
-                    .body("")
+                    .body(body::empty())
                     .build()
                     .unwrap(),
                 |_| async { panic!("should have rejected request") },
@@ -343,7 +347,7 @@ mod test {
             .call_router(
                 router::Request::fake_builder()
                     .header("Content-Length", "5")
-                    .body("")
+                    .body(body::empty())
                     .build()
                     .unwrap(),
                 |_| async { Ok(router::Response::fake_builder().build().unwrap()) },
@@ -370,7 +374,10 @@ mod test {
         let plugin = plugin().await;
         let resp = plugin
             .call_router(
-                router::Request::fake_builder().body("").build().unwrap(),
+                router::Request::fake_builder()
+                    .body(body::empty())
+                    .build()
+                    .unwrap(),
                 |_| async { Err(BoxError::from("error")) },
             )
             .await;
@@ -383,7 +390,7 @@ mod test {
         let resp = plugin
             .call_router(
                 router::Request::fake_builder()
-                    .body("This is a test")
+                    .body(body::full("This is a test"))
                     .build()
                     .unwrap(),
                 |r| async move {

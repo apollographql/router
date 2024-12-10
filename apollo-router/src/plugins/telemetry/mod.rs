@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use ::tracing::info_span;
 use ::tracing::Span;
-use axum::headers::HeaderName;
+use axum_extra::headers::HeaderName;
 use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
@@ -2016,7 +2016,7 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
-    use axum::headers::HeaderName;
+    use axum_extra::headers::HeaderName;
     use dashmap::DashMap;
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
@@ -2117,7 +2117,7 @@ mod tests {
             .into_router();
 
         let http_req_prom = http::Request::get("http://localhost:9090/metrics")
-            .body(Default::default())
+            .body(axum::body::Body::empty())
             .unwrap();
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -2866,16 +2866,17 @@ mod tests {
                 .into_router();
 
             let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
-                .body(Default::default())
+                .body(crate::services::router::body::empty())
                 .unwrap();
 
-            let resp = web_endpoint
-                .ready()
-                .await
-                .unwrap()
-                .call(http_req_prom)
-                .await
-                .unwrap();
+            let resp = <axum::Router as tower::ServiceExt<http::Request<axum::body::Body>>>::ready(
+                &mut web_endpoint,
+            )
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
             assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         }
         .with_metrics()

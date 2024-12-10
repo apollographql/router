@@ -462,7 +462,7 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    let request = http::Request::from_parts(parts, RouterBody::from(bytes));
+    let request = http::Request::from_parts(parts, crate::services::router::body::full(bytes));
     Ok((operation_name, contexts, request, txs))
 }
 
@@ -488,6 +488,7 @@ mod tests {
     use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
+    use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
@@ -545,7 +546,7 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&request.into_body().to_bytes().await.unwrap()).unwrap(),
+            std::str::from_utf8(&body::get_body_bytes(request.into_body()).await.unwrap()).unwrap(),
         )
         .unwrap();
 
@@ -845,7 +846,7 @@ mod tests {
                 .method("POST")
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json")
-                .body(serde_json::to_vec(&request).unwrap().into())
+                .body(body::full(serde_json::to_vec(&request).unwrap()))
                 .unwrap(),
         };
 

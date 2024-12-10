@@ -413,11 +413,6 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                #[cfg(not(feature = "hyper_header_limits"))]
-                if yaml.contains("http1_max_request_headers") {
-                    continue;
-                }
-
                 if let Err(e) = validate_yaml_configuration(
                     &yaml,
                     Expansion::default().unwrap(),
@@ -719,6 +714,9 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
