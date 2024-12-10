@@ -151,27 +151,29 @@ impl Import {
                     match k.as_str() {
                         "name" => {
                             name = Some(v.as_str().ok_or_else(|| {
-                                LinkError::BootstrapError(format!(r#"in "{value}", invalid value for `name` field in @link(import:) argument: must be a string"#))
+                                LinkError::BootstrapError(format!(r#"in "{}", invalid value for `name` field in @link(import:) argument: must be a string"#, value.serialize().no_indent()))
                             })?)
                         },
                         "as" => {
                             alias = Some(v.as_str().ok_or_else(|| {
-                                LinkError::BootstrapError(format!(r#"in "{value}", invalid value for `as` field in @link(import:) argument: must be a string"#))
+                                LinkError::BootstrapError(format!(r#"in "{}", invalid value for `as` field in @link(import:) argument: must be a string"#, value.serialize().no_indent()))
                             })?)
                         },
-                        _ => Err(LinkError::BootstrapError(format!(r#"in "{value}", unknown field `{k}` in @link(import:) argument"#)))?
+                        _ => Err(LinkError::BootstrapError(format!(r#"in "{}", unknown field `{k}` in @link(import:) argument"#, value.serialize().no_indent())))?
                     }
                 }
                 let Some(element) = name else {
                     return Err(LinkError::BootstrapError(format!(
-                        r#"in "{value}", invalid entry in @link(import:) argument, missing mandatory `name` field"#
+                        r#"in "{}", invalid entry in @link(import:) argument, missing mandatory `name` field"#,
+                        value.serialize().no_indent()
                     )));
                 };
                 if let Some(directive_name) = element.strip_prefix('@') {
                     if let Some(alias_str) = alias.as_ref() {
                         let Some(alias_str) = alias_str.strip_prefix('@') else {
                             return Err(LinkError::BootstrapError(format!(
-                                r#"in "{value}", invalid alias '{alias_str}' for import name '{element}': should start with '@' since the imported name does"#
+                                r#"in "{}", invalid alias '{alias_str}' for import name '{element}': should start with '@' since the imported name does"#,
+                                value.serialize().no_indent()
                             )));
                         };
                         alias = Some(alias_str);
@@ -185,7 +187,8 @@ impl Import {
                     if let Some(alias) = &alias {
                         if alias.starts_with('@') {
                             return Err(LinkError::BootstrapError(format!(
-                                r#"in "{value}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#
+                                r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
+                                value.serialize().no_indent()
                             )));
                         }
                     }
@@ -197,7 +200,8 @@ impl Import {
                 }
             }
             _ => Err(LinkError::BootstrapError(format!(
-                r#"in "{value}", invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form {{ name: \"<importedElement>\", as: \"<alias>\" }}."#
+                r#"in "{}", invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form {{ name: "<importedElement>", as: "<alias>" }}."#,
+                value.serialize().no_indent()
             ))),
         }
     }
