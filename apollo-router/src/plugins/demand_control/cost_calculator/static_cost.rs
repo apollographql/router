@@ -1,22 +1,136 @@
 use std::sync::Arc;
 
 use ahash::HashMap;
+use apollo_compiler::ast;
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::FragmentSpread;
+use apollo_compiler::executable::InlineFragment;
+use apollo_compiler::executable::Operation;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
+use serde_json_bytes::Value;
 
-use super::schema2::DemandControlledSchema;
+use super::directives::IncludeDirective;
+use super::directives::SkipDirective;
+use super::schema::DemandControlledSchema;
+use super::schema::InputObjectDirectiveMetadata;
 use super::DemandControlError;
 use crate::graphql::Response;
+use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
+use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
+use crate::spec::TYPENAME;
 
 pub(crate) struct StaticCostCalculator {
-    default_list_size: u32,
+    list_size: u32,
     supergraph_schema: Arc<DemandControlledSchema>,
     subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
+}
+
+struct ScoringContext<'a> {
+    schema: &'a DemandControlledSchema,
+    query: &'a ExecutableDocument,
+    variables: &'a Object,
+    should_estimate_requires: bool,
+}
+
+fn score_input_object(
+    obj: &apollo_compiler::ast::Value,
+    meta: &InputObjectDirectiveMetadata,
+    ctx: &ScoringContext,
+) -> Result<f64, DemandControlError> {
+    match (obj, &meta.ty) {
+        (_, ExtendedType::Interface(_))
+        | (_, ExtendedType::Object(_))
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+            "Interface, Object, and Union types are disallowed in Input Objects".to_string(),
+        )),
+
+        (ast::Value::Object(inner_args), ExtendedType::InputObject(_)) => {
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(1.0, |cost| cost.weight());
+            for (arg_name, arg_val) in inner_args {
+                let arg_meta = ctx.schema.type_input_metadata(meta.ty.name(), arg_name)?;
+                cost += score_input_object(arg_val, arg_meta, ctx)?;
+            }
+            Ok(cost)
+        }
+        (ast::Value::List(inner_args), _) => {
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(0.0, |cost| cost.weight());
+            for arg_val in inner_args {
+                cost += score_input_object(arg_val, meta, ctx)?;
+            }
+            Ok(cost)
+        }
+        (ast::Value::Variable(name), _) => {
+            // We make a best effort attempt to score the variable, but some of these may not exist in the variables
+            // sent on the supergraph request, such as `$representations`.
+            if let Some(variable) = ctx.variables.get(name.as_str()) {
+                score_variable(variable, meta, ctx.schema)
+            } else {
+                Ok(0.0)
+            }
+        }
+        (ast::Value::Null, _) => Ok(0.0),
+        _ => Ok(meta
+            .cost_directive
+            .as_ref()
+            .map_or(0.0, |cost| cost.weight())),
+    }
+}
+
+fn score_variable(
+    variable: &Value,
+    meta: &InputObjectDirectiveMetadata,
+    schema: &DemandControlledSchema,
+) -> Result<f64, DemandControlError> {
+    match (variable, &meta.ty) {
+        (_, ExtendedType::Interface(_))
+        | (_, ExtendedType::Object(_))
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+            "Interface, Object, and Union types are disallowed in Input Objects".to_string(),
+        )),
+
+        (Value::Object(inner_args), ExtendedType::InputObject(_)) => {
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(1.0, |cost| cost.weight());
+            for (arg_name, arg_val) in inner_args {
+                let arg_meta = schema.type_input_metadata(meta.ty.name(), arg_name.as_str())?;
+                cost += score_variable(arg_val, arg_meta, schema)?;
+            }
+            Ok(cost)
+        }
+        (Value::Array(inner_args), _) => {
+            let mut cost = meta
+                .cost_directive
+                .as_ref()
+                .map_or(0.0, |cost| cost.weight());
+            for arg_val in inner_args {
+                cost += score_variable(arg_val, meta, schema)?;
+            }
+            Ok(cost)
+        }
+        (Value::Null, _) => Ok(0.0),
+        _ => Ok(meta
+            .cost_directive
+            .as_ref()
+            .map_or(0.0, |cost| cost.weight())),
+    }
 }
 
 impl StaticCostCalculator {
@@ -26,10 +140,229 @@ impl StaticCostCalculator {
         list_size: u32,
     ) -> Self {
         Self {
-            default_list_size: list_size,
+            list_size,
             supergraph_schema,
             subgraph_schemas,
         }
+    }
+
+    /// Scores a field within a GraphQL operation, handling some expected cases where
+    /// directives change how the query is fetched. In the case of the federation
+    /// directive `@requires`, the cost of the required selection is added to the
+    /// cost of the current field. There's a chance this double-counts the cost of
+    /// a selection if two fields require the same thing, or if a field is selected
+    /// along with a field that it requires.
+    ///
+    /// ```graphql
+    /// type Query {
+    ///     foo: Foo @external
+    ///     bar: Bar @requires(fields: "foo")
+    ///     baz: Baz @requires(fields: "foo")
+    /// }
+    /// ```
+    ///
+    /// This should be okay, as we don't want this implementation to have to know about
+    /// any deduplication happening in the query planner, and we're estimating an upper
+    /// bound for cost anyway.
+    fn score_field(
+        &self,
+        ctx: &ScoringContext,
+        field: &Field,
+        parent_type: &NamedType,
+        list_size_from_upstream: Option<i32>,
+    ) -> Result<f64, DemandControlError> {
+        // The lookup for field metadata does not contain entries for __typename, but we know this
+        // is a `String!` without a `@cost` directive
+        if field.name == TYPENAME {
+            return Ok(0.0);
+        }
+
+        if StaticCostCalculator::skipped_by_directives(field) {
+            return Ok(0.0);
+        }
+
+        let field_metadata = ctx.schema.type_field_metadata(parent_type, &field.name)?;
+
+        let list_size_directive = match field_metadata.list_size_directive.as_ref() {
+            Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
+            None => Ok(None),
+        }?;
+        let instance_count = if !field.ty().is_list() {
+            1
+        } else if let Some(value) = list_size_from_upstream {
+            // This is a sized field whose length is defined by the `@listSize` directive on the parent field
+            value
+        } else if let Some(expected_size) = list_size_directive
+            .as_ref()
+            .and_then(|dir| dir.expected_size)
+        {
+            expected_size
+        } else {
+            self.list_size as i32
+        };
+
+        // Determine the cost for this particular field. Scalars are free, non-scalars are not.
+        // For fields with selections, add in the cost of the selections as well.
+        let mut type_cost = if let Some(cost_directive) = field_metadata.cost_directive.as_ref() {
+            cost_directive.weight()
+        } else if field_metadata.ty.is_interface()
+            || field_metadata.ty.is_object()
+            || field_metadata.ty.is_union()
+        {
+            1.0
+        } else {
+            0.0
+        };
+        type_cost += self.score_selection_set(
+            ctx,
+            &field.selection_set,
+            field.ty().inner_named_type(),
+            list_size_directive.as_ref(),
+        )?;
+
+        let mut arguments_cost = 0.0;
+        for argument in &field.arguments {
+            let argument_metadata = field_metadata.argument_metadata(&argument.name)?;
+            arguments_cost += score_input_object(&argument.value, argument_metadata, ctx)?;
+        }
+
+        let mut requirements_cost = 0.0;
+        if ctx.should_estimate_requires {
+            // If the field is marked with `@requires`, the required selection may not be included
+            // in the query's selection. Adding that requirement's cost to the field ensures it's
+            // accounted for.
+            let requirements = field_metadata
+                .requires_directive
+                .as_ref()
+                .map(|d| &d.fields);
+            if let Some(selection_set) = requirements {
+                requirements_cost = self.score_selection_set(
+                    ctx,
+                    selection_set,
+                    parent_type,
+                    list_size_directive.as_ref(),
+                )?;
+            }
+        }
+
+        let cost = (instance_count as f64) * type_cost + arguments_cost + requirements_cost;
+        tracing::debug!(
+            "Field {} cost breakdown: (count) {} * (type cost) {} + (arguments) {} + (requirements) {} = {}",
+            field.name,
+            instance_count,
+            type_cost,
+            arguments_cost,
+            requirements_cost,
+            cost
+        );
+
+        Ok(cost)
+    }
+
+    fn score_fragment_spread(
+        &self,
+        ctx: &ScoringContext,
+        fragment_spread: &FragmentSpread,
+        list_size_directive: Option<&ListSizeDirective>,
+    ) -> Result<f64, DemandControlError> {
+        let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Parsed operation did not have a definition for fragment {}",
+                fragment_spread.fragment_name
+            ))
+        })?;
+        self.score_selection_set(
+            ctx,
+            &fragment.selection_set,
+            fragment.type_condition(),
+            list_size_directive,
+        )
+    }
+
+    fn score_inline_fragment(
+        &self,
+        ctx: &ScoringContext,
+        inline_fragment: &InlineFragment,
+        parent_type: &NamedType,
+        list_size_directive: Option<&ListSizeDirective>,
+    ) -> Result<f64, DemandControlError> {
+        self.score_selection_set(
+            ctx,
+            &inline_fragment.selection_set,
+            inline_fragment
+                .type_condition
+                .as_ref()
+                .unwrap_or(parent_type),
+            list_size_directive,
+        )
+    }
+
+    fn score_operation(
+        &self,
+        operation: &Operation,
+        ctx: &ScoringContext,
+    ) -> Result<f64, DemandControlError> {
+        let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
+
+        let Some(root_type_name) = ctx.schema.root_operation(operation.operation_type) else {
+            return Err(DemandControlError::QueryParseFailure(format!(
+                "Cannot cost {} operation because the schema does not support this root type",
+                operation.operation_type
+            )));
+        };
+
+        cost += self.score_selection_set(ctx, &operation.selection_set, root_type_name, None)?;
+
+        Ok(cost)
+    }
+
+    fn score_selection(
+        &self,
+        ctx: &ScoringContext,
+        selection: &Selection,
+        parent_type: &NamedType,
+        list_size_directive: Option<&ListSizeDirective>,
+    ) -> Result<f64, DemandControlError> {
+        match selection {
+            Selection::Field(f) => self.score_field(
+                ctx,
+                f,
+                parent_type,
+                list_size_directive.and_then(|dir| dir.size_of(f)),
+            ),
+            Selection::FragmentSpread(s) => self.score_fragment_spread(ctx, s, list_size_directive),
+            Selection::InlineFragment(i) => {
+                self.score_inline_fragment(ctx, i, parent_type, list_size_directive)
+            }
+        }
+    }
+
+    fn score_selection_set(
+        &self,
+        ctx: &ScoringContext,
+        selection_set: &SelectionSet,
+        parent_type_name: &NamedType,
+        list_size_directive: Option<&ListSizeDirective>,
+    ) -> Result<f64, DemandControlError> {
+        let mut cost = 0.0;
+        for selection in selection_set.selections.iter() {
+            cost += self.score_selection(ctx, selection, parent_type_name, list_size_directive)?;
+        }
+        Ok(cost)
+    }
+
+    fn skipped_by_directives(field: &Field) -> bool {
+        let include_directive = IncludeDirective::from_field(field);
+        if let Ok(Some(IncludeDirective { is_included: false })) = include_directive {
+            return true;
+        }
+
+        let skip_directive = SkipDirective::from_field(field);
+        if let Ok(Some(SkipDirective { is_skipped: true })) = skip_directive {
+            return true;
+        }
+
+        false
     }
 
     fn score_plan_node(
@@ -136,9 +469,22 @@ impl StaticCostCalculator {
         query: &ExecutableDocument,
         schema: &DemandControlledSchema,
         variables: &Object,
-        _should_estimate_requires: bool,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
-        schema.score_request(query, variables, self.default_list_size)
+        let mut cost = 0.0;
+        let ctx = ScoringContext {
+            schema,
+            query,
+            variables,
+            should_estimate_requires,
+        };
+        if let Some(op) = &query.operations.anonymous {
+            cost += self.score_operation(op, &ctx)?;
+        }
+        for (_name, op) in query.operations.named.iter() {
+            cost += self.score_operation(op, &ctx)?;
+        }
+        Ok(cost)
     }
 
     pub(crate) fn planned(
@@ -155,8 +501,81 @@ impl StaticCostCalculator {
         response: &Response,
         variables: &Object,
     ) -> Result<f64, DemandControlError> {
-        self.supergraph_schema
-            .score_response(request, response, variables, self.default_list_size)
+        let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
+        visitor.visit(request, response, variables);
+        Ok(visitor.cost)
+    }
+}
+
+pub(crate) struct ResponseCostCalculator<'a> {
+    pub(crate) cost: f64,
+    schema: &'a DemandControlledSchema,
+}
+
+impl<'schema> ResponseCostCalculator<'schema> {
+    pub(crate) fn new(schema: &'schema DemandControlledSchema) -> Self {
+        Self { cost: 0.0, schema }
+    }
+}
+
+impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
+    fn visit_field(
+        &mut self,
+        request: &ExecutableDocument,
+        variables: &Object,
+        parent_ty: &NamedType,
+        field: &Field,
+        value: &Value,
+    ) {
+        self.visit_list_item(request, variables, parent_ty, field, value);
+        let ctx = ScoringContext {
+            query: request,
+            variables,
+            schema: self.schema,
+            should_estimate_requires: false,
+        };
+        if let Ok(field_metadata) = self.schema.type_field_metadata(parent_ty, &field.name) {
+            for argument in &field.arguments {
+                if let Ok(argument_cost) = field_metadata
+                    .argument_metadata(&argument.name)
+                    .and_then(|argument_metadata| {
+                        score_input_object(&argument.value, argument_metadata, &ctx)
+                    })
+                {
+                    self.cost += argument_cost;
+                }
+            }
+        }
+    }
+
+    fn visit_list_item(
+        &mut self,
+        request: &apollo_compiler::ExecutableDocument,
+        variables: &Object,
+        parent_ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+    ) {
+        let cost_directive = self
+            .schema
+            .type_field_metadata(parent_ty, &field.name)
+            .ok()
+            .and_then(|meta| meta.cost_directive.as_ref());
+
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                self.cost += cost_directive.map_or(0.0, |cost| cost.weight());
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, variables, parent_ty, field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.cost += cost_directive.map_or(1.0, |cost| cost.weight());
+                self.visit_selections(request, variables, &field.selection_set, children);
+            }
+        }
     }
 }
 
@@ -168,7 +587,6 @@ mod tests {
     use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
     use router_bridge::planner::PlanOptions;
-    use serde_json_bytes::Value;
     use test_log::test;
     use tower::Service;
 
@@ -611,7 +1029,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn custom_cost_query_asdf() {
+    async fn custom_cost_query() {
         let schema = include_str!("./fixtures/custom_cost_schema.graphql");
         let query = include_str!("./fixtures/custom_cost_query.graphql");
         let variables = "{}";

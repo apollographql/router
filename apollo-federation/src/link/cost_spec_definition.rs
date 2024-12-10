@@ -8,7 +8,6 @@ use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::ScalarType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use lazy_static::lazy_static;
@@ -225,20 +224,6 @@ impl CostSpecDefinition {
         if let Some(name) = directive_name.as_ref() {
             Ok(CostDirective::from_directives(name, &field.directives)
                 .or(CostDirective::from_schema_directives(name, ty.directives())))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn cost_directive_from_scalar(
-        schema: &FederationSchema,
-        field: &FieldDefinition,
-        ty: &ScalarType,
-    ) -> Result<Option<CostDirective>, FederationError> {
-        let directive_name = Self::cost_directive_name(schema)?;
-        if let Some(name) = directive_name.as_ref() {
-            Ok(CostDirective::from_directives(name, &field.directives)
-                .or(CostDirective::from_schema_directives(name, &ty.directives)))
         } else {
             Ok(None)
         }
