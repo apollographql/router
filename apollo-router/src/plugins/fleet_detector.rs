@@ -184,6 +184,26 @@ impl GaugeStore {
                     .init(),
             )
         }
+        {
+            let opts = opts.clone();
+            gauges.push(
+                meter
+                    .u64_observable_gauge("apollo.router.instance.persisted_queries")
+                    .with_description("Details about the current persisted queries")
+                    .with_callback(move |gauge| {
+                        // NOTE: this is a fixed gauge. We only care about observing the included
+                        // attributes.
+                        gauge.observe(
+                            1,
+                            &[KeyValue::new(
+                                "persisted_queries_version",
+                                opts.persisted_queries.clone(),
+                            )],
+                        )
+                    })
+                    .init(),
+            )
+        }
         GaugeStore::Active(gauges)
     }
 }
@@ -192,6 +212,7 @@ impl GaugeStore {
 struct GaugeOptions {
     supergraph_schema_hash: String,
     launch_id: Option<String>,
+    persisted_queries: String,
 }
 
 #[derive(Default)]
@@ -218,6 +239,7 @@ impl PluginPrivate for FleetDetector {
         let gauge_options = GaugeOptions {
             supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
             launch_id: plugin.launch_id.map(|s| s.to_string()),
+            persisted_queries: "".to_string(),
         };
 
         Ok(FleetDetector {
