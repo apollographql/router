@@ -51,6 +51,7 @@ fn get_configuration(rust_qp: bool) -> serde_json::Value {
         }};
     }
     json! {{
+        "experimental_query_planner_mode": "legacy",
         "experimental_type_conditioned_fetching": true,
         // will make debugging easier
         "plugins": {

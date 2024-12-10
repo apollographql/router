@@ -1747,7 +1747,7 @@ expression: "&schema"
         },
         "client_name_header": {
           "default": "apollographql-client-name",
-          "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.",
           "nullable": true,
           "type": "string"
         },
@@ -4483,6 +4483,13 @@ expression: "&schema"
             "both_best_effort"
           ],
           "type": "string"
+        },
+        {
+          "description": "Use the new Rust-based implementation but fall back to the legacy one for supergraph schemas composed with legacy Apollo Federation 1.",
+          "enum": [
+            "new_best_effort"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -6644,7 +6651,7 @@ expression: "&schema"
         },
         "experimental_reuse_query_fragments": {
           "default": null,
-          "description": "Enable reuse of query fragments Default: depends on the federation version",
+          "description": "Enable reuse of query fragments This feature is deprecated and will be removed in next release. The config can only be set when the legacy query planner is explicitly enabled.",
           "nullable": true,
           "type": "boolean"
         },

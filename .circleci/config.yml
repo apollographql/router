@@ -1,12 +1,12 @@
 version: 2.1
 
-# Cache key bump: 2
+# Cache key bump: 3
 
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
   gh: circleci/github-cli@2.6.0
-  slack: circleci/slack@4.15.0
+  slack: circleci/slack@5.1.1
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
@@ -26,7 +26,7 @@ executors:
       - image: cimg/base:stable
       - image: cimg/redis:7.4.1
       - image: jaegertracing/all-in-one:1.54.0
-      - image: openzipkin/zipkin:3.4.2
+      - image: openzipkin/zipkin:3.4.3
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
     resource_class: xlarge
     environment:
@@ -376,9 +376,12 @@ commands:
       - run:
           name: Install cargo deny, about, edit
           command: |
+            # Until we are able to update rustc to at least 1.81.0,
+            # we need special handling of the cargo-about command.
+            rustup install 1.83.0
+            cargo +1.83.0 install --locked --version 0.6.6 cargo-about
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
               cargo install --locked --version 0.14.21 cargo-deny
-              cargo install --locked --version 0.6.1 cargo-about
               cargo install --locked --version 0.12.2 cargo-edit
               cargo install --locked --version 0.12.0 cargo-fuzz
             fi

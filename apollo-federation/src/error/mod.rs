@@ -1,10 +1,8 @@
-use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
-use apollo_compiler::executable::GetOperationError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
@@ -84,7 +82,7 @@ macro_rules! ensure {
 
         #[cfg(not(debug_assertions))]
         if !$expr {
-            $crate::internal_error!( $( $arg )+ );
+            $crate::bail!( $( $arg )+ );
         }
     }
 }
@@ -109,10 +107,6 @@ impl From<SchemaRootKind> for String {
 
 #[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
 pub enum UnsupportedFeatureKind {
-    #[strum(to_string = "defer")]
-    Defer,
-    #[strum(to_string = "context")]
-    Context,
     #[strum(to_string = "alias")]
     Alias,
 }
@@ -126,6 +120,9 @@ pub enum SingleFederationError {
     #[error("An internal error has occurred, please report this bug to Apollo. Details: {0}")]
     #[allow(private_interfaces)] // users should not inspect this.
     InternalRebaseError(#[from] crate::operation::RebaseError),
+    // This is a known bug that will take time to fix, and does not require reporting.
+    #[error("{message}")]
+    InternalUnmergeableFields { message: String },
     #[error("{diagnostics}")]
     InvalidGraphQL { diagnostics: DiagnosticList },
     #[error(transparent)]
@@ -134,6 +131,8 @@ pub enum SingleFederationError {
     InvalidSubgraph { message: String },
     #[error("Operation name not found")]
     UnknownOperation,
+    #[error("Must provide operation name if query contains multiple operations")]
+    OperationNameNotProvided,
     #[error("Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.")]
     UnsupportedSpreadDirective { name: Name },
     #[error("{message}")]
@@ -302,15 +301,17 @@ impl SingleFederationError {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
+            SingleFederationError::InternalUnmergeableFields { .. } => ErrorCode::Internal,
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
-            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
-            // that's invalid, but the operation name
-            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
             // TODO(@goto-bus-stop): this should have a different error code: it's not invalid,
             // just unsupported due to internal limitations.
             SingleFederationError::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
+            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
+            // that's invalid, but the operation name
+            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
+            SingleFederationError::OperationNameNotProvided => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
@@ -492,12 +493,6 @@ impl From<InvalidNameError> for FederationError {
     }
 }
 
-impl From<GetOperationError> for FederationError {
-    fn from(_: GetOperationError) -> Self {
-        SingleFederationError::UnknownOperation.into()
-    }
-}
-
 impl From<FederationSpecError> for FederationError {
     fn from(err: FederationSpecError) -> Self {
         // TODO: When we get around to finishing the composition port, we should really switch it to
@@ -523,8 +518,8 @@ pub struct MultipleFederationErrors {
 impl MultipleFederationErrors {
     pub fn push(&mut self, error: FederationError) {
         match error {
-            FederationError::SingleFederationError { inner, .. } => {
-                self.errors.push(inner);
+            FederationError::SingleFederationError(error) => {
+                self.errors.push(error);
             }
             FederationError::MultipleFederationErrors(errors) => {
                 self.errors.extend(errors.errors);
@@ -591,22 +586,14 @@ impl Display for AggregateFederationError {
     }
 }
 
-/// Work around thiserror, which when an error field has a type named `Backtrace`
-/// "helpfully" implements `Error::provides` even though that API is not stable yet:
-/// <https://github.com/rust-lang/rust/issues/99301>
-type ThiserrorTrustMeThisIsTotallyNotABacktrace = Backtrace;
-
 // PORT_NOTE: Often times, JS functions would either throw/return a GraphQLError, return a vector
 // of GraphQLErrors, or take a vector of GraphQLErrors and group them together under an
 // AggregateGraphQLError which itself would have a specific error message and code, and throw that.
 // We represent all these cases with an enum, and delegate to the members.
-#[derive(thiserror::Error)]
+#[derive(Clone, thiserror::Error)]
 pub enum FederationError {
-    #[error("{inner}")]
-    SingleFederationError {
-        inner: SingleFederationError,
-        trace: ThiserrorTrustMeThisIsTotallyNotABacktrace,
-    },
+    #[error(transparent)]
+    SingleFederationError(#[from] SingleFederationError),
     #[error(transparent)]
     MultipleFederationErrors(#[from] MultipleFederationErrors),
     #[error(transparent)]
@@ -616,18 +603,9 @@ pub enum FederationError {
 impl std::fmt::Debug for FederationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SingleFederationError { inner, trace } => write!(f, "{inner}\n{trace}"),
+            Self::SingleFederationError(inner) => std::fmt::Debug::fmt(inner, f),
             Self::MultipleFederationErrors(inner) => std::fmt::Debug::fmt(inner, f),
             Self::AggregateFederationError(inner) => std::fmt::Debug::fmt(inner, f),
-        }
-    }
-}
-
-impl From<SingleFederationError> for FederationError {
-    fn from(inner: SingleFederationError) -> Self {
-        Self::SingleFederationError {
-            inner,
-            trace: Backtrace::capture(),
         }
     }
 }

@@ -467,15 +467,16 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn context_directive_arguments(
-        application: &Node<Directive>,
-    ) -> Result<ContextDirectiveArguments, FederationError> {
+    pub(crate) fn context_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ContextDirectiveArguments<'doc>, FederationError> {
         Ok(ContextDirectiveArguments {
             name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 
-    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive definition.
@@ -493,24 +494,7 @@ impl FederationSpecDefinition {
             })
     }
 
-    // The directive is named `@fromContex`. This is confusing for clippy, as
-    // `from` is a conventional prefix used in conversion methods, which do not
-    // take `self` as an argument. This function does **not** perform
-    // conversion, but extracts `@fromContext` directive arguments.
-    #[allow(clippy::wrong_self_convention)]
-    pub(crate) fn from_context_directive_arguments<'doc>(
-        &self,
-        application: &'doc Node<Directive>,
-    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
-        Ok(FromContextDirectiveArguments {
-            field: directive_required_string_argument(
-                application,
-                &FEDERATION_FIELD_ARGUMENT_NAME,
-            )?,
-        })
-    }
-
-    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive.
@@ -534,6 +518,23 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments,
+        })
+    }
+
+    // The directive is named `@fromContext`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive arguments.
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn from_context_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
+        Ok(FromContextDirectiveArguments {
+            field: directive_required_string_argument(
+                application,
+                &FEDERATION_FIELD_ARGUMENT_NAME,
+            )?,
         })
     }
 }

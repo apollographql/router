@@ -31,7 +31,7 @@ expression: response
               "operationKind": "query",
               "operationName": "QueryUnion__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "e2ac947e685882790c24243e1312a112923780c6dc9cb18e587f55e1728c5a18",
+              "schemaAwareHash": "967a248e156212f72f5abb27c01fe3d5e8bb4db154e0f7015db551ee0fe46877",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -47,15 +47,6 @@ expression: response
                       "scopes": []
                     },
                     "contextRewrites": [
-                      {
-                        "kind": "KeyRenamer",
-                        "path": [
-                          "..",
-                          "... on A",
-                          "prop"
-                        ],
-                        "renameKeyTo": "contextualArgument_1_1"
-                      },
                       {
                         "kind": "KeyRenamer",
                         "path": [
@@ -89,7 +80,7 @@ expression: response
                         "typeCondition": "V"
                       }
                     ],
-                    "schemaAwareHash": "a4707e1dbe9c5c20130adc188662691c3d601a2f1ff6ddd499301f45c62f009c",
+                    "schemaAwareHash": "77647255b7cbdfcb4a47ab2492c0c5252c4f6d06dd4008b104d8770a584a1e32",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_1"
@@ -114,15 +105,6 @@ expression: response
                         "path": [
                           "..",
                           "... on A",
-                          "prop"
-                        ],
-                        "renameKeyTo": "contextualArgument_1_1"
-                      },
-                      {
-                        "kind": "KeyRenamer",
-                        "path": [
-                          "..",
-                          "... on B",
                           "prop"
                         ],
                         "renameKeyTo": "contextualArgument_1_1"
@@ -151,7 +133,7 @@ expression: response
                         "typeCondition": "V"
                       }
                     ],
-                    "schemaAwareHash": "a4d03082699251d18ad67b92c96a9c33f0c70af8713d10f1b40514cc6b369e33",
+                    "schemaAwareHash": "4a608fbd27c2498c1f31bf737143990d8a2f31e72682542d3169fe2fac6d5834",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_1"

@@ -105,7 +105,7 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
-                Regex::new(r"apollo\.router\.(config|entities|instance)(\..*|$)")
+                Regex::new(r"apollo\.router\.(config|entities|instance|operations\.(fetch|request_size|response_size))(\..*|$)")
                     .expect("regex should have been valid"),
             )
             .build()
