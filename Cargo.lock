@@ -365,7 +365,6 @@ dependencies = [
  "reqwest",
  "rhai",
  "rmp",
- "rowan",
  "rstack",
  "rust-embed",
  "rustls",
