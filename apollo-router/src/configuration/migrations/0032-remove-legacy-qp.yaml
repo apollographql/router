@@ -3,4 +3,6 @@ actions:
   - type: delete
     path: experimental_query_planner_mode
   - type: delete
+    path: supergraph.experimental_reuse_query_fragments
+  - type: delete
     path: supergraph.query_planning.experimental_parallelism
