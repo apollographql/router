@@ -546,9 +546,36 @@ fn same_path(this: &Path, other: &Path) -> bool {
         Some((PathElement::Key(k, type_conditions), rest))
             if k.is_empty() && type_conditions.is_none() =>
         {
-            vec_matches(rest, &other.0, PartialEq::eq)
+            vec_matches(rest, &other.0, same_path_element)
         }
-        _ => *this == *other,
+        _ => vec_matches(&this.0, &other.0, same_path_element),
+    }
+}
+
+fn same_path_element(this: &PathElement, other: &PathElement) -> bool {
+    match (this, other) {
+        (PathElement::Index(this), PathElement::Index(other)) => this == other,
+        (PathElement::Fragment(this), PathElement::Fragment(other)) => this == other,
+        (
+            PathElement::Key(this_key, this_type_conditions),
+            PathElement::Key(other_key, other_type_conditions),
+        ) => {
+            this_key == other_key
+                && same_path_condition(this_type_conditions, other_type_conditions)
+        }
+        (
+            PathElement::Flatten(this_type_conditions),
+            PathElement::Flatten(other_type_conditions),
+        ) => same_path_condition(this_type_conditions, other_type_conditions),
+        _ => false,
+    }
+}
+
+fn same_path_condition(this: &Option<Vec<String>>, other: &Option<Vec<String>>) -> bool {
+    match (this, other) {
+        (Some(this), Some(other)) => vec_matches_sorted(this, other),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -1214,6 +1241,19 @@ mod path_comparison_tests {
         let legacy_path: Path = serde_json::from_value(path_json_legacy).unwrap();
         let native_path: Path = serde_json::from_value(path_json_native).unwrap();
 
+        assert!(same_path(&legacy_path, &native_path));
+    }
+
+    #[test]
+    fn test_same_path_ignore_empty_conditions() {
+        // Create a legacy path with an empty type conditions.
+        let path_json_legacy = json!(["k|[]", "v"]);
+        let path_json_native = json!(["k", "v"]);
+
+        let legacy_path: Path = serde_json::from_value(path_json_legacy).unwrap();
+        let native_path: Path = serde_json::from_value(path_json_native).unwrap();
+
+        // Tests that both formats are deserialized into the same Path.
         assert!(same_path(&legacy_path, &native_path));
     }
 }

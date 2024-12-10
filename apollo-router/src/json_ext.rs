@@ -26,9 +26,19 @@ pub(crate) type Object = Map<ByteString, Value>;
 const FRAGMENT_PREFIX: &str = "... on ";
 
 static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:\|\[)(?<condition>.+?)(?:,\s*|)(?:\])")
+    Regex::new(r"(?:\|\[(?<condition>.+)?\])")
         .expect("this regex to check for type conditions is valid")
 });
+
+/// Extract the condition list from the regex captures.
+fn extract_matched_conditions(caps: &Captures) -> Option<TypeConditions> {
+    caps.name("condition").map(|c| {
+        c.as_str()
+            .split(',')
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    })
+}
 
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
@@ -852,16 +862,7 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     {
         let mut type_conditions: Vec<String> = Vec::new();
         let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions.extend(
-                caps.name("condition")
-                    .map(|c| {
-                        c.as_str()
-                            .split(',')
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default(),
-            );
+            type_conditions.extend(extract_matched_conditions(caps).unwrap_or_default());
             ""
         });
 
@@ -921,13 +922,7 @@ impl<'de> serde::de::Visitor<'de> for KeyVisitor {
     {
         let mut type_conditions = Vec::new();
         let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions.extend(
-                caps.extract::<1>()
-                    .1
-                    .map(|s| s.split(',').map(|s| s.to_string()))
-                    .into_iter()
-                    .flatten(),
-            );
+            type_conditions.extend(extract_matched_conditions(caps).unwrap_or_default());
             ""
         });
         Ok((
@@ -994,13 +989,7 @@ where
 fn flatten_from_str(s: &str) -> Result<PathElement, String> {
     let mut type_conditions = Vec::new();
     let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions.extend(
-            caps.extract::<1>()
-                .1
-                .map(|s| s.split(',').map(|s| s.to_string()))
-                .into_iter()
-                .flatten(),
-        );
+        type_conditions.extend(extract_matched_conditions(caps).unwrap_or_default());
         ""
     });
 
@@ -1015,13 +1004,7 @@ fn flatten_from_str(s: &str) -> Result<PathElement, String> {
 fn key_from_str(s: &str) -> Result<PathElement, String> {
     let mut type_conditions = Vec::new();
     let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions.extend(
-            caps.extract::<1>()
-                .1
-                .map(|s| s.split(',').map(|s| s.to_string()))
-                .into_iter()
-                .flatten(),
-        );
+        type_conditions.extend(extract_matched_conditions(caps).unwrap_or_default());
         ""
     });
 
