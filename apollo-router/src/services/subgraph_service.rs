@@ -1641,7 +1641,6 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
-    use tower::service_fn;
     use tower::ServiceExt;
     use url::Url;
     use SubgraphRequest;
@@ -1661,20 +1660,37 @@ mod tests {
     use crate::services::router::body::get_body_bytes;
     use crate::Context;
 
-    async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler)
+    async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
     where
-        Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Send + 'static,
+        Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
         Fut:
             std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
     {
-        // XXX(@goto-bus-stop) This is probably not the best way to go about this!
-        // This is just a long-winded way of turning the handler into a MakeService, lacking
-        // `make_service_fn`.
-        let server = axum::serve(
-            listener,
-            Router::new().route("/", axum::routing::any_service(service_fn(handle))),
-        );
-        server.await.unwrap();
+        use hyper::body::Incoming;
+        use hyper_util::rt::TokioExecutor;
+        use hyper_util::rt::TokioIo;
+
+        // Not sure this is the *right* place to do it, because it's actually clients that
+        // use crypto, not the server.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        loop {
+            let (stream, _) = listener.accept().await?;
+            let io = TokioIo::new(stream);
+            let handle = handle.clone();
+            tokio::spawn(async move {
+                // N.B. should use hyper service_fn here, since it's required to be implemented hyper Service trait!
+                let svc = hyper::service::service_fn(|request: http::Request<Incoming>| {
+                    handle(request.map(Body::new))
+                });
+                if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection(io, svc)
+                    .await
+                {
+                    eprintln!("server error: {}", err);
+                }
+            });
+        }
     }
 
     // starts a local server emulating a subgraph returning status code 400
