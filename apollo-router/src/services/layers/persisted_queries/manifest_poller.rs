@@ -34,6 +34,13 @@ pub struct FullPersistedQueryOperationId {
 /// An in memory cache of persisted queries.
 pub type PersistedQueryManifest = HashMap<FullPersistedQueryOperationId, String>;
 
+/// Describes whether the router should allow or deny a given request.
+/// with an error, or allow it but log the operation as unknown.
+pub(crate) struct FreeformGraphQLAction {
+    pub(crate) should_allow: bool,
+    pub(crate) should_log: bool,
+}
+
 /// How the router should respond to requests that are not resolved as the IDs
 /// of an operation in the manifest. (For the most part this means "requests
 /// sent as freeform GraphQL", though it also includes requests sent as an ID
@@ -58,49 +65,43 @@ pub(crate) enum FreeformGraphQLBehavior {
     },
 }
 
-/// Describes what the router should do for a given request: allow it, deny it
-/// with an error, or allow it but log the operation as unknown.
-pub(crate) enum FreeformGraphQLAction {
-    Allow,
-    Deny,
-    AllowAndLog,
-    DenyAndLog,
-}
-
 impl FreeformGraphQLBehavior {
     fn action_for_freeform_graphql(
         &self,
         ast: Result<&ast::Document, &str>,
     ) -> FreeformGraphQLAction {
         match self {
-            FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction::Allow,
+            FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction {
+                should_allow: true,
+                should_log: false,
+            },
             // Note that this branch doesn't get called in practice, because we catch
             // DenyAll at an earlier phase with never_allows_freeform_graphql.
-            FreeformGraphQLBehavior::DenyAll { log_unknown, .. } => {
-                if *log_unknown {
-                    FreeformGraphQLAction::DenyAndLog
-                } else {
-                    FreeformGraphQLAction::Deny
-                }
-            }
+            FreeformGraphQLBehavior::DenyAll { log_unknown, .. } => FreeformGraphQLAction {
+                should_allow: false,
+                should_log: *log_unknown,
+            },
             FreeformGraphQLBehavior::AllowIfInSafelist {
                 safelist,
                 log_unknown,
                 ..
             } => {
                 if safelist.is_allowed(ast) {
-                    FreeformGraphQLAction::Allow
-                } else if *log_unknown {
-                    FreeformGraphQLAction::DenyAndLog
+                    FreeformGraphQLAction {
+                        should_allow: true,
+                        should_log: false,
+                    }
                 } else {
-                    FreeformGraphQLAction::Deny
+                    FreeformGraphQLAction {
+                        should_allow: false,
+                        should_log: *log_unknown,
+                    }
                 }
             }
             FreeformGraphQLBehavior::LogUnlessInSafelist { safelist, .. } => {
-                if safelist.is_allowed(ast) {
-                    FreeformGraphQLAction::Allow
-                } else {
-                    FreeformGraphQLAction::AllowAndLog
+                FreeformGraphQLAction {
+                    should_allow: true,
+                    should_log: !safelist.is_allowed(ast),
                 }
             }
         }
