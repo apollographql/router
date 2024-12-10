@@ -376,9 +376,12 @@ commands:
       - run:
           name: Install cargo deny, about, edit
           command: |
+            # Until we are able to update rustc to at least 1.81.0,
+            # we need special handling of the cargo-about command.
+            rustup install 1.83.0
+            cargo install --locked --version 0.6.6 cargo-about
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
               cargo install --locked --version 0.14.21 cargo-deny
-              cargo install --locked --version 0.6.1 cargo-about
               cargo install --locked --version 0.12.2 cargo-edit
               cargo install --locked --version 0.12.0 cargo-fuzz
             fi
