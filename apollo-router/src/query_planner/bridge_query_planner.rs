@@ -269,8 +269,19 @@ impl PlannerMode {
                                 operation,
                                 query_plan_options,
                             )
-                        })
-                        .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+                        });
+                    if let Err(FederationError::SingleFederationError(
+                        SingleFederationError::InternalUnmergeableFields { .. },
+                    )) = &result
+                    {
+                        u64_counter!(
+                            "apollo.router.operations.query_planner.unmergeable_fields",
+                            "Query planner caught attempting to merge unmergeable fields",
+                            1
+                        );
+                    }
+                    let result =
+                        result.map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
                     let elapsed = start.elapsed().as_secs_f64();
                     metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
