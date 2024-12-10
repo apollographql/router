@@ -707,7 +707,7 @@ fragment F on Query {
         result: ast::Document,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "query:\n{}\nfiltered:\n{}", self.query, self.result,)
         }

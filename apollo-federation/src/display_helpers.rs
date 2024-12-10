@@ -67,7 +67,7 @@ pub(crate) fn write_indented_lines<T>(
 
 pub(crate) struct DisplaySlice<'a, T>(pub(crate) &'a [T]);
 
-impl<'a, T: Display> Display for DisplaySlice<'a, T> {
+impl<T: Display> Display for DisplaySlice<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[")?;
         let mut iter = self.0.iter();

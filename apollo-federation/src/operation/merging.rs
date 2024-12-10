@@ -19,7 +19,7 @@ use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
 
-impl<'a> FieldSelectionValue<'a> {
+impl FieldSelectionValue<'_> {
     /// Merges the given field selections into this one.
     ///
     /// # Preconditions
@@ -70,7 +70,7 @@ impl<'a> FieldSelectionValue<'a> {
     }
 }
 
-impl<'a> InlineFragmentSelectionValue<'a> {
+impl InlineFragmentSelectionValue<'_> {
     /// Merges the given normalized inline fragment selections into this one.
     ///
     /// # Preconditions
@@ -105,7 +105,7 @@ impl<'a> InlineFragmentSelectionValue<'a> {
     }
 }
 
-impl<'a> FragmentSpreadSelectionValue<'a> {
+impl FragmentSpreadSelectionValue<'_> {
     /// Merges the given normalized fragment spread selections into this one.
     ///
     /// # Preconditions

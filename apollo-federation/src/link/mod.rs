@@ -197,7 +197,7 @@ impl Import {
     }
 
     pub fn imported_name(&self) -> &Name {
-        return self.alias.as_ref().unwrap_or(&self.element);
+        self.alias.as_ref().unwrap_or(&self.element)
     }
 
     pub fn imported_display_name(&self) -> impl fmt::Display + '_ {
@@ -214,7 +214,7 @@ struct DisplayName<'s> {
     is_directive: bool,
 }
 
-impl<'s> fmt::Display for DisplayName<'s> {
+impl fmt::Display for DisplayName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_directive {
             f.write_str("@")?;
@@ -423,11 +423,11 @@ impl LinksMetadata {
     }
 
     pub fn all_links(&self) -> &[Arc<Link>] {
-        return self.links.as_ref();
+        self.links.as_ref()
     }
 
     pub fn for_identity(&self, identity: &Identity) -> Option<Arc<Link>> {
-        return self.by_identity.get(identity).cloned();
+        self.by_identity.get(identity).cloned()
     }
 
     pub fn source_link_of_type(&self, type_name: &Name) -> Option<LinkedElement> {

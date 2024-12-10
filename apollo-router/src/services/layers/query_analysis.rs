@@ -266,9 +266,6 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) has_explicit_root_fields: bool,
 }
 
-#[derive(Debug)]
-pub(crate) struct RootFieldKinds {}
-
 impl ParsedDocumentInner {
     pub(crate) fn new(
         ast: ast::Document,

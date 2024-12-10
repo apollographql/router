@@ -2195,7 +2195,6 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @join__directive extraction
-
 static JOIN_DIRECTIVE: &str = "join__directive";
 
 /// Converts `@join__directive(graphs: [A], name: "foo")` to `@foo` in the A subgraph.

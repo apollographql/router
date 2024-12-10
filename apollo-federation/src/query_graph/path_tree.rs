@@ -246,6 +246,7 @@ where
             /// trigger: the final trigger value
             ///   - Two equivalent triggers can have minor differences in the sibling_typename.
             ///     This field holds the final trigger value that will be used.
+            ///
             /// PORT_NOTE: The JS QP used the last trigger value. So, we are following that
             ///            to avoid mismatches. But, it can be revisited.
             ///            We may want to keep or merge the sibling_typename values.

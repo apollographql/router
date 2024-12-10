@@ -85,7 +85,7 @@ impl From<FederationError> for MergeFailure {
 }
 
 pub struct MergeFailure {
-    pub schema: Option<Schema>,
+    pub schema: Option<Box<Schema>>,
     pub errors: Vec<MergeError>,
     pub composition_hints: Vec<MergeWarning>,
 }
@@ -252,7 +252,7 @@ impl Merger {
             })
         } else {
             Err(MergeFailure {
-                schema: Some(supergraph),
+                schema: Some(Box::new(supergraph)),
                 composition_hints: self.composition_hints.to_owned(),
                 errors: self.errors.to_owned(),
             })

@@ -85,7 +85,7 @@ where
     }
 }
 
-impl<'a, T> Receiver<'a, T>
+impl<T> Receiver<'_, T>
 where
     T: Send + 'static,
 {

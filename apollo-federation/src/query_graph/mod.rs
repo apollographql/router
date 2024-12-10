@@ -855,7 +855,7 @@ impl QueryGraph {
                 "Unexpectedly encountered federation root node as tail node.",
             ));
         };
-        return match &edge_weight.transition {
+        match &edge_weight.transition {
             QueryGraphEdgeTransition::FieldCollection {
                 source,
                 field_definition_position,
@@ -920,7 +920,7 @@ impl QueryGraph {
             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => {
                 Ok(possible_runtime_types.clone())
             }
-        };
+        }
     }
 
     /// Returns a selection set that can be used as a key for the given type, and that can be

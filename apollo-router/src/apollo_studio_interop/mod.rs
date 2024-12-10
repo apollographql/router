@@ -763,7 +763,7 @@ struct SignatureFormatterWithAlgorithm<'a> {
     normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
 }
 
-impl<'a> fmt::Display for SignatureFormatterWithAlgorithm<'a> {
+impl fmt::Display for SignatureFormatterWithAlgorithm<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self.formatter {
             ApolloReportingSignatureFormatter::Operation(operation) => {

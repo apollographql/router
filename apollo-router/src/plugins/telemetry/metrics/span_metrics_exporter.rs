@@ -155,7 +155,7 @@ struct ValueVisitor<'a> {
     timings: &'a mut Timings,
 }
 
-impl<'a> Visit for ValueVisitor<'a> {
+impl Visit for ValueVisitor<'_> {
     fn record_debug(&mut self, _field: &Field, _value: &dyn std::fmt::Debug) {}
 
     fn record_str(&mut self, field: &Field, value: &str) {

@@ -307,7 +307,7 @@ fn get_from_urlencoded_value<'a, T: Deserialize<'a>>(
 
 struct RequestFromBytesSeed<'data>(&'data Bytes);
 
-impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
+impl<'de> DeserializeSeed<'de> for RequestFromBytesSeed<'_> {
     type Value = Request;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -329,7 +329,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
 
         struct RequestVisitor<'data>(&'data Bytes);
 
-        impl<'data, 'de> serde::de::Visitor<'de> for RequestVisitor<'data> {
+        impl<'de> serde::de::Visitor<'de> for RequestVisitor<'_> {
             type Value = Request;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

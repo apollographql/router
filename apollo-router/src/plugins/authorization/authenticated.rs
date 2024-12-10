@@ -96,7 +96,7 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
+impl traverse::Visitor for AuthenticatedCheckVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if !self.entity_query {
             traverse::operation(self, root_type, node)
@@ -319,7 +319,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
+impl transform::Visitor for AuthenticatedVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -627,7 +627,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,

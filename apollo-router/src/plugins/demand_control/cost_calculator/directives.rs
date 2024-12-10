@@ -133,7 +133,7 @@ pub(in crate::plugins::demand_control) struct ListSizeDirective<'schema> {
     pub(in crate::plugins::demand_control) sized_fields: Option<HashSet<&'schema str>>,
 }
 
-impl<'schema> ListSizeDirective<'schema> {
+impl ListSizeDirective<'_> {
     pub(in crate::plugins::demand_control) fn size_of(&self, field: &Field) -> Option<i32> {
         if self
             .sized_fields

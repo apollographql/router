@@ -1939,7 +1939,7 @@ mod tests {
                             .unwrap());
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -1950,7 +1950,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -1996,7 +1996,7 @@ mod tests {
                             .unwrap());
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2007,7 +2007,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -2038,7 +2038,7 @@ mod tests {
                     }
 
                     if request.query.is_none() {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2053,9 +2053,9 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     } else {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2066,7 +2066,7 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     }
                 }
                 Err(_) => {
@@ -2098,7 +2098,7 @@ mod tests {
                     }
 
                     if request.query.is_none() {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2113,9 +2113,9 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     } else {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2126,7 +2126,7 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     }
                 }
                 Err(_) => {
@@ -2157,7 +2157,7 @@ mod tests {
                         panic!("persistedQuery expected when configuration has apq_enabled=true")
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2168,7 +2168,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -2200,7 +2200,7 @@ mod tests {
                         )
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2211,7 +2211,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")

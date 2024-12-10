@@ -1051,7 +1051,7 @@ mod test {
     }
 
     impl SubgraphRequest {
-        pub fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
+        fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
             let mut headers = headers.clone();
             headers.push((HOST.as_str(), "rhost"));
             headers.push((CONTENT_LENGTH.as_str(), "22"));

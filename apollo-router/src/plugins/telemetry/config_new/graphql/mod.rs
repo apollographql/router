@@ -167,7 +167,7 @@ struct GraphQLInstrumentsVisitor<'a> {
     instruments: &'a GraphQLInstruments,
 }
 
-impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
+impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,

@@ -551,8 +551,7 @@ type Query {
 
         // Use apollo-compiler's selection set printer directly instead of the minimized
         // apollo-federation printer
-        let compiler_set =
-            apollo_compiler::executable::SelectionSet::try_from(&expanded_and_flattened).unwrap();
+        let compiler_set = executable::SelectionSet::try_from(&expanded_and_flattened).unwrap();
 
         insta::assert_snapshot!(compiler_set, @r#"
             {

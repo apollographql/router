@@ -157,7 +157,7 @@ struct SpanEventVisitor<'a, 'b> {
     custom_event: bool,
 }
 
-impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
+impl field::Visit for SpanEventVisitor<'_, '_> {
     /// Record events on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
@@ -318,7 +318,7 @@ struct SpanAttributeVisitor<'a> {
     exception_config: ExceptionFieldConfig,
 }
 
-impl<'a> SpanAttributeVisitor<'a> {
+impl SpanAttributeVisitor<'_> {
     fn record(&mut self, attribute: KeyValue) {
         debug_assert!(self.span_builder.attributes.is_some());
         if let Some(v) = self.span_builder.attributes.as_mut() {
@@ -327,7 +327,7 @@ impl<'a> SpanAttributeVisitor<'a> {
     }
 }
 
-impl<'a> field::Visit for SpanAttributeVisitor<'a> {
+impl field::Visit for SpanAttributeVisitor<'_> {
     /// Set attributes on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
