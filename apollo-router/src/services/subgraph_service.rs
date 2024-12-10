@@ -1713,7 +1713,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning status code 401
@@ -1726,7 +1726,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning connection closed
@@ -1753,7 +1753,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1768,7 +1768,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1783,7 +1783,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1796,7 +1796,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1809,7 +1809,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with missing content_type
@@ -1821,7 +1821,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with invalid content_type
@@ -1834,7 +1834,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning unsupported content_type
@@ -1847,7 +1847,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -1900,7 +1900,7 @@ mod tests {
             }
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -1955,7 +1955,7 @@ mod tests {
             }
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -2013,7 +2013,7 @@ mod tests {
             }
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -2071,7 +2071,7 @@ mod tests {
             }
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning a response to request with apq
@@ -2110,7 +2110,7 @@ mod tests {
             }
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning a response to request without apq
@@ -2151,7 +2151,7 @@ mod tests {
             }
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     async fn emulate_correct_websocket_server(listener: TcpListener) {
@@ -2266,7 +2266,7 @@ mod tests {
                 .unwrap())
         }
 
-        serve(listener, handle).await;
+        serve(listener, handle).await.unwrap();
     }
 
     fn subscription_config() -> SubscriptionConfig {
