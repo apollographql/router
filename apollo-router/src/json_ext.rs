@@ -168,9 +168,6 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
 
-    /// value type
-    fn json_type_name(&self) -> &'static str;
-
     fn as_i32(&self) -> Option<i32>;
 }
 
@@ -544,17 +541,6 @@ impl ValueExt for Value {
                 })
     }
 
-    fn json_type_name(&self) -> &'static str {
-        match self {
-            Value::Array(_) => "array",
-            Value::Null => "null",
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Object(_) => "object",
-        }
-    }
-
     fn as_i32(&self) -> Option<i32> {
         self.as_i64()?.to_i32()
     }
@@ -852,7 +838,7 @@ where
 
 struct FlattenVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
+impl serde::de::Visitor<'_> for FlattenVisitor {
     type Value = Option<TypeConditions>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -903,7 +889,7 @@ where
 
 struct KeyVisitor;
 
-impl<'de> serde::de::Visitor<'de> for KeyVisitor {
+impl serde::de::Visitor<'_> for KeyVisitor {
     type Value = (String, Option<TypeConditions>);
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -947,7 +933,7 @@ where
 
 struct FragmentVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FragmentVisitor {
+impl serde::de::Visitor<'_> for FragmentVisitor {
     type Value = String;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

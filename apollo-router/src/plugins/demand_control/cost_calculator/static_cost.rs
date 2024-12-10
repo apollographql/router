@@ -561,7 +561,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
     }
 }
 
-impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
+impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,

@@ -14,7 +14,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
-use apollo_compiler::schema;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
@@ -111,7 +110,7 @@ impl DeferredNodes {
     fn iter(&self) -> impl Iterator<Item = (&'_ DeferRef, NodeIndex<u32>)> {
         self.inner
             .iter()
-            .flat_map(|(defer_ref, nodes)| std::iter::repeat(defer_ref).zip(nodes.iter().copied()))
+            .flat_map(|(defer_ref, nodes)| iter::repeat(defer_ref).zip(nodes.iter().copied()))
     }
 
     /// Consume the map and yield each element. This is provided as a standalone method and not an
@@ -120,7 +119,7 @@ impl DeferredNodes {
         self.inner.into_iter().flat_map(|(defer_ref, nodes)| {
             // Cloning the key is a bit wasteful, but keys are typically very small,
             // and this map is also very small.
-            std::iter::repeat_with(move || defer_ref.clone()).zip(nodes)
+            iter::repeat_with(move || defer_ref.clone()).zip(nodes)
         })
     }
 }
@@ -670,8 +669,8 @@ impl FetchDependencyGraphNodePath {
                 let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
                 loop {
                     match type_ {
-                        schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
-                        schema::Type::List(inner) | schema::Type::NonNullList(inner) => {
+                        Type::Named(_) | Type::NonNullNamed(_) => break,
+                        Type::List(inner) | Type::NonNullList(inner) => {
                             new_path.push(FetchDataPathElement::AnyIndex(Default::default()));
                             type_ = inner
                         }
@@ -1807,7 +1806,7 @@ impl FetchDependencyGraph {
             )?;
 
             let reduced_sequence =
-                processor.reduce_sequence(std::iter::once(processed).chain(main_sequence));
+                processor.reduce_sequence(iter::once(processed).chain(main_sequence));
             Ok((
                 processor.on_conditions(&conditions, reduced_sequence),
                 all_deferred_nodes,
@@ -3035,7 +3034,7 @@ fn operation_for_entities_fetch(
     })?;
 
     let query_type = match subgraph_schema.get_type(query_type_name.clone())? {
-        crate::schema::position::TypeDefinitionPosition::Object(o) => o,
+        TypeDefinitionPosition::Object(o) => o,
         _ => {
             return Err(SingleFederationError::InvalidSubgraph {
                 message: "the root query type must be an object".to_string(),
