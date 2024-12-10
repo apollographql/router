@@ -482,7 +482,6 @@ mod tests {
     use super::assemble_batch;
     use super::Batch;
     use super::BatchQueryInfo;
-    use crate::batching::get_body_bytes;
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;

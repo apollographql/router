@@ -150,7 +150,7 @@ impl Service<router::Request> for SimpleEndpoint {
                 .status(StatusCode::OK)
                 .body(
                     Full::new(Bytes::from(serde_json::to_vec(&json_body).unwrap()))
-                        .map_err(|never| match never {})
+                        .map_err(|_never| "there is an error")
                         .boxed_unsync(),
                 )
                 .unwrap();

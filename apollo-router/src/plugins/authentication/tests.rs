@@ -21,7 +21,6 @@ use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
-use router::body;
 use serde::Serialize;
 use serde_json::Value;
 use tracing::subscriber;

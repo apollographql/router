@@ -627,7 +627,6 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HeaderSource;
     use apollo_federation::sources::connect::JSONSelection;
-    use bytes::Bytes;
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;

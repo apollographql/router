@@ -2570,7 +2570,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
- "http 0.2.12",
+ "http 1.2.0",
  "http-body-util",
  "hyper 1.5.1",
  "multimap 0.9.1",

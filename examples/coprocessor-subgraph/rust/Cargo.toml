@@ -10,7 +10,7 @@ apollo-router = { path = "../../../apollo-router" }
 async-trait = "0.1"
 bytes = "1.6.0"
 futures = "0.3"
-http = "0.2.8"
+http = "1.2.0"
 http-body-util = "0.1.2"
 hyper = "1.5.1"
 multimap = "0.9.0"
