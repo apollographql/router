@@ -554,6 +554,7 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
+    use crate::services::router::body;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
@@ -583,7 +584,7 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>("this is a test".to_string().into())
+                    .body::<crate::services::router::Body>(body::full("this is a test".to_string()))
                     .unwrap(),
                 context: req.context,
             })
@@ -622,7 +623,7 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>("this is a test".to_string().into())
+                    .body::<crate::services::router::Body>(body::full("this is a test".to_string()))
                     .unwrap(),
                 context: req.context,
             })

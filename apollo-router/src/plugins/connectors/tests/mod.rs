@@ -285,7 +285,7 @@ async fn test_root_field_plus_entity_plus_requires() {
             })))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .insert_header(wiremock::http::HeaderName::from_string(CONTENT_TYPE.to_string()).unwrap(), APPLICATION_JSON.essence_str())
                     .set_body_json(json!({
                       "data": {
                         "_entities": [{

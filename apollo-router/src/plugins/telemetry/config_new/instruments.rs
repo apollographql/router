@@ -2615,6 +2615,7 @@ mod tests {
     use http::StatusCode;
     use http::Uri;
     use multimap::MultiMap;
+    use router::body;
     use rust_embed::RustEmbed;
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
@@ -2967,7 +2968,7 @@ mod tests {
                                         .method(Method::from_str(&method).expect("method"))
                                         .uri(Uri::from_str(&uri).expect("uri"))
                                         .headers(convert_headers(headers))
-                                        .body(body)
+                                        .body(crate::services::router::body::full(body))
                                         .build()
                                         .unwrap();
                                     router_instruments = Some(config.new_router_instruments(
@@ -3197,7 +3198,7 @@ mod tests {
                                     let mut http_request = http::Request::builder()
                                         .method(Method::from_str(&method).expect("method"))
                                         .uri(Uri::from_str(&uri).expect("uri"))
-                                        .body(body.unwrap_or(String::from("")).into())
+                                        .body(body.map(body::full).unwrap_or(body::empty()))
                                         .unwrap();
                                     *http_request.headers_mut() = convert_http_headers(headers);
                                     let request = HttpRequest {
@@ -3220,7 +3221,7 @@ mod tests {
                                 } => {
                                     let mut http_response = http::Response::builder()
                                         .status(StatusCode::from_u16(status).expect("status"))
-                                        .body(body.into())
+                                        .body(crate::services::router::body::full(body))
                                         .unwrap();
                                     *http_response.headers_mut() = convert_http_headers(headers);
                                     let response = HttpResponse {

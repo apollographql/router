@@ -16,7 +16,7 @@ use http::Uri;
 use http::Version;
 use hyper_rustls::ConfigBuilderExt;
 #[cfg(unix)]
-use hyperlocal::UnixServerExt;
+use hyperlocal::UnixListenerExt;
 use mime::APPLICATION_JSON;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;

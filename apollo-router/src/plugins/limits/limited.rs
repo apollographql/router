@@ -129,24 +129,32 @@ mod test {
     use std::pin::Pin;
     use std::sync::Arc;
 
-    use http_body_util::StreamBody;
+    use bytes::Bytes;
+    use http_body::Body;
     use tower::BoxError;
 
     use crate::plugins::limits::layer::BodyLimitControl;
+    use crate::services::router::body;
 
     #[test]
     fn test_completes() {
         let control = BodyLimitControl::new(100);
         let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
         let lock = semaphore.clone().try_acquire_owned().unwrap();
-        let mut limited = super::Limited::new("test".to_string(), control, lock);
+        let mut limited = super::Limited::new(body::full("test".to_string()), control, lock);
 
-        assert_eq!(
-            Pin::new(&mut limited).poll_data(&mut std::task::Context::from_waker(
-                &futures::task::noop_waker()
-            )),
-            std::task::Poll::Ready(Some(Ok("test".to_string().into_bytes().into())))
-        );
+        match Pin::new(&mut limited).poll_frame(&mut std::task::Context::from_waker(
+            &futures::task::noop_waker(),
+        )) {
+            std::task::Poll::Ready(Some(Ok(data))) => {
+                let data = data.into_data().unwrap();
+                let content = String::from_utf8_lossy(data.to_vec().as_slice());
+                assert_eq!(&content, "test");
+            }
+            std::task::Poll::Pending => panic!("it should be ready"),
+            _ => panic!("the data returned is incorrect"),
+        }
+
         assert!(semaphore.try_acquire().is_err());
 
         // We need to assert that if the stream is dropped the semaphore isn't released.
@@ -162,12 +170,12 @@ mod test {
         let lock = semaphore.clone().try_acquire_owned().unwrap();
         let mut limited = super::Limited::new("test".to_string(), control, lock);
 
-        assert_eq!(
-            Pin::new(&mut limited).poll_data(&mut std::task::Context::from_waker(
-                &futures::task::noop_waker()
-            )),
-            std::task::Poll::Pending
-        );
+        match Pin::new(&mut limited).poll_frame(&mut std::task::Context::from_waker(
+            &futures::task::noop_waker(),
+        )) {
+            std::task::Poll::Pending => {}
+            std::task::Poll::Ready(_) => panic!("it should be pending"),
+        }
         assert!(semaphore.try_acquire().is_ok())
     }
 
@@ -178,26 +186,25 @@ mod test {
         let lock = semaphore.clone().try_acquire_owned().unwrap();
 
         let mut limited = super::Limited::new(
-            StreamBody::new(futures::stream::iter(vec![
-                Ok::<&str, BoxError>("hello"),
-                Ok("world"),
+            body::from_result_stream(futures::stream::iter(vec![
+                Ok::<Bytes, BoxError>("hello".into()),
+                Ok("world".into()),
             ])),
             control,
             lock,
         );
-        assert!(matches!(
-            Pin::new(&mut limited).poll_data(&mut std::task::Context::from_waker(
-                &futures::task::noop_waker()
-            )),
-            std::task::Poll::Ready(Some(Ok(_)))
-        ));
+        match Pin::new(&mut limited).poll_frame(&mut std::task::Context::from_waker(
+            &futures::task::noop_waker(),
+        )) {
+            std::task::Poll::Ready(Some(Ok(_))) => {}
+            _ => panic!("it should be ready with Some(Ok(_)"),
+        }
         assert!(semaphore.try_acquire().is_err());
-        assert!(matches!(
-            Pin::new(&mut limited).poll_data(&mut std::task::Context::from_waker(
-                &futures::task::noop_waker()
-            )),
-            std::task::Poll::Pending
-        ));
+        if let std::task::Poll::Ready(_) = Pin::new(&mut limited).poll_frame(
+            &mut std::task::Context::from_waker(&futures::task::noop_waker()),
+        ) {
+            panic!("it should be pending");
+        }
         assert!(semaphore.try_acquire().is_ok());
     }
 }

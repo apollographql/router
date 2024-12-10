@@ -627,6 +627,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HeaderSource;
     use apollo_federation::sources::connect::JSONSelection;
+    use bytes::Bytes;
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
@@ -653,7 +654,7 @@ mod tests {
             &IndexMap::with_hasher(Default::default()),
             &Map::default(),
         );
-        let request = request.body(http_body_util::Empty::new()).unwrap();
+        let request = request.body(http_body_util::Empty::<Bytes>::new()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -686,7 +687,7 @@ mod tests {
             &config,
             &Map::default(),
         );
-        let request = request.body(http_body_util::Empty::new()).unwrap();
+        let request = request.body(http_body_util::Empty::<Bytes>::new()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));

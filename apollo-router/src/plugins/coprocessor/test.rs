@@ -711,7 +711,12 @@ mod tests {
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
                 let (_, body) = r.into_parts();
-                let body: Value = serde_json::from_slice(&body.to_bytes().await.unwrap()).unwrap();
+                let body: Value = serde_json::from_slice(
+                    &crate::services::router::body::get_body_bytes(body)
+                        .await
+                        .unwrap(),
+                )
+                .unwrap();
                 let subgraph_id = body.get("subgraphRequestId").unwrap();
                 assert_eq!(subgraph_id.as_str(), Some("5678"));
 

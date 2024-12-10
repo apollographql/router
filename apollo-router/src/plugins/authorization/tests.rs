@@ -9,6 +9,7 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::router;
+use crate::services::router::body;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
@@ -282,7 +283,7 @@ async fn authenticated_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -313,7 +314,7 @@ async fn authenticated_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -400,7 +401,7 @@ async fn authenticated_directive_reject_unauthorized() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -485,7 +486,7 @@ async fn authenticated_directive_dry_run() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -626,7 +627,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -657,7 +658,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -688,7 +689,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -719,7 +720,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -798,7 +799,7 @@ async fn scopes_directive_reject_unauthorized() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -878,7 +879,7 @@ async fn scopes_directive_dry_run() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -960,7 +961,7 @@ async fn errors_in_extensions() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::full(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 

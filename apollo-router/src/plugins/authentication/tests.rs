@@ -22,6 +22,7 @@ use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
+use router::body;
 use serde::Serialize;
 use serde_json::Value;
 use tracing::subscriber;
@@ -1310,9 +1311,9 @@ async fn jwks_send_headers() {
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .version(http::Version::HTTP_11)
-                            .body::<crate::services::router::body::RouterBody>(
-                                include_str!("testdata/jwks.json").into(),
-                            )
+                            .body::<crate::services::router::body::RouterBody>(body::full(
+                                include_str!("testdata/jwks.json"),
+                            ))
                             .unwrap(),
                     )
                 }

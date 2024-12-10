@@ -6,8 +6,11 @@ use apollo_router::register_plugin;
 use apollo_router::services::router;
 use apollo_router::Endpoint;
 use apollo_router::ListenAddr;
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
+use http_body_util::BodyExt;
+use http_body_util::Full;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -145,7 +148,11 @@ impl Service<router::Request> for SimpleEndpoint {
             // return the modified payload
             let http_response = http::Response::builder()
                 .status(StatusCode::OK)
-                .body(hyper::Body::from(serde_json::to_vec(&json_body).unwrap()))
+                .body(
+                    Full::new(Bytes::from(serde_json::to_vec(&json_body).unwrap()))
+                        .map_err(|never| match never {})
+                        .boxed_unsync(),
+                )
                 .unwrap();
             let mut router_response = router::Response::from(http_response);
             router_response.context = req.context;

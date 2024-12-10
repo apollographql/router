@@ -50,14 +50,15 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
         .part("0", Part::text(FILE).file_name(FILE_NAME));
 
     async fn subgraph_handler(
-        mut request: http::Request<axum::body::Body>,
+        request: http::Request<axum::body::Body>,
     ) -> impl axum::response::IntoResponse {
         let boundary = request
             .headers()
             .get(CONTENT_TYPE)
             .and_then(|v| multer::parse_boundary(v.to_str().ok()?).ok())
             .expect("subgraph request should have valid Content-Type header");
-        let mut multipart = multer::Multipart::new(request.body_mut(), boundary);
+        let mut multipart =
+            multer::Multipart::new(request.into_body().into_data_stream(), boundary);
 
         let operations_field = multipart
             .next_field()
@@ -1269,10 +1270,7 @@ mod helper {
         for (index, (file_name, file)) in names.into_iter().zip(files).enumerate() {
             let file_name: String = file_name.into();
 
-            let part = Part::stream(RouterBody::new(StreamBody::new(
-                file.map(|b| b.map(|body| Frame::data(body)).map_err(BoxError::from)),
-            )))
-            .file_name(file_name);
+            let part = Part::stream(reqwest::Body::wrap_stream(file)).file_name(file_name);
 
             request = request.part(index.to_string(), part);
         }
@@ -1283,10 +1281,8 @@ mod helper {
     /// Handler that echos back the contents of the file that it receives
     ///
     /// Note: This will error if more than one file is received
-    pub async fn echo_single_file(
-        mut request: Request<Body>,
-    ) -> Result<Json<Value>, FileUploadError> {
-        let (_, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_single_file(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (_, map, mut multipart) = decode_request(request).await?;
 
         // Assert that we only have 1 file
         if map.len() > 1 {
@@ -1322,8 +1318,8 @@ mod helper {
     }
 
     /// Handler that echos back the contents of the files that it receives
-    pub async fn echo_files(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
-        let (operation, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_files(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (operation, map, mut multipart) = decode_request(request).await?;
 
         // Make sure that we have some mappings
         if map.is_empty() {
@@ -1376,10 +1372,8 @@ mod helper {
     }
 
     /// Handler that echos back the contents of the list of files that it receives
-    pub async fn echo_file_list(
-        mut request: Request<Body>,
-    ) -> Result<Json<Value>, FileUploadError> {
-        let (operation, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_file_list(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (operation, map, mut multipart) = decode_request(request).await?;
 
         // Make sure that we have some mappings
         if map.is_empty() {
@@ -1439,9 +1433,10 @@ mod helper {
     }
 
     /// A handler that always fails. Useful for tests that should not reach the subgraph at all.
-    pub async fn always_fail(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+    pub async fn always_fail(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
         // Consume the stream
-        while request.body_mut().next().await.is_some() {}
+        let mut request = request.into_body().into_data_stream();
+        while request.next().await.is_some() {}
 
         // Signal a failure
         Err(FileUploadError::ShouldHaveFailed)
@@ -1452,9 +1447,9 @@ mod helper {
     /// Note: Make sure to use a router with state (Expected stream length, expected value).
     pub async fn verify_stream(
         State((expected_length, byte_value)): State<(usize, u8)>,
-        mut request: Request<Body>,
+        request: Request<Body>,
     ) -> Result<Json<Value>, FileUploadError> {
-        let (_, _, mut multipart) = decode_request(&mut request).await?;
+        let (_, _, mut multipart) = decode_request(request).await?;
 
         let mut file = multipart
             .next_field()
@@ -1531,8 +1526,9 @@ mod helper {
     /// Note: The order of the mapping must correspond with the order in the request, so
     /// we use a [BTreeMap] here to keep the order when traversing the list of files.
     async fn decode_request(
-        request: &mut Request<Body>,
-    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart), FileUploadError> {
+        request: Request<Body>,
+    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart<'static>), FileUploadError>
+    {
         let content_type = request
             .headers()
             .get(CONTENT_TYPE)
@@ -1542,7 +1538,7 @@ mod helper {
             FileUploadError::BadHeaders(format!("could not parse multipart boundary: {e}"))
         })?)?;
 
-        let mut multipart = Multipart::new(request.body_mut(), boundary);
+        let mut multipart = Multipart::new(request.into_body().into_data_stream(), boundary);
 
         // Extract the operations
         // TODO: Should we be streaming here?

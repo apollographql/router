@@ -292,6 +292,7 @@ mod tests {
     use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
+    use crate::services::router::body;
     use crate::Context;
 
     const TEST_SUBGRAPH_NAME: &str = "test_subgraph_name";
@@ -320,7 +321,7 @@ mod tests {
 
     fn http_request(context: Context) -> ConnectorRequest {
         HttpRequest {
-            http_request: http::Request::builder().body("".into()).unwrap(),
+            http_request: http::Request::builder().body(body::empty()).unwrap(),
             context,
         }
     }
@@ -329,7 +330,7 @@ mod tests {
         HttpRequest {
             http_request: http::Request::builder()
                 .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)
-                .body("".into())
+                .body(body::empty())
                 .unwrap(),
             context,
         }
@@ -339,7 +340,7 @@ mod tests {
         HttpResponse {
             http_response: http::Response::builder()
                 .status(status_code)
-                .body("".into())
+                .body(body::empty())
                 .unwrap(),
             context,
         }
@@ -350,7 +351,7 @@ mod tests {
             http_response: http::Response::builder()
                 .status(status_code)
                 .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)
-                .body("".into())
+                .body(body::empty())
                 .unwrap(),
             context,
         }

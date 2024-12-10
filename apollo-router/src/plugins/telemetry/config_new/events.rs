@@ -838,6 +838,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use router::body;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
@@ -1197,7 +1198,7 @@ mod tests {
             context
                 .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                 .unwrap();
-            let mut http_request = http::Request::builder().body("".into()).unwrap();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
             http_request
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1210,7 +1211,7 @@ mod tests {
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-request", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: http_request.context.clone(),
                 })
@@ -1239,7 +1240,7 @@ mod tests {
             context
                 .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                 .unwrap();
-            let mut http_request = http::Request::builder().body("".into()).unwrap();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
             http_request
                 .headers_mut()
                 .insert("x-log-response", HeaderValue::from_static("log"));
@@ -1252,7 +1253,7 @@ mod tests {
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: http_request.context.clone(),
                 })

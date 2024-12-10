@@ -289,6 +289,7 @@ mod tests {
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router;
+    use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
@@ -837,7 +838,7 @@ connector:
                 context
                     .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                     .unwrap();
-                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -852,7 +853,7 @@ connector:
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: Default::default(),
                 };
@@ -1007,7 +1008,7 @@ connector:
                 context
                     .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                     .unwrap();
-                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1022,7 +1023,7 @@ connector:
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: Default::default(),
                 };
