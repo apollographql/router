@@ -191,7 +191,9 @@ mod test {
     use super::studio::SingleStatsReport;
     use super::*;
     use crate::context::OPERATION_KIND;
+    use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::subscription;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::default_buffer_size;
@@ -410,7 +412,6 @@ mod test {
     async fn create_plugin_with_apollo_config(
         apollo_config: apollo::Config,
     ) -> Result<Telemetry, BoxError> {
-        use crate::plugin::PluginPrivate;
         Telemetry::new(PluginInit::fake_new(
             config::Conf {
                 apollo: apollo_config,
@@ -422,8 +423,7 @@ mod test {
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
-        use crate::plugin::PluginPrivate;
-        subscription::Subscription::new(PluginInit::fake_new(
+        <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
         ))

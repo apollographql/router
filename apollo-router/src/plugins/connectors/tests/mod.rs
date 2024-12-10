@@ -1449,7 +1449,8 @@ async fn execute(
                     }
                 }
             }
-        }
+        },
+        "experimental_query_planner_mode": "legacy"
     });
     let config = if let Some(mut config) = config {
         config.deep_merge(common_config);

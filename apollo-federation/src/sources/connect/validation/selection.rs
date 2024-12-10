@@ -436,7 +436,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
 
         if !field.definition.arguments.is_empty() {
             return Err(Message {
-                code: Code::FieldWithArguments,
+                code: Code::ConnectorsFieldWithArguments,
                 message: format!(
                     "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
                     parent_type = self.last_field().ty().name,

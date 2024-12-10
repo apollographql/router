@@ -92,12 +92,8 @@ impl DefaultForLevel for ConnectorAttributes {
     }
 }
 
-impl Selectors for ConnectorAttributes {
-    type Request = ConnectorRequest;
-    type Response = ConnectorResponse;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
+impl Selectors<ConnectorRequest, ConnectorResponse, ()> for ConnectorAttributes {
+    fn on_request(&self, request: &ConnectorRequest) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
 
         if let Ok(Some(connector_info)) = request
@@ -138,7 +134,7 @@ impl Selectors for ConnectorAttributes {
         attrs
     }
 
-    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, _response: &ConnectorResponse) -> Vec<KeyValue> {
         Vec::default()
     }
 

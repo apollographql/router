@@ -526,6 +526,7 @@ pub(crate) async fn add_plugin(
     schema_id: Arc<String>,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    launch_id: Option<Arc<String>>,
     notify: &crate::notification::Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
@@ -538,6 +539,7 @@ pub(crate) async fn add_plugin(
                 .supergraph_schema_id(schema_id)
                 .supergraph_schema(supergraph_schema)
                 .subgraph_schemas(subgraph_schemas)
+                .launch_id(launch_id)
                 .notify(notify.clone())
                 .build(),
         )
@@ -595,6 +597,7 @@ pub(crate) async fn create_plugins(
                 supergraph_schema_id.clone(),
                 supergraph_schema.clone(),
                 subgraph_schemas.clone(),
+                schema.launch_id.clone(),
                 &configuration.notify.clone(),
                 &mut plugin_instances,
                 &mut errors,
@@ -688,6 +691,7 @@ pub(crate) async fn create_plugins(
     }
     add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("traffic_shaping");
+    add_mandatory_apollo_plugin!("fleet_detector");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
     add_optional_apollo_plugin!("override_subgraph_url");

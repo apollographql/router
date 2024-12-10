@@ -348,8 +348,10 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.graphql_error = 1u64,
+                    u64_counter!(
+                        "apollo.router.graphql_error",
+                        "Number of GraphQL error responses returned by the router",
+                        1,
                         code = "INVALID_ACCEPT_HEADER"
                     );
                     // Useful for selector in spans/instruments/events
@@ -392,13 +394,6 @@ impl RouterService {
         {
             Ok(requests) => requests,
             Err(err) => {
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    status = err.status.as_u16() as i64,
-                    error = err.error.to_string()
-                );
                 // Useful for selector in spans/instruments/events
                 context
                     .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
@@ -506,7 +501,6 @@ impl RouterService {
                         result = graphql::Request::batch_from_urlencoded_query(q.to_string())
                             .map_err(|e| TranslateError {
                                 status: StatusCode::BAD_REQUEST,
-                                error: "failed to decode a valid GraphQL request from path",
                                 extension_code: "INVALID_GRAPHQL_REQUEST",
                                 extension_details: format!(
                                     "failed to decode a valid GraphQL request from path {e}"
@@ -515,7 +509,6 @@ impl RouterService {
                         if result.is_empty() {
                             return Err(TranslateError {
                                 status: StatusCode::BAD_REQUEST,
-                                error: "failed to decode a valid GraphQL request from path",
                                 extension_code: "INVALID_GRAPHQL_REQUEST",
                                 extension_details: "failed to decode a valid GraphQL request from path: empty array ".to_string()
                             });
@@ -530,14 +523,12 @@ impl RouterService {
                         };
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "batching not enabled",
                             extension_code: "BATCHING_NOT_ENABLED",
                             extension_details,
                         });
                     } else {
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "failed to decode a valid GraphQL request from path",
                             extension_code: "INVALID_GRAPHQL_REQUEST",
                             extension_details: format!(
                                 "failed to decode a valid GraphQL request from path {err}"
@@ -550,7 +541,6 @@ impl RouterService {
         }).unwrap_or_else(|| {
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
-                error: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
                 extension_code: "INVALID_GRAPHQL_REQUEST",
                 extension_details: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
             })
@@ -575,7 +565,6 @@ impl RouterService {
                     result =
                         graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "failed to deserialize the request body into JSON",
                             extension_code: "INVALID_GRAPHQL_REQUEST",
                             extension_details: format!(
                                 "failed to deserialize the request body into JSON: {e}"
@@ -584,7 +573,6 @@ impl RouterService {
                     if result.is_empty() {
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "failed to decode a valid GraphQL request from path",
                             extension_code: "INVALID_GRAPHQL_REQUEST",
                             extension_details:
                                 "failed to decode a valid GraphQL request from path: empty array "
@@ -602,14 +590,12 @@ impl RouterService {
                     };
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
-                        error: "batching not enabled",
                         extension_code: "BATCHING_NOT_ENABLED",
                         extension_details,
                     });
                 } else {
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
-                        error: "failed to deserialize the request body into JSON",
                         extension_code: "INVALID_GRAPHQL_REQUEST",
                         extension_details: format!(
                             "failed to deserialize the request body into JSON: {err}"
@@ -689,7 +675,6 @@ impl RouterService {
                     Batch::query_for_index(shared_batch_details.clone(), index + 1).map_err(
                         |err| TranslateError {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
-                            error: "failed to create batch",
                             extension_code: "BATCHING_ERROR",
                             extension_details: format!("failed to create batch entry: {err}"),
                         },
@@ -718,7 +703,6 @@ impl RouterService {
             let b_for_index =
                 Batch::query_for_index(shared_batch_details, 0).map_err(|err| TranslateError {
                     status: StatusCode::INTERNAL_SERVER_ERROR,
-                    error: "failed to create batch",
                     extension_code: "BATCHING_ERROR",
                     extension_details: format!("failed to create batch entry: {err}"),
                 })?;
@@ -766,12 +750,18 @@ impl RouterService {
         for (code, count) in map {
             match code {
                 None => {
-                    tracing::info!(monotonic_counter.apollo.router.graphql_error = count,);
+                    u64_counter!(
+                        "apollo.router.graphql_error",
+                        "Number of GraphQL error responses returned by the router",
+                        count
+                    );
                 }
                 Some(code) => {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.graphql_error = count,
-                        code = code
+                    u64_counter!(
+                        "apollo.router.graphql_error",
+                        "Number of GraphQL error responses returned by the router",
+                        count,
+                        code = code.to_string()
                     );
                 }
             }
@@ -781,7 +771,6 @@ impl RouterService {
 
 struct TranslateError<'a> {
     status: StatusCode,
-    error: &'a str,
     extension_code: &'a str,
     extension_details: String,
 }

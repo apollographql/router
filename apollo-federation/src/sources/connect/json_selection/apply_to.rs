@@ -122,6 +122,8 @@ impl ApplyToError {
         }
     }
 
+    // This macro is useful for tests, but it absolutely should never be used with
+    // dynamic input at runtime, since it panics for any input that's not JSON.
     #[cfg(test)]
     pub(crate) fn from_json(json: &JSON) -> Self {
         let error = json.as_object().unwrap();

@@ -10,18 +10,18 @@ info:
         connector:
           rate.limit:
             value:
-             connector_http_response_header: x-ratelimit-remaining
+              connector_http_response_header: x-ratelimit-remaining
             unit: count
             type: histogram
             description: Rate limit remaining
             condition:
               all:
                 - eq:
-                  - 200
-                  - connector_http_response_status: code
+                    - 200
+                    - connector_http_response_status: code
                 - eq:
-                  - user_api
-                  - connector_source: name
+                    - user_api
+                    - connector_source: name
 ---
 - name: rate.limit
   description: Rate limit remaining
@@ -29,4 +29,5 @@ info:
   data:
     datapoints:
       - sum: 1499
+        count: 2
         attributes: {}

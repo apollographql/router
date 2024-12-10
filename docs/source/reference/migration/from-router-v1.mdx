@@ -136,6 +136,21 @@ telemetry:
             - my_client
 ```
 
+### Metrics
+
++ `apollo_router_http_request_retry_total` has been removed and will be supported now by `http.client.request.duration` metrics 
+with the `http.request.resend_count` attribute which is automatically set when `default_requirement_level` is set to `recommended`.
+
++ `apollo_router_timeout` has been removed. This metric conflated timed-out requests from client to the router, and requests from the router to subgraphs.
+Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests,
+and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
+
++ `apollo_router_http_requests_total` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+
++ `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+
++ `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
+
 ### Check CORS configuration
 
 If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.

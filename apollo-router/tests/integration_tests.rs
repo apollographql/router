@@ -8,6 +8,7 @@ use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use apollo_router::_private::create_test_service_factory_from_yaml;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
@@ -17,7 +18,6 @@ use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use apollo_router::Configuration;
 use apollo_router::Context;
-use apollo_router::_private::create_test_service_factory_from_yaml;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;

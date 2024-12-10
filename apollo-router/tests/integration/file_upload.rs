@@ -69,14 +69,14 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
         assert_eq!(operations_field.name(), Some("operations"));
         let operations: helper::Operation =
             serde_json::from_slice(&operations_field.bytes().await.unwrap()).unwrap();
-        insta::assert_json_snapshot!(operations, @r#"
+        insta::assert_json_snapshot!(operations, @r###"
         {
-          "query": "mutation SomeMutation__uploads__0($file:Upload){file:singleUpload(file:$file){filename body}}",
+          "query": "mutation SomeMutation__uploads__0($file: Upload) { file: singleUpload(file: $file) { filename body } }",
           "variables": {
             "file": null
           }
         }
-        "#);
+        "###);
 
         let map_field = multipart
             .next_field()
