@@ -1,3 +1,5 @@
+mod keys;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
@@ -7,23 +9,33 @@ use std::sync::Arc;
 use apollo_compiler::ast;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::SourceSpan;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use http::header;
 use http::HeaderName;
+use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 use url::Url;
 
+use super::json_selection::ExternalVarPaths;
+use super::spec::schema::ConnectDirectiveArguments;
+use super::spec::schema::SourceDirectiveArguments;
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
 use super::url_template;
 use super::variable::Namespace;
+use super::variable::VariableReference;
 use super::ConnectId;
 use super::JSONSelection;
+use super::PathSelection;
 use super::URLTemplate;
 use crate::error::FederationError;
-use crate::schema::ValidFederationSchema;
+use crate::internal_error;
+use crate::link::Link;
 use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::header::HeaderValueError;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
@@ -70,17 +82,20 @@ pub enum EntityResolver {
 }
 
 impl Connector {
-    pub(crate) fn from_valid_schema(
-        schema: &ValidFederationSchema,
+    /// Get a map of connectors from an apollo_compiler::Schema.
+    ///
+    /// Note: the function assumes that we've checked that the schema is valid
+    /// before calling this function. We can't take a Valid<Schema> or ValidFederationSchema
+    /// because we use this code in validation, which occurs before we've augmented
+    /// the schema with types from `@link` directives.
+    pub(crate) fn from_schema(
+        schema: &Schema,
         subgraph_name: &str,
         spec: ConnectSpec,
     ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
-        let Some(metadata) = schema.metadata() else {
-            return Ok(IndexMap::with_hasher(Default::default()));
-        };
-
-        let Some(link) = metadata.for_identity(&ConnectSpec::identity()) else {
-            return Ok(IndexMap::with_hasher(Default::default()));
+        let connect_identity = ConnectSpec::identity();
+        let Some((link, _)) = Link::for_identity(schema, &connect_identity) else {
+            return Ok(Default::default());
         };
 
         let source_name = ConnectSpec::source_directive_name(&link);
@@ -91,71 +106,129 @@ impl Connector {
 
         connect_arguments
             .into_iter()
-            .map(move |args| {
-                let source = if let Some(source_name) = args.source {
-                    source_arguments
-                        .iter()
-                        .find(|source| source.name == source_name)
-                } else {
-                    None
-                };
-
-                let source_name = source.map(|s| s.name.clone());
-                let connect_http = args.http.expect("@connect http missing");
-                let source_http = source.map(|s| &s.http);
-
-                let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
-
-                let parent_type_name = args.position.field.type_name().clone();
-                let schema_def = &schema.schema().schema_definition;
-                let on_query = schema_def
-                    .query
-                    .as_ref()
-                    .map(|ty| ty.name == parent_type_name)
-                    .unwrap_or(false);
-                let on_mutation = schema_def
-                    .mutation
-                    .as_ref()
-                    .map(|ty| ty.name == parent_type_name)
-                    .unwrap_or(false);
-                let on_root_type = on_query || on_mutation;
-
-                let id = ConnectId {
-                    label: make_label(subgraph_name, &source_name, &transport),
-                    subgraph_name: subgraph_name.to_string(),
-                    source_name: source_name.clone(),
-                    directive: args.position,
-                };
-
-                let entity_resolver = match (args.entity, on_root_type) {
-                    (true, _) => Some(EntityResolver::Explicit),
-                    (_, false) => Some(EntityResolver::Implicit),
-
-                    _ => None,
-                };
-
-                let request_variables = transport.variables().collect();
-                let response_variables = args.selection.external_variables().collect();
-
-                let connector = Connector {
-                    id: id.clone(),
-                    transport,
-                    selection: args.selection,
-                    entity_resolver,
-                    config: None,
-                    max_requests: None,
-                    spec,
-                    request_variables,
-                    response_variables,
-                };
-
-                Ok((id, connector))
-            })
+            .map(|args| Self::from_directives(schema, subgraph_name, spec, args, &source_arguments))
             .collect()
+    }
+
+    fn from_directives(
+        schema: &Schema,
+        subgraph_name: &str,
+        spec: ConnectSpec,
+        connect: ConnectDirectiveArguments,
+        source_arguments: &[SourceDirectiveArguments],
+    ) -> Result<(ConnectId, Self), FederationError> {
+        let source = connect
+            .source
+            .as_ref()
+            .and_then(|name| source_arguments.iter().find(|s| s.name == *name));
+
+        let source_name = source.map(|s| s.name.clone());
+        let connect_http = connect
+            .http
+            .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
+        let source_http = source.map(|s| &s.http);
+
+        let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
+
+        let parent_type_name = connect.position.field.type_name().clone();
+        let schema_def = &schema.schema_definition;
+        let on_query = schema_def
+            .query
+            .as_ref()
+            .map(|ty| ty.name == parent_type_name)
+            .unwrap_or(false);
+        let on_mutation = schema_def
+            .mutation
+            .as_ref()
+            .map(|ty| ty.name == parent_type_name)
+            .unwrap_or(false);
+        let on_root_type = on_query || on_mutation;
+
+        let id = ConnectId {
+            label: make_label(subgraph_name, &source_name, &transport),
+            subgraph_name: subgraph_name.to_string(),
+            source_name: source_name.clone(),
+            directive: connect.position,
+        };
+
+        let entity_resolver = match (connect.entity, on_root_type) {
+            (true, _) => Some(EntityResolver::Explicit),
+            (_, false) => Some(EntityResolver::Implicit),
+            _ => None,
+        };
+
+        let request_variables = transport.variables().collect();
+        let response_variables = connect.selection.external_variables().collect();
+
+        let connector = Connector {
+            id: id.clone(),
+            transport,
+            selection: connect.selection,
+            entity_resolver,
+            config: None,
+            max_requests: None,
+            spec,
+            request_variables,
+            response_variables,
+        };
+
+        Ok((id, connector))
     }
 
     pub fn field_name(&self) -> &Name {
         self.id.directive.field.field_name()
+    }
+
+    pub(crate) fn variable_references(
+        &self,
+    ) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
+        self.transport.variable_references().chain(
+            self.selection
+                .external_var_paths()
+                .into_iter()
+                .flat_map(PathSelection::variable_reference),
+        )
+    }
+
+    /// Create a field set for a `@key` using $args and $this variables.
+    pub(crate) fn resolvable_key(
+        &self,
+        schema: &Schema,
+    ) -> Result<Option<Valid<FieldSet>>, FederationError> {
+        match &self.entity_resolver {
+            None => Ok(None),
+            Some(EntityResolver::Explicit) => {
+                let output_type = self
+                    .id
+                    .directive
+                    .field
+                    .get(schema)
+                    .map(|f| f.ty.inner_named_type())
+                    .map_err(|_| {
+                        internal_error!(
+                            "Missing field {}.{}",
+                            self.id.directive.field.type_name(),
+                            self.id.directive.field.field_name()
+                        )
+                    })?;
+                make_key_field_set_from_variables(
+                    schema,
+                    output_type,
+                    self.variable_references(),
+                    EntityResolver::Explicit,
+                )
+                .map_err(|_| {
+                    internal_error!("Failed to create key for connector {}", self.id.label)
+                })
+            }
+            Some(EntityResolver::Implicit) => make_key_field_set_from_variables(
+                schema,
+                self.id.directive.field.type_name(),
+                self.variable_references(),
+                EntityResolver::Implicit,
+            )
+            .map_err(|_| internal_error!("Failed to create key for connector {}", self.id.label)),
+        }
     }
 }
 
@@ -227,21 +300,26 @@ impl HttpJsonTransport {
     }
 
     fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
-        let url_variables = self
-            .connect_template
-            .variables()
-            .map(|v| v.namespace.namespace);
+        self.variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
+    }
+
+    fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
+        let url_variables = self.connect_template.variables().cloned();
         let header_variables = self
             .headers
             .iter()
             .filter_map(|(_, source)| match source {
                 HeaderSource::From(_) => None,
-                HeaderSource::Value(source) => {
-                    Some(source.variable_references().map(|v| v.namespace.namespace))
-                }
+                HeaderSource::Value(source) => Some(source.variable_references()),
             })
-            .flatten();
-        let body_variables = self.body.iter().flat_map(|b| b.external_variables());
+            .flatten()
+            .cloned();
+        let body_variables = self.body.iter().flat_map(|b| {
+            b.external_var_paths()
+                .into_iter()
+                .flat_map(PathSelection::variable_reference)
+        });
         url_variables.chain(header_variables).chain(body_variables)
     }
 }
@@ -482,7 +560,7 @@ mod tests {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors =
-            Connector::from_valid_schema(&subgraph.schema, "connectors", ConnectSpec::V0_1)
+            Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
         assert_debug_snapshot!(&connectors, @r###"
         {

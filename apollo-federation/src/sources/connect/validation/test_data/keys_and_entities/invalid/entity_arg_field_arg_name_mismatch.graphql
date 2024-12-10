@@ -1,25 +1,17 @@
 extend schema
-@link(
-    url: "https://specs.apollo.dev/federation/v2.8"
-    import: ["@key"]
-)
-@link(
-    url: "https://specs.apollo.dev/connect/v0.1"
-    import: ["@connect"]
-)
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
 
 type Query {
-    product(
-        id: ID!
-    ): Product
+  product(id: ID!): Product
     @connect(
-        http: { GET: "http://myapi/products/{$args.id}" }
-        selection: "not_named_id name"
-        entity: true
+      http: { GET: "http://myapi/products/{$args.id}" }
+      selection: "not_named_id name"
+      entity: true
     )
 }
 
 type Product {
-    not_named_id: ID!
-    name: String
+  not_named_id: ID!
+  name: String
 }
