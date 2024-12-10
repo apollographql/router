@@ -125,6 +125,9 @@ pub enum SingleFederationError {
     #[error("An internal error has occurred, please report this bug to Apollo. Details: {0}")]
     #[allow(private_interfaces)] // users should not inspect this.
     InternalRebaseError(#[from] crate::operation::RebaseError),
+    // This is a known bug that will take time to fix, and does not require reporting.
+    #[error("{message}")]
+    InternalUnmergeableFields { message: String },
     #[error("{diagnostics}")]
     InvalidGraphQL { diagnostics: DiagnosticList },
     #[error(transparent)]
@@ -301,6 +304,7 @@ impl SingleFederationError {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
+            SingleFederationError::InternalUnmergeableFields { .. } => ErrorCode::Internal,
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,

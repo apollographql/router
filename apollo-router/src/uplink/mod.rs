@@ -17,6 +17,7 @@ use url::Url;
 pub(crate) mod license_enforcement;
 pub(crate) mod license_stream;
 pub(crate) mod persisted_queries_manifest_stream;
+pub(crate) mod schema;
 pub(crate) mod schema_stream;
 
 const GCP_URL: &str = "https://uplink.api.apollographql.com";
