@@ -305,7 +305,7 @@ impl PluginPrivate for FleetDetector {
                                     "apollo.router.operations.fetch.request_size",
                                     "Total number of request bytes for subgraph fetches",
                                     bytes.len() as u64,
-                                    subgraph.service.name = sn.to_string()
+                                    subgraph.name = sn.to_string()
                                 );
                             }
                         }))
@@ -322,7 +322,7 @@ impl PluginPrivate for FleetDetector {
                             "apollo.router.operations.fetch",
                             "Number of subgraph fetches",
                             1u64,
-                            subgraph.service.name = sn.to_string(),
+                            subgraph.name = sn.to_string(),
                             client_error = false,
                             http.response.status_code = res.http_response.status().as_u16() as i64
                         );
@@ -337,7 +337,7 @@ impl PluginPrivate for FleetDetector {
                                             "apollo.router.operations.fetch.response_size",
                                             "Total number of response bytes for subgraph fetches",
                                             bytes.len() as u64,
-                                            subgraph.service.name = sn.to_string()
+                                            subgraph.name = sn.to_string()
                                         );
                                     }
                                 }))
@@ -350,7 +350,7 @@ impl PluginPrivate for FleetDetector {
                             "apollo.router.operations.fetch",
                             "Number of subgraph fetches",
                             1u64,
-                            subgraph.service.name = sn.to_string(),
+                            subgraph.name = sn.to_string(),
                             client_error = true
                         );
                         Err(err)
@@ -641,17 +641,17 @@ mod tests {
             assert!(!collect_metrics().metric_exists::<u64>(
                 "apollo.router.operations.fetch",
                 MetricType::Counter,
-                &[KeyValue::new("subgraph.service.name", "subgraph"),],
+                &[KeyValue::new("subgraph.name", "subgraph"),],
             ));
             assert!(!collect_metrics().metric_exists::<u64>(
                 "apollo.router.operations.fetch.request_size",
                 MetricType::Counter,
-                &[KeyValue::new("subgraph.service.name", "subgraph"),],
+                &[KeyValue::new("subgraph.name", "subgraph"),],
             ));
             assert!(!collect_metrics().metric_exists::<u64>(
                 "apollo.router.operations.fetch.response_size",
                 MetricType::Counter,
-                &[KeyValue::new("subgraph.service.name", "subgraph"),],
+                &[KeyValue::new("subgraph.name", "subgraph"),],
             ));
         }
         .with_metrics()
@@ -716,7 +716,7 @@ mod tests {
                 "apollo.router.operations.fetch",
                 1,
                 &[
-                    KeyValue::new("subgraph.service.name", "subgraph"),
+                    KeyValue::new("subgraph.name", "subgraph"),
                     KeyValue::new("http.response.status_code", 400),
                     KeyValue::new("client_error", false)
                 ]
@@ -724,12 +724,12 @@ mod tests {
             assert_counter!(
                 "apollo.router.operations.fetch.request_size",
                 7,
-                &[KeyValue::new("subgraph.service.name", "subgraph"),]
+                &[KeyValue::new("subgraph.name", "subgraph"),]
             );
             assert_counter!(
                 "apollo.router.operations.fetch.response_size",
                 7,
-                &[KeyValue::new("subgraph.service.name", "subgraph"),]
+                &[KeyValue::new("subgraph.name", "subgraph"),]
             );
         }
         .with_metrics()
