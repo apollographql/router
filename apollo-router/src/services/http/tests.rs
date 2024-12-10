@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 use std::io;
-use std::net::TcpListener;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -29,6 +28,7 @@ use rustls::ServerConfig;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
@@ -55,7 +55,7 @@ use crate::TestHarness;
 // enable all of these tests and make them work before we merge this branch.
 
 async fn tls_server(
-    listener: tokio::net::TcpListener,
+    listener: TcpListener,
     certificates: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
     body: &'static str,
@@ -100,6 +100,27 @@ async fn tls_server(
     }
 }
 
+async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
+where
+    Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
+    Fut: std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
+{
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+        let handle = handle.clone();
+        tokio::spawn(async move {
+            // N.B. should use hyper service_fn here, since it's required to be implemented hyper Service trait!
+            let svc = hyper::service::service_fn(|request: Request<Incoming>| handle(request.map(Body::new)));
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection(io, svc)
+                .await {
+                eprintln!("server error: {}", err);
+            }
+        });
+    }
+}
+
 // Note: This test relies on a checked in certificate with the following validity
 // characteristics:
 //         Validity
@@ -120,7 +141,7 @@ async fn tls_self_signed() {
     let certificates = load_certs(certificate_pem).unwrap();
     let key = load_key(key_pem).unwrap();
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
 
@@ -177,7 +198,7 @@ async fn tls_custom_root() {
     certificates.extend(load_certs(ca_pem).unwrap());
     let key = load_key(key_pem).unwrap();
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
 
@@ -225,7 +246,7 @@ async fn tls_custom_root() {
 /* XXX
  * COMMENTED OUT TO MAKE PROGRESS
 async fn tls_server_with_client_auth(
-    listener: tokio::net::TcpListener,
+    listener: TcpListener,
     certificates: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
     client_root: CertificateDer<'static>,
@@ -274,7 +295,7 @@ async fn tls_client_auth() {
     server_certificates.push(ca_certificate.clone());
     let key = load_key(server_key_pem).unwrap();
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(tls_server_with_client_auth(
         listener,
@@ -405,7 +426,6 @@ async fn test_subgraph_h2c() {
 }
 */
 
-/*
 // starts a local server emulating a subgraph returning compressed response
 async fn emulate_subgraph_compressed_response(listener: TcpListener) {
     async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
@@ -439,22 +459,22 @@ async fn emulate_subgraph_compressed_response(listener: TcpListener) {
             .unwrap())
     }
 
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-    let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-    server.await.unwrap();
+    serve(listener, handle).await.unwrap();
 }
-*/
 
-/*
 #[tokio::test(flavor = "multi_thread")]
 async fn test_compressed_request_response_body() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    // Though the server doesn't use TLS, the client still supports it, and so we need crypto stuff
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_subgraph_compressed_response(listener));
     let subgraph_service = HttpClientService::new(
         "test",
         rustls::ClientConfig::builder()
-            .with_native_roots()?
+            .with_native_roots()
+            .expect("read native TLS root certificates")
             .with_no_client_auth(),
         crate::configuration::shared::Client::builder()
             .experimental_http2(Http2Config::Http2Only)
@@ -469,7 +489,7 @@ async fn test_compressed_request_response_body() {
                 .uri(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header(CONTENT_ENCODING, "gzip")
-                .body(r#"{"query":"{ me { name username } }"#.into())
+                .body(full(r#"{"query":"{ me { name username } }"#))
                 .unwrap(),
             context: Context::new(),
         })
@@ -486,7 +506,6 @@ async fn test_compressed_request_response_body() {
         r#"{"data":"test"}"#
     );
 }
-*/
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
