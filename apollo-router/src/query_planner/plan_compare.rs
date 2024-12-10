@@ -23,6 +23,8 @@ use super::FlattenNode;
 use super::PlanNode;
 use super::Primary;
 use super::QueryPlanResult;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 
 //==================================================================================================
 // Public interface
@@ -534,8 +536,20 @@ fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> Result<()
 
 fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> Result<(), MatchFailure> {
     let FlattenNode { path, node } = this;
-    check_match_eq!(*path, other.path);
+    check_match!(same_path(path, &other.path));
     plan_node_matches(node, &other.node)
+}
+
+fn same_path(this: &Path, other: &Path) -> bool {
+    // Ignore the empty key root from the JS query planner
+    match this.0.split_first() {
+        Some((PathElement::Key(k, type_conditions), rest))
+            if k.is_empty() && type_conditions.is_none() =>
+        {
+            vec_matches(rest, &other.0, PartialEq::eq)
+        }
+        _ => *this == *other,
+    }
 }
 
 // Copied and modified from `apollo_federation::operation::SelectionKey`
@@ -1183,5 +1197,23 @@ mod qp_selection_comparison_tests {
         assert!(!same_selection_set_sorted(&requires1, &requires2));
         // `same_requires` should succeed.
         assert!(same_requires(&requires1, &requires2));
+    }
+}
+
+#[cfg(test)]
+mod path_comparison_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_same_path_ignore_empty_root_key() {
+        let path_json_legacy = json!(["", "k|[A]", "v"]);
+        let path_json_native = json!(["k|[A]", "v"]);
+
+        let legacy_path: Path = serde_json::from_value(path_json_legacy).unwrap();
+        let native_path: Path = serde_json::from_value(path_json_native).unwrap();
+
+        assert!(same_path(&legacy_path, &native_path));
     }
 }
