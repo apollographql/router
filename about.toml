@@ -9,6 +9,7 @@ accepted = [
     "LicenseRef-ring",
     "MIT",
     "MPL-2.0",
+    "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib"
 ]
@@ -28,6 +29,10 @@ workarounds = [
 
 [ring]
 accepted = ["OpenSSL"]
+
+[aws-lc-sys]
+accepted = ["OpenSSL"]
+
 
 [webpki.clarify]
 license = "ISC"
