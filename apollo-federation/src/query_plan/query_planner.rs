@@ -335,7 +335,6 @@ impl QueryPlanner {
             })?;
         if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            // We could panic here but we are returning a `Result` already anyways, so shrug!
             crate::bail!("Invalid operation: empty selection set")
         }
 
