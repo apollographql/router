@@ -183,6 +183,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .supergraph_sdl(schema.raw_sdl.clone())
                                 .supergraph_schema_id(schema.schema_id.clone())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
+                                .persisted_queries_version(Arc::new("TODO".to_string()))
                                 .notify(configuration.notify.clone())
                                 .build(),
                         )

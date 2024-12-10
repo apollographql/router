@@ -354,7 +354,7 @@ impl PluginFactory {
         (self.instance_factory)(
             PluginInit::fake_builder()
                 .config(configuration.clone())
-                .persisted_queries_version(Arc::new("persisted_queries_version".to_string()))
+                .persisted_queries_version(Arc::new("WHY DO I NEED TO DO THIS?".to_string()))
                 .build(),
         )
         .await
