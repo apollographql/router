@@ -29,6 +29,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::net::UnixListener;
 use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
@@ -111,10 +112,37 @@ where
         let handle = handle.clone();
         tokio::spawn(async move {
             // N.B. should use hyper service_fn here, since it's required to be implemented hyper Service trait!
-            let svc = hyper::service::service_fn(|request: Request<Incoming>| handle(request.map(Body::new)));
+            let svc = hyper::service::service_fn(|request: Request<Incoming>| {
+                handle(request.map(Body::new))
+            });
             if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
                 .serve_connection(io, svc)
-                .await {
+                .await
+            {
+                eprintln!("server error: {}", err);
+            }
+        });
+    }
+}
+
+async fn serve_unix<Handler, Fut>(listener: UnixListener, handle: Handler) -> std::io::Result<()>
+where
+    Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
+    Fut: std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
+{
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+        let handle = handle.clone();
+        tokio::spawn(async move {
+            // N.B. should use hyper service_fn here, since it's required to be implemented hyper Service trait!
+            let svc = hyper::service::service_fn(|request: Request<Incoming>| {
+                handle(request.map(Body::new))
+            });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection(io, svc)
+                .await
+            {
                 eprintln!("server error: {}", err);
             }
         });
@@ -613,7 +641,6 @@ fn make_schema(path: &str) -> String {
    }"#
 }
 
-/*
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(not(target_os = "windows"))]
 async fn test_unix_socket() {
@@ -621,29 +648,22 @@ async fn test_unix_socket() {
     let path = dir.path().join("router.sock");
     let schema = make_schema(path.to_str().unwrap());
 
-    let make_service = make_service_fn(|_| async {
-        Ok::<_, hyper::Error>(service_fn(|mut req: http::Request<Body>| async move {
-            let data = get_body_bytes(req.body_mut()).await.unwrap();
-            let body = std::str::from_utf8(&data).unwrap();
-            println!("{:?}", body);
-            let response = http::Response::builder()
-                .status(StatusCode::OK)
-                .header(CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{ "data": { "currentUser": { "id": "0" } } }"#,
-                ))
-                .unwrap();
-            Ok::<_, hyper::Error>(response)
-        }))
-    });
-
-    tokio::task::spawn(async move {
-        hyper::Server::bind_unix(path)
-            .unwrap()
-            .serve(make_service)
-            .await
+    async fn handle(mut req: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+        let data = get_body_bytes(req.body_mut()).await.unwrap();
+        let body = std::str::from_utf8(&data).unwrap();
+        println!("{:?}", body);
+        let response = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{ "data": { "currentUser": { "id": "0" } } }"#,
+            ))
             .unwrap();
-    });
+        Ok(response)
+    }
+
+    let listener = UnixListener::bind(path).unwrap();
+    tokio::task::spawn(serve_unix(listener, handle));
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -667,4 +687,3 @@ async fn test_unix_socket() {
         .unwrap();
     insta::assert_json_snapshot!(response);
 }
-*/
