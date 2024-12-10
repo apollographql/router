@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
+use futures::StreamExt;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::metrics::Unit;
@@ -13,13 +14,19 @@ use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
+use tower::util::BoxService;
 use tower::BoxError;
+use tower::ServiceExt as _;
 use tracing::debug;
 
 use crate::executable::APOLLO_TELEMETRY_DISABLED;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
+use crate::services::router;
+use crate::services::router::body::RouterBody;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
@@ -196,6 +203,7 @@ struct GaugeOptions {
 
 #[derive(Default)]
 struct FleetDetector {
+    enabled: bool,
     gauge_store: Mutex<GaugeStore>,
 
     // Options passed to the gauge_store during activation.
@@ -221,6 +229,7 @@ impl PluginPrivate for FleetDetector {
         };
 
         Ok(FleetDetector {
+            enabled: true,
             gauge_store: Mutex::new(GaugeStore::Pending),
             gauge_options,
         })
@@ -231,6 +240,124 @@ impl PluginPrivate for FleetDetector {
         if matches!(*store, GaugeStore::Pending) {
             *store = GaugeStore::active(&self.gauge_options);
         }
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        if !self.enabled {
+            return service;
+        }
+
+        service
+            // Count the number of request bytes from clients to the router
+            .map_request(move |req: router::Request| router::Request {
+                router_request: req.router_request.map(move |body| {
+                    router::Body::wrap_stream(body.inspect(|res| {
+                        if let Ok(bytes) = res {
+                            u64_counter!(
+                                "apollo.router.operations.request_size",
+                                "Total number of request bytes from clients",
+                                bytes.len() as u64
+                            );
+                        }
+                    }))
+                }),
+                context: req.context,
+            })
+            // Count the number of response bytes from the router to clients
+            .map_response(move |res: router::Response| router::Response {
+                response: res.response.map(move |body| {
+                    router::Body::wrap_stream(body.inspect(|res| {
+                        if let Ok(bytes) = res {
+                            u64_counter!(
+                                "apollo.router.operations.response_size",
+                                "Total number of response bytes to clients",
+                                bytes.len() as u64
+                            );
+                        }
+                    }))
+                }),
+                context: res.context,
+            })
+            .boxed()
+    }
+
+    fn http_client_service(
+        &self,
+        subgraph_name: &str,
+        service: BoxService<HttpRequest, HttpResponse, BoxError>,
+    ) -> BoxService<HttpRequest, HttpResponse, BoxError> {
+        if !self.enabled {
+            return service;
+        }
+        let sn_req = Arc::new(subgraph_name.to_string());
+        let sn_res = sn_req.clone();
+        service
+            // Count the number of bytes per subgraph fetch request
+            .map_request(move |req: HttpRequest| {
+                let sn = sn_req.clone();
+                HttpRequest {
+                    http_request: req.http_request.map(move |body| {
+                        let sn = sn.clone();
+                        RouterBody::wrap_stream(body.inspect(move |res| {
+                            if let Ok(bytes) = res {
+                                let sn = sn.clone();
+                                u64_counter!(
+                                    "apollo.router.operations.fetch.request_size",
+                                    "Total number of request bytes for subgraph fetches",
+                                    bytes.len() as u64,
+                                    subgraph.name = sn.to_string()
+                                );
+                            }
+                        }))
+                    }),
+                    context: req.context,
+                }
+            })
+            // Count the number of fetches, and the number of bytes per subgraph fetch response
+            .map_result(move |res| {
+                let sn = sn_res.clone();
+                match res {
+                    Ok(res) => {
+                        u64_counter!(
+                            "apollo.router.operations.fetch",
+                            "Number of subgraph fetches",
+                            1u64,
+                            subgraph.name = sn.to_string(),
+                            client_error = false,
+                            http.response.status_code = res.http_response.status().as_u16() as i64
+                        );
+                        let sn = sn_res.clone();
+                        Ok(HttpResponse {
+                            http_response: res.http_response.map(move |body| {
+                                let sn = sn.clone();
+                                RouterBody::wrap_stream(body.inspect(move |res| {
+                                    if let Ok(bytes) = res {
+                                        let sn = sn.clone();
+                                        u64_counter!(
+                                            "apollo.router.operations.fetch.response_size",
+                                            "Total number of response bytes for subgraph fetches",
+                                            bytes.len() as u64,
+                                            subgraph.name = sn.to_string()
+                                        );
+                                    }
+                                }))
+                            }),
+                            context: res.context,
+                        })
+                    }
+                    Err(err) => {
+                        u64_counter!(
+                            "apollo.router.operations.fetch",
+                            "Number of subgraph fetches",
+                            1u64,
+                            subgraph.name = sn.to_string(),
+                            client_error = true
+                        );
+                        Err(err)
+                    }
+                }
+            })
+            .boxed()
     }
 }
 
@@ -342,3 +469,270 @@ fn get_deployment_type() -> &'static str {
 }
 
 register_private_plugin!("apollo", "fleet_detector", FleetDetector);
+
+#[cfg(test)]
+mod tests {
+    use http::StatusCode;
+    use tower::Service as _;
+
+    use super::*;
+    use crate::metrics::collect_metrics;
+    use crate::metrics::test_utils::MetricType;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::plugin::test::MockHttpClientService;
+    use crate::plugin::test::MockRouterService;
+    use crate::services::Body;
+
+    #[tokio::test]
+    async fn test_disabled_router_service() {
+        async {
+            // WHEN the plugin is disabled
+            let plugin = FleetDetector::default();
+
+            // GIVEN a router service request
+            let mut mock_bad_request_service = MockRouterService::new();
+            mock_bad_request_service
+                .expect_call()
+                .times(1)
+                .returning(|req: router::Request| {
+                    Ok(router::Response {
+                        context: req.context,
+                        response: http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            // making sure the request body is consumed
+                            .body(req.router_request.into_body())
+                            .unwrap(),
+                    })
+                });
+            let mut bad_request_router_service =
+                plugin.router_service(mock_bad_request_service.boxed());
+            let router_req = router::Request::fake_builder()
+                .body("request")
+                .build()
+                .unwrap();
+            let _router_response = bad_request_router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            // THEN operation size metrics shouldn't exist
+            assert!(!collect_metrics().metric_exists::<u64>(
+                "apollo.router.operations.request_size",
+                MetricType::Counter,
+                &[],
+            ));
+            assert!(!collect_metrics().metric_exists::<u64>(
+                "apollo.router.operations.response_size",
+                MetricType::Counter,
+                &[],
+            ));
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_enabled_router_service() {
+        async {
+            // WHEN the plugin is enabled
+            let plugin = FleetDetector {
+                enabled: true,
+                ..Default::default()
+            };
+
+            // GIVEN a router service request
+            let mut mock_bad_request_service = MockRouterService::new();
+            mock_bad_request_service
+                .expect_call()
+                .times(1)
+                .returning(|req: router::Request| {
+                    Ok(router::Response {
+                        context: req.context,
+                        response: http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            // making sure the request body is consumed
+                            .body(req.router_request.into_body())
+                            .unwrap(),
+                    })
+                });
+            let mut bad_request_router_service =
+                plugin.router_service(mock_bad_request_service.boxed());
+            let router_req = router::Request::fake_builder()
+                .body(Body::wrap_stream(Body::from("request")))
+                .build()
+                .unwrap();
+            let _router_response = bad_request_router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            // THEN operation size metrics should exist
+            assert_counter!("apollo.router.operations.request_size", 7, &[]);
+            assert_counter!("apollo.router.operations.response_size", 7, &[]);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_disabled_http_client_service() {
+        async {
+            // WHEN the plugin is disabled
+            let plugin = FleetDetector::default();
+
+            // GIVEN an http client service request
+            let mut mock_bad_request_service = MockHttpClientService::new();
+            mock_bad_request_service.expect_call().times(1).returning(
+                |req: http::Request<Body>| {
+                    Box::pin(async {
+                        let data = hyper::body::to_bytes(req.into_body()).await?;
+                        Ok(http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            // making sure the request body is consumed
+                            .body(Body::from(data))
+                            .unwrap())
+                    })
+                },
+            );
+            let mut bad_request_http_client_service = plugin.http_client_service(
+                "subgraph",
+                mock_bad_request_service
+                    .map_request(|req: HttpRequest| req.http_request.map(|body| body.into_inner()))
+                    .map_response(|res: http::Response<Body>| HttpResponse {
+                        http_response: res.map(RouterBody::from),
+                        context: Default::default(),
+                    })
+                    .boxed(),
+            );
+            let http_client_req = HttpRequest {
+                http_request: http::Request::builder()
+                    .body(RouterBody::from("request"))
+                    .unwrap(),
+                context: Default::default(),
+            };
+            let http_client_response = bad_request_http_client_service
+                .ready()
+                .await
+                .unwrap()
+                .call(http_client_req)
+                .await
+                .unwrap();
+            // making sure the response body is consumed
+            let _data = hyper::body::to_bytes(http_client_response.http_response.into_body())
+                .await
+                .unwrap();
+
+            // THEN fetch metrics shouldn't exist
+            assert!(!collect_metrics().metric_exists::<u64>(
+                "apollo.router.operations.fetch",
+                MetricType::Counter,
+                &[KeyValue::new("subgraph.name", "subgraph"),],
+            ));
+            assert!(!collect_metrics().metric_exists::<u64>(
+                "apollo.router.operations.fetch.request_size",
+                MetricType::Counter,
+                &[KeyValue::new("subgraph.name", "subgraph"),],
+            ));
+            assert!(!collect_metrics().metric_exists::<u64>(
+                "apollo.router.operations.fetch.response_size",
+                MetricType::Counter,
+                &[KeyValue::new("subgraph.name", "subgraph"),],
+            ));
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_enabled_http_client_service() {
+        async {
+            // WHEN the plugin is enabled
+            let plugin = FleetDetector {
+                enabled: true,
+                ..Default::default()
+            };
+
+            // GIVEN an http client service request
+            let mut mock_bad_request_service = MockHttpClientService::new();
+            mock_bad_request_service.expect_call().times(1).returning(
+                |req: http::Request<Body>| {
+                    Box::pin(async {
+                        let data = hyper::body::to_bytes(req.into_body()).await?;
+                        Ok(http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            // making sure the request body is consumed
+                            .body(Body::from(data))
+                            .unwrap())
+                    })
+                },
+            );
+            let mut bad_request_http_client_service = plugin.http_client_service(
+                "subgraph",
+                mock_bad_request_service
+                    .map_request(|req: HttpRequest| req.http_request.map(|body| body.into_inner()))
+                    .map_response(|res: http::Response<Body>| HttpResponse {
+                        http_response: res.map(RouterBody::from),
+                        context: Default::default(),
+                    })
+                    .boxed(),
+            );
+            let http_client_req = HttpRequest {
+                http_request: http::Request::builder()
+                    .body(RouterBody::from("request"))
+                    .unwrap(),
+                context: Default::default(),
+            };
+            let http_client_response = bad_request_http_client_service
+                .ready()
+                .await
+                .unwrap()
+                .call(http_client_req)
+                .await
+                .unwrap();
+
+            // making sure the response body is consumed
+            let _data = hyper::body::to_bytes(http_client_response.http_response.into_body())
+                .await
+                .unwrap();
+
+            // THEN fetch metrics should exist
+            assert_counter!(
+                "apollo.router.operations.fetch",
+                1,
+                &[
+                    KeyValue::new("subgraph.name", "subgraph"),
+                    KeyValue::new("http.response.status_code", 400),
+                    KeyValue::new("client_error", false)
+                ]
+            );
+            assert_counter!(
+                "apollo.router.operations.fetch.request_size",
+                7,
+                &[KeyValue::new("subgraph.name", "subgraph"),]
+            );
+            assert_counter!(
+                "apollo.router.operations.fetch.response_size",
+                7,
+                &[KeyValue::new("subgraph.name", "subgraph"),]
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+}
