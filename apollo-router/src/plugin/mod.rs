@@ -77,6 +77,9 @@ pub struct PluginInit<T> {
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
 
+    /// Launch ID
+    pub(crate) launch_id: Option<Arc<String>>,
+
     pub(crate) notify: Notify<String, graphql::Response>,
 }
 
@@ -137,6 +140,7 @@ where
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
+            .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
             .build()
     }
@@ -173,6 +177,7 @@ where
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
@@ -181,6 +186,7 @@ where
             supergraph_schema_id,
             supergraph_schema,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id: launch_id.flatten(),
             notify,
         }
     }
@@ -196,6 +202,7 @@ where
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -205,6 +212,7 @@ where
             supergraph_schema,
             supergraph_schema_id,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id,
             notify,
         })
     }
@@ -217,6 +225,7 @@ where
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
         PluginInit {
@@ -226,6 +235,7 @@ where
             supergraph_schema: supergraph_schema
                 .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
         }
     }
@@ -630,6 +640,9 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
+
+    /// The point of no return this plugin is about to go live
+    fn activate(&self) {}
 }
 
 #[async_trait]
@@ -677,6 +690,8 @@ where
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         PluginUnstable::web_endpoints(self)
     }
+
+    fn activate(&self) {}
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -733,6 +748,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// Support downcasting
     #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// The point of no return, this plugin is about to go live
+    fn activate(&self) {}
 }
 
 #[async_trait]
@@ -782,6 +800,19 @@ where
     #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn activate(&self) {
+        self.activate()
+    }
+}
+
+impl<T> From<T> for Box<dyn DynPlugin>
+where
+    T: PluginPrivate,
+{
+    fn from(value: T) -> Self {
+        Box::new(value)
     }
 }
 

@@ -318,7 +318,9 @@ impl InstrumentData {
             opt.subgraph.enabled,
             "$[?(@.subgraph.subgraphs..enabled)]",
             opt.subgraph.ttl,
-            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]"
+            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
+            opt.subgraph.invalidation.enabled,
+            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
         );
         populate_config_instrument!(
             apollo.router.config.telemetry,
@@ -563,6 +565,7 @@ impl InstrumentData {
             super::QueryPlannerMode::Both => "both",
             super::QueryPlannerMode::BothBestEffort => "both_best_effort",
             super::QueryPlannerMode::New => "new",
+            super::QueryPlannerMode::NewBestEffort => "new_best_effort",
         };
 
         self.data.insert(

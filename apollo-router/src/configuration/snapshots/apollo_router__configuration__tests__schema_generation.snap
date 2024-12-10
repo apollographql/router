@@ -1266,6 +1266,9 @@ expression: "&schema"
       "type": "object"
     },
     "Conf5": {
+      "type": "object"
+    },
+    "Conf6": {
       "anyOf": [
         {
           "additionalProperties": {
@@ -1277,7 +1280,7 @@ expression: "&schema"
       ],
       "description": "Subgraph URL mappings"
     },
-    "Conf6": {
+    "Conf7": {
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
@@ -1294,7 +1297,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Conf7": {
+    "Conf8": {
       "additionalProperties": false,
       "description": "Telemetry configuration",
       "properties": {
@@ -1317,6 +1320,20 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
+        "http1_max_request_buf_size": {
+          "default": null,
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
+          "nullable": true,
+          "type": "string"
+        },
+        "http1_max_request_headers": {
+          "default": null,
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
@@ -1686,6 +1703,11 @@ expression: "&schema"
           "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
         "invalidation": {
           "$ref": "#/definitions/InvalidationEndpointConfig",
           "description": "#/definitions/InvalidationEndpointConfig",
@@ -1725,7 +1747,7 @@ expression: "&schema"
         },
         "client_name_header": {
           "default": "apollographql-client-name",
-          "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.",
           "nullable": true,
           "type": "string"
         },
@@ -4461,6 +4483,13 @@ expression: "&schema"
             "both_best_effort"
           ],
           "type": "string"
+        },
+        {
+          "description": "Use the new Rust-based implementation but fall back to the legacy one for supergraph schemas composed with legacy Apollo Federation 1.",
+          "enum": [
+            "new_best_effort"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -5721,6 +5750,11 @@ expression: "&schema"
     "SubgraphAttributes": {
       "additionalProperties": false,
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -6219,6 +6253,24 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "subgraph_resend_count": {
+              "description": "The subgraph http resend count",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_resend_count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
               "description": "Optional default value.",
               "nullable": true,
               "type": "string"
@@ -6599,7 +6651,7 @@ expression: "&schema"
         },
         "experimental_reuse_query_fragments": {
           "default": null,
-          "description": "Enable reuse of query fragments Default: depends on the federation version",
+          "description": "Enable reuse of query fragments This feature is deprecated and will be removed in next release. The config can only be set when the legacy query planner is explicitly enabled.",
           "nullable": true,
           "type": "boolean"
         },
@@ -7733,6 +7785,11 @@ expression: "&schema"
         "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -7762,6 +7819,11 @@ expression: "&schema"
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -8323,6 +8385,10 @@ expression: "&schema"
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
     },
+    "fleet_detector": {
+      "$ref": "#/definitions/Conf5",
+      "description": "#/definitions/Conf5"
+    },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig",
       "description": "#/definitions/ForbidMutationsConfig"
@@ -8348,8 +8414,8 @@ expression: "&schema"
       "description": "#/definitions/Config"
     },
     "override_subgraph_url": {
-      "$ref": "#/definitions/Conf5",
-      "description": "#/definitions/Conf5"
+      "$ref": "#/definitions/Conf6",
+      "description": "#/definitions/Conf6"
     },
     "persisted_queries": {
       "$ref": "#/definitions/PersistedQueries",
@@ -8372,8 +8438,8 @@ expression: "&schema"
       "description": "#/definitions/Config8"
     },
     "rhai": {
-      "$ref": "#/definitions/Conf6",
-      "description": "#/definitions/Conf6"
+      "$ref": "#/definitions/Conf7",
+      "description": "#/definitions/Conf7"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
@@ -8388,8 +8454,8 @@ expression: "&schema"
       "description": "#/definitions/Supergraph"
     },
     "telemetry": {
-      "$ref": "#/definitions/Conf7",
-      "description": "#/definitions/Conf7"
+      "$ref": "#/definitions/Conf8",
+      "description": "#/definitions/Conf8"
     },
     "tls": {
       "$ref": "#/definitions/Tls",

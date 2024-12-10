@@ -20,7 +20,6 @@ use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -30,7 +29,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
-use serde::Serialize;
 
 use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
@@ -72,12 +70,11 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 
 /// Opaque wrapper of the unique selection ID type.
 ///
-/// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
-/// to be something like UUIDs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-// NOTE(@TylerBloom): This feature gate can be removed once the condition in the comment above is
-// met. Note that there are `serde(skip)` statements that should be removed once this is removed.
-#[cfg_attr(feature = "snapshot_tracing", derive(Serialize))]
+/// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
+/// startup. It currently implements `Serialize` for debugging purposes. It should not implement
+/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// provided (i.e. the inner type is a `Uuid` or the like).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct SelectionId(usize);
 
 impl SelectionId {
@@ -92,9 +89,12 @@ impl SelectionId {
 /// All arguments and input object values are sorted in a consistent order.
 ///
 /// This type is immutable and cheaply cloneable.
-#[derive(Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub(crate) struct ArgumentList {
     /// The inner list *must* be sorted with `sort_arguments`.
+    #[serde(
+        serialize_with = "crate::utils::serde_bridge::serialize_optional_slice_of_exe_argument_nodes"
+    )]
     inner: Option<Arc<[Node<executable::Argument>]>>,
 }
 
@@ -243,7 +243,7 @@ impl Operation {
 /// - For the type, stores the schema and the position in that schema instead of just the
 ///   `NamedType`.
 /// - Stores selections in a map so they can be normalized efficiently.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SelectionSet {
     #[serde(skip)]
     pub(crate) schema: ValidFederationSchema,
@@ -271,7 +271,7 @@ pub(crate) use selection_map::SelectionValue;
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant, serde::Serialize)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -659,9 +659,7 @@ mod field_selection {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
         pub(crate) alias: Option<Name>,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_debug_string")]
         pub(crate) arguments: ArgumentList,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: DirectiveList,
         pub(crate) sibling_typename: Option<SiblingTypename>,
     }
@@ -869,16 +867,13 @@ mod fragment_spread_selection {
         pub(crate) fragment_name: Name,
         pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
         // directives applied on the fragment spread selection
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: DirectiveList,
         // directives applied within the fragment definition
         //
         // PORT_NOTE: The JS codebase combined the fragment spread's directives with the fragment
         // definition's directives. This was invalid GraphQL as those directives may not be applicable
         // on different locations. While we now keep track of those references, they are currently ignored.
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) fragment_directives: DirectiveList,
-        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         pub(crate) selection_id: SelectionId,
     }
 
@@ -924,17 +919,6 @@ impl FragmentSpreadSelection {
             spread,
             selection_set: fragment.selection_set.clone(),
         })
-    }
-
-    pub(crate) fn from_fragment(
-        fragment: &Node<Fragment>,
-        directives: &executable::DirectiveList,
-    ) -> Self {
-        let spread = FragmentSpread::from_fragment(fragment, directives);
-        Self {
-            spread,
-            selection_set: fragment.selection_set.clone(),
-        }
     }
 
     /// Creates a fragment spread selection (in an optimized operation).
@@ -1063,9 +1047,7 @@ mod inline_fragment_selection {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
         pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: DirectiveList,
-        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         pub(crate) selection_id: SelectionId,
     }
 
@@ -2178,15 +2160,6 @@ impl SelectionSet {
         })
     }
 
-    /// In a normalized selection set containing only fields and inline fragments,
-    /// iterate over all the fields that may be selected.
-    ///
-    /// # Preconditions
-    /// The selection set must not contain named fragment spreads.
-    pub(crate) fn field_selections(&self) -> FieldSelectionsIter<'_> {
-        FieldSelectionsIter::new(self.selections.values())
-    }
-
     /// # Preconditions
     /// The selection set must not contain named fragment spreads.
     fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
@@ -2324,36 +2297,6 @@ impl<'a> IntoIterator for &'a SelectionSet {
 
     fn into_iter(self) -> Self::IntoIter {
         self.selections.values()
-    }
-}
-
-pub(crate) struct FieldSelectionsIter<'sel> {
-    stack: Vec<selection_map::Values<'sel>>,
-}
-
-impl<'sel> FieldSelectionsIter<'sel> {
-    fn new(iter: selection_map::Values<'sel>) -> Self {
-        Self { stack: vec![iter] }
-    }
-}
-
-impl<'sel> Iterator for FieldSelectionsIter<'sel> {
-    type Item = &'sel Arc<FieldSelection>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.stack.last_mut()?.next() {
-            None if self.stack.len() == 1 => None,
-            None => {
-                self.stack.pop();
-                self.next()
-            }
-            Some(Selection::Field(field)) => Some(field),
-            Some(Selection::InlineFragment(frag)) => {
-                self.stack.push(frag.selection_set.selections.values());
-                self.next()
-            }
-            Some(Selection::FragmentSpread(_frag)) => unreachable!(),
-        }
     }
 }
 
@@ -2632,16 +2575,6 @@ impl Field {
     pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
         self.field_position.parent()
     }
-
-    pub(crate) fn types_can_be_merged(&self, other: &Self) -> Result<bool, FederationError> {
-        let self_definition = self.field_position.get(self.schema().schema())?;
-        let other_definition = other.field_position.get(self.schema().schema())?;
-        types_can_be_merged(
-            &self_definition.ty,
-            &other_definition.ty,
-            self.schema().schema(),
-        )
-    }
 }
 
 impl InlineFragmentSelection {
@@ -2739,23 +2672,6 @@ impl InlineFragmentSelection {
         ))
     }
 
-    /// Construct a new InlineFragmentSelection out of a selection set.
-    /// - The new type condition will be the same as the selection set's type.
-    pub(crate) fn from_selection_set(
-        parent_type_position: CompositeTypeDefinitionPosition,
-        selection_set: SelectionSet,
-        directives: DirectiveList,
-    ) -> Self {
-        let inline_fragment_data = InlineFragment {
-            schema: selection_set.schema.clone(),
-            parent_type_position,
-            type_condition_position: selection_set.type_position.clone().into(),
-            directives,
-            selection_id: SelectionId::new(),
-        };
-        InlineFragmentSelection::new(inline_fragment_data, selection_set)
-    }
-
     pub(crate) fn casted_type(&self) -> &CompositeTypeDefinitionPosition {
         self.inline_fragment
             .type_condition_position
@@ -2818,29 +2734,8 @@ impl NamedFragments {
         NamedFragments::initialize_in_dependency_order(fragments, schema)
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.fragments.len() == 0
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.fragments.len()
-    }
-
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Node<Fragment>> {
         self.fragments.values()
-    }
-
-    pub(crate) fn iter_rev(&self) -> impl Iterator<Item = &Node<Fragment>> {
-        self.fragments.values().rev()
-    }
-
-    pub(crate) fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, Name, Node<Fragment>> {
-        Arc::make_mut(&mut self.fragments).iter_mut()
-    }
-
-    // Calls `retain` on the underlying `IndexMap`.
-    pub(crate) fn retain(&mut self, mut predicate: impl FnMut(&Name, &Node<Fragment>) -> bool) {
-        Arc::make_mut(&mut self.fragments).retain(|name, fragment| predicate(name, fragment));
     }
 
     fn insert(&mut self, fragment: Fragment) {
@@ -2936,32 +2831,6 @@ impl NamedFragments {
             }
         })
     }
-
-    /// When we rebase named fragments on a subgraph schema, only a subset of what the fragment handles may belong
-    /// to that particular subgraph. And there are a few sub-cases where that subset is such that we basically need or
-    /// want to consider to ignore the fragment for that subgraph, and that is when:
-    /// 1. the subset that apply is actually empty. The fragment wouldn't be valid in this case anyway.
-    /// 2. the subset is a single leaf field: in that case, using the one field directly is just shorter than using
-    ///    the fragment, so we consider the fragment don't really apply to that subgraph. Technically, using the
-    ///    fragment could still be of value if the fragment name is a lot smaller than the one field name, but it's
-    ///    enough of a niche case that we ignore it. Note in particular that one sub-case of this rule that is likely
-    ///    to be common is when the subset ends up being just `__typename`: this would basically mean the fragment
-    ///    don't really apply to the subgraph, and that this will ensure this is the case.
-    pub(crate) fn is_selection_set_worth_using(selection_set: &SelectionSet) -> bool {
-        if selection_set.selections.len() == 0 {
-            return false;
-        }
-        if selection_set.selections.len() == 1 {
-            // true if NOT field selection OR non-leaf field
-            return if let Some(Selection::Field(field_selection)) = selection_set.selections.first()
-            {
-                field_selection.selection_set.is_some()
-            } else {
-                true
-            };
-        }
-        true
-    }
 }
 
 // @defer handling: removing and normalization
@@ -2982,7 +2851,7 @@ pub(crate) struct NormalizedDefer {
 }
 
 struct DeferNormalizer {
-    used_labels: HashSet<String>,
+    used_labels: IndexSet<String>,
     assigned_labels: IndexSet<String>,
     conditions: IndexMap<Name, IndexSet<String>>,
     label_offset: usize,
@@ -2991,7 +2860,7 @@ struct DeferNormalizer {
 impl DeferNormalizer {
     fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
         let mut digest = Self {
-            used_labels: HashSet::default(),
+            used_labels: IndexSet::default(),
             label_offset: 0,
             assigned_labels: IndexSet::default(),
             conditions: IndexMap::default(),
@@ -3400,49 +3269,6 @@ impl Operation {
     }
 }
 
-// Collect fragment usages from operation types.
-
-impl Selection {
-    fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        match self {
-            Selection::Field(field_selection) => {
-                if let Some(s) = &field_selection.selection_set {
-                    s.collect_used_fragment_names(aggregator)
-                }
-            }
-            Selection::InlineFragment(inline) => {
-                inline.selection_set.collect_used_fragment_names(aggregator);
-            }
-            Selection::FragmentSpread(fragment) => {
-                let current_count = aggregator
-                    .entry(fragment.spread.fragment_name.clone())
-                    .or_default();
-                *current_count += 1;
-            }
-        }
-    }
-}
-
-impl SelectionSet {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        for s in self.selections.values() {
-            s.collect_used_fragment_names(aggregator);
-        }
-    }
-
-    pub(crate) fn used_fragments(&self) -> IndexMap<Name, u32> {
-        let mut usages = IndexMap::default();
-        self.collect_used_fragment_names(&mut usages);
-        usages
-    }
-}
-
-impl Fragment {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        self.selection_set.collect_used_fragment_names(aggregator)
-    }
-}
-
 // Collect used variables from operation types.
 
 pub(crate) struct VariableCollector<'s> {
@@ -3537,16 +3363,6 @@ impl<'s> VariableCollector<'s> {
     /// Consume the collector and return the collected names.
     pub(crate) fn into_inner(self) -> IndexSet<&'s Name> {
         self.variables
-    }
-}
-
-impl Fragment {
-    /// Returns the variable names that are used by this fragment.
-    pub(crate) fn used_variables(&self) -> IndexSet<&'_ Name> {
-        let mut collector = VariableCollector::new();
-        collector.visit_directive_list(&self.directives);
-        collector.visit_selection_set(&self.selection_set);
-        collector.into_inner()
     }
 }
 
@@ -3912,7 +3728,9 @@ pub(crate) fn normalize_operation(
         variables: Arc::new(operation.variables.clone()),
         directives: operation.directives.clone().into(),
         selection_set: normalized_selection_set,
-        named_fragments,
+        // fragments were already expanded into selection sets
+        // new ones will be generated when optimizing the final subgraph fetch operations
+        named_fragments: Default::default(),
     };
     Ok(normalized_operation)
 }

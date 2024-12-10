@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -223,8 +224,11 @@ pub(crate) enum QueryPlannerMode {
     /// Falls back to `legacy` with a warning
     /// if the the new planner does not support the schema
     /// (such as using legacy Apollo Federation 1)
-    #[default]
     BothBestEffort,
+    /// Use the new Rust-based implementation but fall back to the legacy one
+    /// for supergraph schemas composed with legacy Apollo Federation 1.
+    #[default]
+    NewBestEffort,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -416,16 +420,29 @@ impl Configuration {
     pub(crate) fn rust_query_planner_config(
         &self,
     ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-        apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments.unwrap_or(true),
+        use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
+
+        let max_evaluated_plans = self
+            .supergraph
+            .query_planning
+            .experimental_plans_limit
+            // Fails if experimental_plans_limit is zero; use our default.
+            .and_then(NonZeroU32::new)
+            .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
+
+        QueryPlannerConfig {
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
-            incremental_delivery:
-                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
-                    enable_defer: self.supergraph.defer_support,
-                },
+            incremental_delivery: QueryPlanIncrementalDeliveryConfig {
+                enable_defer: self.supergraph.defer_support,
+            },
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
-            debug: Default::default(),
+            debug: QueryPlannerDebugConfig {
+                max_evaluated_plans,
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            },
         }
     }
 }
@@ -492,6 +509,14 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        #[cfg(not(feature = "hyper_header_limits"))]
+        if self.limits.http1_max_request_headers.is_some() {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "'limits.http1_max_request_headers' requires 'hyper_header_limits' feature",
+                error: "enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'".to_string(),
+            });
+        }
+
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
@@ -676,7 +701,8 @@ pub(crate) struct Supergraph {
     pub(crate) introspection: bool,
 
     /// Enable reuse of query fragments
-    /// Default: depends on the federation version
+    /// This feature is deprecated and will be removed in next release.
+    /// The config can only be set when the legacy query planner is explicitly enabled.
     #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: Option<bool>,
 
@@ -757,7 +783,8 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -794,7 +821,8 @@ impl Supergraph {
                     Some(false)
                 } else { reuse_query_fragments }
             ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }

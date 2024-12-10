@@ -147,6 +147,8 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
         - errors:
             - message: expected error in A
               path: []
+              extensions:
+                service: a
         - data:
             entryA:
               index: 2
@@ -200,9 +202,13 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
         - errors:
             - message: expected error in A
               path: []
+              extensions:
+                service: a
         - errors:
             - message: expected error in B
               path: []
+              extensions:
+                service: b
         - data:
             entryA:
               index: 2
@@ -256,6 +262,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         - data:
             entryA:
               index: 1
@@ -264,6 +271,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         "###);
     }
 
@@ -331,16 +339,19 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         - errors:
             - message: Request timed out
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         - errors:
             - message: Request timed out
               path: []
               extensions:
                 code: REQUEST_TIMEOUT
+                service: b
         "###);
     }
 
@@ -434,7 +445,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__b__0{{entryB(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__b__0 {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -568,6 +579,7 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: ERR_NOT_ALLOWED
+                service: a
         - data:
             entryB:
               index: 0
@@ -576,6 +588,7 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
               path: []
               extensions:
                 code: ERR_NOT_ALLOWED
+                service: a
         - data:
             entryB:
               index: 1
@@ -670,7 +683,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -725,6 +738,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
               path: []
               extensions:
                 code: ERR_NOT_ALLOWED
+                service: a
         - data:
             entryB:
               index: 2
@@ -771,7 +785,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -913,7 +927,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -929,7 +943,7 @@ mod helper {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    "query op{index}__{}__0 {{ entry{}(count: {count}) {{ index }} }}",
                     subgraph.to_lowercase(),
                     subgraph
                 ))
@@ -957,7 +971,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -996,7 +1010,7 @@ mod helper {
 
         // Extract info about this operation
         let (_, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())

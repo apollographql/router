@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Instant;
@@ -29,6 +28,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
+use crate::compute_job;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -139,6 +139,13 @@ impl PlannerMode {
                     Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
                 }
             }
+            QueryPlannerMode::NewBestEffort => {
+                if let Some(rust) = rust_planner {
+                    Self::Rust(rust)
+                } else {
+                    Self::Js(Self::js_planner(&schema.raw_sdl, configuration, old_planner).await?)
+                }
+            }
         })
     }
 
@@ -151,13 +158,15 @@ impl PlannerMode {
             QueryPlannerMode::New | QueryPlannerMode::Both => {
                 Ok(Some(Self::rust(schema, configuration)?))
             }
-            QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
-                Ok(planner) => Ok(Some(planner)),
-                Err(error) => {
-                    tracing::info!("Falling back to the legacy query planner: {error}");
-                    Ok(None)
+            QueryPlannerMode::BothBestEffort | QueryPlannerMode::NewBestEffort => {
+                match Self::rust(schema, configuration) {
+                    Ok(planner) => Ok(Some(planner)),
+                    Err(error) => {
+                        tracing::info!("Falling back to the legacy query planner: {error}");
+                        Ok(None)
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -165,27 +174,11 @@ impl PlannerMode {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
-        let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-            reuse_query_fragments: configuration
-                .supergraph
-                .reuse_query_fragments
-                .unwrap_or(true),
-            subgraph_graphql_validation: false,
-            generate_query_fragments: configuration.supergraph.generate_query_fragments,
-            incremental_delivery:
-                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
-                    enable_defer: configuration.supergraph.defer_support,
-                },
-            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
-            debug: Default::default(),
-        };
+        let config = configuration.rust_query_planner_config();
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
 
         match &result {
-            Err(FederationError::SingleFederationError {
-                inner: error,
-                trace: _,
-            }) => match error {
+            Err(FederationError::SingleFederationError(error)) => match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
@@ -258,7 +251,8 @@ impl PlannerMode {
             PlannerMode::Rust(rust_planner) => {
                 let doc = doc.clone();
                 let rust_planner = rust_planner.clone();
-                let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
+                let priority = compute_job::Priority::P8; // High priority
+                let (plan, mut root_node) = compute_job::execute(priority, move || {
                     let start = Instant::now();
 
                     let query_plan_options = QueryPlanOptions {
@@ -275,8 +269,19 @@ impl PlannerMode {
                                 operation,
                                 query_plan_options,
                             )
-                        })
-                        .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+                        });
+                    if let Err(FederationError::SingleFederationError(
+                        SingleFederationError::InternalUnmergeableFields { .. },
+                    )) = &result
+                    {
+                        u64_counter!(
+                            "apollo.router.operations.query_planner.unmergeable_fields",
+                            "Query planner caught attempting to merge unmergeable fields",
+                            1
+                        );
+                    }
+                    let result =
+                        result.map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
                     let elapsed = start.elapsed().as_secs_f64();
                     metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
@@ -800,33 +805,6 @@ pub(super) struct QueryPlan {
     pub(super) node: Option<Arc<PlanNode>>,
 }
 
-// Note: Reexported under `apollo_router::_private`
-pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
-    let mut output = String::new();
-    for diff_line in differences {
-        match diff_line {
-            diff::Result::Left(l) => {
-                let trimmed = l.trim();
-                if !trimmed.starts_with('#') && !trimmed.is_empty() {
-                    writeln!(&mut output, "-{l}").expect("write will never fail");
-                } else {
-                    writeln!(&mut output, " {l}").expect("write will never fail");
-                }
-            }
-            diff::Result::Both(l, _) => {
-                writeln!(&mut output, " {l}").expect("write will never fail");
-            }
-            diff::Result::Right(r) => {
-                let trimmed = r.trim();
-                if trimmed != "---" && !trimmed.is_empty() {
-                    writeln!(&mut output, "+{r}").expect("write will never fail");
-                }
-            }
-        }
-    }
-    output
-}
-
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
@@ -857,9 +835,6 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-
     use serde_json::json;
     use test_log::test;
     use tower::Service;
@@ -1401,28 +1376,6 @@ mod tests {
                 doc,
             )
             .await
-    }
-
-    #[test]
-    fn router_bridge_dependency_is_pinned() {
-        let cargo_manifest: serde_json::Value = basic_toml::from_str(
-            &fs::read_to_string(PathBuf::from(&env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
-                .expect("could not read Cargo.toml"),
-        )
-        .expect("could not parse Cargo.toml");
-        let router_bridge_version = cargo_manifest
-            .get("dependencies")
-            .expect("Cargo.toml does not contain dependencies")
-            .as_object()
-            .expect("Cargo.toml dependencies key is not an object")
-            .get("router-bridge")
-            .expect("Cargo.toml dependencies does not have an entry for router-bridge")
-            .as_str()
-            .unwrap_or_default();
-        assert!(
-            router_bridge_version.contains('='),
-            "router-bridge in Cargo.toml is not pinned with a '=' prefix"
-        );
     }
 
     #[tokio::test]

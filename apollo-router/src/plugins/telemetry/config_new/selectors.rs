@@ -7,6 +7,7 @@ use serde_json_bytes::path::JsonPathInst;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
+use super::attributes::SubgraphRequestResendCountKey;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -525,6 +526,12 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseStatus {
         /// The subgraph http response status code.
         subgraph_response_status: ResponseStatus,
+    },
+    SubgraphResendCount {
+        /// The subgraph http resend count
+        subgraph_resend_count: bool,
+        /// Optional default value.
+        default: Option<AttributeValue>,
     },
     SupergraphOperationName {
         /// The supergraph query operation name.
@@ -1069,25 +1076,6 @@ impl Selector for SupergraphSelector {
         ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
-            SupergraphSelector::Query { query, .. } => {
-                let limits_opt = ctx
-                    .extensions()
-                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
-                match query {
-                    Query::Aliases => {
-                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
-                    }
-                    Query::Depth => {
-                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
-                    }
-                    Query::Height => {
-                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
-                    }
-                    Query::RootFields => limits_opt
-                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
-                    Query::String => None,
-                }
-            }
             SupergraphSelector::ResponseData {
                 response_data,
                 default,
@@ -1596,6 +1584,18 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::OnGraphQLError {
                 subgraph_on_graphql_error: on_graphql_error,
             } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
+            SubgraphSelector::SubgraphResendCount {
+                subgraph_resend_count,
+                default,
+            } if *subgraph_resend_count => {
+                response
+                    .context
+                    .get::<_, usize>(SubgraphRequestResendCountKey::new(&response.id))
+                    .ok()
+                    .flatten()
+                    .map(|v| opentelemetry::Value::from(v as i64))
+            }
+            .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::Cache { cache, entity_type } => {
@@ -1790,12 +1790,14 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SubgraphQuery;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphRequestResendCountKey;
     use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::spec::operation_limits::OperationLimits;
 
@@ -2493,6 +2495,41 @@ mod test {
                     .build()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn subgraph_resend_count() {
+        let selector = SubgraphSelector::SubgraphResendCount {
+            subgraph_resend_count: true,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        let subgraph_req_id = SubgraphRequestId(String::from("test"));
+        let _ = context.insert(SubgraphRequestResendCountKey::new(&subgraph_req_id), 2usize);
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context.clone())
+                        .id(subgraph_req_id)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            2i64.into()
         );
     }
 
@@ -3286,12 +3323,6 @@ mod test {
                         .build()
                         .unwrap()
                 )
-                .unwrap(),
-            4.into()
-        );
-        assert_eq!(
-            selector
-                .on_response_event(&crate::graphql::Response::builder().build(), &context)
                 .unwrap(),
             4.into()
         );
