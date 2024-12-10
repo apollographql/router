@@ -5,7 +5,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/fields_wi
 ---
 [
     Message {
-        code: FieldWithArguments,
+        code: ConnectorsFieldWithArguments,
         message: "`@connect(selection:)` on `Query.ts` selects field `T.field`, which has arguments. Only fields with a connector can have arguments.",
         locations: [
             11:7..11:12,

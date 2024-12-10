@@ -19,7 +19,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
@@ -117,8 +116,6 @@ pub(crate) struct Metrics {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
-    /// Configuration to add custom labels/attributes to metrics
-    pub(crate) attributes: MetricsAttributesConf,
     /// Set a service.name resource in your metrics
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
@@ -134,7 +131,6 @@ pub(crate) struct MetricsCommon {
 impl Default for MetricsCommon {
     fn default() -> Self {
         Self {
-            attributes: Default::default(),
             service_name: None,
             service_namespace: None,
             resource: BTreeMap::new(),

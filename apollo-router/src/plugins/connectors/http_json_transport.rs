@@ -634,6 +634,7 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
+    use crate::services::router::body::empty;
     use crate::Context;
 
     #[test]
@@ -654,7 +655,7 @@ mod tests {
             &IndexMap::with_hasher(Default::default()),
             &Map::default(),
         );
-        let request = request.body(http_body_util::Empty::<Bytes>::new()).unwrap();
+        let request = request.body(empty()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -687,7 +688,7 @@ mod tests {
             &config,
             &Map::default(),
         );
-        let request = request.body(http_body_util::Empty::<Bytes>::new()).unwrap();
+        let request = request.body(empty()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));

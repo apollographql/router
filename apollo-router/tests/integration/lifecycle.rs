@@ -6,15 +6,12 @@ use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::router;
-use apollo_router::services::router::body::RouterBody;
 use apollo_router::services::supergraph;
 use apollo_router::Context;
 use apollo_router::TestHarness;
 use async_trait::async_trait;
-use bytes::Bytes;
+use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;
-use http_body_util::BodyExt as _;
-use http_body_util::Full;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -261,11 +258,7 @@ const TEST_PLUGIN_ORDERING_CONTEXT_KEY: &str = "ordering-trace";
 /// <https://github.com/apollographql/router/issues/3207>
 #[tokio::test(flavor = "multi_thread")]
 async fn test_plugin_ordering() {
-    async fn coprocessor(
-        request: http::Request<RouterBody>,
-    ) -> Result<http::Response<RouterBody>, BoxError> {
-        let body = request.into_body().collect().await?;
-        let mut json: serde_json::Value = serde_json::from_slice(&body.to_bytes())?;
+    async fn coprocessor(mut json: axum::Json<serde_json::Value>) -> axum::Json<serde_json::Value> {
         let stage = json["stage"].as_str().unwrap().to_owned();
         json["context"]["entries"]
             .as_object_mut()
@@ -275,20 +268,15 @@ async fn test_plugin_ordering() {
             .as_array_mut()
             .unwrap()
             .push(format!("coprocessor {stage}").into());
-        Ok(http::Response::new(RouterBody::new(
-            Full::new(Bytes::from(serde_json::to_vec(&json)?)).map_err(|never| match never {}),
-        )))
+        json
     }
 
     async fn spawn_coprocessor() -> (String, ShutdownOnDrop) {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let shutdown_on_drop = ShutdownOnDrop(Some(tx));
-        let service = hyper::service::make_service_fn(|_| async {
-            Ok::<_, hyper::Error>(hyper::service::service_fn(coprocessor))
-        });
-        // Bind to "port 0" to let the kernel choose an available port number.
-        let server = hyper::Server::bind(&([127, 0, 0, 1], 0).into()).serve(service);
-        let coprocessor_url = format!("http://{}", server.local_addr());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let coprocessor_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = axum::serve(listener, coprocessor.into_make_service());
         let server = server.with_graceful_shutdown(async {
             let _ = rx.await;
         });

@@ -69,14 +69,14 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
         assert_eq!(operations_field.name(), Some("operations"));
         let operations: helper::Operation =
             serde_json::from_slice(&operations_field.bytes().await.unwrap()).unwrap();
-        insta::assert_json_snapshot!(operations, @r#"
+        insta::assert_json_snapshot!(operations, @r###"
         {
-          "query": "mutation SomeMutation__uploads__0($file:Upload){file:singleUpload(file:$file){filename body}}",
+          "query": "mutation SomeMutation__uploads__0($file: Upload) { file: singleUpload(file: $file) { filename body } }",
           "variables": {
             "file": null
           }
         }
-        "#);
+        "###);
 
         let map_field = multipart
             .next_field()
@@ -1019,7 +1019,6 @@ mod helper {
     use std::net::SocketAddr;
     use std::path::PathBuf;
 
-    use apollo_router::services::router::body::RouterBody;
     use axum::body::Body;
     use axum::extract::State;
     use axum::response::IntoResponse;
@@ -1031,8 +1030,6 @@ mod helper {
     use http::header::CONTENT_TYPE;
     use http::Request;
     use http::StatusCode;
-    use http_body::Frame;
-    use http_body_util::StreamBody;
     use itertools::Itertools;
     use multer::Multipart;
     use reqwest::multipart::Form;
@@ -1135,15 +1132,13 @@ mod helper {
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
             // Start the server using the tcp listener randomly assigned above
-            let server = axum::Server::from_tcp(bound.into_std().unwrap())
-                .unwrap()
-                .serve(self.handler.into_make_service())
+            let server = axum::serve(bound, self.handler.into_make_service())
                 .with_graceful_shutdown(async {
                     shutdown_rx.await.ok();
                 });
 
             // Spawn the server in the background, controlled by the shutdown signal
-            tokio::spawn(server);
+            tokio::spawn(async { server.await.unwrap() });
 
             // Make the request and pass it into the validator callback
             let (_span, response) = router
@@ -1435,8 +1430,8 @@ mod helper {
     /// A handler that always fails. Useful for tests that should not reach the subgraph at all.
     pub async fn always_fail(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
         // Consume the stream
-        let mut request = request.into_body().into_data_stream();
-        while request.next().await.is_some() {}
+        let mut body = request.into_body().into_data_stream();
+        while body.next().await.is_some() {}
 
         // Signal a failure
         Err(FileUploadError::ShouldHaveFailed)

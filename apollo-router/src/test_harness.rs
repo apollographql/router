@@ -176,7 +176,7 @@ impl<'a> TestHarness<'a> {
             ),
         };
 
-        self.extra_plugins.push((name, Box::new(plugin)));
+        self.extra_plugins.push((name, plugin.into()));
         self
     }
 

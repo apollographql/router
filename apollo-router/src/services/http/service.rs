@@ -225,6 +225,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
         let HttpRequest {
             mut http_request,
             context,
+            ..
         } = request;
 
         let schema_uri = http_request.uri();

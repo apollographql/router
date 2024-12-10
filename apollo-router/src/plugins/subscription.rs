@@ -503,10 +503,12 @@ impl Service<router::Request> for CallbackService {
                                 };
                                 // Keep the subscription to the client opened
                                 payload.subscribed = Some(true);
-                                tracing::info!(
-                                        monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
-                                        subscriptions.mode="callback"
-                                    );
+                                u64_counter!(
+                                    "apollo.router.operations.subscriptions.events",
+                                    "Number of subscription events",
+                                    1,
+                                    subscriptions.mode = "callback"
+                                );
                                 handle.send_sync(payload)?;
 
                                 Ok(router::Response {
@@ -628,10 +630,12 @@ impl Service<router::Request> for CallbackService {
                                             });
                                          }
                                     };
-                                    tracing::info!(
-                                        monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
-                                        subscriptions.mode="callback",
-                                        subscriptions.complete=true
+                                    u64_counter!(
+                                        "apollo.router.operations.subscriptions.events",
+                                        "Number of subscription events",
+                                        1,
+                                        subscriptions.mode = "callback",
+                                        subscriptions.complete = true
                                     );
                                     if let Err(_err) = handle.send_sync(
                                         graphql::Response::builder().errors(errors).build(),
@@ -772,15 +776,14 @@ mod tests {
             .next()
             .unwrap()
             .into_router();
-
-        let resp = <axum::Router as tower::ServiceExt<http::Request<axum::body::Body>>>::ready(
-            &mut web_endpoint,
-        )
-        .await
-        .unwrap()
-        .call(http_req_prom)
-        .await
-        .unwrap();
+        let resp = web_endpoint
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (handler, _created) = notify
@@ -915,14 +918,14 @@ mod tests {
             .next()
             .unwrap()
             .into_router();
-        let resp = <axum::Router as tower::ServiceExt<http::Request<axum::body::Body>>>::ready(
-            &mut web_endpoint,
-        )
-        .await
-        .unwrap()
-        .call(http_req_prom)
-        .await
-        .unwrap();
+        let resp = web_endpoint
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (_handler, _created) = notify
@@ -1004,14 +1007,14 @@ mod tests {
             .next()
             .unwrap()
             .into_router();
-        let resp = <axum::Router as tower::ServiceExt<http::Request<axum::body::Body>>>::ready(
-            &mut web_endpoint,
-        )
-        .await
-        .unwrap()
-        .call(http_req_prom)
-        .await
-        .unwrap();
+        let resp = web_endpoint
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (handler, _created) = notify
@@ -1043,7 +1046,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(crate::services::router::body::full(
+        .body(router::body::full(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()

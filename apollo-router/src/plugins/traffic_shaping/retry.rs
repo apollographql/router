@@ -6,6 +6,7 @@ use tower::retry::budget::Budget as _;
 use tower::retry::budget::TpsBudget;
 use tower::retry::Policy;
 
+use crate::plugins::telemetry::config_new::attributes::SubgraphRequestResendCountKey;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 
@@ -13,7 +14,6 @@ use crate::services::subgraph;
 pub(crate) struct RetryPolicy {
     budget: Arc<TpsBudget>,
     retry_mutations: bool,
-    subgraph_name: String,
 }
 
 impl RetryPolicy {
@@ -22,7 +22,6 @@ impl RetryPolicy {
         min_per_sec: Option<u32>,
         retry_percent: Option<f32>,
         retry_mutations: Option<bool>,
-        subgraph_name: String,
     ) -> Self {
         Self {
             budget: Arc::new(TpsBudget::new(
@@ -31,7 +30,6 @@ impl RetryPolicy {
                 retry_percent.unwrap_or(0.2),
             )),
             retry_mutations: retry_mutations.unwrap_or(false),
-            subgraph_name,
         }
     }
 }
@@ -44,8 +42,9 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
         req: &mut subgraph::Request,
         result: &mut Result<Res, E>,
     ) -> Option<Self::Future> {
+        let subgraph_name = req.subgraph_name.clone().unwrap_or_default();
         match result {
-            Ok(_) => {
+            Ok(_resp) => {
                 // Treat all `Response`s as success,
                 // so deposit budget and don't retry...
                 self.budget.deposit();
@@ -58,19 +57,26 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
 
                 let can_retry = self.budget.withdraw();
                 if !can_retry {
-                    tracing::info!(
-                        monotonic_counter.apollo_router_http_request_retry_total = 1u64,
+                    u64_counter!(
+                        "apollo_router_http_request_retry_total",
+                        "Number of retries for an http request to a subgraph",
+                        1u64,
                         status = "aborted",
-                        subgraph = %self.subgraph_name,
+                        subgraph = subgraph_name
                     );
 
                     return None;
                 }
-
-                tracing::info!(
-                    monotonic_counter.apollo_router_http_request_retry_total = 1u64,
-                    subgraph = %self.subgraph_name,
+                u64_counter!(
+                    "apollo_router_http_request_retry_total",
+                    "Number of retries for an http request to a subgraph",
+                    1u64,
+                    subgraph = subgraph_name
                 );
+
+                let _ = req
+                    .context
+                    .upsert::<_, usize>(SubgraphRequestResendCountKey::new(&req.id), |val| val + 1);
 
                 Some(future::ready(()))
             }

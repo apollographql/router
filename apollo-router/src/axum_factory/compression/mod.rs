@@ -283,12 +283,12 @@ content-type: application/json
 {"data":{"allProducts":[{"sku":"federation","id":"apollo-federation"},{"sku":"studio","id":"apollo-studio"},{"sku":"client","id":"apollo-client"}]},"hasNext":true}
 --graphql
 "#;
+
         let deferred_response = r#"content-type: application/json
 
 {"hasNext":false,"incremental":[{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"platform"}},"path":["allProducts",0]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"platform","name":"platform-name"}},"path":["allProducts",1]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"client"}},"path":["allProducts",2]}]}
 --graphql--
 "#;
-
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
         let body: RouterBody = from_result_stream(stream::iter(vec![

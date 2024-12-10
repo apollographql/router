@@ -71,7 +71,8 @@ impl From<(http::Request<Body>, Context)> for Request {
 ///
 /// It's only meant for tests, as the "real" router should create bodies explicitly accounting for
 /// streaming, size limits, etc.
-struct IntoBody(Body);
+pub struct IntoBody(Body);
+
 impl From<Body> for IntoBody {
     fn from(value: Body) -> Self {
         Self(value)
@@ -490,7 +491,6 @@ mod test {
     use std::task::Context;
     use std::task::Poll;
 
-    use http::HeaderMap;
     use http_body::Frame;
     use tower::BoxError;
 

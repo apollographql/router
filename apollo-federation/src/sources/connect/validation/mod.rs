@@ -46,6 +46,8 @@ use coordinates::source_http_argument_coordinate;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
 use source_name::SourceName;
+use strum_macros::Display;
+use strum_macros::IntoStaticStr;
 use url::Url;
 
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -187,7 +189,7 @@ fn should_check_seen_fields(messages: &[Message]) -> bool {
             || error.code == Code::GroupSelectionRequiredForObject
             // if we encounter unsupported definitions, there are probably related definitions that we won't be able to resolve
             || error.code == Code::SubscriptionInConnectors
-            || error.code == Code::UnsupportedAbstractType
+            || error.code == Code::ConnectorsUnsupportedAbstractType
     })
 }
 
@@ -244,7 +246,7 @@ fn check_seen_fields(
             };
         };
         Message {
-            code: Code::UnresolvedField,
+            code: Code::ConnectorsUnresolvedField,
             message: format!(
                 "No connector resolves field `{parent_type}.{field_name}`. It must have a `@{connect_directive_name}` directive or appear in `@{connect_directive_name}(selection:)`.",
                 connect_directive_name = schema.connect_directive_name
@@ -278,7 +280,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
             disallowed_imports
                 .contains(&import.element)
                 .then(|| Message {
-                    code: Code::UnsupportedFederationDirective,
+                    code: Code::ConnectorsUnsupportedFederationDirective,
                     message: format!(
                         "The directive `@{import}` is not supported when using connectors.",
                         import = import.alias.as_ref().unwrap_or(&import.element)
@@ -446,7 +448,12 @@ pub struct Message {
     pub locations: Vec<Range<LineColumn>>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// The error code that will be shown to users when a validation fails during composition.
+///
+/// Note that these codes are global, not scoped to connectors, so they should attempt to be
+/// unique across all pieces of composition, including JavaScript components.
+#[derive(Clone, Copy, Debug, Display, Eq, IntoStaticStr, PartialEq)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum Code {
     /// A problem with GraphQL syntax or semantics was found. These will usually be caught before
     /// this validation process.
@@ -500,17 +507,15 @@ pub enum Code {
     /// A provided header in `@source` or `@connect` was not valid
     InvalidHeader,
     /// Certain directives are not allowed when using connectors
-    UnsupportedFederationDirective,
+    ConnectorsUnsupportedFederationDirective,
     /// Abstract types are not allowed when using connectors
-    UnsupportedAbstractType,
+    ConnectorsUnsupportedAbstractType,
     /// Fields that return an object type must use a group JSONSelection `{}`
     GroupSelectionRequiredForObject,
     /// Fields in the schema that aren't resolved by a connector
-    UnresolvedField,
+    ConnectorsUnresolvedField,
     /// A field resolved by a connector has arguments defined
-    FieldWithArguments,
-    /// Invalid star selection
-    InvalidStarSelection,
+    ConnectorsFieldWithArguments,
     /// Part of the `@connect` refers to an `$args` which is not defined
     UndefinedArgument,
     /// Part of the `@connect` refers to an `$this` which is not defined
