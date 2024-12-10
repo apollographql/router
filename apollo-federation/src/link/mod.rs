@@ -23,7 +23,7 @@ use crate::link::spec::Url;
 
 pub(crate) mod argument;
 pub(crate) mod context_spec_definition;
-pub(crate) mod cost_spec_definition;
+pub mod cost_spec_definition;
 pub mod database;
 pub(crate) mod federation_spec_definition;
 pub(crate) mod graphql_definition;
@@ -67,13 +67,12 @@ pub enum Purpose {
 
 impl Purpose {
     pub fn from_value(value: &Value) -> Result<Purpose, LinkError> {
-        if let Value::Enum(value) = value {
-            Ok(value.parse::<Purpose>()?)
-        } else {
-            Err(LinkError::BootstrapError(
-                "invalid `purpose` value, should be an enum".to_string(),
-            ))
-        }
+        value
+            .as_enum()
+            .ok_or_else(|| {
+                LinkError::BootstrapError("invalid `purpose` value, should be an enum".to_string())
+            })
+            .and_then(|value| value.parse())
     }
 }
 
@@ -85,8 +84,7 @@ impl str::FromStr for Purpose {
             "SECURITY" => Ok(Purpose::SECURITY),
             "EXECUTION" => Ok(Purpose::EXECUTION),
             _ => Err(LinkError::BootstrapError(format!(
-                "invalid/unrecognized `purpose` value '{}'",
-                s
+                "invalid/unrecognized `purpose` value '{s}'"
             ))),
         }
     }
@@ -133,11 +131,19 @@ impl Import {
         match value {
             Value::String(str) => {
                 if let Some(directive_name) = str.strip_prefix('@') {
-                    Ok(Import { element: Name::new(directive_name)?, is_directive: true, alias: None })
+                    Ok(Import {
+                        element: Name::new(directive_name)?,
+                        is_directive: true,
+                        alias: None,
+                    })
                 } else {
-                    Ok(Import { element: Name::new(str)?, is_directive: false, alias: None })
+                    Ok(Import {
+                        element: Name::new(str)?,
+                        is_directive: false,
+                        alias: None,
+                    })
                 }
-            },
+            }
             Value::Object(fields) => {
                 let mut name: Option<&str> = None;
                 let mut alias: Option<&str> = None;
@@ -145,47 +151,58 @@ impl Import {
                     match k.as_str() {
                         "name" => {
                             name = Some(v.as_str().ok_or_else(|| {
-                                LinkError::BootstrapError("invalid value for `name` field in @link(import:) argument: must be a string".to_string())
+                                LinkError::BootstrapError(format!(r#"in "{}", invalid value for `name` field in @link(import:) argument: must be a string"#, value.serialize().no_indent()))
                             })?)
                         },
                         "as" => {
                             alias = Some(v.as_str().ok_or_else(|| {
-                                LinkError::BootstrapError("invalid value for `as` field in @link(import:) argument: must be a string".to_string())
+                                LinkError::BootstrapError(format!(r#"in "{}", invalid value for `as` field in @link(import:) argument: must be a string"#, value.serialize().no_indent()))
                             })?)
                         },
-                        _ => Err(LinkError::BootstrapError(format!("unknown field `{k}` in @link(import:) argument")))?
+                        _ => Err(LinkError::BootstrapError(format!(r#"in "{}", unknown field `{k}` in @link(import:) argument"#, value.serialize().no_indent())))?
                     }
                 }
-                if let Some(element) = name {
-                    if let Some(directive_name) = element.strip_prefix('@') {
-                        if let Some(alias_str) = alias.as_ref() {
-                            let Some(alias_str) = alias_str.strip_prefix('@') else {
-                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should start with '@' since the imported name does", alias_str, element)));
-                            };
-                            alias = Some(alias_str);
-                        }
-                        Ok(Import {
-                            element: Name::new(directive_name)?,
-                            is_directive: true,
-                            alias: alias.map(Name::new).transpose()?,
-                        })
-                    } else {
-                        if let Some(alias) = &alias {
-                            if alias.starts_with('@') {
-                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should not start with '@' (or, if {} is a directive, then the name should start with '@')", alias, element, element)));
-                            }
-                        }
-                        Ok(Import {
-                            element: Name::new(element)?,
-                            is_directive: false,
-                            alias: alias.map(Name::new).transpose()?,
-                        })
+                let Some(element) = name else {
+                    return Err(LinkError::BootstrapError(format!(
+                        r#"in "{}", invalid entry in @link(import:) argument, missing mandatory `name` field"#,
+                        value.serialize().no_indent()
+                    )));
+                };
+                if let Some(directive_name) = element.strip_prefix('@') {
+                    if let Some(alias_str) = alias.as_ref() {
+                        let Some(alias_str) = alias_str.strip_prefix('@') else {
+                            return Err(LinkError::BootstrapError(format!(
+                                r#"in "{}", invalid alias '{alias_str}' for import name '{element}': should start with '@' since the imported name does"#,
+                                value.serialize().no_indent()
+                            )));
+                        };
+                        alias = Some(alias_str);
                     }
+                    Ok(Import {
+                        element: Name::new(directive_name)?,
+                        is_directive: true,
+                        alias: alias.map(Name::new).transpose()?,
+                    })
                 } else {
-                    Err(LinkError::BootstrapError("invalid entry in @link(import:) argument, missing mandatory `name` field".to_string()))
+                    if let Some(alias) = &alias {
+                        if alias.starts_with('@') {
+                            return Err(LinkError::BootstrapError(format!(
+                                r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
+                                value.serialize().no_indent()
+                            )));
+                        }
+                    }
+                    Ok(Import {
+                        element: Name::new(element)?,
+                        is_directive: false,
+                        alias: alias.map(Name::new).transpose()?,
+                    })
                 }
-            },
-            _ => Err(LinkError::BootstrapError("invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: \"<importedElement>\", as: \"<alias>\" }.".to_string()))
+            }
+            _ => Err(LinkError::BootstrapError(format!(
+                r#"in "{}", invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form {{ name: "<importedElement>", as: "<alias>" }}."#,
+                value.serialize().no_indent()
+            ))),
         }
     }
 
@@ -197,7 +214,7 @@ impl Import {
     }
 
     pub fn imported_name(&self) -> &Name {
-        return self.alias.as_ref().unwrap_or(&self.element);
+        self.alias.as_ref().unwrap_or(&self.element)
     }
 
     pub fn imported_display_name(&self) -> impl fmt::Display + '_ {
