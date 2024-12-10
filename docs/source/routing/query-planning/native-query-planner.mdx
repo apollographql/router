@@ -13,7 +13,7 @@ Learn about the Rust-native query planner in GraphOS Router. The planner is GA a
 
 In v1.49.0 the router introduced a [query planner](/graphos/routing/about-router#query-planning) implemented natively in Rust. This native query planner improves the overall performance and resource utilization of query planning. It exists alongside the legacy JavaScript implementation that uses the V8 JavaScript engine, and it will eventually replace the legacy implementation.
 
-As of v1.59.0, the native query planner is the default planner in the router. The legacy implementation is deprecated, and will be removed in the upcoming release. In v1.59.0, however, it is still possible to opt-in to legacy query planner.
+As of v1.59.0, the native query planner is the default planner in the router. As part of this, Deno, and by extension v8, are no longer intialised at router startup. The legacy implementation is deprecated, and will be removed in the upcoming release. In v1.59.0, however, it is still possible to opt-in to legacy query planner.
 
 ## Configuring query planning
 
@@ -30,14 +30,6 @@ The `experimental_query_planner_mode` option has the following supported modes:
 ### Comparing query planner implementations
 
 As part of the effort to ensure correctness and stability of the new query planner, starting in v1.53.0 the router enables both the new and legacy planners and runs them in parallel to compare their results by default. After their comparison, the router discards the native query planner's results and uses only the legacy planner to execute requests. The native query planner uses a single thread in the cold path of the router. It has a bounded queue of ten queries. If the queue is full, the router simply does not run the comparison to avoid excessive resource consumption.
-
-<Note>
-
-In router v1.56, running the native query planner with the best performance and resource utilization also requires setting `experimental_introspection_mode: new`.
-
-</Note>
-
-Setting `experimental_query_planner_mode: new` not only enables native query planning and schema introspection, it also disables the V8 JavaScript runtime used by the legacy query planner. Disabling V8 frees up CPU and memory and improves native query planning performance.
 
 ### Metrics for native query planner
 
