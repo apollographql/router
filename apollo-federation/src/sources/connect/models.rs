@@ -198,19 +198,19 @@ impl Connector {
         match &self.entity_resolver {
             None => Ok(None),
             Some(EntityResolver::Explicit) => {
-                let Ok(output_type) = self
+                let output_type = self
                     .id
                     .directive
                     .field
                     .get(schema)
                     .map(|f| f.ty.inner_named_type())
-                else {
-                    return Err(internal_error!(
-                        "Missing type on field {}.{}",
-                        self.id.directive.field.type_name(),
-                        self.id.directive.field.field_name()
-                    ));
-                };
+                    .map_err(|_| {
+                        internal_error!(
+                            "Missing field {}.{}",
+                            self.id.directive.field.type_name(),
+                            self.id.directive.field.field_name()
+                        )
+                    })?;
                 make_key_field_set_from_variables(
                     schema,
                     output_type,
