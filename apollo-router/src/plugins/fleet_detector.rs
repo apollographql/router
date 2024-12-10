@@ -216,15 +216,14 @@ impl PluginPrivate for FleetDetector {
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
                 router_request: req.router_request.map(move |body| {
-                    router::Body::wrap_stream(body.map(move |res| {
-                        res.map(move |bytes| {
+                    router::Body::wrap_stream(body.inspect(|res| {
+                        if let Ok(bytes) = res {
                             u64_counter!(
                                 "apollo.router.operations.request_size",
                                 "Total number of request bytes from clients",
                                 bytes.len() as u64
                             );
-                            bytes
-                        })
+                        }
                     }))
                 }),
                 context: req.context,
@@ -232,15 +231,14 @@ impl PluginPrivate for FleetDetector {
             // Count the number of response bytes from the router to clients
             .map_response(move |res: router::Response| router::Response {
                 response: res.response.map(move |body| {
-                    router::Body::wrap_stream(body.map(move |res| {
-                        res.map(move |bytes| {
+                    router::Body::wrap_stream(body.inspect(|res| {
+                        if let Ok(bytes) = res {
                             u64_counter!(
                                 "apollo.router.operations.response_size",
                                 "Total number of response bytes to clients",
                                 bytes.len() as u64
                             );
-                            bytes
-                        })
+                        }
                     }))
                 }),
                 context: res.context,
@@ -265,17 +263,16 @@ impl PluginPrivate for FleetDetector {
                 HttpRequest {
                     http_request: req.http_request.map(move |body| {
                         let sn = sn.clone();
-                        RouterBody::wrap_stream(body.map(move |res| {
-                            let sn = sn.clone();
-                            res.map(move |bytes| {
+                        RouterBody::wrap_stream(body.inspect(move |res| {
+                            if let Ok(bytes) = res {
+                                let sn = sn.clone();
                                 u64_counter!(
                                     "apollo.router.operations.fetch.request_size",
                                     "Total number of request bytes for subgraph fetches",
                                     bytes.len() as u64,
                                     subgraph.service.name = sn.to_string()
                                 );
-                                bytes
-                            })
+                            }
                         }))
                     }),
                     context: req.context,
@@ -291,36 +288,35 @@ impl PluginPrivate for FleetDetector {
                             "Number of subgraph fetches",
                             1u64,
                             subgraph.service.name = sn.to_string(),
+                            client_error = false,
                             http.response.status_code = res.http_response.status().as_u16() as i64
                         );
                         let sn = sn_res.clone();
                         Ok(HttpResponse {
                             http_response: res.http_response.map(move |body| {
                                 let sn = sn.clone();
-                                RouterBody::wrap_stream(body.map(move |res| {
-                                    let sn = sn.clone();
-                                    res.map(move |bytes| {
+                                RouterBody::wrap_stream(body.inspect(move |res| {
+                                    if let Ok(bytes) = res {
+                                        let sn = sn.clone();
                                         u64_counter!(
                                             "apollo.router.operations.fetch.response_size",
                                             "Total number of response bytes for subgraph fetches",
                                             bytes.len() as u64,
                                             subgraph.service.name = sn.to_string()
                                         );
-                                        bytes
-                                    })
+                                    }
                                 }))
                             }),
                             context: res.context,
                         })
                     }
                     Err(err) => {
-                        // On fetch errors, report the status code as 0
                         u64_counter!(
                             "apollo.router.operations.fetch",
                             "Number of subgraph fetches",
                             1u64,
                             subgraph.service.name = sn.to_string(),
-                            http.response.status_code = 0i64
+                            client_error = true
                         );
                         Err(err)
                     }
