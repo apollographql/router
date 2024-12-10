@@ -147,8 +147,8 @@ mod test {
             &futures::task::noop_waker(),
         )) {
             std::task::Poll::Ready(Some(Ok(data))) => {
-                let data = data.into_data().unwrap();
-                let content = String::from_utf8_lossy(data.to_vec().as_slice());
+                let data = data.into_data().unwrap().to_vec();
+                let content = String::from_utf8_lossy(data.as_slice());
                 assert_eq!(&content, "test");
             }
             std::task::Poll::Pending => panic!("it should be ready"),
