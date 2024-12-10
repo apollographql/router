@@ -280,7 +280,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(json!({
-              "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
+              "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { c } } }",
               "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
             })))
             .respond_with(
@@ -334,9 +334,9 @@ async fn test_root_field_plus_entity_plus_requires() {
         &mock_server.received_requests().await.unwrap(),
         vec![
             Matcher::new().method("GET").path("/users"),
-            Matcher::new().method("POST").path("/graphql"),
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
+            Matcher::new().method("POST").path("/graphql"),
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
         ],
@@ -1216,23 +1216,22 @@ async fn test_interface_object() {
         &mock_server.received_requests().await.unwrap(),
         vec![
           Matcher::new().method("GET").path("/itfs"),
+          Matcher::new().method("GET").path("/itfs/1/e"),
+          Matcher::new().method("GET").path("/itfs/2/e"),
+          Matcher::new().method("GET").path("/itfs/1"),
+          Matcher::new().method("GET").path("/itfs/2"),
           Matcher::new()
             .method("POST")
             .path("/graphql")
             .body(serde_json::json!({
-              "query": r#"query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onItf3_0}}fragment _generated_onItf3_0 on Itf{__typename ...on T1{a}...on T2{b}}"#,
+              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ..._generated_onItf3_0 } } fragment _generated_onItf3_0 on Itf { __typename ... on T1 { a } ... on T2 { b } }"#,
               "variables": {
                 "representations": [
                   { "__typename": "Itf", "id": 1 },
                   { "__typename": "Itf", "id": 2 }
                 ]
               }
-            }))
-            ,
-          Matcher::new().method("GET").path("/itfs/1"),
-          Matcher::new().method("GET").path("/itfs/2"),
-          Matcher::new().method("GET").path("/itfs/1/e"),
-          Matcher::new().method("GET").path("/itfs/2/e"),
+            })),
         ],
     );
 }
@@ -1449,8 +1448,7 @@ async fn execute(
                     }
                 }
             }
-        },
-        "experimental_query_planner_mode": "legacy"
+        }
     });
     let config = if let Some(mut config) = config {
         config.deep_merge(common_config);
