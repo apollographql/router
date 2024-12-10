@@ -385,7 +385,6 @@ async fn tls_client_auth() {
 }
 */
 
-/*
 // starts a local server emulating a subgraph returning status code 401
 async fn emulate_h2c_server(listener: TcpListener) {
     async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
@@ -404,25 +403,20 @@ async fn emulate_h2c_server(listener: TcpListener) {
             .unwrap())
     }
 
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-    let server = Server::from_tcp(listener)
-        .unwrap()
-        .http2_only(true)
-        .serve(make_svc);
-    server.await.unwrap();
+    // XXX(@goto-bus-stop): ideally this server would *only* support HTTP 2 and not HTTP 1
+    serve(listener, handle).await.unwrap();
 }
-*/
 
-/*
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_h2c() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_h2c_server(listener));
     let subgraph_service = HttpClientService::new(
         "test",
         rustls::ClientConfig::builder()
-            .with_native_roots()?
+            .with_native_roots()
+            .expect("read native TLS root certificates")
             .with_no_client_auth(),
         crate::configuration::shared::Client::builder()
             .experimental_http2(Http2Config::Http2Only)
@@ -452,7 +446,6 @@ async fn test_subgraph_h2c() {
         r#"{"data":null}"#
     );
 }
-*/
 
 // starts a local server emulating a subgraph returning compressed response
 async fn emulate_subgraph_compressed_response(listener: TcpListener) {
