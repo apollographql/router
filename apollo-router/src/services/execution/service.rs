@@ -350,11 +350,7 @@ impl ExecutionService {
                     let matching_len = query.matching_error_path_length(path);
                     if path.len() != matching_len {
                         let truncated_path: Vec<PathElement> = path.0.drain(matching_len..).filter(
-                        |el|
-                            match el {
-                              PathElement::Key(..) | PathElement::Index(..) => true,
-                              _ => false,
-                            }
+                        |el| matches!(el, PathElement::Key(..) | PathElement::Index(..))
                         ).collect();
                         if !truncated_path.is_empty() {
                             if let Ok(truncated_path) = serde_json_bytes::to_value(truncated_path) {
