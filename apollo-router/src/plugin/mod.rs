@@ -80,6 +80,9 @@ pub struct PluginInit<T> {
     /// Launch ID
     pub(crate) launch_id: Option<Arc<String>>,
 
+    /// ID of the latest persisted queries.
+    pub(crate) persisted_queries_version: Arc<String>,
+
     pub(crate) notify: Notify<String, graphql::Response>,
 }
 
@@ -98,6 +101,7 @@ where
             ))
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
+            .persisted_queries_version(Arc::new("TODO".to_string()))
             .notify(Notify::builder().build())
             .build()
     }
@@ -122,6 +126,7 @@ where
             ))
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
+            .persisted_queries_version(Arc::new("TODO".to_string()))
             .notify(Notify::builder().build())
             .build()
     }
@@ -141,6 +146,7 @@ where
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
+            .persisted_queries_version(Arc::new("persisted_queries_version".to_string()))
             .notify(Notify::for_tests())
             .build()
     }
@@ -178,6 +184,7 @@ where
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         launch_id: Option<Option<Arc<String>>>,
+        persisted_queries_version: Arc<String>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
@@ -187,6 +194,7 @@ where
             supergraph_schema,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
+            persisted_queries_version,
             notify,
         }
     }
@@ -203,6 +211,7 @@ where
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
+        persisted_queries_version: Arc<String>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -213,6 +222,7 @@ where
             supergraph_schema_id,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
+            persisted_queries_version,
             notify,
         })
     }
@@ -226,6 +236,7 @@ where
         supergraph_schema: Option<Arc<Valid<Schema>>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
+        persisted_queries_version: Arc<String>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
         PluginInit {
@@ -236,6 +247,7 @@ where
                 .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
+            persisted_queries_version,
             notify: notify.unwrap_or_else(Notify::for_tests),
         }
     }
@@ -253,6 +265,7 @@ impl PluginInit<serde_json::Value> {
             .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
+            .persisted_queries_version(self.persisted_queries_version)
             .notify(self.notify.clone())
             .build()
     }
@@ -341,6 +354,7 @@ impl PluginFactory {
         (self.instance_factory)(
             PluginInit::fake_builder()
                 .config(configuration.clone())
+                .persisted_queries_version(Arc::new("persisted_queries_version".to_string()))
                 .build(),
         )
         .await

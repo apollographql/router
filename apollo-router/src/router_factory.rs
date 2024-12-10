@@ -517,6 +517,7 @@ pub(crate) async fn add_plugin(
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     launch_id: Option<Arc<String>>,
+    persisted_queries_version: Arc<String>,
     notify: &crate::notification::Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
@@ -530,6 +531,7 @@ pub(crate) async fn add_plugin(
                 .supergraph_schema(supergraph_schema)
                 .subgraph_schemas(subgraph_schemas)
                 .launch_id(launch_id)
+                .persisted_queries_version(persisted_queries_version)
                 .notify(notify.clone())
                 .build(),
         )
@@ -588,6 +590,7 @@ pub(crate) async fn create_plugins(
                 supergraph_schema.clone(),
                 subgraph_schemas.clone(),
                 schema.launch_id.clone(),
+                Arc::new("persisted_queries_version".to_string()),
                 &configuration.notify.clone(),
                 &mut plugin_instances,
                 &mut errors,

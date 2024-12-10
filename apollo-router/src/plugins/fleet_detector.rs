@@ -197,7 +197,7 @@ impl GaugeStore {
                             1,
                             &[KeyValue::new(
                                 "persisted_queries_version",
-                                opts.persisted_queries.clone(),
+                                opts.persisted_queries_version.clone(),
                             )],
                         )
                     })
@@ -212,7 +212,7 @@ impl GaugeStore {
 struct GaugeOptions {
     supergraph_schema_hash: String,
     launch_id: Option<String>,
-    persisted_queries: String,
+    persisted_queries_version: String,
 }
 
 #[derive(Default)]
@@ -239,7 +239,7 @@ impl PluginPrivate for FleetDetector {
         let gauge_options = GaugeOptions {
             supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
             launch_id: plugin.launch_id.map(|s| s.to_string()),
-            persisted_queries: "".to_string(),
+            persisted_queries_version: plugin.persisted_queries_version.to_string(),
         };
 
         Ok(FleetDetector {
