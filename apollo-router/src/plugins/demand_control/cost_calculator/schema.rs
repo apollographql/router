@@ -23,15 +23,31 @@ pub(crate) struct DemandControlledSchema {
 }
 
 pub(crate) struct FieldDirectiveMetadata {
-    pub(crate) name: Name,
-    pub(crate) ty: ExtendedType,
-    pub(crate) cost_directive: Option<CostDirective>,
-    pub(crate) list_size_directive: Option<ListSizeDirective>,
-    pub(crate) requires_directive: Option<RequiresDirective>,
+    name: Name,
+    ty: ExtendedType,
+    cost_directive: Option<CostDirective>,
+    list_size_directive: Option<ListSizeDirective>,
+    requires_directive: Option<RequiresDirective>,
     argument_directive_metadata: HashMap<Name, InputObjectDirectiveMetadata>,
 }
 
 impl FieldDirectiveMetadata {
+    pub(crate) fn ty(&self) -> &ExtendedType {
+        &self.ty
+    }
+
+    pub(crate) fn cost_directive(&self) -> Option<&CostDirective> {
+        self.cost_directive.as_ref()
+    }
+
+    pub(crate) fn list_size_directive(&self) -> Option<&ListSizeDirective> {
+        self.list_size_directive.as_ref()
+    }
+
+    pub(crate) fn requires_directive(&self) -> Option<&RequiresDirective> {
+        self.requires_directive.as_ref()
+    }
+
     pub(crate) fn argument_metadata(
         &self,
         arg_name: &str,

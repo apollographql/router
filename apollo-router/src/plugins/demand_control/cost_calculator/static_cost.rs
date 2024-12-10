@@ -183,7 +183,7 @@ impl StaticCostCalculator {
 
         let field_metadata = ctx.schema.type_field_metadata(parent_type, &field.name)?;
 
-        let list_size_directive = match field_metadata.list_size_directive.as_ref() {
+        let list_size_directive = match field_metadata.list_size_directive() {
             Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
             None => Ok(None),
         }?;
@@ -203,11 +203,11 @@ impl StaticCostCalculator {
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
-        let mut type_cost = if let Some(cost_directive) = field_metadata.cost_directive.as_ref() {
+        let mut type_cost = if let Some(cost_directive) = field_metadata.cost_directive() {
             cost_directive.weight()
-        } else if field_metadata.ty.is_interface()
-            || field_metadata.ty.is_object()
-            || field_metadata.ty.is_union()
+        } else if field_metadata.ty().is_interface()
+            || field_metadata.ty().is_object()
+            || field_metadata.ty().is_union()
         {
             1.0
         } else {
@@ -231,10 +231,7 @@ impl StaticCostCalculator {
             // If the field is marked with `@requires`, the required selection may not be included
             // in the query's selection. Adding that requirement's cost to the field ensures it's
             // accounted for.
-            let requirements = field_metadata
-                .requires_directive
-                .as_ref()
-                .map(|d| &d.fields);
+            let requirements = field_metadata.requires_directive().map(|d| &d.fields);
             if let Some(selection_set) = requirements {
                 requirements_cost = self.score_selection_set(
                     ctx,
@@ -560,7 +557,7 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
             .schema
             .type_field_metadata(parent_ty, &field.name)
             .ok()
-            .and_then(|meta| meta.cost_directive.as_ref());
+            .and_then(|meta| meta.cost_directive());
 
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
