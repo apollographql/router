@@ -298,9 +298,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 main_listener,
-                actual_main_listen_address.clone(),
                 all_routers.main.1,
-                true,
                 configuration.limits.http1_max_request_headers,
                 configuration.limits.http1_max_request_buf_size,
                 all_connections_stopped_sender.clone(),
@@ -339,9 +337,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             listener,
-                            listen_addr.clone(),
                             router,
-                            false,
                             configuration.limits.http1_max_request_headers,
                             configuration.limits.http1_max_request_buf_size,
                             all_connections_stopped_sender.clone(),
