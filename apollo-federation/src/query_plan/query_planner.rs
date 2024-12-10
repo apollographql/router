@@ -325,14 +325,17 @@ impl QueryPlanner {
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
             .operations
-            .get(operation_name.as_ref().map(|name| name.as_str()))?;
-
+            .get(operation_name.as_ref().map(|name| name.as_str()))
+            .map_err(|_| {
+                if operation_name.is_some() {
+                    SingleFederationError::UnknownOperation
+                } else {
+                    SingleFederationError::OperationNameNotProvided
+                }
+            })?;
         if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            // We could panic here but we are returning a `Result` already anyways, so shrug!
-            return Err(FederationError::internal(
-                "Invalid operation: empty selection set",
-            ));
+            crate::bail!("Invalid operation: empty selection set")
         }
 
         let is_subscription = operation.is_subscription();
