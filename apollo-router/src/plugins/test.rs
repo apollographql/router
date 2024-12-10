@@ -121,6 +121,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
+            .persisted_queries_version(Arc::new("persisted_queries_version".to_string()))
             .notify(Notify::default())
             .build();
 
