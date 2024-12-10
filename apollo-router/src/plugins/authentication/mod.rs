@@ -582,8 +582,6 @@ fn authenticate(
     jwks_manager: &JwksManager,
     request: router::Request,
 ) -> ControlFlow<router::Response, router::Request> {
-    const AUTHENTICATION_KIND: &str = "JWT";
-
     // We are going to do a lot of similar checking so let's define a local function
     // to help reduce repetition
     fn failure_message(
@@ -592,17 +590,16 @@ fn authenticate(
         status: StatusCode,
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
-        tracing::info!(
-            monotonic_counter.apollo_authentication_failure_count = 1u64,
-            kind = %AUTHENTICATION_KIND
+        u64_counter!(
+            "apollo_authentication_failure_count",
+            "Number of requests with failed JWT authentication (deprecated)",
+            1,
+            kind = "JWT"
         );
-        tracing::info!(
-            monotonic_counter
-                .apollo
-                .router
-                .operations
-                .authentication
-                .jwt = 1,
+        u64_counter!(
+            "apollo.router.operations.authentication.jwt",
+            "Number of requests with JWT authentication",
+            1,
             authentication.jwt.failed = true
         );
         tracing::info!(message = %error, "jwt authentication failure");
@@ -705,11 +702,17 @@ fn authenticate(
             );
         }
         // This is a metric and will not appear in the logs
-        tracing::info!(
-            monotonic_counter.apollo_authentication_success_count = 1u64,
-            kind = %AUTHENTICATION_KIND
+        u64_counter!(
+            "apollo_authentication_success_count",
+            "Number of requests with successful JWT authentication (deprecated)",
+            1,
+            kind = "JWT"
         );
-        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1u64);
+        u64_counter!(
+            "apollo.router.operations.jwt",
+            "Number of requests with JWT authentication",
+            1
+        );
         return ControlFlow::Continue(request);
     }
 

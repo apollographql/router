@@ -510,7 +510,9 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 }
 
 #[macro_export]
-/// Get or create a u64 monotonic counter metric and add a value to it
+/// Get or create a `u64` monotonic counter metric and add a value to it.
+///
+/// Each metric needs a description.
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
@@ -520,6 +522,34 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
 ///
 /// New metrics should be added using these macros.
+///
+/// # Examples
+/// ```ignore
+/// // Count a thing:
+/// u64_counter!(
+///     "apollo.router.operations.frobbles",
+///     "The amount of frobbles we've operated on",
+///     1
+/// );
+/// // Count a thing with attributes:
+/// u64_counter!(
+///     "apollo.router.operations.frobbles",
+///     "The amount of frobbles we've operated on",
+///     1,
+///     frobbles.color = "blue"
+/// );
+/// // Count a thing with dynamic attributes:
+/// let attributes = vec![];
+/// if (frobbled) {
+///     attributes.push(opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()));
+/// }
+/// u64_counter!(
+///     "apollo.router.operations.frobbles",
+///     "The amount of frobbles we've operated on",
+///     1,
+///     attributes
+/// );
+/// ```
 #[allow(unused_macros)]
 macro_rules! u64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
@@ -925,6 +955,11 @@ macro_rules! assert_counter {
         assert_metric!(result, $name, Some($value.into()), None, None, &attributes);
     };
 
+    ($name:literal, $value: expr, $attributes: expr) => {
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, false, $attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, &$attributes);
+    };
+
     ($name:literal, $value: expr) => {
         let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, false, &[]);
         assert_metric!(result, $name, Some($value.into()), None, None, &[]);
@@ -1228,6 +1263,7 @@ mod test {
         let attributes = vec![KeyValue::new("attr", "val")];
         u64_counter!("test", "test description", 1, attributes);
         assert_counter!("test", 1, "attr" = "val");
+        assert_counter!("test", 1, &attributes);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.0.0-preview.1"
+version = "2.0.0-preview.3"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
@@ -23,7 +23,7 @@ time = { version = "0.3.34", default-features = false, features = [
 ] }
 derive_more = "0.99.17"
 http.workspace = true
-hashbrown = "0.15.0"
+hashbrown = "0.15.1"
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
 lazy_static = "1.4.0"
