@@ -11,6 +11,7 @@ use url::Url;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
+use crate::uplink::schema::SchemaState;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
 use crate::uplink::UplinkConfig;
@@ -74,9 +75,20 @@ impl SchemaSource {
     pub(crate) fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             SchemaSource::Static { schema_sdl: schema } => {
-                stream::once(future::ready(UpdateSchema(schema))).boxed()
+                let update_schema = UpdateSchema(SchemaState {
+                    sdl: schema,
+                    launch_id: None,
+                });
+                stream::once(future::ready(update_schema)).boxed()
             }
-            SchemaSource::Stream(stream) => stream.map(UpdateSchema).boxed(),
+            SchemaSource::Stream(stream) => stream
+                .map(|sdl| {
+                    UpdateSchema(SchemaState {
+                        sdl,
+                        launch_id: None,
+                    })
+                })
+                .boxed(),
             #[allow(deprecated)]
             SchemaSource::File {
                 path,
@@ -100,7 +112,13 @@ impl SchemaSource {
                                         let path = path.clone();
                                         async move {
                                             match tokio::fs::read_to_string(&path).await {
-                                                Ok(schema) => Some(UpdateSchema(schema)),
+                                                Ok(schema) => {
+                                                    let update_schema = UpdateSchema(SchemaState {
+                                                        sdl: schema,
+                                                        launch_id: None,
+                                                    });
+                                                    Some(update_schema)
+                                                }
                                                 Err(err) => {
                                                     tracing::error!(reason = %err, "failed to read supergraph schema");
                                                     None
@@ -110,7 +128,11 @@ impl SchemaSource {
                                     })
                                     .boxed()
                             } else {
-                                stream::once(future::ready(UpdateSchema(schema))).boxed()
+                                let update_schema = UpdateSchema(SchemaState {
+                                    sdl: schema,
+                                    launch_id: None,
+                                });
+                                stream::once(future::ready(update_schema)).boxed()
                             }
                         }
                         Err(err) => {
@@ -121,10 +143,13 @@ impl SchemaSource {
                 }
             }
             SchemaSource::Registry(uplink_config) => {
-                stream_from_uplink::<SupergraphSdlQuery, String>(uplink_config)
+                stream_from_uplink::<SupergraphSdlQuery, SchemaState>(uplink_config)
                     .filter_map(|res| {
                         future::ready(match res {
-                            Ok(schema) => Some(UpdateSchema(schema)),
+                            Ok(schema) => {
+                                let update_schema = UpdateSchema(schema);
+                                Some(update_schema)
+                            }
                             Err(e) => {
                                 tracing::error!("{}", e);
                                 None
@@ -222,7 +247,13 @@ impl Fetcher {
                 .await
             {
                 Ok(res) if res.status().is_success() => match res.text().await {
-                    Ok(schema) => return Some(UpdateSchema(schema)),
+                    Ok(schema) => {
+                        let update_schema = UpdateSchema(SchemaState {
+                            sdl: schema,
+                            launch_id: None,
+                        });
+                        return Some(update_schema);
+                    }
                     Err(err) => {
                         tracing::warn!(
                             url.full = %url,
@@ -346,10 +377,10 @@ mod tests {
             .into_stream();
 
             assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_1)
+                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
             );
             assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_1)
+                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
             );
         }
         .with_subscriber(assert_snapshot_subscriber!())
@@ -382,10 +413,10 @@ mod tests {
             .into_stream();
 
             assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_2)
+                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_2)
             );
             assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_2)
+                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_2)
             );
         }
         .with_subscriber(assert_snapshot_subscriber!({
@@ -448,7 +479,7 @@ mod tests {
                 .await;
 
             assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_1)
+                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
             );
 
             drop(success);
@@ -468,7 +499,7 @@ mod tests {
                 .await;
 
             assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_1)
+                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
             );
         }
         .with_subscriber(assert_snapshot_subscriber!({
@@ -497,7 +528,7 @@ mod tests {
             .into_stream();
 
             assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema == SCHEMA_1)
+                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
             );
             assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
         }
