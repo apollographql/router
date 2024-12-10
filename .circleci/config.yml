@@ -377,8 +377,9 @@ commands:
           name: Install cargo deny, about, edit
           command: |
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
+              rustup install 1.83.0
+              cargo +1.83.0 install --locked --version 0.6.6 cargo-about
               cargo install --locked --version 0.14.21 cargo-deny
-              cargo install --locked --version 0.6.1 cargo-about
               cargo install --locked --version 0.12.2 cargo-edit
               cargo install --locked --version 0.12.0 cargo-fuzz
             fi
