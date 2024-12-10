@@ -630,11 +630,23 @@ mod tests {
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http_body_util::BodyExt;
     use insta::assert_debug_snapshot;
 
     use super::*;
     use crate::services::router::body::empty;
     use crate::Context;
+
+    /// Utility function for converting UnsyncBoxBody to Full bodies. Useful with snapshots...
+    async fn unsync_to_full(
+        input: http::Request<RouterBody>,
+    ) -> http::Request<http_body_util::Full<bytes::Bytes>> {
+        let (parts, body) = input.into_parts();
+
+        let body_bytes = body.collect().await.expect("body collected").to_bytes();
+        let new_request = http::Request::from_parts(parts, http_body_util::Full::new(body_bytes));
+        new_request
+    }
 
     #[test]
     fn test_headers_to_add_no_directives() {
@@ -721,8 +733,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn make_request() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn make_request() {
         let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
@@ -748,7 +760,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        let new_req = (unsync_to_full(req.0).await, req.1);
+
+        assert_debug_snapshot!(new_req, @r###"
         (
             Request {
                 method: POST,
@@ -758,19 +772,19 @@ mod tests {
                     "content-type": "application/json",
                     "content-length": "8",
                 },
-                body: Body(
-                    Full(
+                body: Full {
+                    data: Some(
                         b"{\"a\":42}",
                     ),
-                ),
+                },
             },
             None,
         )
         "###);
     }
 
-    #[test]
-    fn make_request_form_encoded() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn make_request_form_encoded() {
         let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
@@ -801,7 +815,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        let new_req = (unsync_to_full(req.0).await, req.1);
+
+        assert_debug_snapshot!(new_req, @r###"
         (
             Request {
                 method: POST,
@@ -811,11 +827,11 @@ mod tests {
                     "content-type": "application/x-www-form-urlencoded",
                     "content-length": "4",
                 },
-                body: Body(
-                    Full(
+                body: Full {
+                    data: Some(
                         b"a=42",
                     ),
-                ),
+                },
             },
             None,
         )
