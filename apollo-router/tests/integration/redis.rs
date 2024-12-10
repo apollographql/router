@@ -999,16 +999,6 @@ async fn query_planner_redis_update_query_fragments() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "the cache key for different query planner modes is currently different"]
-async fn query_planner_redis_update_planner_mode() {
-    test_redis_query_plan_config_update(
-        include_str!("fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"),
-        "",
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_defer() {
     // If this test fails and the cache key format changed you'll need to update
     // the key here.  Look at the top of the file for instructions on getting
