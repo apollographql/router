@@ -576,16 +576,10 @@ mod tests {
                                     "id": String(
                                         "1",
                                     ),
-                                    "__typename": String(
-                                        "User",
-                                    ),
                                 }),
                                 Object({
                                     "id": String(
                                         "2",
-                                    ),
-                                    "__typename": String(
-                                        "User",
                                     ),
                                 }),
                             ]),
@@ -827,9 +821,6 @@ mod tests {
                                 Object({
                                     "id": String(
                                         "2",
-                                    ),
-                                    "__typename": String(
-                                        "User",
                                     ),
                                 }),
                                 Null,
