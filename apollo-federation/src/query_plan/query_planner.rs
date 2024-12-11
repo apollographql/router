@@ -32,6 +32,7 @@ use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
+use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -563,6 +564,7 @@ fn compute_root_serial_dependency_graph(
             );
             compute_root_fetch_groups(
                 operation.root_kind,
+                federated_query_graph,
                 &mut fetch_dependency_graph,
                 &prev_path,
                 parameters.config.type_conditioned_fetching,
@@ -600,6 +602,7 @@ fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<Arc<str>, Federati
 )]
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
+    federated_query_graph: &QueryGraph,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
     type_conditioned_fetching_enabled: bool,
@@ -635,6 +638,12 @@ pub(crate) fn compute_root_fetch_groups(
             dependency_graph.to_dot(),
             "tree_with_root_node"
         );
+        let subgraph_schema = federated_query_graph.schema_by_source(subgraph_name)?;
+        let supergraph_root_type = convert_type_from_subgraph(
+            root_type,
+            subgraph_schema,
+            &dependency_graph.supergraph_schema,
+        )?;
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -642,7 +651,7 @@ pub(crate) fn compute_root_fetch_groups(
             FetchDependencyGraphNodePath::new(
                 dependency_graph.supergraph_schema.clone(),
                 type_conditioned_fetching_enabled,
-                root_type,
+                supergraph_root_type,
             )?,
             Default::default(),
             &Default::default(),
