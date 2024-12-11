@@ -630,23 +630,12 @@ mod tests {
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
-    use http_body_util::BodyExt;
     use insta::assert_debug_snapshot;
 
     use super::*;
     use crate::services::router::body::empty;
+    use crate::services::router::body::unsync_to_full;
     use crate::Context;
-
-    /// Utility function for converting UnsyncBoxBody to Full bodies. Useful with snapshots...
-    async fn unsync_to_full(
-        input: http::Request<RouterBody>,
-    ) -> http::Request<http_body_util::Full<bytes::Bytes>> {
-        let (parts, body) = input.into_parts();
-
-        let body_bytes = body.collect().await.expect("body collected").to_bytes();
-        let new_request = http::Request::from_parts(parts, http_body_util::Full::new(body_bytes));
-        new_request
-    }
 
     #[test]
     fn test_headers_to_add_no_directives() {
@@ -760,7 +749,7 @@ mod tests {
         )
         .unwrap();
 
-        let new_req = (unsync_to_full(req.0).await, req.1);
+        let new_req = (unsync_to_full(req.0).await.expect("body converted"), req.1);
 
         assert_debug_snapshot!(new_req, @r###"
         (
@@ -815,7 +804,7 @@ mod tests {
         )
         .unwrap();
 
-        let new_req = (unsync_to_full(req.0).await, req.1);
+        let new_req = (unsync_to_full(req.0).await.expect("body converted"), req.1);
 
         assert_debug_snapshot!(new_req, @r###"
         (
