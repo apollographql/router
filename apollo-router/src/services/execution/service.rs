@@ -349,21 +349,10 @@ impl ExecutionService {
                     // Check if path can be matched to the supergraph query and truncate if not
                     let matching_len = query.matching_error_path_length(path);
                     if path.len() != matching_len {
-                        let truncated_path: Vec<PathElement> = path.0.drain(matching_len..).filter(
-                            |el| matches!(el, PathElement::Key(..) | PathElement::Index(..))
-                        ).collect();
+                        path.0.drain(matching_len..);
 
                         if path.is_empty() {
                             error.path = None;
-                        }
-
-                        if !truncated_path.is_empty() {
-                            if let Ok(truncated_path) = serde_json_bytes::to_value(truncated_path) {
-                                // Save truncated part into extensions
-                                error.extensions
-                                    .entry("truncatedPath")
-                                    .or_insert(truncated_path);
-                            }
                         }
 
                         // if path was invalid that means we can't trust locations either

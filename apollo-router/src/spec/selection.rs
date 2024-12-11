@@ -194,10 +194,10 @@ impl Selection {
         path: &[PathElement],
         fragments: &Fragments,
     ) -> usize {
-        match (path.first(), self) {
+        match (path.split_first(), self) {
             (None, _) => 0,
             (
-                Some(PathElement::Key(key, _)),
+                Some((PathElement::Key(key, _), rest)),
                 Selection::Field {
                     name,
                     alias,
@@ -212,7 +212,7 @@ impl Selection {
                         Some(set) => {
                             set.iter()
                                 .map(|selection| {
-                                    selection.matching_error_path_length(&path[1..], fragments)
+                                    selection.matching_error_path_length(rest, fragments)
                                 })
                                 .max()
                                 .unwrap_or(0)
@@ -224,7 +224,7 @@ impl Selection {
                 }
             }
             (
-                Some(PathElement::Fragment(fragment)),
+                Some((PathElement::Fragment(fragment), rest)),
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
@@ -234,9 +234,7 @@ impl Selection {
                 if fragment.as_str() == type_condition.as_str() {
                     selection_set
                         .iter()
-                        .map(|selection| {
-                            selection.matching_error_path_length(&path[1..], fragments)
-                        })
+                        .map(|selection| selection.matching_error_path_length(rest, fragments))
                         .max()
                         .unwrap_or(0)
                         + 1
@@ -244,14 +242,12 @@ impl Selection {
                     0
                 }
             }
-            (Some(PathElement::Fragment(fragment)), Self::FragmentSpread { name, .. }) => {
+            (Some((PathElement::Fragment(fragment), rest)), Self::FragmentSpread { name, .. }) => {
                 if let Some(f) = fragments.get(name) {
                     if fragment.as_str() == f.type_condition.as_str() {
                         f.selection_set
                             .iter()
-                            .map(|selection| {
-                                selection.matching_error_path_length(&path[1..], fragments)
-                            })
+                            .map(|selection| selection.matching_error_path_length(rest, fragments))
                             .max()
                             .unwrap_or(0)
                             + 1
@@ -273,17 +269,18 @@ impl Selection {
                     0
                 }
             }
-            (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten(_)), _) => {
+            (Some((PathElement::Index(_), _)), _) | (Some((PathElement::Flatten(_), _)), _) => {
                 self.matching_error_path_length(&path[1..], fragments) + 1
             }
-            (Some(PathElement::Key(_, _)), Selection::InlineFragment { selection_set, .. }) => {
-                selection_set
-                    .iter()
-                    .map(|selection| selection.matching_error_path_length(path, fragments))
-                    .max()
-                    .unwrap_or(0)
-            }
-            (Some(PathElement::Fragment(_)), Selection::Field { .. }) => 0,
+            (
+                Some((PathElement::Key(_, _), _)),
+                Selection::InlineFragment { selection_set, .. },
+            ) => selection_set
+                .iter()
+                .map(|selection| selection.matching_error_path_length(path, fragments))
+                .max()
+                .unwrap_or(0),
+            (Some((PathElement::Fragment(_), _)), Selection::Field { .. }) => 0,
         }
     }
 }

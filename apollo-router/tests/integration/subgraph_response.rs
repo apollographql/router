@@ -475,8 +475,7 @@ async fn test_invalid_error_path() -> Result<(), BoxError> {
             "errors": [{
                 "message":"Some error on subgraph",
                 "extensions": {
-                   "service": "products",
-                   "truncatedPath": ["some", "path", 42],
+                   "service": "products"
                 }
             }]
         })
@@ -515,8 +514,7 @@ async fn test_partially_valid_error_path() -> Result<(), BoxError> {
                 "message": "Some error on subgraph",
                 "path": ["topProducts"],
                 "extensions": {
-                   "service": "products",
-                   "truncatedPath": ["invalid", 42]
+                   "service": "products"
                 }
             }]
         })

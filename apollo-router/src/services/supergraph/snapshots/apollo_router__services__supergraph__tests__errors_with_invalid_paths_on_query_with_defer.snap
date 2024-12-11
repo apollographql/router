@@ -13,21 +13,13 @@ snapshot_kind: text
     {
       "message": "Subgraph error with invalid path",
       "extensions": {
-        "service": "computers",
-        "truncatedPath": [
-          "invalid",
-          "path"
-        ]
+        "service": "computers"
       }
     },
     {
       "message": "Subgraph error with partially valid path",
       "extensions": {
-        "service": "computers",
-        "truncatedPath": [
-          "currentUser",
-          "invalidSubpath"
-        ]
+        "service": "computers"
       }
     }
   ],

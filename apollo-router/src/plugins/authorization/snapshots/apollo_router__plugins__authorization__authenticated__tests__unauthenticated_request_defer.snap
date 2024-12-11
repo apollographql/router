@@ -19,10 +19,7 @@ snapshot_kind: text
         "orga"
       ],
       "extensions": {
-        "code": "UNAUTHORIZED_FIELD_OR_TYPE",
-        "truncatedPath": [
-          "nonNullId"
-        ]
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
       }
     }
   ]
