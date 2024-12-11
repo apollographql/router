@@ -477,15 +477,19 @@ supergraph:
 
 The path must start with `/`.
 
-Path parameters and wildcards are supported. For example:
+A path can contain parameters and wildcards:
 
-- `/:my_dynamic_prefix/graphql` matches both `/my_project_a/graphql` and `/my_project_b/graphql`.
-- `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
-- `/g*` matches `/graphql`, `/gateway` and `/graphql/api`.
+- `/:parameter` matches a single segment. For example:
+    - `/abc/:wildcard/def` matches `/abc/1/def` and `/abc/whatever/def`, but it doesn't match `/abc/1/2/def` or `/abc/def`
+
+- `/*parameter` matches all segments in the rest of a path. For example:
+    -  `/abc/*wildcard` matches `/abc/1/def` and `/abc/w/h/a/t/e/v/e/r`, but it doesn't match `/abc/` or `/not_abc_at_all`
 
 <Note>
 
-The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
+- Both `:` and `*` syntaxes require a name, even though you can’t use those names anywhere.
+
+- The router doesn't support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
 
 </Note>
 
