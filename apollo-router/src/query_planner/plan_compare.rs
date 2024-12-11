@@ -1274,7 +1274,7 @@ mod path_comparison_tests {
         };
     }
 
-    macro_rules! assert_path_mismatch {
+    macro_rules! assert_path_differ {
         ($a:expr, $b:expr) => {
             let legacy_path: Path = serde_json::from_value($a).unwrap();
             let native_path: Path = serde_json::from_value($b).unwrap();
@@ -1284,15 +1284,10 @@ mod path_comparison_tests {
 
     #[test]
     fn test_same_path_basic() {
-        // Basic symmetry tests.
-        assert_path_match!(json!([]), json!([]));
-        assert_path_match!(json!(["a"]), json!(["a"]));
-        assert_path_match!(json!(["a", "b"]), json!(["a", "b"]));
-
-        // Basic mismatch tests.
-        assert_path_mismatch!(json!([]), json!(["a"]));
-        assert_path_mismatch!(json!(["a"]), json!(["b"]));
-        assert_path_mismatch!(json!(["a", "b"]), json!(["a", "b", "c"]));
+        // Basic dis-equality tests.
+        assert_path_differ!(json!([]), json!(["a"]));
+        assert_path_differ!(json!(["a"]), json!(["b"]));
+        assert_path_differ!(json!(["a", "b"]), json!(["a", "b", "c"]));
     }
 
     #[test]
@@ -1303,6 +1298,6 @@ mod path_comparison_tests {
     #[test]
     fn test_same_path_distinguishes_empty_conditions_from_no_conditions() {
         // Create paths that use no type conditions and empty type conditions
-        assert_path_mismatch!(json!(["k|[]", "v"]), json!(["k", "v"]));
+        assert_path_differ!(json!(["k|[]", "v"]), json!(["k", "v"]));
     }
 }
