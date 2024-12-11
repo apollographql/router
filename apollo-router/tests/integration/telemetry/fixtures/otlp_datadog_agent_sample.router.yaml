@@ -1,11 +1,17 @@
 telemetry:
+  apollo:
+    field_level_instrumentation_sampler: always_off
   exporters:
     tracing:
+      propagation:
+        datadog: true
       experimental_response_trace_id:
         enabled: true
         header_name: apollo-custom-trace-id
       common:
         service_name: router
+        preview_datadog_agent_sampling: true
+        sampler: 1.0
       otlp:
         enabled: true
         protocol: http

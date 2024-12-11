@@ -33,6 +33,7 @@ use opentelemetry::sdk::trace::TracerProvider;
 use opentelemetry::sdk::Resource;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
@@ -79,6 +80,7 @@ pub struct IntegrationTest {
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
     telemetry: Telemetry,
+    extra_propagator: Telemetry,
 
     pub _tracer_provider_client: TracerProvider,
     pub _tracer_provider_subgraph: TracerProvider,
@@ -104,11 +106,15 @@ struct TracedResponder {
     telemetry: Telemetry,
     subscriber_subgraph: Dispatch,
     subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
+    subgraph_context: Arc<Mutex<Option<SpanContext>>>,
 }
 
 impl Respond for TracedResponder {
     fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
         let context = self.telemetry.extract_context(request);
+        *self.subgraph_context.lock().expect("lock poisoned") =
+            Some(context.span().span_context().clone());
+
         tracing_core::dispatcher::with_default(&self.subscriber_subgraph, || {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
@@ -126,7 +132,7 @@ impl Respond for TracedResponder {
 pub enum Telemetry {
     Jaeger,
     Otlp {
-        endpoint: String,
+        endpoint: Option<String>,
     },
     Datadog,
     Zipkin,
@@ -156,7 +162,9 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Otlp { endpoint } => TracerProvider::builder()
+            Telemetry::Otlp {
+                endpoint: Some(endpoint),
+            } => TracerProvider::builder()
                 .with_config(config)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
@@ -201,7 +209,7 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::None => TracerProvider::builder()
+            Telemetry::None | Telemetry::Otlp { endpoint: None } => TracerProvider::builder()
                 .with_config(config)
                 .with_simple_exporter(NoopSpanExporter::default())
                 .build(),
@@ -220,11 +228,23 @@ impl Telemetry {
                 )
             }
             Telemetry::Datadog => {
+                // Get the existing PSR header if it exists. This is because the existing telemetry propagator doesn't support PSR properly yet.
+                // In testing we are manually setting the PSR header, and we don't want to override it.
+                let psr = request
+                    .headers()
+                    .get("x-datadog-sampling-priority")
+                    .cloned();
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                );
+
+                if let Some(psr) = psr {
+                    request
+                        .headers_mut()
+                        .insert("x-datadog-sampling-priority", psr);
+                }
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
@@ -258,7 +278,25 @@ impl Telemetry {
             }
             Telemetry::Datadog => {
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
-                propagator.extract(&headers)
+                let mut context = propagator.extract(&headers);
+                // We're going to override the sampled so that we can test sampling priority
+                if let Some(psr) = headers.get("x-datadog-sampling-priority") {
+                    let state = context
+                        .span()
+                        .span_context()
+                        .trace_state()
+                        .insert("psr", psr.to_string())
+                        .expect("psr");
+                    context = context.with_remote_span_context(SpanContext::new(
+                        context.span().span_context().trace_id(),
+                        context.span().span_context().span_id(),
+                        context.span().span_context().trace_flags(),
+                        true,
+                        state,
+                    ));
+                }
+
+                context
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
@@ -279,7 +317,9 @@ impl IntegrationTest {
     pub async fn new(
         config: String,
         telemetry: Option<Telemetry>,
+        extra_propagator: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
+        subgraph_context: Option<Arc<Mutex<Option<SpanContext>>>>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
@@ -288,6 +328,7 @@ impl IntegrationTest {
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
+        let extra_propagator = extra_propagator.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
         let subscriber_client = Self::dispatch(&tracer_provider_client);
         let tracer_provider_subgraph = telemetry.tracer_provider("subgraph");
@@ -318,7 +359,8 @@ impl IntegrationTest {
                 ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
                 telemetry: telemetry.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
-                subgraph_callback
+                subgraph_callback,
+                subgraph_context: subgraph_context.unwrap_or_default()
             })
             .mount(&subgraphs)
             .await;
@@ -353,6 +395,7 @@ impl IntegrationTest {
             subscriber_client,
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
+            extra_propagator,
             redis_namespace,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
         }
@@ -558,6 +601,7 @@ impl IntegrationTest {
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
         let telemetry = self.telemetry.clone();
+        let extra_propagator = self.extra_propagator.clone();
 
         let query = query.clone();
         let url = format!("http://{}", self.bind_address());
@@ -587,6 +631,7 @@ impl IntegrationTest {
 
                 let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
+                extra_propagator.inject_context(&mut request);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {
@@ -604,6 +649,7 @@ impl IntegrationTest {
     pub fn execute_untraced_query(
         &self,
         query: &Value,
+        headers: Option<HashMap<String, String>>,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
@@ -615,17 +661,20 @@ impl IntegrationTest {
         async move {
             let client = reqwest::Client::new();
 
-            let mut request = client
+            let mut builder = client
                 .post(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
-                .json(&query)
-                .build()
-                .unwrap();
+                .json(&query);
 
-            request.headers_mut().remove(ACCEPT);
-            match client.execute(request).await {
+            if let Some(headers) = headers {
+                for (name, value) in headers {
+                    builder = builder.header(name, value);
+                }
+            }
+
+            match client.execute(builder.build().unwrap()).await {
                 Ok(response) => (
                     TraceId::from_hex(
                         response
