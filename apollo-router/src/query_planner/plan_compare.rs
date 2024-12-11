@@ -23,6 +23,8 @@ use super::FlattenNode;
 use super::PlanNode;
 use super::Primary;
 use super::QueryPlanResult;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 
 //==================================================================================================
 // Public interface
@@ -534,8 +536,47 @@ fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> Result<()
 
 fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> Result<(), MatchFailure> {
     let FlattenNode { path, node } = this;
-    check_match_eq!(*path, other.path);
+    check_match!(same_path(path, &other.path));
     plan_node_matches(node, &other.node)
+}
+
+fn same_path(this: &Path, other: &Path) -> bool {
+    // Ignore the empty key root from the JS query planner
+    match this.0.split_first() {
+        Some((PathElement::Key(k, type_conditions), rest))
+            if k.is_empty() && type_conditions.is_none() =>
+        {
+            vec_matches(rest, &other.0, same_path_element)
+        }
+        _ => vec_matches(&this.0, &other.0, same_path_element),
+    }
+}
+
+fn same_path_element(this: &PathElement, other: &PathElement) -> bool {
+    match (this, other) {
+        (PathElement::Index(this), PathElement::Index(other)) => this == other,
+        (PathElement::Fragment(this), PathElement::Fragment(other)) => this == other,
+        (
+            PathElement::Key(this_key, this_type_conditions),
+            PathElement::Key(other_key, other_type_conditions),
+        ) => {
+            this_key == other_key
+                && same_path_condition(this_type_conditions, other_type_conditions)
+        }
+        (
+            PathElement::Flatten(this_type_conditions),
+            PathElement::Flatten(other_type_conditions),
+        ) => same_path_condition(this_type_conditions, other_type_conditions),
+        _ => false,
+    }
+}
+
+fn same_path_condition(this: &Option<Vec<String>>, other: &Option<Vec<String>>) -> bool {
+    match (this, other) {
+        (Some(this), Some(other)) => vec_matches_sorted(this, other),
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 // Copied and modified from `apollo_federation::operation::SelectionKey`
@@ -1183,5 +1224,85 @@ mod qp_selection_comparison_tests {
         assert!(!same_selection_set_sorted(&requires1, &requires2));
         // `same_requires` should succeed.
         assert!(same_requires(&requires1, &requires2));
+    }
+}
+
+#[cfg(test)]
+mod path_comparison_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    macro_rules! matches_deserialized_path {
+        ($json:expr, $expected:expr) => {
+            let path: Path = serde_json::from_value($json).unwrap();
+            assert_eq!(path, $expected);
+        };
+    }
+
+    #[test]
+    fn test_type_condition_deserialization() {
+        matches_deserialized_path!(
+            json!(["k"]),
+            Path(vec![PathElement::Key("k".to_string(), None)])
+        );
+        matches_deserialized_path!(
+            json!(["k|[A]"]),
+            Path(vec![PathElement::Key(
+                "k".to_string(),
+                Some(vec!["A".to_string()])
+            )])
+        );
+        matches_deserialized_path!(
+            json!(["k|[A,B]"]),
+            Path(vec![PathElement::Key(
+                "k".to_string(),
+                Some(vec!["A".to_string(), "B".to_string()])
+            )])
+        );
+        matches_deserialized_path!(
+            json!(["k|[]"]),
+            Path(vec![PathElement::Key("k".to_string(), Some(vec![]))])
+        );
+    }
+
+    macro_rules! assert_path_match {
+        ($a:expr, $b:expr) => {
+            let legacy_path: Path = serde_json::from_value($a).unwrap();
+            let native_path: Path = serde_json::from_value($b).unwrap();
+            assert!(same_path(&legacy_path, &native_path));
+        };
+    }
+
+    macro_rules! assert_path_mismatch {
+        ($a:expr, $b:expr) => {
+            let legacy_path: Path = serde_json::from_value($a).unwrap();
+            let native_path: Path = serde_json::from_value($b).unwrap();
+            assert!(!same_path(&legacy_path, &native_path));
+        };
+    }
+
+    #[test]
+    fn test_same_path_basic() {
+        // Basic symmetry tests.
+        assert_path_match!(json!([]), json!([]));
+        assert_path_match!(json!(["a"]), json!(["a"]));
+        assert_path_match!(json!(["a", "b"]), json!(["a", "b"]));
+
+        // Basic mismatch tests.
+        assert_path_mismatch!(json!([]), json!(["a"]));
+        assert_path_mismatch!(json!(["a"]), json!(["b"]));
+        assert_path_mismatch!(json!(["a", "b"]), json!(["a", "b", "c"]));
+    }
+
+    #[test]
+    fn test_same_path_ignore_empty_root_key() {
+        assert_path_match!(json!(["", "k|[A]", "v"]), json!(["k|[A]", "v"]));
+    }
+
+    #[test]
+    fn test_same_path_distinguishes_empty_conditions_from_no_conditions() {
+        // Create paths that use no type conditions and empty type conditions
+        assert_path_mismatch!(json!(["k|[]", "v"]), json!(["k", "v"]));
     }
 }
