@@ -37,13 +37,13 @@ fn extract_matched_conditions(caps: &Captures) -> TypeConditions {
         .unwrap_or_default()
 }
 
-fn split_key_and_type_conditions(s: &str) -> (String, Option<TypeConditions>) {
+fn split_path_element_and_type_conditions(s: &str) -> (String, Option<TypeConditions>) {
     let mut type_conditions = None;
-    let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
+    let path_element = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
         type_conditions = Some(extract_matched_conditions(caps));
         ""
     });
-    (key.to_string(), type_conditions)
+    (path_element.to_string(), type_conditions)
 }
 
 macro_rules! extract_key_value_from_object {
@@ -866,8 +866,8 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     where
         E: serde::de::Error,
     {
-        let (key, type_conditions) = split_key_and_type_conditions(s);
-        if key == "@" {
+        let (path_element, type_conditions) = split_path_element_and_type_conditions(s);
+        if path_element == "@" {
             Ok(type_conditions)
         } else {
             Err(serde::de::Error::invalid_value(
@@ -917,7 +917,7 @@ impl<'de> serde::de::Visitor<'de> for KeyVisitor {
     where
         E: serde::de::Error,
     {
-        Ok(split_key_and_type_conditions(s))
+        Ok(split_path_element_and_type_conditions(s))
     }
 }
 
@@ -972,15 +972,15 @@ where
 }
 
 fn flatten_from_str(s: &str) -> Result<PathElement, String> {
-    let (key, type_conditions) = split_key_and_type_conditions(s);
-    if key != "@" {
+    let (path_element, type_conditions) = split_path_element_and_type_conditions(s);
+    if path_element != "@" {
         return Err("invalid flatten".to_string());
     }
     Ok(PathElement::Flatten(type_conditions))
 }
 
 fn key_from_str(s: &str) -> Result<PathElement, String> {
-    let (key, type_conditions) = split_key_and_type_conditions(s);
+    let (key, type_conditions) = split_path_element_and_type_conditions(s);
     Ok(PathElement::Key(key, type_conditions))
 }
 
