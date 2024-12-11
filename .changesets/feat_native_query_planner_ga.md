@@ -16,9 +16,8 @@ by comparing ~2.5 million all known unique user operations in GraphOS as well as
 comparing ~630 million operations across actual router deployments in shadow
 mode over the period of last 4 months.
 
-The legacy, JavaScript, query planner is deprecated in this release, and will be
-removed in the upcoming 1.60.0. In 1.59.0, however, you can still switch
-back to legacy query planner with:
+The legacy, JavaScript, query planner is deprecated in this release, but you can still switch
+back to it with:
 
 ```
 experimental_query_planner_mode: legacy
