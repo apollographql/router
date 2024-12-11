@@ -1245,15 +1245,15 @@ mod path_comparison_tests {
     }
 
     #[test]
-    fn test_same_path_ignore_empty_conditions() {
-        // Create a legacy path with an empty type conditions.
+    fn test_same_path_distinguishes_empty_conditions_from_no_conditions() {
+        // Create paths that use no type conditions and empty type conditions
         let path_json_legacy = json!(["k|[]", "v"]);
         let path_json_native = json!(["k", "v"]);
 
         let legacy_path: Path = serde_json::from_value(path_json_legacy).unwrap();
         let native_path: Path = serde_json::from_value(path_json_native).unwrap();
 
-        // Tests that both formats are deserialized into the same Path.
-        assert!(same_path(&legacy_path, &native_path));
+        // Tests that both formats are deserialized into different Paths.
+        assert!(!same_path(&legacy_path, &native_path));
     }
 }
