@@ -40,7 +40,6 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
-// use crate::services::transport;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
@@ -79,7 +78,6 @@ impl Endpoint {
     }
 
     pub(crate) fn into_router(self) -> axum::Router {
-        // let handler = move |req: http::Request<crate::services::router::Body>| {
         let handler = move |req: http::Request<axum::body::Body>| {
             let endpoint = self.handler.clone();
             async move {

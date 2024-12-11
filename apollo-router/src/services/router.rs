@@ -28,7 +28,6 @@ use super::supergraph;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
-use crate::services;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 use crate::Context;
@@ -263,8 +262,6 @@ impl Response {
             }
         }
 
-        // let response = builder.body(once(ready(res)).boxed())?;
-
         let response = builder.body(self::body::full(serde_json::to_vec(&res)?))?;
 
         Ok(Self { response, context })
@@ -479,9 +476,7 @@ where
     let val_any = &mut b as &mut dyn Any;
     match val_any.downcast_mut::<Body>() {
         Some(body) => mem::take(body),
-        None => Body::new(services::http::body_stream::BodyStream::new(
-            b.map_err(axum::Error::new),
-        )),
+        None => Body::new(http_body_util::BodyStream::new(b.map_err(axum::Error::new))),
     }
 }
 
@@ -506,7 +501,7 @@ mod test {
 
         fn poll_frame(
             self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
+            _cx: &mut Context<'_>,
         ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
             if let Some(data) = self.get_mut().data.take() {
                 Poll::Ready(Some(Ok(Frame::data(bytes::Bytes::from(data)))))

@@ -402,8 +402,7 @@ impl Executable {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        // XXX: Install a default crypto provider. Not sure if this is the right thing to do, but
-        // required after rustls update
+        // Enable crypto
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         copy_args_to_env();

@@ -58,35 +58,3 @@ pub(crate) async fn unsync_to_full(
     let new_request = http::Request::from_parts(parts, Full::new(body_bytes));
     Ok(new_request)
 }
-
-//
-// Useful Conversion notes:
-//  - If you have a body and want to convert it to BodyDataStream
-//    You can call `body.into_data_stream` from BodyExt
-//  - If you have a Stream and want a StreamBody, you can call
-//    `StreamBody::new(stream)`.
-//
-//  I'll leave these functions here as examples and at some point
-//  in the upgrade we can remove them.
-//
-//  Commenting out for now to prevent compiler warnings. Evaluate
-//  their utility before we merge...
-
-/*
-pub(crate) fn into_data_stream_body(
-    body: RouterBody,
-) -> http_body_util::BodyDataStream<RouterBody> {
-    body.into_data_stream()
-}
-
-pub(crate) fn into_stream_body<S, E>(stream: S) -> http_body_util::StreamBody<S>
-where
-    S: futures::Stream<Item = Result<Frame<RouterBody>, E>>,
-{
-    http_body_util::StreamBody::new(stream)
-}
-
-pub(crate) fn from_data_stream(data_stream: BodyDataStream<RouterBody>) -> RouterBody {
-    RouterBody::new(StreamBody::new(data_stream.map(|s| s.map(Frame::data))))
-}
-*/

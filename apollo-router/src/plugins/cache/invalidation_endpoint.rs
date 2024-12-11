@@ -120,7 +120,6 @@ impl Service<router::Request> for InvalidationService {
                 match parts.method {
                     Method::POST => {
                         let body = get_body_bytes(body)
-                            // renamed from "to_bytes" on dev
                             .instrument(tracing::info_span!("get_body_bytes"))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))

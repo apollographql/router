@@ -55,7 +55,6 @@ use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
-// use crate::services::router::body::RouterBodyConverter;
 use crate::services::subgraph;
 
 #[cfg(test)]
@@ -111,19 +110,6 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         } else {
             builder.wrap_connector(http_connector)
         };
-
-        /*
-        let http_client = RouterBodyConverter {
-            inner: ServiceBuilder::new()
-                .layer(TimeoutLayer::new(init.config.timeout))
-                .service(
-                    hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                        .http2_only(experimental_http2 == Http2Config::Http2Only)
-                        .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                        .build(connector),
-                ),
-        };
-        */
 
         let http_client = ServiceBuilder::new()
             .map_response(
@@ -824,18 +810,11 @@ where
 
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
-    /*
-    let (first, rest): (
-        Option<Result<Bytes, hyper::Error>>,
-        crate::services::router::Body,
-    ) = body.into_future().await;
-        */
     let mut stream = body.into_data_stream();
     let first = stream.next().await.transpose().expect("XXX FIX LATER");
     let rest = stream;
 
     // If first is None, or contains an error we return an error
-    // let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
     let bytes = match first {
         Some(b) => b,
         None => {

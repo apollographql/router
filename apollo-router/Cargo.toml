@@ -306,7 +306,6 @@ tikv-jemallocator = "0.6.0"
 
 [dev-dependencies]
 axum = { version = "0.7.9", features = [
-    # "headers",
     "json",
     "original-uri",
     "ws",
