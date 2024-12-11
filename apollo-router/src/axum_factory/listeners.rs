@@ -282,6 +282,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 // XXX Not sure if this does anything anymore
+                                                // NOTE: I think this may be the cause of
+                                                // test_local_root_50_percent_sample failing
                                                 // let c = connection.as_mut();
                                                 // c.graceful_shutdown();
 
@@ -327,6 +329,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 // XXX Not sure if this does anything anymore
+                                                // NOTE: I think this may be the cause of
+                                                // test_local_root_50_percent_sample failing
                                                 // let c = connection.as_mut();
                                                 // c.graceful_shutdown();
 
@@ -383,6 +387,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 // XXX Not sure if this does anything anymore
+                                                // NOTE: I think this may be the cause of
+                                                // test_local_root_50_percent_sample failing
                                                 // let c = connection.as_mut();
                                                 // c.graceful_shutdown();
 
