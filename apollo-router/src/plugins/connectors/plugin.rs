@@ -113,11 +113,9 @@ impl Plugin for Connectors {
                                 }
                             });
                             if is_debug_enabled {
-                                if let Some(debug) =
-                                    res.context.extensions().with_lock(|mut lock| {
-                                        lock.remove::<Arc<Mutex<ConnectorContext>>>()
-                                    })
-                                {
+                                if let Some(debug) = res.context.extensions().with_lock(|lock| {
+                                    lock.get::<Arc<Mutex<ConnectorContext>>>().cloned()
+                                }) {
                                     let (parts, stream) = res.response.into_parts();
 
                                     let stream = stream.map(move |mut chunk| {
