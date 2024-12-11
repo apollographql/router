@@ -72,7 +72,6 @@ async-compression = { version = "0.4.6", features = [
     "deflate",
 ] }
 async-trait.workspace = true
-# axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 axum = { version = "0.7.9", features = ["json", "original-uri"] }
 axum-extra = { version = "0.9.6", features = [ "typed-header" ] }
 base64 = "0.22.0"
@@ -104,13 +103,11 @@ graphql_client = "0.14.0"
 hex.workspace = true
 http.workspace = true
 http-0_2 = { version = "0.2.12", package = "http" }
-# http-body = "0.4.6"
 http-body = "1.0.1"
 http-body-util = {version = "0.1.2" }
 heck = "0.5.0"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
-# hyper = { version = "0.14.28", features = ["server", "client", "stream"] }
 hyper = { version = "1.5.1", features = ["full"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
 hyper-rustls = { version = "0.27.3", features = ["http1", "http2", "rustls-native-certs"] }
@@ -247,9 +244,7 @@ tonic-0_9 = { version = "0.9.0", features = [
     "tls-roots",
     "gzip",
 ], package = "tonic" }
-# tower.workspace = true
-tower = { version = "0.5.1", features = ["full"] }
-
+tower.workspace = true
 tower-http = { version = "0.6.2", features = ["full"] }
 tower-service = "0.3.2"
 tracing = "0.1.40"
