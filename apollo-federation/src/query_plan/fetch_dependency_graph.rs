@@ -509,15 +509,14 @@ impl FetchDependencyGraphNodePath {
         type_conditioned_fetching_enabled: bool,
         root_type: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
-        let root_possible_types = if type_conditioned_fetching_enabled {
+        let root_possible_types: IndexSet<Name> = if type_conditioned_fetching_enabled {
             schema.possible_runtime_types(root_type)?
         } else {
             Default::default()
         }
         .into_iter()
-        .map(|pos| Ok(pos.get(schema.schema())?.name.clone()))
-        .collect::<Result<IndexSet<Name>, _>>()
-        .map_err(|e: PositionLookupError| FederationError::from(e))?;
+        .map(|pos| Ok::<_, PositionLookupError>(pos.get(schema.schema())?.name.clone()))
+        .process_results(|c| c.sorted().collect())?;
 
         Ok(Self {
             schema,
@@ -577,12 +576,13 @@ impl FetchDependencyGraphNodePath {
                 None => self.possible_types.clone(),
                 Some(tcp) => {
                     let element_possible_types = self.schema.possible_runtime_types(tcp.clone())?;
-                    element_possible_types
+                    self.possible_types
                         .iter()
                         .filter(|&possible_type| {
-                            self.possible_types.contains(&possible_type.type_name)
+                            element_possible_types
+                                .contains(&ObjectTypeDefinitionPosition::new(possible_type.clone()))
                         })
-                        .map(|possible_type| possible_type.type_name.clone())
+                        .cloned()
                         .collect()
                 }
             },
@@ -592,15 +592,11 @@ impl FetchDependencyGraphNodePath {
     }
 
     fn advance_field_type(&self, element: &Field) -> Result<IndexSet<Name>, FederationError> {
-        if !element
-            .output_base_type()
-            .map(|base_type| base_type.is_composite_type())
-            .unwrap_or_default()
-        {
+        if !element.output_base_type()?.is_composite_type() {
             return Ok(Default::default());
         }
 
-        let mut res = self
+        let mut res: IndexSet<Name> = self
             .possible_types
             .clone()
             .into_iter()
@@ -616,17 +612,13 @@ impl FetchDependencyGraphNodePath {
                     .schema
                     .possible_runtime_types(typ)?
                     .into_iter()
-                    .map(|ctdp| ctdp.type_name)
-                    .collect::<Vec<_>>())
+                    .map(|ctdp| ctdp.type_name))
             })
-            .collect::<Result<Vec<Vec<Name>>, FederationError>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            .process_results::<_, _, FederationError, _>(|c| c.flatten().collect())?;
 
         res.sort();
 
-        Ok(res.into_iter().collect())
+        Ok(res)
     }
 
     fn updated_response_path(
@@ -649,17 +641,22 @@ impl FetchDependencyGraphNodePath {
 
                     match new_path.pop() {
                         Some(FetchDataPathElement::AnyIndex(_)) => {
-                            new_path.push(FetchDataPathElement::AnyIndex(
+                            new_path.push(FetchDataPathElement::AnyIndex(Some(
                                 conditions.iter().cloned().collect(),
-                            ));
+                            )));
                         }
                         Some(FetchDataPathElement::Key(name, _)) => {
                             new_path.push(FetchDataPathElement::Key(
                                 name,
-                                conditions.iter().cloned().collect(),
+                                Some(conditions.iter().cloned().collect()),
                             ));
                         }
                         Some(other) => new_path.push(other),
+                        // TODO: We should be emitting type conditions here on no element like the
+                        //       JS code, which requires a new FetchDataPathElement variant in Rust.
+                        //       This really has to do with a hack we did to avoid changing fetch
+                        //       data paths too much, in which type conditions ought to be their own
+                        //       variant entirely.
                         None => {}
                     }
                 }
@@ -5285,11 +5282,10 @@ mod tests {
         )
     }
 
-    fn cond_to_string(conditions: &[Name]) -> String {
-        if conditions.is_empty() {
-            return Default::default();
+    fn cond_to_string(conditions: &Option<Vec<Name>>) -> String {
+        if let Some(conditions) = conditions {
+            return format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","));
         }
-
-        format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","))
+        Default::default()
     }
 }
