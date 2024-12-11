@@ -594,9 +594,6 @@ mod tests {
             [
                 RootField {
                     name: "a",
-                    typename: Concrete(
-                        "A",
-                    ),
                     selection: Named(
                         SubSelection {
                             selections: [
@@ -625,9 +622,6 @@ mod tests {
                 },
                 RootField {
                     name: "a2",
-                    typename: Concrete(
-                        "A",
-                    ),
                     selection: Named(
                         SubSelection {
                             selections: [
@@ -731,9 +725,6 @@ mod tests {
             [
                 RootField {
                     name: "b",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -768,9 +759,6 @@ mod tests {
                 },
                 RootField {
                     name: "b2",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -896,9 +884,6 @@ mod tests {
             [
                 RootField {
                     name: "c",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -962,9 +947,6 @@ mod tests {
                 },
                 RootField {
                     name: "c2",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -1130,9 +1112,6 @@ mod tests {
         [
             Entity {
                 index: 0,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1240,9 +1219,6 @@ mod tests {
             },
             Entity {
                 index: 1,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1452,9 +1428,6 @@ mod tests {
         [
             Entity {
                 index: 0,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1562,9 +1535,6 @@ mod tests {
             },
             Entity {
                 index: 1,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1755,9 +1725,6 @@ mod tests {
         [
             RootField {
                 name: "a",
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1810,9 +1777,6 @@ mod tests {
             },
             RootField {
                 name: "b",
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1981,7 +1945,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2024,7 +1988,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2067,7 +2031,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2110,7 +2074,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2259,7 +2223,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2302,7 +2266,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2345,7 +2309,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2388,7 +2352,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2534,7 +2498,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "field",
-                typename: Omitted,
+                typename: None,
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -2575,7 +2539,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
-                typename: Omitted,
+                typename: None,
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -2685,9 +2649,6 @@ mod tests {
                 },
                 key: RootField {
                     name: "a",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
