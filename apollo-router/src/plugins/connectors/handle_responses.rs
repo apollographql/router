@@ -12,7 +12,6 @@ use crate::graphql;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::ResponseKey;
-use crate::plugins::connectors::make_requests::ResponseTypeName;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
@@ -192,30 +191,12 @@ impl MappedResponse {
                 errors.push(error);
             }
             Self::Data {
-                data: mut value,
-                key,
-                ..
+                data: value, key, ..
             } => match key {
-                ResponseKey::RootField {
-                    ref name,
-                    ref typename,
-                    ..
-                } => {
-                    if let ResponseTypeName::Concrete(typename) = typename {
-                        inject_typename(&mut value, typename);
-                    }
-
+                ResponseKey::RootField { ref name, .. } => {
                     data.insert(name.clone(), value);
                 }
-                ResponseKey::Entity {
-                    index,
-                    ref typename,
-                    ..
-                } => {
-                    if let ResponseTypeName::Concrete(typename) = typename {
-                        inject_typename(&mut value, typename);
-                    }
-
+                ResponseKey::Entity { index, .. } => {
                     let entities = data
                         .entry(ENTITIES)
                         .or_insert(Value::Array(Vec::with_capacity(count)));
@@ -246,8 +227,8 @@ impl MappedResponse {
                         }
                         _ => {
                             let mut entity = serde_json_bytes::Map::new();
-                            if let ResponseTypeName::Concrete(typename) = typename {
-                                entity.insert(TYPENAME, Value::String(typename.clone().into()));
+                            if let Some(typename) = typename {
+                                entity.insert(TYPENAME, Value::String(typename.as_str().into()));
                             }
                             entity.insert(field_name.clone(), value);
                             entities.insert(index, Value::Object(entity));
@@ -399,23 +380,6 @@ async fn deserialize_response<T: HttpBody>(
     }
 }
 
-fn inject_typename(data: &mut Value, typename: &str) {
-    match data {
-        Value::Array(data) => {
-            for data in data {
-                inject_typename(data, typename);
-            }
-        }
-        Value::Object(data) => {
-            data.insert(
-                ByteString::from(TYPENAME),
-                Value::String(ByteString::from(typename)),
-            );
-        }
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -433,7 +397,6 @@ mod tests {
 
     use crate::plugins::connectors::http::Response as ConnectorResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::make_requests::ResponseTypeName;
     use crate::services::router::body::RouterBody;
     use crate::Context;
 
@@ -470,7 +433,6 @@ mod tests {
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("String".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -480,7 +442,6 @@ mod tests {
         let response_key2 = ResponseKey::RootField {
             name: "hello2".to_string(),
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("String".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -568,7 +529,6 @@ mod tests {
         let response_key1 = ResponseKey::Entity {
             index: 0,
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -578,7 +538,6 @@ mod tests {
         let response_key2 = ResponseKey::Entity {
             index: 1,
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -679,7 +638,7 @@ mod tests {
             index: 0,
             inputs: Default::default(),
             field_name: "field".to_string(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
+            typename: Some(name!("User")),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -690,7 +649,7 @@ mod tests {
             index: 1,
             inputs: Default::default(),
             field_name: "field".to_string(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
+            typename: Some(name!("User")),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -790,7 +749,6 @@ mod tests {
         let response_key_plaintext = ResponseKey::Entity {
             index: 0,
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -801,7 +759,6 @@ mod tests {
         let response_key1 = ResponseKey::Entity {
             index: 1,
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -811,7 +768,6 @@ mod tests {
         let response_key2 = ResponseKey::Entity {
             index: 2,
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -822,7 +778,6 @@ mod tests {
         let response_key3 = ResponseKey::Entity {
             index: 3,
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("User".to_string()),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
@@ -996,7 +951,6 @@ mod tests {
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
             inputs: Default::default(),
-            typename: ResponseTypeName::Concrete("Int".to_string()),
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
 
