@@ -9,7 +9,7 @@ improvements with the native query planner:
 * 2.9x improvement in router’s CPU utilisation
 * 2.2x improvement in router’s memory usage 
 
-It is expected that the generated plans and subgraph operations will have slight
+It is expected that the generated plans and subgraph operations in the native query planner will have slight differences when compared to the legacy query planner.
 differences. These differences have been ascertained as semantically
 insignificant by comparing ~2.5 million all known unique user operations across as well
 as comparing ~590 million operations across actual router deployments in shadow
