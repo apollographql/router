@@ -1291,7 +1291,7 @@ async fn test_sources_in_context() {
         })),
         |_| {},
     )
-        .await;
+    .await;
 
     let requests = &mock_server.received_requests().await.unwrap();
     let coprocessor_request = requests.first().unwrap();
@@ -1365,7 +1365,7 @@ async fn test_variables() {
         })),
         |_| {},
     )
-        .await;
+    .await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -1408,7 +1408,7 @@ async fn test_variables() {
                 .header("x-connect-context".into(), "B".try_into().unwrap())
                 .header("x-connect-config".into(), "C".try_into().unwrap())
                 .body(serde_json::json!({ "arg": "A", "context": "B", "config": "C" }))
-            ,
+                ,
             Matcher::new()
                 .method("POST")
                 .path("/f")
@@ -1420,7 +1420,7 @@ async fn test_variables() {
                 .header("x-connect-config".into(), "C".try_into().unwrap())
                 .header("x-connect-sibling".into(), "D".try_into().unwrap())
                 .body(serde_json::json!({ "arg": "A", "context": "B", "config": "C", "sibling": "D" }))
-            ,
+                ,
         ],
     );
 }

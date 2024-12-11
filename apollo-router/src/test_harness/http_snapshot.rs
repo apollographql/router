@@ -66,7 +66,7 @@ use tower::ServiceExt;
 use tracing::error;
 use tracing::info;
 
-use crate::plugins::traffic_shaping::Http2Config;
+use crate::configuration::shared::Client;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
 use crate::services::router::body::RouterBody;
@@ -361,11 +361,11 @@ impl SnapshotServer {
 
         let http_service = HttpClientService::new(
             "test",
-            Http2Config::Http2Only,
             rustls::ClientConfig::builder()
                 .with_safe_defaults()
                 .with_native_roots()
                 .with_no_client_auth(),
+            Client::builder().build(),
         )
         .expect("can create a HttpService");
         let app = Router::new()
