@@ -269,8 +269,9 @@ impl Selection {
                     0
                 }
             }
-            (Some((PathElement::Index(_), _)), _) | (Some((PathElement::Flatten(_), _)), _) => {
-                self.matching_error_path_length(&path[1..], fragments) + 1
+            (Some((PathElement::Index(_), rest)), _)
+            | (Some((PathElement::Flatten(_), rest)), _) => {
+                self.matching_error_path_length(rest, fragments) + 1
             }
             (
                 Some((PathElement::Key(_, _), _)),
