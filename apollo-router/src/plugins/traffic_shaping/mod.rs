@@ -784,14 +784,9 @@ mod test {
         )
         .unwrap();
 
-        let shaping_config = TrafficShaping::new(
-            PluginInit::fake_builder()
-                .config(config)
-                .persisted_queries_version(Arc::new("WHY DO I NEED TO DO THIS?".to_string()))
-                .build(),
-        )
-        .await
-        .unwrap();
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
 
         assert_eq!(
             shaping_config.subgraph_client_config("products"),

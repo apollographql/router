@@ -713,7 +713,6 @@ fn ensure_id_consistency(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use serde_json::Value;
@@ -753,7 +752,6 @@ mod tests {
                         )
                         .unwrap(),
                     )
-                    .persisted_queries_version(Arc::new("persisted_queries_version".to_string()))
                     .notify(notify.clone())
                     .build(),
             )
@@ -901,7 +899,6 @@ mod tests {
                         )
                         .unwrap(),
                     )
-                    .persisted_queries_version(Arc::new("persisted_queries_version".to_string()))
                     .notify(notify.clone())
                     .build(),
             )
@@ -993,7 +990,6 @@ mod tests {
                         )
                         .unwrap(),
                     )
-                    .persisted_queries_version(Arc::new("persisted_queries_version".to_string()))
                     .notify(notify.clone())
                     .build(),
             )

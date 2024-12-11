@@ -58,6 +58,16 @@ impl From<persisted_queries_manifest_query::ResponseData>
     fn from(response: persisted_queries_manifest_query::ResponseData) -> Self {
         match response.persisted_queries {
             PersistedQueriesManifestQueryPersistedQueries::PersistedQueriesResult(response) => {
+                // TODO: make this a gauge.
+                u64_counter!(
+                    "apollo.router.operations.persisted_queries_version",
+                    "ID of the latest persisted queries",
+                    1,
+                    [opentelemetry::KeyValue::new(
+                        "persisted_queries_version",
+                        response.id.clone(),
+                    )]
+                );
                 if let Some(chunks) = response.chunks {
                     let chunks = chunks
                         .iter()
