@@ -26,18 +26,15 @@ pub(crate) type Object = Map<ByteString, Value>;
 const FRAGMENT_PREFIX: &str = "... on ";
 
 static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\|\[(?<condition>.*?)\]")
+    Regex::new(r"\|\[(?<condition>.+?)?\]")
         .expect("this regex to check for type conditions is valid")
 });
 
 /// Extract the condition list from the regex captures.
-fn extract_matched_conditions(caps: &Captures) -> Option<TypeConditions> {
-    caps.name("condition").map(|c| {
-        c.as_str()
-            .split(',')
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-    })
+fn extract_matched_conditions(caps: &Captures) -> TypeConditions {
+    caps.name("condition")
+        .map(|c| c.as_str().split(',').map(|s| s.to_string()).collect())
+        .unwrap_or_default()
 }
 
 macro_rules! extract_key_value_from_object {
@@ -862,7 +859,7 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     {
         let mut type_conditions = Default::default();
         let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions = extract_matched_conditions(caps);
+            type_conditions = Some(extract_matched_conditions(caps));
             ""
         });
 
@@ -918,7 +915,7 @@ impl<'de> serde::de::Visitor<'de> for KeyVisitor {
     {
         let mut type_conditions = Default::default();
         let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions = extract_matched_conditions(caps);
+            type_conditions = Some(extract_matched_conditions(caps));
             ""
         });
         Ok((key.to_string(), type_conditions))
@@ -978,7 +975,7 @@ where
 fn flatten_from_str(s: &str) -> Result<PathElement, String> {
     let mut type_conditions = Default::default();
     let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions = extract_matched_conditions(caps);
+        type_conditions = Some(extract_matched_conditions(caps));
         ""
     });
 
@@ -991,7 +988,7 @@ fn flatten_from_str(s: &str) -> Result<PathElement, String> {
 fn key_from_str(s: &str) -> Result<PathElement, String> {
     let mut type_conditions = Default::default();
     let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions = extract_matched_conditions(caps);
+        type_conditions = Some(extract_matched_conditions(caps));
         ""
     });
 
