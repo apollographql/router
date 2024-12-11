@@ -12,8 +12,6 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use router_bridge::planner::Planner;
-use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
@@ -26,6 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
@@ -49,7 +48,6 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
-use crate::query_planner::QueryPlanResult;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;
@@ -926,10 +924,6 @@ impl SupergraphCreator {
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
         self.query_planner_service.previous_cache()
-    }
-
-    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.query_planner_service.js_planners()
     }
 
     pub(crate) async fn warm_up_query_planner(

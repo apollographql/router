@@ -7,15 +7,13 @@ use apollo_compiler::validation::WithErrors;
 use apollo_federation::error::FederationError;
 use displaydoc::Display;
 use lazy_static::__Deref;
-use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::PlannerError;
-use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
 use tower::BoxError;
 
+use crate::apollo_studio_interop::UsageReporting;
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
@@ -236,9 +234,6 @@ impl From<QueryPlannerError> for CacheResolverError {
 /// Error types for service building.
 #[derive(Error, Debug, Display)]
 pub(crate) enum ServiceBuildError {
-    /// couldn't build Query Planner Service: {0}
-    QueryPlannerError(QueryPlannerError),
-
     /// failed to initialize the query planner: {0}
     QpInitError(FederationError),
 
@@ -255,18 +250,6 @@ impl From<SchemaError> for ServiceBuildError {
     }
 }
 
-impl From<Vec<PlannerError>> for ServiceBuildError {
-    fn from(errors: Vec<PlannerError>) -> Self {
-        ServiceBuildError::QueryPlannerError(errors.into())
-    }
-}
-
-impl From<router_bridge::error::Error> for ServiceBuildError {
-    fn from(error: router_bridge::error::Error) -> Self {
-        ServiceBuildError::QueryPlannerError(error.into())
-    }
-}
-
 impl From<BoxError> for ServiceBuildError {
     fn from(err: BoxError) -> Self {
         ServiceBuildError::ServiceError(err)
@@ -276,14 +259,8 @@ impl From<BoxError> for ServiceBuildError {
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerError {
-    /// couldn't instantiate query planner; invalid schema: {0}
-    SchemaValidationErrors(PlannerErrors),
-
     /// invalid query: {0}
     OperationValidationErrors(ValidationErrors),
-
-    /// couldn't plan query: {0}
-    PlanningErrors(PlanErrors),
 
     /// query planning panicked: {0}
     JoinError(String),
@@ -297,14 +274,8 @@ pub(crate) enum QueryPlannerError {
     /// unhandled planner result
     UnhandledPlannerResult,
 
-    /// router bridge error: {0}
-    RouterBridgeError(router_bridge::error::Error),
-
     /// spec error: {0}
     SpecError(SpecError),
-
-    /// introspection error: {0}
-    Introspection(IntrospectionError),
 
     /// complexity limit exceeded
     LimitExceeded(OperationLimits<bool>),
@@ -402,25 +373,11 @@ impl IntoGraphQLErrors for QueryPlannerError {
             QueryPlannerError::SpecError(err) => err
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SpecError),
-            QueryPlannerError::SchemaValidationErrors(errs) => errs
-                .into_graphql_errors()
-                .map_err(QueryPlannerError::SchemaValidationErrors),
+
             QueryPlannerError::OperationValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::OperationValidationErrors),
-            QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
-                .errors
-                .iter()
-                .map(|p_err| Error::from(p_err.clone()))
-                .collect()),
-            QueryPlannerError::Introspection(introspection_error) => Ok(vec![Error::builder()
-                .message(
-                    introspection_error
-                        .message
-                        .unwrap_or_else(|| "introspection error".to_string()),
-                )
-                .extension_code("INTROSPECTION_ERROR")
-                .build()]),
+
             QueryPlannerError::LimitExceeded(OperationLimits {
                 depth,
                 height,
@@ -471,56 +428,12 @@ impl IntoGraphQLErrors for QueryPlannerError {
 impl QueryPlannerError {
     pub(crate) fn usage_reporting(&self) -> Option<UsageReporting> {
         match self {
-            QueryPlannerError::PlanningErrors(pe) => Some(pe.usage_reporting.clone()),
             QueryPlannerError::SpecError(e) => Some(UsageReporting {
                 stats_report_key: e.get_error_key().to_string(),
                 referenced_fields_by_type: HashMap::new(),
             }),
             _ => None,
         }
-    }
-}
-
-#[derive(Clone, Debug, Error, Serialize, Deserialize)]
-/// Container for planner setup errors
-pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
-
-impl IntoGraphQLErrors for PlannerErrors {
-    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
-        let errors = self.0.iter().map(|e| Error::from(e.clone())).collect();
-
-        Ok(errors)
-    }
-}
-
-impl std::fmt::Display for PlannerErrors {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "schema validation errors: {}",
-            self.0
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<String>>()
-                .join(", ")
-        ))
-    }
-}
-
-impl From<Vec<PlannerError>> for QueryPlannerError {
-    fn from(errors: Vec<PlannerError>) -> Self {
-        QueryPlannerError::SchemaValidationErrors(PlannerErrors(Arc::new(errors)))
-    }
-}
-
-impl From<router_bridge::planner::PlanErrors> for QueryPlannerError {
-    fn from(errors: router_bridge::planner::PlanErrors) -> Self {
-        QueryPlannerError::PlanningErrors(errors.into())
-    }
-}
-
-impl From<PlanErrors> for QueryPlannerError {
-    fn from(errors: PlanErrors) -> Self {
-        QueryPlannerError::PlanningErrors(errors)
     }
 }
 
@@ -552,12 +465,6 @@ impl From<ValidationErrors> for QueryPlannerError {
         QueryPlannerError::OperationValidationErrors(ValidationErrors { errors: err.errors })
     }
 }
-
-impl From<router_bridge::error::Error> for QueryPlannerError {
-    fn from(error: router_bridge::error::Error) -> Self {
-        QueryPlannerError::RouterBridgeError(error)
-    }
-}
 impl From<OperationLimits<bool>> for QueryPlannerError {
     fn from(error: OperationLimits<bool>) -> Self {
         QueryPlannerError::LimitExceeded(error)
@@ -568,51 +475,6 @@ impl From<QueryPlannerError> for Response {
     fn from(err: QueryPlannerError) -> Self {
         FetchError::from(err).to_response()
     }
-}
-
-/// The payload if the plan_worker invocation failed
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PlanErrors {
-    /// The errors the plan_worker invocation failed with
-    pub(crate) errors: Arc<Vec<router_bridge::planner::PlanError>>,
-    /// Usage reporting related data such as the
-    /// operation signature and referenced fields
-    pub(crate) usage_reporting: UsageReporting,
-}
-
-impl From<router_bridge::planner::PlanErrors> for PlanErrors {
-    fn from(
-        router_bridge::planner::PlanErrors {
-            errors,
-            usage_reporting,
-        }: router_bridge::planner::PlanErrors,
-    ) -> Self {
-        PlanErrors {
-            errors,
-            usage_reporting,
-        }
-    }
-}
-
-impl std::fmt::Display for PlanErrors {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "query validation errors: {}",
-            format_bridge_errors(&self.errors)
-        ))
-    }
-}
-
-pub(crate) fn format_bridge_errors(errors: &[router_bridge::planner::PlanError]) -> String {
-    errors
-        .iter()
-        .map(|e| {
-            e.message
-                .clone()
-                .unwrap_or_else(|| "UNKNWON ERROR".to_string())
-        })
-        .collect::<Vec<String>>()
-        .join(", ")
 }
 
 /// Error in the schema.
@@ -796,39 +658,5 @@ mod tests {
             .build();
 
         assert_eq!(expected_gql_error, error.to_graphql_error(None));
-    }
-
-    #[test]
-    fn test_into_graphql_error_introspection_with_message_handled_correctly() {
-        let expected_message = "no can introspect".to_string();
-        let ie = IntrospectionError {
-            message: Some(expected_message.clone()),
-        };
-        let error = QueryPlannerError::Introspection(ie);
-        let mut graphql_errors = error.into_graphql_errors().expect("vec of graphql errors");
-        assert_eq!(graphql_errors.len(), 1);
-        let first_error = graphql_errors.pop().expect("has to be one error");
-        assert_eq!(first_error.message, expected_message);
-        assert_eq!(first_error.extensions.len(), 1);
-        assert_eq!(
-            first_error.extensions.get("code").expect("has code"),
-            "INTROSPECTION_ERROR"
-        );
-    }
-
-    #[test]
-    fn test_into_graphql_error_introspection_without_message_handled_correctly() {
-        let expected_message = "introspection error".to_string();
-        let ie = IntrospectionError { message: None };
-        let error = QueryPlannerError::Introspection(ie);
-        let mut graphql_errors = error.into_graphql_errors().expect("vec of graphql errors");
-        assert_eq!(graphql_errors.len(), 1);
-        let first_error = graphql_errors.pop().expect("has to be one error");
-        assert_eq!(first_error.message, expected_message);
-        assert_eq!(first_error.extensions.len(), 1);
-        assert_eq!(
-            first_error.extensions.get("code").expect("has code"),
-            "INTROSPECTION_ERROR"
-        );
     }
 }

@@ -14,15 +14,8 @@ use heck::ToShoutySnakeCase;
 pub use request::Request;
 pub use response::IncrementalResponse;
 pub use response::Response;
-pub use router_bridge::planner::Location;
-use router_bridge::planner::PlanError;
-use router_bridge::planner::PlanErrorExtensions;
-use router_bridge::planner::PlannerError;
-use router_bridge::planner::WorkerError;
-use router_bridge::planner::WorkerGraphQLError;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -43,6 +36,16 @@ pub use crate::json_ext::PathElement as JsonPathElement;
 /// We represent this in Rust as a stream,
 /// even if that stream happens to only contain one item.
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+/// The error location
+pub struct Location {
+    /// The line number
+    pub line: u32,
+    /// The column number
+    pub column: u32,
+}
 
 /// A [GraphQL error](https://spec.graphql.org/October2021/#sec-Errors)
 /// as may be found in the `errors` field of a GraphQL [`Response`].
@@ -211,73 +214,6 @@ where
     }
 }
 
-impl ErrorExtension for PlanError {}
-
-impl From<PlanError> for Error {
-    fn from(err: PlanError) -> Self {
-        let extension_code = err.extension_code();
-        let extensions = err
-            .extensions
-            .map(convert_extensions_to_map)
-            .unwrap_or_else(move || {
-                let mut object = Object::new();
-                object.insert("code", extension_code.into());
-                object
-            });
-        Self {
-            message: err.message.unwrap_or_else(|| String::from("plan error")),
-            extensions,
-            ..Default::default()
-        }
-    }
-}
-
-impl ErrorExtension for PlannerError {
-    fn extension_code(&self) -> String {
-        match self {
-            PlannerError::WorkerGraphQLError(worker_graphql_error) => worker_graphql_error
-                .extensions
-                .as_ref()
-                .map(|ext| ext.code.clone())
-                .unwrap_or_else(|| worker_graphql_error.extension_code()),
-            PlannerError::WorkerError(worker_error) => worker_error
-                .extensions
-                .as_ref()
-                .map(|ext| ext.code.clone())
-                .unwrap_or_else(|| worker_error.extension_code()),
-        }
-    }
-}
-
-impl From<PlannerError> for Error {
-    fn from(err: PlannerError) -> Self {
-        match err {
-            PlannerError::WorkerGraphQLError(err) => err.into(),
-            PlannerError::WorkerError(err) => err.into(),
-        }
-    }
-}
-
-impl ErrorExtension for WorkerError {}
-
-impl From<WorkerError> for Error {
-    fn from(err: WorkerError) -> Self {
-        let extension_code = err.extension_code();
-        let mut extensions = err
-            .extensions
-            .map(convert_extensions_to_map)
-            .unwrap_or_default();
-        extensions.insert("code", extension_code.into());
-
-        Self {
-            message: err.message.unwrap_or_else(|| String::from("worker error")),
-            locations: err.locations.into_iter().map(Location::from).collect(),
-            extensions,
-            ..Default::default()
-        }
-    }
-}
-
 impl From<CompilerExecutionError> for Error {
     fn from(error: CompilerExecutionError) -> Self {
         let CompilerExecutionError {
@@ -314,38 +250,4 @@ impl From<CompilerExecutionError> for Error {
             extensions,
         }
     }
-}
-
-impl ErrorExtension for WorkerGraphQLError {}
-
-impl From<WorkerGraphQLError> for Error {
-    fn from(err: WorkerGraphQLError) -> Self {
-        let extension_code = err.extension_code();
-        let mut extensions = err
-            .extensions
-            .map(convert_extensions_to_map)
-            .unwrap_or_default();
-        extensions.insert("code", extension_code.into());
-        Self {
-            message: err.message,
-            locations: err.locations.into_iter().map(Location::from).collect(),
-            extensions,
-            ..Default::default()
-        }
-    }
-}
-
-fn convert_extensions_to_map(ext: PlanErrorExtensions) -> Object {
-    let mut extensions = Object::new();
-    extensions.insert("code", ext.code.into());
-    if let Some(exception) = ext.exception {
-        extensions.insert(
-            "exception",
-            json!({
-                "stacktrace": serde_json_bytes::Value::from(exception.stacktrace)
-            }),
-        );
-    }
-
-    extensions
 }

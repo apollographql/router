@@ -118,7 +118,6 @@ or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::en
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_defer) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_introspection) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_query_fragments) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_reuse_query_fragments) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_type_conditional_fetching) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::test::connection_failure_blocks_startup) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_response::test_invalid_error_locations_contains_negative_one_location) )

@@ -11,11 +11,11 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
-use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::compute_job;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
