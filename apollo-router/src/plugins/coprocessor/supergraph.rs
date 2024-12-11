@@ -10,7 +10,6 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
-use super::externalize_header_map;
 use super::*;
 use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
@@ -243,12 +242,9 @@ where
     let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
+    let duration = start.elapsed();
     drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::SupergraphRequest,
-    );
+    record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -397,12 +393,9 @@ where
     let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
+    let duration = start.elapsed();
     drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::SupergraphResponse,
-    );
+    record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
