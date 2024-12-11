@@ -1233,27 +1233,76 @@ mod path_comparison_tests {
 
     use super::*;
 
+    macro_rules! matches_deserialized_path {
+        ($json:expr, $expected:expr) => {
+            let path: Path = serde_json::from_value($json).unwrap();
+            assert_eq!(path, $expected);
+        };
+    }
+
+    #[test]
+    fn test_type_condition_deserialization() {
+        matches_deserialized_path!(
+            json!(["k"]),
+            Path(vec![PathElement::Key("k".to_string(), None)])
+        );
+        matches_deserialized_path!(
+            json!(["k|[A]"]),
+            Path(vec![PathElement::Key(
+                "k".to_string(),
+                Some(vec!["A".to_string()])
+            )])
+        );
+        matches_deserialized_path!(
+            json!(["k|[A,B]"]),
+            Path(vec![PathElement::Key(
+                "k".to_string(),
+                Some(vec!["A".to_string(), "B".to_string()])
+            )])
+        );
+        matches_deserialized_path!(
+            json!(["k|[]"]),
+            Path(vec![PathElement::Key("k".to_string(), Some(vec![]))])
+        );
+    }
+
+    macro_rules! assert_path_match {
+        ($a:expr, $b:expr) => {
+            let legacy_path: Path = serde_json::from_value($a).unwrap();
+            let native_path: Path = serde_json::from_value($b).unwrap();
+            assert!(same_path(&legacy_path, &native_path));
+        };
+    }
+
+    macro_rules! assert_path_mismatch {
+        ($a:expr, $b:expr) => {
+            let legacy_path: Path = serde_json::from_value($a).unwrap();
+            let native_path: Path = serde_json::from_value($b).unwrap();
+            assert!(!same_path(&legacy_path, &native_path));
+        };
+    }
+
+    #[test]
+    fn test_same_path_basic() {
+        // Basic symmetry tests.
+        assert_path_match!(json!([]), json!([]));
+        assert_path_match!(json!(["a"]), json!(["a"]));
+        assert_path_match!(json!(["a", "b"]), json!(["a", "b"]));
+
+        // Basic mismatch tests.
+        assert_path_mismatch!(json!([]), json!(["a"]));
+        assert_path_mismatch!(json!(["a"]), json!(["b"]));
+        assert_path_mismatch!(json!(["a", "b"]), json!(["a", "b", "c"]));
+    }
+
     #[test]
     fn test_same_path_ignore_empty_root_key() {
-        let path_json_legacy = json!(["", "k|[A]", "v"]);
-        let path_json_native = json!(["k|[A]", "v"]);
-
-        let legacy_path: Path = serde_json::from_value(path_json_legacy).unwrap();
-        let native_path: Path = serde_json::from_value(path_json_native).unwrap();
-
-        assert!(same_path(&legacy_path, &native_path));
+        assert_path_match!(json!(["", "k|[A]", "v"]), json!(["k|[A]", "v"]));
     }
 
     #[test]
     fn test_same_path_distinguishes_empty_conditions_from_no_conditions() {
         // Create paths that use no type conditions and empty type conditions
-        let path_json_legacy = json!(["k|[]", "v"]);
-        let path_json_native = json!(["k", "v"]);
-
-        let legacy_path: Path = serde_json::from_value(path_json_legacy).unwrap();
-        let native_path: Path = serde_json::from_value(path_json_native).unwrap();
-
-        // Tests that both formats are deserialized into different Paths.
-        assert!(!same_path(&legacy_path, &native_path));
+        assert_path_mismatch!(json!(["k|[]", "v"]), json!(["k", "v"]));
     }
 }

@@ -37,6 +37,15 @@ fn extract_matched_conditions(caps: &Captures) -> TypeConditions {
         .unwrap_or_default()
 }
 
+fn split_key_and_type_conditions(s: &str) -> (String, Option<TypeConditions>) {
+    let mut type_conditions = None;
+    let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
+        type_conditions = Some(extract_matched_conditions(caps));
+        ""
+    });
+    (key.to_string(), type_conditions)
+}
+
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
         match $object.remove($key) {
@@ -857,13 +866,8 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     where
         E: serde::de::Error,
     {
-        let mut type_conditions = Default::default();
-        let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions = Some(extract_matched_conditions(caps));
-            ""
-        });
-
-        if path == "@" {
+        let (key, type_conditions) = split_key_and_type_conditions(s);
+        if key == "@" {
             Ok(type_conditions)
         } else {
             Err(serde::de::Error::invalid_value(
@@ -913,12 +917,7 @@ impl<'de> serde::de::Visitor<'de> for KeyVisitor {
     where
         E: serde::de::Error,
     {
-        let mut type_conditions = Default::default();
-        let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions = Some(extract_matched_conditions(caps));
-            ""
-        });
-        Ok((key.to_string(), type_conditions))
+        Ok(split_key_and_type_conditions(s))
     }
 }
 
@@ -973,26 +972,16 @@ where
 }
 
 fn flatten_from_str(s: &str) -> Result<PathElement, String> {
-    let mut type_conditions = Default::default();
-    let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions = Some(extract_matched_conditions(caps));
-        ""
-    });
-
-    if path != "@" {
+    let (key, type_conditions) = split_key_and_type_conditions(s);
+    if key != "@" {
         return Err("invalid flatten".to_string());
     }
     Ok(PathElement::Flatten(type_conditions))
 }
 
 fn key_from_str(s: &str) -> Result<PathElement, String> {
-    let mut type_conditions = Default::default();
-    let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions = Some(extract_matched_conditions(caps));
-        ""
-    });
-
-    Ok(PathElement::Key(key.to_string(), type_conditions))
+    let (key, type_conditions) = split_key_and_type_conditions(s);
+    Ok(PathElement::Key(key, type_conditions))
 }
 
 /// A path into the result document.
