@@ -63,6 +63,8 @@ pub struct Connector {
 
     pub request_variables: HashSet<Namespace>,
     pub response_variables: HashSet<Namespace>,
+
+    pub is_success: SuccessHandler,
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -79,6 +81,18 @@ pub enum EntityResolver {
 
     /// The user defined a connector on a field of a type, so we need an entity resolver for that type
     Implicit,
+}
+
+/// SuccessHandler determines whether we should map the response to the "data"
+/// field of the GraphQL response or to an error in the "errors" list.
+///
+/// The default is essentially `status < 300 && status >= 200`, but users can
+/// define their own expressions to enable custom handling.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum SuccessHandler {
+    #[default]
+    Default,
+    Custom(JSONSelection),
 }
 
 impl Connector {
@@ -160,6 +174,11 @@ impl Connector {
         let request_variables = transport.variables().collect();
         let response_variables = connect.selection.external_variables().collect();
 
+        let is_success = match connect.is_success {
+            Some(selection) => SuccessHandler::Custom(selection),
+            None => SuccessHandler::Default,
+        };
+
         let connector = Connector {
             id: id.clone(),
             transport,
@@ -170,6 +189,7 @@ impl Connector {
             spec,
             request_variables,
             response_variables,
+            is_success,
         };
 
         Ok((id, connector))

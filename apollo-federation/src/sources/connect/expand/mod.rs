@@ -352,10 +352,34 @@ mod helpers {
                     )))
                 }
                 TypeDefinitionPosition::Union(union) => {
-                    return Err(FederationError::internal(format!(
-                        "connect directives not yet supported on union: found on {}",
-                        union.type_name
-                    )))
+                    // TODO proper error handler and/or swapping this out entirely with a better system
+                    let _ = union.pre_insert(&mut schema);
+                    let _ = union.insert(
+                        &mut schema,
+                        union.get(self.original_schema.schema()).unwrap().clone(),
+                    );
+
+                    let member_objects = union
+                        .get(self.original_schema.schema())?
+                        .members
+                        .iter()
+                        .map(|member| ObjectTypeDefinitionPosition {
+                            type_name: member.name.clone(),
+                        });
+
+                    for object in member_objects {
+                        SchemaVisitor::new(
+                            self.original_schema,
+                            &mut schema,
+                            &self.directive_deny_list,
+                        )
+                        .walk((
+                            object,
+                            connector.selection.next_subselection().cloned().ok_or(
+                                FederationError::internal("empty selections are not allowed"),
+                            )?,
+                        ))?;
+                    }
                 }
                 TypeDefinitionPosition::InputObject(input) => {
                     return Err(FederationError::internal(format!(

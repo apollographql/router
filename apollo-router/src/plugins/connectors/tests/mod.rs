@@ -49,6 +49,7 @@ const NO_SOURCES_SCHEMA: &str = include_str!("../testdata/connector-without-sour
 const QUICKSTART_SCHEMA: &str = include_str!("../testdata/quickstart.graphql");
 const INTERFACE_OBJECT_SCHEMA: &str = include_str!("../testdata/interface-object.graphql");
 const VARIABLES_SCHEMA: &str = include_str!("../testdata/variables.graphql");
+const ERROR_UNIONS_SCHEMA: &str = include_str!("../testdata/error-unions.graphql");
 
 #[tokio::test]
 async fn value_from_config() {
@@ -1422,6 +1423,108 @@ async fn test_variables() {
                 .body(serde_json::json!({ "arg": "A", "context": "B", "config": "C", "sibling": "D" }))
                 ,
         ],
+    );
+}
+
+#[tokio::test]
+async fn test_error_unions() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/products"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+          "product_id": "1",
+          "name": "product name"
+        })))
+        .mount(&mock_server)
+        .await;
+    let uri = mock_server.uri();
+
+    let query = r#"mutation CreateProduct($input: CreateProductInput!) {
+          createProduct(input: $input) {
+            __typename
+            ... on CreateProductSuccess {
+              success
+              product { id name }
+            }
+            ... on CreateProductError {
+              success
+              messages
+            }
+          }
+        }"#;
+    let vars = json!({ "input": { "name": "product name" } })
+        .as_object()
+        .unwrap()
+        .clone();
+
+    let response = execute(
+        &ERROR_UNIONS_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
+        &uri,
+        query,
+        vars.clone(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "createProduct": {
+          "__typename": "CreateProductSuccess",
+          "success": true,
+          "product": {
+            "id": "1",
+            "name": "product name"
+          }
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("POST").path("/products")],
+    );
+
+    // --- error case ----------------------------------------------------------
+
+    mock_server.reset().await;
+    Mock::given(method("POST"))
+        .and(path("/products"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+          "messages": ["whoops"]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        &ERROR_UNIONS_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
+        &uri,
+        query,
+        vars,
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "createProduct": {
+          "__typename": "CreateProductError",
+          "success": false,
+          "messages": [
+            "whoops"
+          ]
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("POST").path("/products")],
     );
 }
 

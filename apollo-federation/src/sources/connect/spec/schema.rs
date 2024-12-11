@@ -17,6 +17,7 @@ pub(crate) const CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME: Name = name!("PATCH");
 pub(crate) const CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME: Name = name!("DELETE");
 pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
+pub(crate) const CONNECT_IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
 
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
@@ -90,6 +91,8 @@ pub(crate) struct ConnectDirectiveArguments {
     /// identified domain model.) If true, the connector must be defined on a field
     /// of the Query type.
     pub(crate) entity: bool,
+
+    pub(crate) is_success: Option<JSONSelection>,
 }
 
 /// The HTTP arguments needed for a connect request

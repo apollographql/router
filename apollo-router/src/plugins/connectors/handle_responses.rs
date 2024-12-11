@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::SuccessHandler;
 use http_body::Body as HttpBody;
 use parking_lot::Mutex;
+use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tracing::Span;
@@ -302,7 +304,19 @@ pub(crate) async fn handle_responses<T: HttpBody>(
     for raw in responses {
         let is_success = match &raw {
             RawResponse::Error { .. } => false,
-            RawResponse::Data { parts, .. } => parts.status.is_success(),
+            RawResponse::Data { parts, key, .. } => match &connector.is_success {
+                SuccessHandler::Default => parts.status.is_success(),
+                SuccessHandler::Custom(selection) => {
+                    let vars = key.inputs().merge(
+                        &connector.response_variables,
+                        connector.config.as_ref(),
+                        context,
+                        Some(parts.status.as_u16()),
+                    );
+                    let (result, _) = selection.apply_with_vars(&json!({}), &vars);
+                    result.and_then(|b| b.as_bool()).unwrap_or(false)
+                }
+            },
         };
 
         let mapped = if is_success {
@@ -425,6 +439,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -521,6 +536,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -623,6 +639,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -735,6 +752,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -933,6 +951,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: selection.external_variables().collect(),
+            is_success: Default::default(),
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()

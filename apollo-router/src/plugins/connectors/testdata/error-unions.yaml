@@ -1,0 +1,72 @@
+# WARNING: lots of manual edits to this file until we can support unions
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10")
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: {
+              baseURL: "http://localhost:4001/"
+            }
+          )
+
+        type Query {
+          _tmp: ID @connect(http: { GET: "http://localhost/" }, selection: "$$")
+        }
+
+        type Mutation {
+          createProduct(input: CreateProductInput): CreateProductPayload!
+            @connect(
+              source: "json"
+              http: {
+                POST: "/products"
+                body: """
+                $$args.input { name }
+                """
+              }
+              # isSuccess: "$$(true)"
+              selection: """
+              # __typename: $$status->match(
+              #   [201, "CreateProductSuccess"],
+              #   [@, "CreateProductError"]
+              # )
+              success: $$status->match([201, true], [@, false])
+              product: { id: product_id name }
+              messages
+              """
+            )
+        }
+
+        type CreateProductPayload {
+          success: Boolean!
+          product: Product
+          messages: [String!]
+        }
+
+        # union CreateProductPayload = CreateProductSuccess | CreateProductError
+
+        # type CreateProductSuccess {
+        #   success: Boolean!
+        #   product: Product!
+        # }
+
+        # type CreateProductError {
+        #   success: Boolean!
+        #   messages: [String!]
+        # }
+
+        type Product {
+          id: ID!
+          name: String!
+        }
+
+        input CreateProductInput {
+          name: String!
+        }

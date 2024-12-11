@@ -587,6 +587,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -718,6 +719,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -877,6 +879,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -1106,6 +1109,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1422,6 +1426,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1719,6 +1724,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1938,6 +1944,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
@@ -2216,6 +2223,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
@@ -2491,6 +2499,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector ,&req).unwrap(), @r###"
@@ -2631,6 +2640,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            is_success: Default::default(),
         };
 
         let requests = super::make_requests(req, &connector, &None).unwrap();

@@ -32,6 +32,7 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::FederationSchema;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_IS_SUCCESS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
@@ -237,6 +238,22 @@ pub(super) fn check_or_add(
                     name: CONNECT_ENTITY_ARGUMENT_NAME.clone(),
                     get_type: |_| Ok(Type::Named(name!(Boolean))),
                     default_value: Some(Value::Boolean(false)),
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: CONNECT_IS_SUCCESS_ARGUMENT_NAME.clone(),
+                    get_type: |s| {
+                        let name = s
+                            .metadata()
+                            .ok_or_else(|| internal!("missing metadata"))?
+                            .for_identity(&ConnectSpec::identity())
+                            .ok_or_else(|| internal!("missing connect spec"))?
+                            .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
                 },
                 composition_strategy: None,
             },

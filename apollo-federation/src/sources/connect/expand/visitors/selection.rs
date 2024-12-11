@@ -39,6 +39,10 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
 
         // Get the type of the field so we know how to visit it
         for field_name in field.names() {
+            if field_name == "__typename" {
+                continue;
+            }
+
             let field_name = Name::new(field_name)?;
             let field = definition
                 .field(field_name.clone())

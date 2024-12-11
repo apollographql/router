@@ -12,6 +12,7 @@ use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
+use super::schema::CONNECT_IS_SUCCESS_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
@@ -194,6 +195,7 @@ impl ConnectDirectiveArguments {
         let mut http = None;
         let mut selection = None;
         let mut entity = None;
+        let mut is_success = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -221,6 +223,12 @@ impl ConnectDirectiveArguments {
                 ))?;
 
                 entity = Some(entity_value);
+            } else if arg_name == CONNECT_IS_SUCCESS_ARGUMENT_NAME.as_str() {
+                let selection_value = arg.value.as_str().ok_or(internal!(
+                    "`isSuccess` field in `@connect` directive is not a string"
+                ))?;
+                is_success =
+                    Some(JSONSelection::parse(selection_value).map_err(|e| internal!(e.message))?);
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@connect` directive: {arg_name}"
@@ -234,6 +242,7 @@ impl ConnectDirectiveArguments {
             http,
             selection: selection.ok_or(internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
+            is_success,
         })
     }
 }
