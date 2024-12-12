@@ -7,6 +7,7 @@ use serde::Serialize;
 use tracing::trace;
 
 use super::fetch_dependency_graph::FetchIdGenerator;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::operation::Operation;
 use crate::operation::Selection;
@@ -184,6 +185,29 @@ impl BestQueryPlanInfo {
                 .into(),
             cost: Default::default(),
         }
+    }
+}
+
+pub(crate) fn convert_type_from_subgraph(
+    ty: CompositeTypeDefinitionPosition,
+    subgraph_schema: &ValidFederationSchema,
+    supergraph_schema: &ValidFederationSchema,
+) -> Result<CompositeTypeDefinitionPosition, FederationError> {
+    if subgraph_schema.is_interface_object_type(ty.clone().into())? {
+        let type_in_supergraph_pos: CompositeTypeDefinitionPosition = supergraph_schema
+            .get_type(ty.type_name().clone())?
+            .try_into()?;
+        ensure!(
+            matches!(
+                type_in_supergraph_pos,
+                CompositeTypeDefinitionPosition::Interface(_)
+            ),
+            "Type {} should be an interface in the supergraph",
+            ty.type_name()
+        );
+        Ok(type_in_supergraph_pos)
+    } else {
+        Ok(ty)
     }
 }
 
@@ -1004,6 +1028,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         if is_root_path_tree {
             compute_root_fetch_groups(
                 self.root_kind,
+                &self.parameters.federated_query_graph,
                 dependency_graph,
                 path_tree,
                 type_conditioned_fetching_enabled,
@@ -1024,6 +1049,15 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 self.root_kind,
                 root_type.clone(),
             )?;
+            let subgraph_schema = self
+                .parameters
+                .federated_query_graph
+                .schema_by_source(&query_graph_node.source)?;
+            let supergraph_root_type = convert_type_from_subgraph(
+                root_type,
+                subgraph_schema,
+                &dependency_graph.supergraph_schema,
+            )?;
             compute_nodes_for_tree(
                 dependency_graph,
                 path_tree,
@@ -1031,7 +1065,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 FetchDependencyGraphNodePath::new(
                     dependency_graph.supergraph_schema.clone(),
                     self.parameters.config.type_conditioned_fetching,
-                    root_type,
+                    supergraph_root_type,
                 )?,
                 Default::default(),
                 &Default::default(),
