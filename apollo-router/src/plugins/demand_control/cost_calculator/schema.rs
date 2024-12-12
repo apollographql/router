@@ -13,7 +13,7 @@ use apollo_federation::link::cost_spec_definition::CostSpecDefinition;
 use apollo_federation::link::cost_spec_definition::ListSizeDirective;
 use apollo_federation::schema::ValidFederationSchema;
 
-use super::directives::RequiresDirective;
+use crate::plugins::demand_control::cost_calculator::directives::RequiresDirective;
 use crate::plugins::demand_control::DemandControlError;
 
 pub(in crate::plugins::demand_control) struct InputDefinition {
@@ -96,10 +96,10 @@ impl FieldDefinition {
         };
 
         processed_field_definition.cost_directive =
-            CostSpecDefinition::cost_directive_from_field(&schema, field_definition, field_type)?;
+            CostSpecDefinition::cost_directive_from_field(schema, field_definition, field_type)?;
         processed_field_definition.list_size_directive =
             CostSpecDefinition::list_size_directive_from_field_definition(
-                &schema,
+                schema,
                 field_definition,
             )?;
         processed_field_definition.requires_directive = RequiresDirective::from_field_definition(
@@ -191,7 +191,7 @@ impl DemandControlledSchema {
                     for (field_name, field_definition) in &ty.fields {
                         type_fields.insert(
                             field_name.clone(),
-                            InputDefinition::new(&fed_schema, &field_definition)?,
+                            InputDefinition::new(&fed_schema, field_definition)?,
                         );
                     }
                 }

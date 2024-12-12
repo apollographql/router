@@ -42,41 +42,41 @@ struct ScoringContext<'a> {
     should_estimate_requires: bool,
 }
 
-fn score_input_object(
+fn score_argument(
     argument: &apollo_compiler::ast::Value,
-    definition: &InputDefinition,
+    argument_definition: &InputDefinition,
     schema: &DemandControlledSchema,
     variables: &Object,
 ) -> Result<f64, DemandControlError> {
-    match (argument, definition.ty()) {
+    match (argument, argument_definition.ty()) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
         | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
             format!(
                 "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
-                definition.name(),
-                definition.ty().name()
+                argument_definition.name(),
+                argument_definition.ty().name()
             )
         )),
 
         (ast::Value::Object(inner_args), ExtendedType::InputObject(_)) => {
-            let mut cost = definition.cost_directive().map_or(1.0, |cost| cost.weight());
+            let mut cost = argument_definition.cost_directive().map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
-                let arg_def = schema.input_field_definition(definition.ty().name(), arg_name).ok_or_else(|| {
+                let arg_def = schema.input_field_definition(argument_definition.ty().name(), arg_name).ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
                         "Argument {} was found in query, but its type ({}) was not found in the schema",
                         arg_name,
-                        definition.ty().name()
+                        argument_definition.ty().name()
                     ))
                 })?;
-                cost += score_input_object(arg_val, arg_def, schema, variables)?;
+                cost += score_argument(arg_val, arg_def, schema, variables)?;
             }
             Ok(cost)
         }
         (ast::Value::List(inner_args), _) => {
-            let mut cost = definition.cost_directive().map_or(0.0, |cost| cost.weight());
+            let mut cost = argument_definition.cost_directive().map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_input_object(arg_val, definition, schema, variables)?;
+                cost += score_argument(arg_val, argument_definition, schema, variables)?;
             }
             Ok(cost)
         }
@@ -84,40 +84,40 @@ fn score_input_object(
             // We make a best effort attempt to score the variable, but some of these may not exist in the variables
             // sent on the supergraph request, such as `$representations`.
             if let Some(variable) = variables.get(name.as_str()) {
-                score_variable(variable, definition, schema)
+                score_variable(variable, argument_definition, schema)
             } else {
                 Ok(0.0)
             }
         }
         (ast::Value::Null, _) => Ok(0.0),
-        _ => Ok(definition.cost_directive().map_or(0.0, |cost| cost.weight()))
+        _ => Ok(argument_definition.cost_directive().map_or(0.0, |cost| cost.weight()))
     }
 }
 
 fn score_variable(
     variable: &Value,
-    definition: &InputDefinition,
+    argument_definition: &InputDefinition,
     schema: &DemandControlledSchema,
 ) -> Result<f64, DemandControlError> {
-    match (variable, definition.ty()) {
+    match (variable, argument_definition.ty()) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
         | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
             format!(
                 "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
-                definition.name(),
-                definition.ty().name()
+                argument_definition.name(),
+                argument_definition.ty().name()
             )
         )),
 
         (Value::Object(inner_args), ExtendedType::InputObject(_)) => {
-            let mut cost = definition.cost_directive().map_or(1.0, |cost| cost.weight());
+            let mut cost = argument_definition.cost_directive().map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
-                let arg_def = schema.input_field_definition(definition.ty().name(), arg_name.as_str()).ok_or_else(|| {
+                let arg_def = schema.input_field_definition(argument_definition.ty().name(), arg_name.as_str()).ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
                         "Argument {} was found in query, but its type ({}) was not found in the schema",
-                        definition.name(),
-                        definition.ty().name()
+                        argument_definition.name(),
+                        argument_definition.ty().name()
                     ))
                 })?;
                 cost += score_variable(arg_val, arg_def, schema)?;
@@ -125,14 +125,14 @@ fn score_variable(
             Ok(cost)
         }
         (Value::Array(inner_args), _) => {
-            let mut cost = definition.cost_directive().map_or(0.0, |cost| cost.weight());
+            let mut cost = argument_definition.cost_directive().map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_variable(arg_val, definition, schema)?;
+                cost += score_variable(arg_val, argument_definition, schema)?;
             }
             Ok(cost)
         }
         (Value::Null, _) => Ok(0.0),
-        _ => Ok(definition.cost_directive().map_or(0.0, |cost| cost.weight()))
+        _ => Ok(argument_definition.cost_directive().map_or(0.0, |cost| cost.weight()))
     }
 }
 
@@ -236,7 +236,7 @@ impl StaticCostCalculator {
                         argument.name, field.name
                     ))
                 })?;
-            arguments_cost += score_input_object(
+            arguments_cost += score_argument(
                 &argument.value,
                 argument_definition,
                 ctx.schema,
@@ -551,7 +551,7 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
                 .and_then(|def| def.argument_by_name(&argument.name))
             {
                 if let Ok(score) =
-                    score_input_object(&argument.value, argument_definition, self.schema, variables)
+                    score_argument(&argument.value, argument_definition, self.schema, variables)
                 {
                     self.cost += score;
                 }
