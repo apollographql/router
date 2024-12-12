@@ -1535,7 +1535,10 @@ fn join_graph_enum_type(
 
 fn add_core_feature_inaccessible(supergraph: &mut Schema) {
     // @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
-    let spec = InaccessibleSpecDefinition::new(Version { major: 0, minor: 2 }, None);
+    let spec = InaccessibleSpecDefinition::new(
+        Version { major: 0, minor: 2 },
+        // minimum_federation_version = None
+    );
 
     supergraph
         .schema_definition

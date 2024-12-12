@@ -17,7 +17,6 @@ use crate::schema::FederationSchema;
 
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
-    fn minimum_federation_version(&self) -> Option<&Version>;
 
     fn identity(&self) -> &Identity {
         &self.url().identity

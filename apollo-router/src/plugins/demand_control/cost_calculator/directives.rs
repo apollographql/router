@@ -39,7 +39,7 @@ pub(in crate::plugins::demand_control) struct ListSizeDirective<'schema> {
     pub(in crate::plugins::demand_control) sized_fields: Option<HashSet<&'schema str>>,
 }
 
-impl ListSizeDirective<'_> {
+impl<'schema> ListSizeDirective<'schema> {
     pub(in crate::plugins::demand_control) fn new(
         parsed: &'schema ParsedListSizeDirective,
         field: &Field,

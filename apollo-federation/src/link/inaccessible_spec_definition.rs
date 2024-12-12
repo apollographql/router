@@ -39,17 +39,15 @@ pub(crate) const INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("inaccessible
 
 pub(crate) struct InaccessibleSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
 }
 
 impl InaccessibleSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::inaccessible_identity(),
                 version,
             },
-            minimum_federation_version,
         }
     }
 
@@ -97,10 +95,6 @@ impl SpecDefinition for InaccessibleSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
-    }
 }
 
 lazy_static! {
@@ -108,11 +102,11 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::inaccessible_identity());
         definitions.add(InaccessibleSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            None,
+            // minimum_federation_version = None,
         ));
         definitions.add(InaccessibleSpecDefinition::new(
             Version { major: 0, minor: 2 },
-            Some(Version { major: 2, minor: 0 }),
+            // minimum_federation_version = Some(Version { major: 2, minor: 0 }),
         ));
         definitions
     };

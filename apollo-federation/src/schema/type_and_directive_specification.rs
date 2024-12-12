@@ -810,7 +810,7 @@ mod tests {
         fn link_spec(_version: Version) -> Box<dyn SpecDefinition> {
             Box::new(LinkSpecDefinition::new(
                 Version { major: 1, minor: 0 },
-                None,
+                // minimum_federation_version = None,
                 Identity {
                     domain: String::from("https://specs.apollo.dev/link/v1.0"),
                     name: name!("link"),
@@ -859,7 +859,7 @@ mod tests {
         fn link_spec(_version: Version) -> Box<dyn SpecDefinition> {
             Box::new(LinkSpecDefinition::new(
                 Version { major: 1, minor: 0 },
-                None,
+                // minimum_federation_version = None,
                 Identity {
                     domain: String::from("https://specs.apollo.dev/link/v1.0"),
                     name: name!("link"),

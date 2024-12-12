@@ -543,10 +543,6 @@ impl SpecDefinition for FederationSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        None
-    }
 }
 
 lazy_static! {

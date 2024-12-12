@@ -25,17 +25,15 @@ pub(crate) struct ContextDirectiveArguments<'doc> {
 #[derive(Clone)]
 pub(crate) struct ContextSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
 }
 
 impl ContextSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::context_identity(),
                 version,
             },
-            minimum_federation_version,
         }
     }
 
@@ -61,10 +59,6 @@ impl SpecDefinition for ContextSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
-    }
 }
 
 lazy_static! {
@@ -72,7 +66,7 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::context_identity());
         definitions.add(ContextSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            Some(Version { major: 2, minor: 8 }),
+            // minimum_federation_version = Some(Version { major: 2, minor: 8 }),
         ));
         definitions
     };
