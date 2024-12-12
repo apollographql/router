@@ -82,10 +82,6 @@ parameters:
   protoc_version:
     type: string
     default: "21.8"
-  # note the cmake version is only used for manual installs, not for installs from a package manager like apt or homebrew
-  cmake_version:
-    type: string
-    default: "3.31.1"
   nightly:
     type: boolean
     default: false
@@ -237,37 +233,9 @@ commands:
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
                     mkdir $HOME/.deb
-                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev
                   fi
                   sudo dpkg -i $HOME/.deb/*.deb
-      - when:
-          condition:
-            or:
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Install CMake
-                command: |
-                  mkdir -p "$HOME/.local"
-                  if [[ ! -f "$HOME/.local/bin/cmake" ]]; then
-                    curl -L https://github.com/Kitware/CMake/releases/download/v<< pipeline.parameters.cmake_version >>/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64.zip  --output cmake.zip
-                    # The zip file has a root directory, so we put it somewhere else first before placing the files in .local
-                    unzip cmake.zip -d /tmp > /dev/null
-                    cp /tmp/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64/* -R "$HOME/.local"
-                  fi
-
-                  cmake --version
-      - when:
-          condition:
-            or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Install CMake
-                command: |
-                  brew install cmake
   install_protoc:
     parameters:
       platform:

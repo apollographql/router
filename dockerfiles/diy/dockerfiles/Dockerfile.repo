@@ -8,8 +8,7 @@ WORKDIR /usr/src/router
 # Update our build image and install required packages
 RUN apt-get update
 RUN apt-get -y install \
-    protobuf-compiler \
-    cmake
+    protobuf-compiler
 
 # Add rustfmt since build requires it
 RUN rustup component add rustfmt
