@@ -66,7 +66,8 @@ enum GaugeStore {
     #[default]
     Disabled,
     Pending,
-    Active(Vec<ObservableGauge<u64>>),
+    // This `Vec` is not used explicitly but is to be kept alive until the enum is dropped
+    Active(#[allow(unused)] Vec<ObservableGauge<u64>>),
 }
 
 impl GaugeStore {

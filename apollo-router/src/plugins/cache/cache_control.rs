@@ -258,11 +258,7 @@ impl CacheControl {
 
     fn update_ttl(&self, ttl: u32, now: u64) -> u32 {
         let elapsed = self.elapsed_inner(now);
-        if elapsed >= ttl {
-            0
-        } else {
-            ttl - elapsed
-        }
+        ttl.saturating_sub(elapsed)
     }
 
     pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
@@ -376,11 +372,7 @@ impl CacheControl {
     pub(crate) fn remaining_time(&self, now: u64) -> Option<u32> {
         self.ttl().map(|ttl| {
             let elapsed = self.elapsed_inner(now);
-            if ttl > elapsed {
-                ttl - elapsed
-            } else {
-                0
-            }
+            ttl.saturating_sub(elapsed)
         })
     }
 }

@@ -117,6 +117,7 @@ where
     /// This is the constructor (or builder) to use when constructing a Router
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn router_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -157,6 +158,7 @@ where
     /// This is the constructor (or builder) to use when constructing a Supergraph
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn supergraph_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -197,6 +199,7 @@ where
     /// This is the constructor (or builder) to use when constructing an Execution
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn execution_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -238,6 +241,7 @@ where
     /// This is the constructor (or builder) to use when constructing a Subgraph
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn subgraph_new(
         stage: PipelineStep,
         control: Option<Control>,

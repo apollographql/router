@@ -1656,7 +1656,7 @@ impl SelectionSet {
     /// This tries to be smart about including or excluding the whole selection set.
     /// - If all selections have the same condition, returns that condition.
     /// - If selections in the set have different conditions, the selection set must always be
-    /// included, so the individual selections can be evaluated.
+    ///   included, so the individual selections can be evaluated.
     ///
     /// # Errors
     /// Returns an error if the selection set contains a fragment spread, or if any of the
@@ -1859,9 +1859,9 @@ impl SelectionSet {
     ///
     /// __typename is added to the sub selection set of a given selection in following conditions
     /// * if a given selection is a field, we add a __typename sub selection if its selection set type
-    /// position is an abstract type
+    ///   position is an abstract type
     /// * if a given selection is a fragment, we only add __typename sub selection if fragment specifies
-    /// type condition and that type condition is an abstract type.
+    ///   type condition and that type condition is an abstract type.
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractTypeDefinitionPosition>,

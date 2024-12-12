@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::sync::Once;
+use std::sync::LazyLock;
 
 use async_graphql::Context;
 use async_graphql::Object;
@@ -128,25 +128,21 @@ impl User {
 }
 
 fn users() -> &'static [User] {
-    static mut USERS: Vec<User> = vec![];
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| {
-            USERS = vec![
-                User {
-                    id: "1".to_string(),
-                    name: "Ada Lovelace".to_string(),
-                    username: "@ada".to_string(),
-                },
-                User {
-                    id: "2".to_string(),
-                    name: "Alan Turing".to_string(),
-                    username: "@complete".to_string(),
-                },
-            ];
-        });
-        &USERS
-    }
+    static USERS: LazyLock<Vec<User>> = LazyLock::new(|| {
+        vec![
+            User {
+                id: "1".to_string(),
+                name: "Ada Lovelace".to_string(),
+                username: "@ada".to_string(),
+            },
+            User {
+                id: "2".to_string(),
+                name: "Alan Turing".to_string(),
+                username: "@complete".to_string(),
+            },
+        ]
+    });
+    &USERS
 }
 
 /*
@@ -223,43 +219,39 @@ impl Product {
 }
 
 fn products() -> &'static [Product] {
-    static mut PRODUCTS: Vec<Product> = vec![];
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| {
-            PRODUCTS = vec![
-                Product {
-                    upc: "1".to_string(),
-                    name: Some("Table".to_string()),
-                    price: 899,
-                    weight: 100,
-                    inStock: true,
-                },
-                Product {
-                    upc: "2".to_string(),
-                    name: Some("Couch".to_string()),
-                    price: 1299,
-                    weight: 1000,
-                    inStock: false,
-                },
-                Product {
-                    upc: "3".to_string(),
-                    name: Some("Chair".to_string()),
-                    price: 54,
-                    weight: 50,
-                    inStock: true,
-                },
-                Product {
-                    upc: "4".to_string(),
-                    name: Some("Bed".to_string()),
-                    price: 1000,
-                    weight: 1200,
-                    inStock: false,
-                },
-            ];
-        });
-        &PRODUCTS
-    }
+    static PRODUCTS: LazyLock<Vec<Product>> = LazyLock::new(|| {
+        vec![
+            Product {
+                upc: "1".to_string(),
+                name: Some("Table".to_string()),
+                price: 899,
+                weight: 100,
+                inStock: true,
+            },
+            Product {
+                upc: "2".to_string(),
+                name: Some("Couch".to_string()),
+                price: 1299,
+                weight: 1000,
+                inStock: false,
+            },
+            Product {
+                upc: "3".to_string(),
+                name: Some("Chair".to_string()),
+                price: 54,
+                weight: 50,
+                inStock: true,
+            },
+            Product {
+                upc: "4".to_string(),
+                name: Some("Bed".to_string()),
+                price: 1000,
+                weight: 1200,
+                inStock: false,
+            },
+        ]
+    });
+    &PRODUCTS
 }
 
 /*
@@ -303,37 +295,33 @@ impl Review {
 }
 
 fn reviews() -> &'static [Review] {
-    static mut REVIEWS: Vec<Review> = vec![];
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| {
-            REVIEWS = vec![
-                Review {
-                    id: "1".to_string(),
-                    authorId: "1".to_string(),
-                    productUpc: "1".to_string(),
-                    body: Some("Love it!".to_string()),
-                },
-                Review {
-                    id: "2".to_string(),
-                    authorId: "1".to_string(),
-                    productUpc: "2".to_string(),
-                    body: Some("Too expensive.".to_string()),
-                },
-                Review {
-                    id: "3".to_string(),
-                    authorId: "2".to_string(),
-                    productUpc: "3".to_string(),
-                    body: Some("Could be better.".to_string()),
-                },
-                Review {
-                    id: "4".to_string(),
-                    authorId: "2".to_string(),
-                    productUpc: "1".to_string(),
-                    body: Some("Prefer something else.".to_string()),
-                },
-            ];
-        });
-        &REVIEWS
-    }
+    static REVIEWS: LazyLock<Vec<Review>> = LazyLock::new(|| {
+        vec![
+            Review {
+                id: "1".to_string(),
+                authorId: "1".to_string(),
+                productUpc: "1".to_string(),
+                body: Some("Love it!".to_string()),
+            },
+            Review {
+                id: "2".to_string(),
+                authorId: "1".to_string(),
+                productUpc: "2".to_string(),
+                body: Some("Too expensive.".to_string()),
+            },
+            Review {
+                id: "3".to_string(),
+                authorId: "2".to_string(),
+                productUpc: "3".to_string(),
+                body: Some("Could be better.".to_string()),
+            },
+            Review {
+                id: "4".to_string(),
+                authorId: "2".to_string(),
+                productUpc: "1".to_string(),
+                body: Some("Prefer something else.".to_string()),
+            },
+        ]
+    });
+    &REVIEWS
 }

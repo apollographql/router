@@ -47,7 +47,7 @@ impl Plugin for IncludeSubgraphErrors {
 
         let sub_name_response = name.to_string();
         let sub_name_error = name.to_string();
-        return service
+        service
             .map_response(move |mut response: SubgraphResponse| {
                 let errors = &mut response.response.body_mut().errors;
                 if !errors.is_empty() {
@@ -82,7 +82,7 @@ impl Plugin for IncludeSubgraphErrors {
                     })
                 }
             })
-            .boxed();
+            .boxed()
     }
 }
 
