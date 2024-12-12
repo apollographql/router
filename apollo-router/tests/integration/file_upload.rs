@@ -887,12 +887,12 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
               },
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'.",
+                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': client error (SendRequest)",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads_clone",
-                    "reason": "HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'."
+                    "reason": "HTTP fetch failed from 'uploads_clone': client error (SendRequest)"
                   }
                 }
               ]
