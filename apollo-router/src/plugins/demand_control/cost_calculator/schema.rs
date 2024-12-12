@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashMapExt;
-use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -18,6 +17,7 @@ use crate::plugins::demand_control::DemandControlError;
 
 pub(crate) struct DemandControlledSchema {
     inner: ValidFederationSchema,
+    type_field_argument_cost_directives: HashMap<Name, HashMap<Name, HashMap<Name, CostDirective>>>,
     type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>>,
     type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>>,
     type_field_requires_directives: HashMap<Name, HashMap<Name, RequiresDirective>>,
@@ -26,6 +26,10 @@ pub(crate) struct DemandControlledSchema {
 impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
         let fed_schema = ValidFederationSchema::new((*schema).clone())?;
+        let mut type_field_argument_cost_directives: HashMap<
+            Name,
+            HashMap<Name, HashMap<Name, CostDirective>>,
+        > = HashMap::new();
         let mut type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>> =
             HashMap::new();
         let mut type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>> =
@@ -34,6 +38,9 @@ impl DemandControlledSchema {
             HashMap::new();
 
         for (type_name, type_) in &schema.types {
+            let field_argument_cost_directives = type_field_argument_cost_directives
+                .entry(type_name.clone())
+                .or_default();
             let field_cost_directives = type_field_cost_directives
                 .entry(type_name.clone())
                 .or_default();
@@ -81,6 +88,29 @@ impl DemandControlledSchema {
                             field_requires_directives
                                 .insert(field_name.clone(), requires_directive);
                         }
+
+                        let argument_cost_directives = field_argument_cost_directives
+                            .entry(field_name.clone())
+                            .or_default();
+                        for argument in &field_definition.arguments {
+                            let argument_type = schema.types.get(argument.ty.inner_named_type()).ok_or_else(|| {
+                                DemandControlError::QueryParseFailure(format!(
+                                    "Argument {}({}:) was found in query, but its type is missing from the schema.",
+                                    field_name,
+                                    argument.name,
+                                ))
+                            })?;
+                            if let Some(cost_directive) =
+                                CostSpecDefinition::cost_directive_from_argument(
+                                    &fed_schema,
+                                    argument,
+                                    argument_type,
+                                )?
+                            {
+                                argument_cost_directives
+                                    .insert(argument.name.clone(), cost_directive);
+                            }
+                        }
                     }
                 }
                 ExtendedType::Object(ty) => {
@@ -119,6 +149,51 @@ impl DemandControlledSchema {
                             field_requires_directives
                                 .insert(field_name.clone(), requires_directive);
                         }
+
+                        let argument_cost_directives = field_argument_cost_directives
+                            .entry(field_name.clone())
+                            .or_default();
+                        for argument in &field_definition.arguments {
+                            let argument_type = schema.types.get(argument.ty.inner_named_type()).ok_or_else(|| {
+                                DemandControlError::QueryParseFailure(format!(
+                                    "Argument {}({}:) was found in query, but its type is missing from the schema.",
+                                    field_name,
+                                    argument.name,
+                                ))
+                            })?;
+                            if let Some(cost_directive) =
+                                CostSpecDefinition::cost_directive_from_argument(
+                                    &fed_schema,
+                                    argument,
+                                    argument_type,
+                                )?
+                            {
+                                argument_cost_directives
+                                    .insert(argument.name.clone(), cost_directive);
+                            }
+                        }
+                    }
+                }
+                ExtendedType::InputObject(ty) => {
+                    let field_cost_directives = type_field_cost_directives
+                        .entry(ty.name.clone())
+                        .or_default();
+                    for (field_name, field_definition) in &ty.fields {
+                        let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
+                            DemandControlError::QueryParseFailure(format!(
+                                "Field {} was found in query, but its type is missing from the schema.",
+                                field_name
+                            ))
+                        })?;
+                        if let Some(cost_directive) =
+                            CostSpecDefinition::cost_directive_from_argument(
+                                &fed_schema,
+                                field_definition,
+                                field_type,
+                            )?
+                        {
+                            field_cost_directives.insert(field_name.clone(), cost_directive);
+                        }
                     }
                 }
                 _ => {
@@ -129,6 +204,7 @@ impl DemandControlledSchema {
 
         Ok(Self {
             inner: fed_schema,
+            type_field_argument_cost_directives,
             type_field_cost_directives,
             type_field_list_size_directives,
             type_field_requires_directives,
@@ -165,17 +241,16 @@ impl DemandControlledSchema {
             .get(field_name)
     }
 
-    pub(in crate::plugins::demand_control) fn argument_cost_directive(
+    pub(in crate::plugins::demand_control) fn type_field_argument_cost_directive(
         &self,
-        definition: &InputValueDefinition,
-        ty: &ExtendedType,
-    ) -> Option<CostDirective> {
-        // For now, we ignore FederationError and return None because this should not block the whole scoring
-        // process at runtime. Later, this should be pushed into the constructor and propagate any federation
-        // errors encountered when parsing.
-        CostSpecDefinition::cost_directive_from_argument(&self.inner, definition, ty)
-            .ok()
-            .flatten()
+        type_name: &str,
+        field_name: &str,
+        argument_name: &str,
+    ) -> Option<&CostDirective> {
+        self.type_field_argument_cost_directives
+            .get(type_name)?
+            .get(field_name)?
+            .get(argument_name)
     }
 }
 

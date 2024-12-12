@@ -12,6 +12,7 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use serde_json_bytes::Value;
 
@@ -47,6 +48,8 @@ fn score_argument(
     argument_definition: &Node<InputValueDefinition>,
     schema: &DemandControlledSchema,
     variables: &Object,
+    parent_type: &NamedType,
+    field_name: &Name,
 ) -> Result<f64, DemandControlError> {
     let ty = schema
         .types
@@ -58,7 +61,11 @@ fn score_argument(
                 argument_definition.ty.inner_named_type()
             ))
         })?;
-    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
+    let cost_directive = schema.type_field_argument_cost_directive(
+        &parent_type,
+        field_name,
+        argument_definition.name.as_str(),
+    );
 
     match (argument, ty) {
         (_, ExtendedType::Interface(_))
@@ -81,14 +88,14 @@ fn score_argument(
                         argument_definition.ty.inner_named_type()
                     ))
                 })?;
-                cost += score_argument(arg_val, arg_def, schema, variables,)?;
+                cost += score_input_object(arg_val, arg_def, schema, variables, ty.name())?;
             }
             Ok(cost)
         }
         (ast::Value::List(inner_args), _) => {
             let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_argument(arg_val, argument_definition, schema, variables)?;
+                cost += score_input_object(arg_val, argument_definition, schema, variables, parent_type)?;
             }
             Ok(cost)
         }
@@ -96,7 +103,73 @@ fn score_argument(
             // We make a best effort attempt to score the variable, but some of these may not exist in the variables
             // sent on the supergraph request, such as `$representations`.
             if let Some(variable) = variables.get(name.as_str()) {
-                score_variable(variable, argument_definition, schema)
+                score_variable(variable, argument_definition, schema, parent_type)
+            } else {
+                Ok(0.0)
+            }
+        }
+        (ast::Value::Null, _) => Ok(0.0),
+        _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
+    }
+}
+
+fn score_input_object(
+    argument: &apollo_compiler::ast::Value,
+    argument_definition: &Node<InputValueDefinition>,
+    schema: &DemandControlledSchema,
+    variables: &Object,
+    parent_type: &NamedType,
+) -> Result<f64, DemandControlError> {
+    let ty = schema
+        .types
+        .get(argument_definition.ty.inner_named_type())
+        .ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Argument {} was found in query, but its type ({}) was not found in the schema",
+                argument_definition.name,
+                argument_definition.ty.inner_named_type()
+            ))
+        })?;
+    let cost_directive =
+        schema.type_field_cost_directive(&parent_type, argument_definition.name.as_str());
+
+    match (argument, ty) {
+        (_, ExtendedType::Interface(_))
+        | (_, ExtendedType::Object(_))
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+            format!(
+                "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
+                argument_definition.name,
+                argument_definition.ty.inner_named_type()
+            )
+        )),
+
+        (ast::Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
+            let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
+            for (arg_name, arg_val) in inner_args {
+                let arg_def = inner_arg_defs.fields.get(arg_name).ok_or_else(|| {
+                    DemandControlError::QueryParseFailure(format!(
+                        "Argument {} was found in query, but its type ({}) was not found in the schema",
+                        argument_definition.name,
+                        argument_definition.ty.inner_named_type()
+                    ))
+                })?;
+                cost += score_input_object(arg_val, arg_def, schema, variables, ty.name())?;
+            }
+            Ok(cost)
+        }
+        (ast::Value::List(inner_args), _) => {
+            let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
+            for arg_val in inner_args {
+                cost += score_input_object(arg_val, argument_definition, schema, variables, parent_type)?;
+            }
+            Ok(cost)
+        }
+        (ast::Value::Variable(name), _) => {
+            // We make a best effort attempt to score the variable, but some of these may not exist in the variables
+            // sent on the supergraph request, such as `$representations`.
+            if let Some(variable) = variables.get(name.as_str()) {
+                score_variable(variable, argument_definition, schema, parent_type)
             } else {
                 Ok(0.0)
             }
@@ -110,6 +183,7 @@ fn score_variable(
     variable: &Value,
     argument_definition: &Node<InputValueDefinition>,
     schema: &DemandControlledSchema,
+    parent_type: &NamedType,
 ) -> Result<f64, DemandControlError> {
     let ty = schema
         .types
@@ -121,7 +195,8 @@ fn score_variable(
                 argument_definition.ty.inner_named_type()
             ))
         })?;
-    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
+    let cost_directive =
+        schema.type_field_cost_directive(parent_type, argument_definition.name.as_str());
 
     match (variable, ty) {
         (_, ExtendedType::Interface(_))
@@ -144,14 +219,14 @@ fn score_variable(
                         argument_definition.ty.inner_named_type()
                     ))
                 })?;
-                cost += score_variable(arg_val, arg_def, schema)?;
+                cost += score_variable(arg_val, arg_def, schema, ty.name())?;
             }
             Ok(cost)
         }
         (Value::Array(inner_args), _) => {
             let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_variable(arg_val, argument_definition, schema)?;
+                cost += score_variable(arg_val, argument_definition, schema, parent_type)?;
             }
             Ok(cost)
         }
@@ -266,6 +341,8 @@ impl StaticCostCalculator {
                 argument_definition,
                 ctx.schema,
                 ctx.variables,
+                parent_type,
+                &field.name,
             )?;
         }
 
@@ -578,9 +655,14 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
                 .as_ref()
                 .map(|def| def.argument_by_name(&argument.name))
             {
-                if let Ok(score) =
-                    score_argument(&argument.value, argument_definition, self.schema, variables)
-                {
+                if let Ok(score) = score_argument(
+                    &argument.value,
+                    argument_definition,
+                    self.schema,
+                    variables,
+                    parent_ty,
+                    &field.name,
+                ) {
                     self.cost += score;
                 }
             } else {
