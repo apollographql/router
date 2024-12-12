@@ -15,169 +15,84 @@ use apollo_federation::schema::ValidFederationSchema;
 use super::directives::RequiresDirective;
 use crate::plugins::demand_control::DemandControlError;
 
+pub(in crate::plugins::demand_control) struct InputDefinition {
+    name: Name,
+    ty: ExtendedType,
+    cost_directive: Option<CostDirective>,
+}
+
+impl InputDefinition {
+    pub(in crate::plugins::demand_control) fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub(in crate::plugins::demand_control) fn ty(&self) -> &ExtendedType {
+        &self.ty
+    }
+
+    pub(in crate::plugins::demand_control) fn cost_directive(&self) -> Option<&CostDirective> {
+        self.cost_directive.as_ref()
+    }
+}
+
+pub(in crate::plugins::demand_control) struct FieldDefinition {
+    ty: ExtendedType,
+    cost_directive: Option<CostDirective>,
+    list_size_directive: Option<ListSizeDirective>,
+    requires_directive: Option<RequiresDirective>,
+    arguments: HashMap<Name, InputDefinition>,
+}
+
+impl FieldDefinition {
+    pub(in crate::plugins::demand_control) fn ty(&self) -> &ExtendedType {
+        &self.ty
+    }
+
+    pub(in crate::plugins::demand_control) fn cost_directive(&self) -> Option<&CostDirective> {
+        self.cost_directive.as_ref()
+    }
+
+    pub(in crate::plugins::demand_control) fn list_size_directive(
+        &self,
+    ) -> Option<&ListSizeDirective> {
+        self.list_size_directive.as_ref()
+    }
+
+    pub(in crate::plugins::demand_control) fn requires_directive(
+        &self,
+    ) -> Option<&RequiresDirective> {
+        self.requires_directive.as_ref()
+    }
+
+    pub(in crate::plugins::demand_control) fn argument_by_name(
+        &self,
+        argument_name: &str,
+    ) -> Option<&InputDefinition> {
+        self.arguments.get(argument_name)
+    }
+}
+
 pub(crate) struct DemandControlledSchema {
     inner: ValidFederationSchema,
-    type_field_argument_cost_directives: HashMap<Name, HashMap<Name, HashMap<Name, CostDirective>>>,
-    type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>>,
-    type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>>,
-    type_field_requires_directives: HashMap<Name, HashMap<Name, RequiresDirective>>,
+    input_field_definitions: HashMap<Name, HashMap<Name, InputDefinition>>,
+    output_field_definitions: HashMap<Name, HashMap<Name, FieldDefinition>>,
 }
 
 impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
         let fed_schema = ValidFederationSchema::new((*schema).clone())?;
-        let mut type_field_argument_cost_directives: HashMap<
-            Name,
-            HashMap<Name, HashMap<Name, CostDirective>>,
-        > = HashMap::new();
-        let mut type_field_cost_directives: HashMap<Name, HashMap<Name, CostDirective>> =
+        let mut input_field_definitions: HashMap<Name, HashMap<Name, InputDefinition>> =
             HashMap::new();
-        let mut type_field_list_size_directives: HashMap<Name, HashMap<Name, ListSizeDirective>> =
-            HashMap::new();
-        let mut type_field_requires_directives: HashMap<Name, HashMap<Name, RequiresDirective>> =
+        let mut output_field_definitions: HashMap<Name, HashMap<Name, FieldDefinition>> =
             HashMap::new();
 
         for (type_name, type_) in &schema.types {
-            let field_argument_cost_directives = type_field_argument_cost_directives
-                .entry(type_name.clone())
-                .or_default();
-            let field_cost_directives = type_field_cost_directives
-                .entry(type_name.clone())
-                .or_default();
-            let field_list_size_directives = type_field_list_size_directives
-                .entry(type_name.clone())
-                .or_default();
-            let field_requires_directives = type_field_requires_directives
-                .entry(type_name.clone())
-                .or_default();
-
             match type_ {
                 ExtendedType::Interface(ty) => {
-                    for field_name in ty.fields.keys() {
-                        let field_definition = schema.type_field(type_name, field_name)?;
-                        let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
-                            DemandControlError::QueryParseFailure(format!(
-                                "Field {} was found in query, but its type is missing from the schema.",
-                                field_name
-                            ))
-                        })?;
-
-                        if let Some(cost_directive) = CostSpecDefinition::cost_directive_from_field(
-                            &fed_schema,
-                            field_definition,
-                            field_type,
-                        )? {
-                            field_cost_directives.insert(field_name.clone(), cost_directive);
-                        }
-
-                        if let Some(list_size_directive) =
-                            CostSpecDefinition::list_size_directive_from_field_definition(
-                                &fed_schema,
-                                field_definition,
-                            )?
-                        {
-                            field_list_size_directives
-                                .insert(field_name.clone(), list_size_directive);
-                        }
-
-                        if let Some(requires_directive) = RequiresDirective::from_field_definition(
-                            field_definition,
-                            type_name,
-                            &schema,
-                        )? {
-                            field_requires_directives
-                                .insert(field_name.clone(), requires_directive);
-                        }
-
-                        let argument_cost_directives = field_argument_cost_directives
-                            .entry(field_name.clone())
-                            .or_default();
-                        for argument in &field_definition.arguments {
-                            let argument_type = schema.types.get(argument.ty.inner_named_type()).ok_or_else(|| {
-                                DemandControlError::QueryParseFailure(format!(
-                                    "Argument {}({}:) was found in query, but its type is missing from the schema.",
-                                    field_name,
-                                    argument.name,
-                                ))
-                            })?;
-                            if let Some(cost_directive) =
-                                CostSpecDefinition::cost_directive_from_argument(
-                                    &fed_schema,
-                                    argument,
-                                    argument_type,
-                                )?
-                            {
-                                argument_cost_directives
-                                    .insert(argument.name.clone(), cost_directive);
-                            }
-                        }
-                    }
-                }
-                ExtendedType::Object(ty) => {
-                    for field_name in ty.fields.keys() {
-                        let field_definition = schema.type_field(type_name, field_name)?;
-                        let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
-                            DemandControlError::QueryParseFailure(format!(
-                                "Field {} was found in query, but its type is missing from the schema.",
-                                field_name
-                            ))
-                        })?;
-
-                        if let Some(cost_directive) = CostSpecDefinition::cost_directive_from_field(
-                            &fed_schema,
-                            field_definition,
-                            field_type,
-                        )? {
-                            field_cost_directives.insert(field_name.clone(), cost_directive);
-                        }
-
-                        if let Some(list_size_directive) =
-                            CostSpecDefinition::list_size_directive_from_field_definition(
-                                &fed_schema,
-                                field_definition,
-                            )?
-                        {
-                            field_list_size_directives
-                                .insert(field_name.clone(), list_size_directive);
-                        }
-
-                        if let Some(requires_directive) = RequiresDirective::from_field_definition(
-                            field_definition,
-                            type_name,
-                            &schema,
-                        )? {
-                            field_requires_directives
-                                .insert(field_name.clone(), requires_directive);
-                        }
-
-                        let argument_cost_directives = field_argument_cost_directives
-                            .entry(field_name.clone())
-                            .or_default();
-                        for argument in &field_definition.arguments {
-                            let argument_type = schema.types.get(argument.ty.inner_named_type()).ok_or_else(|| {
-                                DemandControlError::QueryParseFailure(format!(
-                                    "Argument {}({}:) was found in query, but its type is missing from the schema.",
-                                    field_name,
-                                    argument.name,
-                                ))
-                            })?;
-                            if let Some(cost_directive) =
-                                CostSpecDefinition::cost_directive_from_argument(
-                                    &fed_schema,
-                                    argument,
-                                    argument_type,
-                                )?
-                            {
-                                argument_cost_directives
-                                    .insert(argument.name.clone(), cost_directive);
-                            }
-                        }
-                    }
-                }
-                ExtendedType::InputObject(ty) => {
-                    let field_cost_directives = type_field_cost_directives
-                        .entry(ty.name.clone())
+                    let type_fields = output_field_definitions
+                        .entry(type_name.clone())
                         .or_default();
+
                     for (field_name, field_definition) in &ty.fields {
                         let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
                             DemandControlError::QueryParseFailure(format!(
@@ -185,15 +100,149 @@ impl DemandControlledSchema {
                                 field_name
                             ))
                         })?;
-                        if let Some(cost_directive) =
+                        let processed_field_definition = type_fields
+                            .entry(field_name.clone())
+                            .or_insert_with(|| FieldDefinition {
+                                ty: field_type.clone(),
+                                cost_directive: None,
+                                list_size_directive: None,
+                                requires_directive: None,
+                                arguments: HashMap::new(),
+                            });
+
+                        processed_field_definition.cost_directive =
+                            CostSpecDefinition::cost_directive_from_field(
+                                &fed_schema,
+                                field_definition,
+                                field_type,
+                            )?;
+                        processed_field_definition.list_size_directive =
+                            CostSpecDefinition::list_size_directive_from_field_definition(
+                                &fed_schema,
+                                field_definition,
+                            )?;
+                        processed_field_definition.requires_directive =
+                            RequiresDirective::from_field_definition(
+                                field_definition,
+                                type_name,
+                                &schema,
+                            )?;
+
+                        for argument in &field_definition.arguments {
+                            let argument_type = schema.types.get(argument.ty.inner_named_type()).ok_or_else(|| {
+                                DemandControlError::QueryParseFailure(format!(
+                                    "Argument {}({}:) was found in query, but its type is missing from the schema.",
+                                    field_name,
+                                    argument.name,
+                                ))
+                            })?;
+                            let processed_argument = processed_field_definition
+                                .arguments
+                                .entry(argument.name.clone())
+                                .or_insert_with(|| InputDefinition {
+                                    name: argument.name.clone(),
+                                    ty: argument_type.clone(),
+                                    cost_directive: None,
+                                });
+                            processed_argument.cost_directive =
+                                CostSpecDefinition::cost_directive_from_argument(
+                                    &fed_schema,
+                                    argument,
+                                    argument_type,
+                                )?;
+                        }
+                    }
+                }
+                ExtendedType::Object(ty) => {
+                    let type_fields = output_field_definitions
+                        .entry(type_name.clone())
+                        .or_default();
+
+                    for (field_name, field_definition) in &ty.fields {
+                        let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
+                            DemandControlError::QueryParseFailure(format!(
+                                "Field {} was found in query, but its type is missing from the schema.",
+                                field_name
+                            ))
+                        })?;
+                        let processed_field_definition = type_fields
+                            .entry(field_name.clone())
+                            .or_insert_with(|| FieldDefinition {
+                                ty: field_type.clone(),
+                                cost_directive: None,
+                                list_size_directive: None,
+                                requires_directive: None,
+                                arguments: HashMap::new(),
+                            });
+
+                        processed_field_definition.cost_directive =
+                            CostSpecDefinition::cost_directive_from_field(
+                                &fed_schema,
+                                field_definition,
+                                field_type,
+                            )?;
+                        processed_field_definition.list_size_directive =
+                            CostSpecDefinition::list_size_directive_from_field_definition(
+                                &fed_schema,
+                                field_definition,
+                            )?;
+                        processed_field_definition.requires_directive =
+                            RequiresDirective::from_field_definition(
+                                field_definition,
+                                type_name,
+                                &schema,
+                            )?;
+
+                        for argument in &field_definition.arguments {
+                            let argument_type = schema.types.get(argument.ty.inner_named_type()).ok_or_else(|| {
+                                DemandControlError::QueryParseFailure(format!(
+                                    "Argument {}({}:) was found in query, but its type is missing from the schema.",
+                                    field_name,
+                                    argument.name,
+                                ))
+                            })?;
+                            let processed_argument = processed_field_definition
+                                .arguments
+                                .entry(argument.name.clone())
+                                .or_insert_with(|| InputDefinition {
+                                    name: argument.name.clone(),
+                                    ty: argument_type.clone(),
+                                    cost_directive: None,
+                                });
+                            processed_argument.cost_directive =
+                                CostSpecDefinition::cost_directive_from_argument(
+                                    &fed_schema,
+                                    argument,
+                                    argument_type,
+                                )?;
+                        }
+                    }
+                }
+                ExtendedType::InputObject(ty) => {
+                    let type_fields = input_field_definitions
+                        .entry(type_name.clone())
+                        .or_default();
+
+                    for (field_name, field_definition) in &ty.fields {
+                        let field_type = schema.types.get(field_definition.ty.inner_named_type()).ok_or_else(|| {
+                            DemandControlError::QueryParseFailure(format!(
+                                "Field {} was found in query, but its type is missing from the schema.",
+                                field_name
+                            ))
+                        })?;
+                        let processed_inputs = type_fields
+                            .entry(field_name.clone())
+                            .or_insert_with(|| InputDefinition {
+                                name: field_name.clone(),
+                                ty: field_type.clone(),
+                                cost_directive: None,
+                            });
+                        processed_inputs.cost_directive =
                             CostSpecDefinition::cost_directive_from_argument(
                                 &fed_schema,
                                 field_definition,
                                 field_type,
-                            )?
-                        {
-                            field_cost_directives.insert(field_name.clone(), cost_directive);
-                        }
+                            )?;
                     }
                 }
                 _ => {
@@ -204,53 +253,27 @@ impl DemandControlledSchema {
 
         Ok(Self {
             inner: fed_schema,
-            type_field_argument_cost_directives,
-            type_field_cost_directives,
-            type_field_list_size_directives,
-            type_field_requires_directives,
+            input_field_definitions,
+            output_field_definitions,
         })
     }
 
-    pub(in crate::plugins::demand_control) fn type_field_cost_directive(
+    pub(in crate::plugins::demand_control) fn input_field_definition(
         &self,
         type_name: &str,
         field_name: &str,
-    ) -> Option<&CostDirective> {
-        self.type_field_cost_directives
-            .get(type_name)?
-            .get(field_name)
+    ) -> Option<&InputDefinition> {
+        self.input_field_definitions.get(type_name)?.get(field_name)
     }
 
-    pub(in crate::plugins::demand_control) fn type_field_list_size_directive(
+    pub(in crate::plugins::demand_control) fn output_field_definition(
         &self,
         type_name: &str,
         field_name: &str,
-    ) -> Option<&ListSizeDirective> {
-        self.type_field_list_size_directives
+    ) -> Option<&FieldDefinition> {
+        self.output_field_definitions
             .get(type_name)?
             .get(field_name)
-    }
-
-    pub(in crate::plugins::demand_control) fn type_field_requires_directive(
-        &self,
-        type_name: &str,
-        field_name: &str,
-    ) -> Option<&RequiresDirective> {
-        self.type_field_requires_directives
-            .get(type_name)?
-            .get(field_name)
-    }
-
-    pub(in crate::plugins::demand_control) fn type_field_argument_cost_directive(
-        &self,
-        type_name: &str,
-        field_name: &str,
-        argument_name: &str,
-    ) -> Option<&CostDirective> {
-        self.type_field_argument_cost_directives
-            .get(type_name)?
-            .get(field_name)?
-            .get(argument_name)
     }
 }
 
