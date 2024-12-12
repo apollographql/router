@@ -47,7 +47,6 @@ fn score_input_object(
     definition: &InputDefinition,
     schema: &DemandControlledSchema,
     variables: &Object,
-    parent_type: &NamedType,
 ) -> Result<f64, DemandControlError> {
     match (argument, definition.ty()) {
         (_, ExtendedType::Interface(_))
@@ -70,14 +69,14 @@ fn score_input_object(
                         definition.ty().name()
                     ))
                 })?;
-                cost += score_input_object(arg_val, arg_def, schema, variables, definition.ty().name())?;
+                cost += score_input_object(arg_val, arg_def, schema, variables)?;
             }
             Ok(cost)
         }
         (ast::Value::List(inner_args), _) => {
             let mut cost = definition.cost_directive().map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_input_object(arg_val, definition, schema, variables, parent_type)?;
+                cost += score_input_object(arg_val, definition, schema, variables)?;
             }
             Ok(cost)
         }
@@ -85,7 +84,7 @@ fn score_input_object(
             // We make a best effort attempt to score the variable, but some of these may not exist in the variables
             // sent on the supergraph request, such as `$representations`.
             if let Some(variable) = variables.get(name.as_str()) {
-                score_variable(variable, definition, schema, parent_type)
+                score_variable(variable, definition, schema)
             } else {
                 Ok(0.0)
             }
@@ -99,7 +98,6 @@ fn score_variable(
     variable: &Value,
     definition: &InputDefinition,
     schema: &DemandControlledSchema,
-    parent_type: &NamedType,
 ) -> Result<f64, DemandControlError> {
     match (variable, definition.ty()) {
         (_, ExtendedType::Interface(_))
@@ -122,14 +120,14 @@ fn score_variable(
                         definition.ty().name()
                     ))
                 })?;
-                cost += score_variable(arg_val, arg_def, schema, definition.ty().name())?;
+                cost += score_variable(arg_val, arg_def, schema)?;
             }
             Ok(cost)
         }
         (Value::Array(inner_args), _) => {
             let mut cost = definition.cost_directive().map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_variable(arg_val, definition, schema, parent_type)?;
+                cost += score_variable(arg_val, definition, schema)?;
             }
             Ok(cost)
         }
@@ -243,7 +241,6 @@ impl StaticCostCalculator {
                 argument_definition,
                 ctx.schema,
                 ctx.variables,
-                parent_type,
             )?;
         }
 
@@ -553,13 +550,9 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
                 .as_ref()
                 .and_then(|def| def.argument_by_name(&argument.name))
             {
-                if let Ok(score) = score_input_object(
-                    &argument.value,
-                    argument_definition,
-                    self.schema,
-                    variables,
-                    parent_ty,
-                ) {
+                if let Ok(score) =
+                    score_input_object(&argument.value, argument_definition, self.schema, variables)
+                {
                     self.cost += score;
                 }
             } else {
