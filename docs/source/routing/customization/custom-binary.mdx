@@ -15,29 +15,24 @@ Learn how to compile a custom binary from Apollo Router Core source, which is re
 
 ## Prerequisites
 
-To compile the router, you need to have the following installed:
-
 <!-- renovate-automation: rustc version -->
-* [Rust 1.83.0 or later](https://www.rust-lang.org/tools/install)
-* [Node.js 16.9.1 or later](https://nodejs.org/en/download/)
-* [CMake 3.5.1 or later](https://cmake.org/download/)
+To compile the router, you need to have [Rust 1.83.0 or later](https://www.rust-lang.org/tools/install) installed.
 
-After you install the above, also install the `cargo-xtask` and `cargo-scaffold` crates:
+After you install the above, also install the `cargo-scaffold` tool:
 
 ```sh
-cargo install cargo-xtask
 cargo install cargo-scaffold
 ```
 
 ## 1. Create a new project
 
-1. Use the `cargo-scaffold` command to create a project for your custom router:
+1. Use the `cargo scaffold` command to create a project for your custom router:
 
    ```bash
-   cargo-scaffold scaffold https://github.com/apollographql/router.git -r apollo-router-scaffold/templates/base -t main
+   cargo scaffold https://github.com/apollographql/router.git -r apollo-router-scaffold/templates/base -t main
    ```
 
-2. The `cargo-scaffold` command prompts you for some configuration settings. For the purposes of this tutorial, set your project's name to `starstuff`.
+2. The `cargo scaffold` command prompts you for some configuration settings. For the purposes of this tutorial, set your project's name to `starstuff`.
 
 3. After your project is created, change to the `starstuff` directory:
 
