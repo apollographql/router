@@ -82,7 +82,7 @@ macro_rules! ensure {
 
         #[cfg(not(debug_assertions))]
         if !$expr {
-            $crate::internal_error!( $( $arg )+ );
+            $crate::bail!( $( $arg )+ );
         }
     }
 }

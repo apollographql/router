@@ -47,7 +47,6 @@ use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
-use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -84,6 +83,7 @@ use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -1899,7 +1899,7 @@ fn licensed_operation_count(stats_report_key: &str) -> u64 {
 }
 
 fn convert(
-    referenced_fields: router_bridge::planner::ReferencedFieldsForType,
+    referenced_fields: crate::apollo_studio_interop::ReferencedFieldsForType,
 ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType {
     crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,

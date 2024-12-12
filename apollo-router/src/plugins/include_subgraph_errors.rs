@@ -88,7 +88,6 @@ impl Plugin for IncludeSubgraphErrors {
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -211,14 +210,9 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Schema::parse(schema, &configuration).unwrap();
 
-        let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.into(),
-            Arc::clone(&configuration),
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
+        let planner = BridgeQueryPlannerPool::new(schema.into(), Arc::clone(&configuration))
+            .await
+            .unwrap();
         let schema = planner.schema();
         let subgraph_schemas = planner.subgraph_schemas();
 
