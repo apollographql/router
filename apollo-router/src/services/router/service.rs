@@ -43,6 +43,11 @@ use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -303,6 +308,21 @@ impl RouterService {
                     if !response.errors.is_empty() {
                         Self::count_errors(&response.errors);
                     }
+
+                    if let Some(path) = response.path.clone() {
+                        println!("response path: {}", path);
+                    }
+
+                    let operation_id: String = context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default();
+                    let operation_kind = context.get::<_, String>(OPERATION_KIND).unwrap_or_default().unwrap_or_default();
+                    let operation_name = context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default();
+                    let client_name = context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default();
+                    let client_version = context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default();
+                    println!("operation_id: {}", operation_id);
+                    println!("operation_kind: {}", operation_kind);
+                    println!("operation_name: {}", operation_name);
+                    println!("client_name: {}", client_name);
+                    println!("client_version: {}", client_version);
 
                     parts
                         .headers
@@ -778,6 +798,31 @@ impl RouterService {
             let code = error.extensions.get("code").and_then(|c| c.as_str());
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
+
+            let temp_code = code.unwrap_or_default().to_string();
+            let temp_service = error.extensions.get("service").and_then(|s| s.as_str())
+                .unwrap_or_default().to_string();
+            let temp_path = match &error.path {
+                None => "".into(),
+                Some(path) => path.to_string()
+            };
+            println!("temp_code: {temp_code}");
+            println!("temp_path: {temp_path}");
+            println!("temp_service: {temp_service}");
+
+            u64_counter!(
+                "temp.nick.apollo.router.operations.error",
+                "Temp metric",
+                1,
+                "apollo.operation.id" = "todo",
+                "apollo.operation.name" = "todo",
+                "apollo.client.name" = "todo",
+                "apollo.client.version" = "todo",
+                "graphql.error.extensions.code" = temp_code,
+                "graphql.error.path" = temp_path,
+                "apollo.router.error.source" = temp_service,
+                "apollo.router.error.coordinate" = "todo"
+            );
         }
 
         for (code, count) in map {
