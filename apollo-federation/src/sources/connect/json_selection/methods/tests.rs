@@ -363,6 +363,67 @@ fn test_match_methods() {
 }
 
 #[test]
+fn test_map_values_method() {
+    assert_eq!(
+        selection!("$->mapValues(@->add(10))").apply_to(&json!({
+            "a": 1,
+            "b": 2,
+            "c": 3,
+        })),
+        (
+            Some(json!({
+                "a": 11,
+                "b": 12,
+                "c": 13,
+            })),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!("$->mapValues(@->typeof)").apply_to(&json!({
+            "a": 1,
+            "b": "two",
+            "c": false,
+        })),
+        (
+            Some(json!({
+                "a": "number",
+                "b": "string",
+                "c": "boolean",
+            })),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!("$->mapValues(@->typeof)").apply_to(&json!({})),
+        (Some(json!({})), vec![]),
+    );
+
+    assert_eq!(
+        selection!("$->map(@->mapValues(@->typeof))").apply_to(&json!([])),
+        (Some(json!([])), vec![]),
+    );
+
+    assert_eq!(
+        selection!("$->map(@->mapValues(@->typeof))").apply_to(&json!([{
+            "x": 1,
+            "y": "two",
+            "z": false,
+        }])),
+        (
+            Some(json!([{
+                "x": "number",
+                "y": "string",
+                "z": "boolean",
+            }])),
+            vec![],
+        ),
+    );
+}
+
+#[test]
 fn test_arithmetic_methods() {
     assert_eq!(
         selection!("$->add(1)").apply_to(&json!(2)),

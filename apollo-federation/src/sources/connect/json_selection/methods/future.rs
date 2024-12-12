@@ -3,6 +3,7 @@
 // and tests. After careful review, they may one day move to public.rs.
 
 use serde_json::Number;
+use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
@@ -131,6 +132,58 @@ pub(super) fn match_if_method(
             ),
         ),
     )
+}
+
+pub(super) fn map_values_method(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &WithRange<PathList>,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
+        if let JSON::Object(map) = data {
+            let mut new_map = JSONMap::new();
+            let mut errors = Vec::new();
+            for (key, value) in map {
+                let new_key = key.clone();
+                let (new_value_opt, value_errors) =
+                    first_arg.apply_to_path(value, vars, input_path);
+                errors.extend(value_errors);
+                if let Some(new_value) = new_value_opt {
+                    new_map.insert(new_key, new_value);
+                }
+            }
+            tail.apply_to_path(&JSON::Object(new_map), vars, input_path)
+                .prepend_errors(errors)
+        } else {
+            (
+                None,
+                vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} requires an object input, not {}",
+                        method_name.as_ref(),
+                        json_type_name(data),
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            )
+        }
+    } else {
+        (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} requires exactly one argument",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
+    }
 }
 
 pub(super) fn arithmetic_method(
