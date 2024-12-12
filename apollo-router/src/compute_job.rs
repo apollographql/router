@@ -14,13 +14,31 @@ use crate::metrics::meter_provider;
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
 const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
 
-/// Let this thread pool use all available resources if it can.
-/// In the worst case, we’ll have moderate context switching cost
-/// as the kernel’s scheduler distributes time to it or Tokio or other threads.
+/// Leave a fraction of CPU cores free to run Tokio threads even if this thread pool is very busy:
+///
+/// available: 1     pool size: 1
+/// available: 2     pool size: 1
+/// available: 3     pool size: 2
+/// available: 4     pool size: 3
+/// available: 5     pool size: 4
+/// ...
+/// available: 8     pool size: 7
+/// available: 9     pool size: 7
+/// ...
+/// available: 16    pool size: 14
+/// available: 17    pool size: 14
+/// ...
+/// available: 32    pool size: 28
 fn thread_pool_size() -> usize {
-    std::thread::available_parallelism()
+    let available = std::thread::available_parallelism()
         .expect("available_parallelism() failed")
-        .get()
+        .get();
+    thread_poll_size_for_available_parallelism(available)
+}
+
+fn thread_poll_size_for_available_parallelism(available: usize) -> usize {
+    let reserved = available.div_ceil(8);
+    (available - reserved).max(1)
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
@@ -116,5 +134,15 @@ mod tests {
         assert_eq!(two.await.unwrap(), 2);
         // Evidence of fearless parallel sleep:
         assert!(start.elapsed() < Duration::from_millis(1_400));
+    }
+
+    #[test]
+    fn pool_size() {
+        assert_eq!(thread_poll_size_for_available_parallelism(1), 1);
+        assert_eq!(thread_poll_size_for_available_parallelism(2), 1);
+        assert_eq!(thread_poll_size_for_available_parallelism(3), 2);
+        assert_eq!(thread_poll_size_for_available_parallelism(4), 3);
+        assert_eq!(thread_poll_size_for_available_parallelism(31), 27);
+        assert_eq!(thread_poll_size_for_available_parallelism(32), 28);
     }
 }
