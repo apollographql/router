@@ -695,6 +695,7 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                is_success: Default,
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -819,6 +820,7 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                is_success: Default,
             },
         }
         "###);

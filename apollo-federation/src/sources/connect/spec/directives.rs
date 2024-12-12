@@ -385,7 +385,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION"
         );
 
         let fields = schema
@@ -542,6 +542,7 @@ mod tests {
                     },
                 ),
                 entity: false,
+                is_success: None,
             },
             ConnectDirectiveArguments {
                 position: ObjectOrInterfaceFieldDirectivePosition {
@@ -611,6 +612,7 @@ mod tests {
                     },
                 ),
                 entity: false,
+                is_success: None,
             },
         ]
         "###

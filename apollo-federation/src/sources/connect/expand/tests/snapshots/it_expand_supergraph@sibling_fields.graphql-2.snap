@@ -97,6 +97,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         spec: V0_1,
         request_variables: {},
         response_variables: {},
+        is_success: Default,
     },
     "connectors_T_b_0": Connector {
         id: ConnectId {
@@ -198,5 +199,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             $this,
         },
         response_variables: {},
+        is_success: Default,
     },
 }

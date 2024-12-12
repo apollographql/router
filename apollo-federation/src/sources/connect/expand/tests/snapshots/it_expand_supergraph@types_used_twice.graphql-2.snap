@@ -143,5 +143,6 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
         spec: V0_1,
         request_variables: {},
         response_variables: {},
+        is_success: Default,
     },
 }
