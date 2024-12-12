@@ -1687,7 +1687,7 @@ mod tests {
                     handle(request.map(Body::new))
                 });
                 if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-                    .serve_connection(io, svc)
+                    .serve_connection_with_upgrades(io, svc)
                     .await
                 {
                     eprintln!("server error: {}", err);

@@ -172,7 +172,7 @@ async fn spawn_subgraph() -> ShutdownOnDrop {
                     let (stream, peer_addr) = conn.unwrap();
                     let stream = hyper_util::rt::TokioIo::new(Box::pin(stream));
                     let conn = server
-                        .serve_connection(stream, hyper::service::service_fn(subgraph));
+                        .serve_connection_with_upgrades(stream, hyper::service::service_fn(subgraph));
                     let conn = graceful.watch(conn.into_owned());
 
                     tokio::spawn(async move {

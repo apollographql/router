@@ -271,7 +271,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
 
-                                        let connection = http_config.serve_connection(tokio_stream, hyper_service);
+                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         tokio::pin!(connection);
                                         tokio::select! {
                                             // the connection finished first
@@ -317,7 +317,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         if let Some(max_buf_size) = opt_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
-                                        let connection = http_config.serve_connection(tokio_stream, hyper_service);
+                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -375,7 +375,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
                                         let connection = http_config
-                                            .serve_connection(tokio_stream, hyper_service);
+                                            .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);
                                         tokio::select! {

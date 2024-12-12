@@ -72,7 +72,7 @@ async-compression = { version = "0.4.6", features = [
     "deflate",
 ] }
 async-trait.workspace = true
-axum = { version = "0.7.9", features = ["json", "original-uri"] }
+axum = { version = "0.7.9", features = ["http2"] }
 axum-extra = { version = "0.9.6", features = [ "typed-header" ] }
 base64 = "0.22.0"
 bloomfilter = "1.0.13"
@@ -305,11 +305,7 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 tikv-jemallocator = "0.6.0"
 
 [dev-dependencies]
-axum = { version = "0.7.9", features = [
-    "json",
-    "original-uri",
-    "ws",
-] }
+axum = { version = "0.7.9", features = ["http2", "ws"] }
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "9.4.0", features = ["enable-rustls", "mocks", "i-cluster"] }
 futures-test = "0.3.30"

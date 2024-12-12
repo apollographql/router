@@ -92,7 +92,7 @@ async fn tls_server(
                     )
                 });
             if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-                .serve_connection(tokio_stream, hyper_service)
+                .serve_connection_with_upgrades(tokio_stream, hyper_service)
                 .await
             {
                 eprintln!("failed to serve connection: {err:#}");
@@ -116,7 +116,7 @@ where
                 handle(request.map(Body::new))
             });
             if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-                .serve_connection(io, svc)
+                .serve_connection_with_upgrades(io, svc)
                 .await
             {
                 eprintln!("server error: {}", err);
@@ -140,7 +140,7 @@ where
                 handle(request.map(Body::new))
             });
             if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-                .serve_connection(io, svc)
+                .serve_connection_with_upgrades(io, svc)
                 .await
             {
                 eprintln!("server error: {}", err);
