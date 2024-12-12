@@ -61,12 +61,10 @@ impl SubSelection {
 
         // When the operation contains __typename, it might be used to complete
         // an entity reference (e.g. `__typename id`) for a subsequent fetch.
-        // We don't have a way to inject static values into the mapping, so for
-        // now we'll hardcode a special "variable" prefix that returns values
-        // based on the key. ({ "Product": "Product" }).
+        // This encodes the typename selection as `__typename: $->echo("Product")`
         //
-        // TODO: when we support abstract types, we'll want to first check if
-        // the user defined a __typename mapping.
+        // TODO: this must change before we support interfaces and unions
+        // because it will emit the abstract type's name which is invalid.
         if field_map.contains_key("__typename") {
             new_selections.push(NamedSelection::Path(
                 Some(Alias::new("__typename")),

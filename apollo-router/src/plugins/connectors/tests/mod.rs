@@ -235,7 +235,7 @@ async fn test_root_field_plus_entity() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username } }",
+        "query { users { __typename id name username } }",
         Default::default(),
         None,
         |_| {},
@@ -247,11 +247,13 @@ async fn test_root_field_plus_entity() {
       "data": {
         "users": [
           {
+            "__typename": "User",
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
+            "__typename": "User",
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette"
@@ -302,7 +304,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username d } }",
+        "query { users { __typename id name username d } }",
         Default::default(),
         None,
         |_| {},
@@ -314,12 +316,14 @@ async fn test_root_field_plus_entity_plus_requires() {
       "data": {
         "users": [
           {
+            "__typename": "User",
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret",
             "d": "1-770-736-8031 x56442"
           },
           {
+            "__typename": "User",
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette",
