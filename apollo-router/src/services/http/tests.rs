@@ -409,6 +409,9 @@ async fn emulate_h2c_server(listener: TcpListener) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_h2c() {
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_h2c_server(listener));
