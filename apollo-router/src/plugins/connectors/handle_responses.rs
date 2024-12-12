@@ -150,7 +150,7 @@ impl RawResponse {
 
 // --- MAPPED RESPONSE ---------------------------------------------------------
 
-enum MappedResponse {
+pub(crate) enum MappedResponse {
     /// This is equivalent to RawResponse::Error, but it also represents errors
     /// when the request is semantically unsuccessful (e.g. 404, 500).
     Error {
@@ -244,73 +244,63 @@ impl MappedResponse {
 
 // --- handle_responses --------------------------------------------------------
 
-pub(crate) async fn handle_responses<T: HttpBody>(
-    responses: Vec<ConnectorResponse<T>>,
+pub(crate) async fn process_response<T: HttpBody>(
+    response: ConnectorResponse<T>,
     connector: &Connector,
     context: &Context,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<Response, HandleResponseError> {
-    let futures_vec = responses
-        .into_iter()
-        .map(|response| async move {
-            let response_key = response.key;
-            let debug_request = response.debug_request;
+) -> MappedResponse {
+    let response_key = response.key;
+    let debug_request = response.debug_request;
 
-            match response.result {
-                // This occurs when we short-circuit the request when over the limit
-                ConnectorResult::Err(error) => RawResponse::Error {
-                    error: error.to_graphql_error(connector, None),
+    let raw = match response.result {
+        // This occurs when we short-circuit the request when over the limit
+        ConnectorResult::Err(error) => RawResponse::Error {
+            error: error.to_graphql_error(connector, None),
+            key: response_key,
+        },
+        ConnectorResult::HttpResponse(response) => {
+            let (parts, body) = response.into_parts();
+
+            // If this errors, it will write to the debug context because it
+            // has access to the raw bytes, so we can't write to it again
+            // in any RawResponse::Error branches.
+            match deserialize_response(body, &parts, connector, debug_context, &debug_request).await
+            {
+                Ok(data) => RawResponse::Data {
+                    parts,
+                    data,
+                    key: response_key,
+                    debug_request,
+                },
+                Err(error) => RawResponse::Error {
+                    error,
                     key: response_key,
                 },
-                ConnectorResult::HttpResponse(response) => {
-                    let (parts, body) = response.into_parts();
-
-                    // If this errors, it will write to the debug context because it
-                    // has access to the raw bytes, so we can't write to it again
-                    // in any RawResponse::Error branches.
-                    match deserialize_response(
-                        body,
-                        &parts,
-                        connector,
-                        debug_context,
-                        &debug_request,
-                    )
-                    .await
-                    {
-                        Ok(data) => RawResponse::Data {
-                            parts,
-                            data,
-                            key: response_key,
-                            debug_request,
-                        },
-                        Err(error) => RawResponse::Error {
-                            error,
-                            key: response_key,
-                        },
-                    }
-                }
             }
-        })
-        .collect::<Vec<_>>();
+        }
+    };
 
-    let responses = futures::future::join_all(futures_vec).await;
+    let is_success = match &raw {
+        RawResponse::Error { .. } => false,
+        RawResponse::Data { parts, .. } => parts.status.is_success(),
+    };
 
+    if is_success {
+        raw.map_response(connector, context, debug_context)
+    } else {
+        raw.map_error(connector, context, debug_context)
+    }
+}
+
+pub(crate) fn aggregate_responses(
+    responses: Vec<MappedResponse>,
+) -> Result<Response, HandleResponseError> {
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
     let count = responses.len();
 
-    for raw in responses {
-        let is_success = match &raw {
-            RawResponse::Error { .. } => false,
-            RawResponse::Data { parts, .. } => parts.status.is_success(),
-        };
-
-        let mapped = if is_success {
-            raw.map_response(connector, context, debug_context)
-        } else {
-            raw.map_error(connector, context, debug_context)
-        };
-
+    for mapped in responses {
         mapped.add_to_data(&mut data, &mut errors, count)?;
     }
 
@@ -395,6 +385,7 @@ mod tests {
     use insta::assert_debug_snapshot;
     use url::Url;
 
+    use crate::plugins::connectors::handle_responses::process_response;
     use crate::plugins::connectors::http::Response as ConnectorResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router::body::RouterBody;
@@ -436,7 +427,7 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2 = http::Response::builder()
+        let response2: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::RootField {
@@ -445,24 +436,30 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let res = super::handle_responses(
-            vec![
+        let res = super::aggregate_responses(vec![
+            process_response(
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+            process_response(
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
-            ],
-            &connector,
-            &Context::default(),
-            &None,
-        )
-        .await
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+        ])
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -532,7 +529,7 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2 = http::Response::builder()
+        let response2: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::Entity {
@@ -541,24 +538,30 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let res = super::handle_responses(
-            vec![
+        let res = super::aggregate_responses(vec![
+            process_response(
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+            process_response(
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
-            ],
-            &connector,
-            &Context::default(),
-            &None,
-        )
-        .await
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+        ])
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -636,7 +639,7 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2 = http::Response::builder()
+        let response2: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":"value2"}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::EntityField {
@@ -647,24 +650,30 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let res = super::handle_responses(
-            vec![
+        let res = super::aggregate_responses(vec![
+            process_response(
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+            process_response(
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
-            ],
-            &connector,
-            &Context::default(),
-            &None,
-        )
-        .await
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+        ])
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -756,7 +765,7 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2 = http::Response::builder()
+        let response2: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":{"id":"2"}}"#).into())
             .unwrap();
         let response_key2 = ResponseKey::Entity {
@@ -765,7 +774,7 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response3 = http::Response::builder()
+        let response3: http::Response<RouterBody> = http::Response::builder()
             .status(500)
             .body(hyper::Body::from(r#"{"error":"whoops"}"#).into())
             .unwrap();
@@ -775,34 +784,52 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let res = super::handle_responses(
-            vec![
+        let res = super::aggregate_responses(vec![
+            process_response(
                 ConnectorResponse {
                     result: response_plaintext.into(),
                     key: response_key_plaintext,
                     debug_request: None,
                 },
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+            process_response(
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+            process_response(
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+            process_response(
                 ConnectorResponse {
                     result: response3.into(),
                     key: response_key3,
                     debug_request: None,
                 },
-            ],
-            &connector,
-            &Context::default(),
-            &None,
-        )
-        .await
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+        ])
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -945,17 +972,19 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
 
-        let res = super::handle_responses(
-            vec![ConnectorResponse {
-                result: response1.into(),
-                key: response_key1,
-                debug_request: None,
-            }],
-            &connector,
-            &Context::default(),
-            &None,
-        )
-        .await
+        let res = super::aggregate_responses(vec![
+            process_response(
+                ConnectorResponse {
+                    result: response1.into(),
+                    key: response_key1,
+                    debug_request: None,
+                },
+                &connector,
+                &Context::default(),
+                &None,
+            )
+            .await,
+        ])
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
