@@ -18,11 +18,10 @@ use hyper::body::Incoming;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
-#[cfg(unix)]
-use hyperlocal::UnixListenerExt;
 use mime::APPLICATION_JSON;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
+use rustls::server::WebPkiClientVerifier;
 use rustls::RootCertStore;
 use rustls::ServerConfig;
 use serde_json_bytes::ByteString;
@@ -31,7 +30,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 use tokio_rustls::TlsAcceptor;
-use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -51,9 +49,6 @@ use crate::services::supergraph;
 use crate::Configuration;
 use crate::Context;
 use crate::TestHarness;
-
-// XXX Note a lot of this file is commented out as part of the hyper 1.0 update. We will need to
-// enable all of these tests and make them work before we merge this branch.
 
 async fn tls_server(
     listener: TcpListener,
@@ -271,8 +266,7 @@ async fn tls_custom_root() {
         r#"{"data": null}"#
     );
 }
-/* XXX
- * COMMENTED OUT TO MAKE PROGRESS
+
 async fn tls_server_with_client_auth(
     listener: TcpListener,
     certificates: Vec<CertificateDer<'static>>,
@@ -283,35 +277,47 @@ async fn tls_server_with_client_auth(
     let mut client_auth_roots = RootCertStore::empty();
     client_auth_roots.add(client_root).unwrap();
 
-    let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots).boxed();
+    let client_auth = WebPkiClientVerifier::builder(Arc::new(client_auth_roots))
+        .build()
+        .unwrap();
 
-    let acceptor = TlsAcceptor::builder()
-        .with_tls_config(
-            ServerConfig::builder()
-                .with_client_cert_verifier(client_auth)
-                .with_single_cert(certificates, key)
-                .unwrap(),
-        )
-        .with_all_versions_alpn()
-        .with_incoming(AddrIncoming::from_listener(listener).unwrap());
-    let service = make_service_fn(|_| async {
-        Ok::<_, io::Error>(service_fn(|_req| async {
-            Ok::<_, io::Error>(
-                http::Response::builder()
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .status(StatusCode::OK)
-                    .version(Version::HTTP_11)
-                    .body::<Body>(body.into())
-                    .unwrap(),
-            )
-        }))
-    });
-    let server = Server::builder(acceptor).serve(service);
-    server.await.unwrap()
+    let tls_config = Arc::new(
+        ServerConfig::builder()
+            .with_client_cert_verifier(client_auth)
+            .with_single_cert(certificates, key)
+            .unwrap(),
+    );
+    let acceptor = TlsAcceptor::from(tls_config);
+
+    loop {
+        let (stream, _) = listener.accept().await.expect("accepting connections");
+        let acceptor = acceptor.clone();
+
+        tokio::spawn(async move {
+            let acceptor_stream = acceptor.accept(stream).await.expect("accepted stream");
+            let tokio_stream = TokioIo::new(acceptor_stream);
+
+            let hyper_service =
+                hyper::service::service_fn(move |_request: Request<Incoming>| async {
+                    Ok::<_, io::Error>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .version(Version::HTTP_11)
+                            .body::<Body>(body.into())
+                            .unwrap(),
+                    )
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(tokio_stream, hyper_service)
+                .await
+            {
+                eprintln!("failed to serve connection: {err:#}");
+            }
+        });
+    }
 }
-*/
 
-/*
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_client_auth() {
     let server_certificate_pem = include_str!("./testdata/server.crt");
@@ -347,10 +353,10 @@ async fn tls_client_auth() {
         "test".to_string(),
         TlsClient {
             certificate_authorities: Some(ca_pem.into()),
-            client_authentication: Some(TlsClientAuth {
+            client_authentication: Some(Arc::new(TlsClientAuth {
                 certificate_chain: client_certificates,
                 key: client_key,
-            }),
+            })),
         },
     );
     let subgraph_service = HttpClientService::from_config(
@@ -383,7 +389,6 @@ async fn tls_client_auth() {
         r#"{"data": null}"#
     );
 }
-*/
 
 // starts a local server emulating a subgraph returning status code 401
 async fn emulate_h2c_server(listener: TcpListener) {
