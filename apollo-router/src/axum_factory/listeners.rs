@@ -199,6 +199,74 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
+async fn process_error(io_error: std::io::Error) {
+    match io_error.kind() {
+        // this is already handled by moi and tokio
+        //std::io::ErrorKind::WouldBlock => todo!(),
+
+        // should be treated as EAGAIN
+        // https://man7.org/linux/man-pages/man2/accept.2.html
+        // Linux accept() (and accept4()) passes already-pending network
+        // errors on the new socket as an error code from accept().  This
+        // behavior differs from other BSD socket implementations.  For
+        // reliable operation the application should detect the network
+        // errors defined for the protocol after accept() and treat them
+        // like EAGAIN by retrying.  In the case of TCP/IP, these are
+        // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
+        // EOPNOTSUPP, and ENETUNREACH.
+        //
+        // those errors are not supported though: needs the unstable io_error_more feature
+        // std::io::ErrorKind::NetworkDown => todo!(),
+        // std::io::ErrorKind::HostUnreachable => todo!(),
+        // std::io::ErrorKind::NetworkUnreachable => todo!(),
+
+        //ECONNABORTED
+        std::io::ErrorKind::ConnectionAborted|
+        //EINTR
+        std::io::ErrorKind::Interrupted|
+        // EINVAL
+        std::io::ErrorKind::InvalidInput|
+        std::io::ErrorKind::PermissionDenied |
+        std::io::ErrorKind::TimedOut |
+        std::io::ErrorKind::ConnectionReset|
+        std::io::ErrorKind::NotConnected => {
+            // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
+            // we should ignore that and get to the next one
+            return;
+        }
+
+        // ignored errors, these should not happen with accept()
+        std::io::ErrorKind::NotFound |
+        std::io::ErrorKind::AddrInUse |
+        std::io::ErrorKind::AddrNotAvailable |
+        std::io::ErrorKind::BrokenPipe|
+        std::io::ErrorKind::AlreadyExists |
+        std::io::ErrorKind::InvalidData |
+        std::io::ErrorKind::WriteZero |
+        std::io::ErrorKind::Unsupported |
+        std::io::ErrorKind::UnexpectedEof |
+        std::io::ErrorKind::OutOfMemory => {
+            return;
+        }
+
+        // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
+        // We match on _ because max open file errors fall under ErrorKind::Uncategorized
+        _ => {
+            match io_error.raw_os_error() {
+                Some(libc::EMFILE) | Some(libc::ENFILE) => {
+                    tracing::error!(
+                        "reached the max open file limit, cannot accept any new connection"
+                    );
+                    MAX_FILE_HANDLES_WARN.store(true, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                _ => {}
+            }
+            return;
+        }
+    }
+}
+
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     router: axum::Router,
@@ -281,11 +349,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // so we tell the connection to do a graceful shutdown
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
-                                                // XXX Not sure if this does anything anymore
-                                                // NOTE: I think this may be the cause of
-                                                // test_local_root_50_percent_sample failing
-                                                // let c = connection.as_mut();
-                                                // c.graceful_shutdown();
+                                                let c = connection.as_mut();
+                                                c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
@@ -328,11 +393,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // so we tell the connection to do a graceful shutdown
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
-                                                // XXX Not sure if this does anything anymore
-                                                // NOTE: I think this may be the cause of
-                                                // test_local_root_50_percent_sample failing
-                                                // let c = connection.as_mut();
-                                                // c.graceful_shutdown();
+                                                let c = connection.as_mut();
+                                                c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
@@ -386,11 +448,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // so we tell the connection to do a graceful shutdown
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
-                                                // XXX Not sure if this does anything anymore
-                                                // NOTE: I think this may be the cause of
-                                                // test_local_root_50_percent_sample failing
-                                                // let c = connection.as_mut();
-                                                // c.graceful_shutdown();
+                                                let c = connection.as_mut();
+                                                c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
@@ -404,73 +463,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 }
                             });
                         }
-
-                        Err(e) => match e.kind() {
-                            // this is already handled by moi and tokio
-                            //std::io::ErrorKind::WouldBlock => todo!(),
-
-                            // should be treated as EAGAIN
-                            // https://man7.org/linux/man-pages/man2/accept.2.html
-                            // Linux accept() (and accept4()) passes already-pending network
-                            // errors on the new socket as an error code from accept().  This
-                            // behavior differs from other BSD socket implementations.  For
-                            // reliable operation the application should detect the network
-                            // errors defined for the protocol after accept() and treat them
-                            // like EAGAIN by retrying.  In the case of TCP/IP, these are
-                            // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
-                            // EOPNOTSUPP, and ENETUNREACH.
-                            //
-                            // those errors are not supported though: needs the unstable io_error_more feature
-                            // std::io::ErrorKind::NetworkDown => todo!(),
-                            // std::io::ErrorKind::HostUnreachable => todo!(),
-                            // std::io::ErrorKind::NetworkUnreachable => todo!(),
-
-                            //ECONNABORTED
-                            std::io::ErrorKind::ConnectionAborted|
-                            //EINTR
-                            std::io::ErrorKind::Interrupted|
-                            // EINVAL
-                            std::io::ErrorKind::InvalidInput|
-                            std::io::ErrorKind::PermissionDenied |
-                            std::io::ErrorKind::TimedOut |
-                            std::io::ErrorKind::ConnectionReset|
-                            std::io::ErrorKind::NotConnected => {
-                                // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
-                                // we should ignore that and get to the next one
-                                continue;
-                            }
-
-                            // ignored errors, these should not happen with accept()
-                            std::io::ErrorKind::NotFound |
-                            std::io::ErrorKind::AddrInUse |
-                            std::io::ErrorKind::AddrNotAvailable |
-                            std::io::ErrorKind::BrokenPipe|
-                            std::io::ErrorKind::AlreadyExists |
-                            std::io::ErrorKind::InvalidData |
-                            std::io::ErrorKind::WriteZero |
-                            std::io::ErrorKind::Unsupported |
-                            std::io::ErrorKind::UnexpectedEof |
-                            std::io::ErrorKind::OutOfMemory => {
-                                continue;
-                            }
-
-                            // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
-                            // We match on _ because max open file errors fall under ErrorKind::Uncategorized
-                            _ => {
-                                match e.raw_os_error() {
-                                    Some(libc::EMFILE) | Some(libc::ENFILE) => {
-                                        tracing::error!(
-                                            "reached the max open file limit, cannot accept any new connection"
-                                        );
-                                        MAX_FILE_HANDLES_WARN.store(true, Ordering::SeqCst);
-                                        tokio::time::sleep(Duration::from_millis(1)).await;
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-
-                        }
+                        Err(e) => process_error(e).await
                     }
                 }
             }
