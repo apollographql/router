@@ -589,7 +589,9 @@ Starting with v1.49.0, the router can run a Rust-native query planner. This nati
 
 <Tip>
 
-Starting with v1.59.0, the native query planner is GA and is run by default in the router with an ability to switch back to the now deprecated legacy implementation.
+Starting with v1.59.0, the native query planner is GA and is run by default. 
+
+If you need to run the deprecated JavaScript-based implementation, configure your router's query planner mode to `legacy`:
 
 ```yaml title="router.yaml"
 experimental_query_planner_mode: legacy

@@ -1,23 +1,22 @@
-### Native query planner is now generally available 
+### General availability of native query planner
 
-The router now uses a native, rust-based, query planner by default.
+The router's native, Rust-based, query planner is now [generally available](https://www.apollographql.com/docs/graphos/reference/feature-launch-stages#general-availability) and enabled by default.
 
-In our testing across a variety of graphs, we observed the following
-improvements with the native query planner:
+The native query planner achieves better performance for a variety of graphs. In our tests, we observe:
 
-* 10x [median] improvement in query planning time (observed via `apollo.router.query_planning.plan.duration`)
-* 2.9x improvement in router’s CPU utilisation
+* 10x median improvement in query planning time (observed via `apollo.router.query_planning.plan.duration`)
+* 2.9x improvement in router’s CPU utilization
 * 2.2x improvement in router’s memory usage 
 
-It is expected that the generated plans and subgraph operations in the native
-query planner will have slight differences when compared to the legacy query
-planner. These differences have been ascertained as semantically insignificant
-by comparing ~2.5 million all known unique user operations in GraphOS as well as
+> Note: you can expect generated plans and subgraph operations in the native
+query planner to have slight differences when compared to the legacy, JavaScript-based query planner. We've ascertained these differences to be semantically insignificant, based on comparing ~2.5 million known unique user operations in GraphOS as well as
 comparing ~630 million operations across actual router deployments in shadow
-mode over the period of last 4 months.
+mode for a four month duration.
+
+The native query planner supports Federation v2 supergraphs. If you are using Federation v1 today, see our [migration guide](https://www.apollographql.com/docs/graphos/reference/migration/to-federation-version-2) on how to update your composition build step and subgraph changes are typically not needed.
 
 The legacy, JavaScript, query planner is deprecated in this release, but you can still switch
-back to it with:
+back to it if you are still using Federation v1 supergraph:
 
 ```
 experimental_query_planner_mode: legacy

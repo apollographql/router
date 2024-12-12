@@ -13,7 +13,7 @@ Learn about the Rust-native query planner in GraphOS Router. The planner is GA a
 
 In v1.49.0 the router introduced a [query planner](/graphos/routing/about-router#query-planning) implemented natively in Rust. This native query planner improves the overall performance and resource utilization of query planning. It exists alongside the legacy JavaScript implementation that uses the V8 JavaScript engine, and it will eventually replace the legacy implementation.
 
-As of v1.59.0, the native query planner is the default planner in the router. As part of this, Deno, and by extension v8, are no longer intialised at router startup. The legacy implementation is deprecated, but it is still possible to opt-in to legacy query planner.
+As of v1.59.0, the native query planner is the default planner in the router. As part of this, Deno, and by extension v8, are no longer initialized at router startup. The legacy implementation is deprecated, but it is still possible to configure the router to run with the legacy query planner.
 
 ## Configuring query planning
 
