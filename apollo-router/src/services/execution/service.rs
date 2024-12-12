@@ -344,6 +344,23 @@ impl ExecutionService {
                     ,
             );
 
+            for error in response.errors.iter_mut() {
+                if let Some(path) = &mut error.path {
+                    // Check if path can be matched to the supergraph query and truncate if not
+                    let matching_len = query.matching_error_path_length(path);
+                    if path.len() != matching_len {
+                        path.0.drain(matching_len..);
+
+                        if path.is_empty() {
+                            error.path = None;
+                        }
+
+                        // if path was invalid that means we can't trust locations either
+                        error.locations.clear();
+                    }
+                }
+            }
+
             nullified_paths.extend(paths);
 
             let mut referenced_enums = context
