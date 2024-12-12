@@ -415,23 +415,18 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            // minimum_federation_version = None,
         ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 2 },
-            // minimum_federation_version = None,
         ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 3 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 0 }),
         ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 4 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 7 }),
         ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 5 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 8 }),
         ));
         definitions
     };

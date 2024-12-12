@@ -66,7 +66,6 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::context_identity());
         definitions.add(ContextSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 8 }),
         ));
         definitions
     };

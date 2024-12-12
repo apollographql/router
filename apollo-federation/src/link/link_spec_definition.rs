@@ -29,12 +29,10 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::core_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            // minimum_federation_version = None,
             Identity::core_identity(),
         ));
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 2 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 0 }),
             Identity::core_identity(),
         ));
         definitions
@@ -43,7 +41,6 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::link_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 0 }),
             Identity::link_identity(),
         ));
         definitions

@@ -102,11 +102,9 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::inaccessible_identity());
         definitions.add(InaccessibleSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            // minimum_federation_version = None,
         ));
         definitions.add(InaccessibleSpecDefinition::new(
             Version { major: 0, minor: 2 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 0 }),
         ));
         definitions
     };

@@ -247,7 +247,6 @@ lazy_static! {
         let mut definitions = SpecDefinitions::new(Identity::cost_identity());
         definitions.add(CostSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            // minimum_federation_version = Some(Version { major: 2, minor: 9 }),
         ));
         definitions
     };
