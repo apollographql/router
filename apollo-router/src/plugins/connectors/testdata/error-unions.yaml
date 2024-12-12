@@ -31,7 +31,7 @@ subgraphs:
                 $$args.input { name }
                 """
               }
-              # isSuccess: "$$(true)"
+              # isSuccess: "$status->match([201, true], [400, true], [@, false])"
               selection: """
               # __typename: $$status->match(
               #   [201, "CreateProductSuccess"],
@@ -59,7 +59,7 @@ subgraphs:
 
         # type CreateProductError {
         #   success: Boolean!
-        #   messages: [String!]
+        #   messages: [String!]!
         # }
 
         type Product {

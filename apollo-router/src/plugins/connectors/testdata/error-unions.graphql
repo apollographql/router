@@ -128,7 +128,7 @@ type Mutation @join__type(graph: CONNECTORS) {
       args: {
         source: "json"
         http: { POST: "/products", body: "$args.input { name }" }
-        isSuccess: "$(true)"
+        isSuccess: "$status->match([201, true], [400, true], [@, false])"
         selection: """
         __typename: $status->match(
           [201, "CreateProductSuccess"],

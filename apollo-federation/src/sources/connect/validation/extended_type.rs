@@ -39,11 +39,7 @@ pub(super) fn validate_extended_type(
         ExtendedType::Object(object) => {
             validate_object_fields(object, schema, all_source_names, seen_fields)
         }
-        ExtendedType::Union(union_type) => vec![validate_abstract_type(
-            SourceSpan::recompose(union_type.location(), union_type.name.location()),
-            &schema.sources,
-            "union",
-        )],
+        ExtendedType::Union(_) => vec![],
         ExtendedType::Interface(interface) => vec![validate_abstract_type(
             SourceSpan::recompose(interface.location(), interface.name.location()),
             &schema.sources,
