@@ -320,6 +320,8 @@ async fn tls_server_with_client_auth(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_client_auth() {
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let server_certificate_pem = include_str!("./testdata/server.crt");
     let ca_pem = include_str!("./testdata/CA/ca.crt");
     let server_key_pem = include_str!("./testdata/server.key");
