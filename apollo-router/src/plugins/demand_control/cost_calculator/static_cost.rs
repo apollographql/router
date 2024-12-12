@@ -531,6 +531,65 @@ impl<'schema> ResponseCostCalculator<'schema> {
     pub(crate) fn new(schema: &'schema DemandControlledSchema) -> Self {
         Self { cost: 0.0, schema }
     }
+
+    fn score_response_field(
+        &mut self,
+        request: &ExecutableDocument,
+        variables: &Object,
+        parent_ty: &NamedType,
+        field: &Field,
+        value: &Value,
+        include_argument_score: bool,
+    ) {
+        if let Some(definition) = self.schema.output_field_definition(parent_ty, &field.name) {
+            match value {
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                    self.cost += definition
+                        .cost_directive()
+                        .map_or(0.0, |cost| cost.weight());
+                }
+                Value::Array(items) => {
+                    for item in items {
+                        self.visit_list_item(request, variables, parent_ty, field, item);
+                    }
+                }
+                Value::Object(children) => {
+                    self.cost += definition
+                        .cost_directive()
+                        .map_or(1.0, |cost| cost.weight());
+                    self.visit_selections(request, variables, &field.selection_set, children);
+                }
+            }
+
+            if include_argument_score {
+                for argument in &field.arguments {
+                    if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
+                        if let Ok(score) = score_argument(
+                            &argument.value,
+                            argument_definition,
+                            self.schema,
+                            variables,
+                        ) {
+                            self.cost += score;
+                        }
+                    } else {
+                        tracing::warn!(
+                            "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
+                            parent_ty,
+                            field.name,
+                            argument.name,
+                        )
+                    }
+                }
+            }
+        } else {
+            tracing::warn!(
+                "Failed to get schema definition for field {}.{}. The resulting response cost will be a partial result.",
+                parent_ty,
+                field.name,
+            )
+        }
+    }
 }
 
 impl ResponseVisitor for ResponseCostCalculator<'_> {
@@ -542,27 +601,7 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
         field: &Field,
         value: &Value,
     ) {
-        self.visit_list_item(request, variables, parent_ty, field, value);
-
-        let definition = self.schema.output_field_definition(parent_ty, &field.name);
-        for argument in &field.arguments {
-            if let Some(argument_definition) = definition
-                .as_ref()
-                .and_then(|def| def.argument_by_name(&argument.name))
-            {
-                if let Ok(score) =
-                    score_argument(&argument.value, argument_definition, self.schema, variables)
-                {
-                    self.cost += score;
-                }
-            } else {
-                tracing::warn!(
-                    "Failed to get schema definition for argument {} of field {}. The resulting actual cost will be a partial result.",
-                    argument.name,
-                    field.name
-                )
-            }
-        }
+        self.score_response_field(request, variables, parent_ty, field, value, true);
     }
 
     fn visit_list_item(
@@ -573,25 +612,7 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        let cost_directive = self
-            .schema
-            .output_field_definition(parent_ty, &field.name)
-            .and_then(|meta| meta.cost_directive());
-
-        match value {
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                self.cost += cost_directive.map_or(0.0, |cost| cost.weight());
-            }
-            Value::Array(items) => {
-                for item in items {
-                    self.visit_list_item(request, variables, parent_ty, field, item);
-                }
-            }
-            Value::Object(children) => {
-                self.cost += cost_directive.map_or(1.0, |cost| cost.weight());
-                self.visit_selections(request, variables, &field.selection_set, children);
-            }
-        }
+        self.score_response_field(request, variables, parent_ty, field, value, false);
     }
 }
 
