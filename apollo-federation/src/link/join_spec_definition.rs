@@ -413,21 +413,11 @@ impl SpecDefinition for JoinSpecDefinition {
 lazy_static! {
     pub(crate) static ref JOIN_VERSIONS: SpecDefinitions<JoinSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 2 },
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 3 },
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 4 },
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 5 },
-        ));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 1 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 2 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 3 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 4 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 5 }));
         definitions
     };
 }

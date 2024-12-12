@@ -64,9 +64,7 @@ impl SpecDefinition for ContextSpecDefinition {
 lazy_static! {
     pub(crate) static ref CONTEXT_VERSIONS: SpecDefinitions<ContextSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::context_identity());
-        definitions.add(ContextSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-        ));
+        definitions.add(ContextSpecDefinition::new(Version { major: 0, minor: 1 }));
         definitions
     };
 }

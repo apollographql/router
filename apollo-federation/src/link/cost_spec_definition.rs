@@ -245,9 +245,7 @@ impl SpecDefinition for CostSpecDefinition {
 lazy_static! {
     pub(crate) static ref COST_VERSIONS: SpecDefinitions<CostSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::cost_identity());
-        definitions.add(CostSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-        ));
+        definitions.add(CostSpecDefinition::new(Version { major: 0, minor: 1 }));
         definitions
     };
 }

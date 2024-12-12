@@ -100,12 +100,14 @@ impl SpecDefinition for InaccessibleSpecDefinition {
 lazy_static! {
     pub(crate) static ref INACCESSIBLE_VERSIONS: SpecDefinitions<InaccessibleSpecDefinition> = {
         let mut definitions = SpecDefinitions::new(Identity::inaccessible_identity());
-        definitions.add(InaccessibleSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-        ));
-        definitions.add(InaccessibleSpecDefinition::new(
-            Version { major: 0, minor: 2 },
-        ));
+        definitions.add(InaccessibleSpecDefinition::new(Version {
+            major: 0,
+            minor: 1,
+        }));
+        definitions.add(InaccessibleSpecDefinition::new(Version {
+            major: 0,
+            minor: 2,
+        }));
         definitions
     };
 }
