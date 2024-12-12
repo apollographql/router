@@ -39,13 +39,6 @@ pub(crate) struct Field {
     pub(crate) selections: Option<Vec<Selection>>,
 }
 
-impl Field {
-    // Mirroring `apollo_compiler::Field::response_name`
-    pub(crate) fn response_name(&self) -> &Name {
-        self.alias.as_ref().unwrap_or(&self.name)
-    }
-}
-
 /// An inline fragment.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
