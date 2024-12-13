@@ -1149,7 +1149,7 @@ impl<'a> SubgraphRequestResendCountKey<'a> {
     }
 }
 
-impl<'a> From<SubgraphRequestResendCountKey<'a>> for String {
+impl From<SubgraphRequestResendCountKey<'_>> for String {
     fn from(value: SubgraphRequestResendCountKey) -> Self {
         format!(
             "apollo::telemetry::http_request_resend_count_{}",

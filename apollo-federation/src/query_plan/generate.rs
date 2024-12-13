@@ -251,7 +251,7 @@ mod tests {
         target_len: usize,
     }
 
-    impl<'a> PlanBuilder<Plan, Element> for TestPlanBuilder<'a> {
+    impl PlanBuilder<Plan, Element> for TestPlanBuilder<'_> {
         fn add_to_plan(
             &mut self,
             partial_plan: &Plan,

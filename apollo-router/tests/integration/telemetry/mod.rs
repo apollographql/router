@@ -22,7 +22,7 @@ struct TraceSpec {
     unmeasured_spans: HashSet<&'static str>,
     priority_sampled: Option<&'static str>,
     subgraph_sampled: Option<bool>,
-    span_attributes: HashMap<&'static str, &'static str>
+    span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>
 }
 
 

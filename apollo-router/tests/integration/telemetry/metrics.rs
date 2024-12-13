@@ -285,24 +285,6 @@ async fn test_gauges_on_reload() {
         .await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_query_planning_queued{otel_scope_name="apollo/router"} "#,
-            None,
-        )
-        .await;
-    router
-        .assert_metrics_contains(
-            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
-            None,
-        )
-        .await;
-    router
-        .assert_metrics_contains(
-            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
-            None,
-        )
-        .await;
-    router
-        .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )

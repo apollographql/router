@@ -1,3 +1,4 @@
+//! ```text
 //! curl -v \
 //!     --header 'content-type: application/json' \
 //!     --header 'x-client-id: unknown' \
@@ -22,6 +23,7 @@
 //! <
 //! * Connection #0 to host 127.0.0.1 left intact
 //! {"data":{"me":{"name":"Ada Lovelace"}}}
+//! ```
 //! The only thing you need to add to your main.rs file is
 
 // adding the module to your main.rs file
