@@ -135,11 +135,7 @@ async fn handle(
 
     {
         // check if we have an existing snapshot for this request
-        let key = snapshot_key(
-            &Some(method.to_string()),
-            &Some(path.clone()),
-            &request_json_body,
-        );
+        let key = snapshot_key(Some(method.as_str()), Some(path.as_str()), &request_json_body);
         let mut snapshots = state.snapshots.lock().unwrap();
         let existing = snapshots.get(&key);
         if let Some(snapshot) = existing {
@@ -451,23 +447,23 @@ impl TryFrom<Snapshot> for http::Response<RouterBody> {
 
 impl Snapshot {
     fn key(&self) -> String {
-        snapshot_key(&self.request.method, &self.request.path, &self.request.body)
+        snapshot_key(
+            self.request.method.as_ref().map(String::as_str),
+            self.request.path.as_ref().map(String::as_str),
+            &self.request.body,
+        )
     }
 }
 
-fn snapshot_key(method: &Option<String>, path: &Option<String>, body: &Value) -> String {
+fn snapshot_key(method: Option<&str>, path: Option<&str>, body: &Value) -> String {
     if body.is_null() {
-        format!(
-            "{}-{}",
-            method.as_ref().unwrap_or(&String::from("GET")),
-            path.as_ref().unwrap_or(&String::from("/"))
-        )
+        format!("{}-{}", method.unwrap_or("GET"), path.unwrap_or("/"))
     } else {
         let body = base64::engine::general_purpose::STANDARD.encode(body.to_string());
         format!(
             "{}-{}-{}",
-            method.as_ref().unwrap_or(&String::from("GET")),
-            path.as_ref().unwrap_or(&String::from("/")),
+            method.unwrap_or("GET"),
+            path.unwrap_or("/"),
             body,
         )
     }
