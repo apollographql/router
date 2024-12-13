@@ -45,16 +45,18 @@ where
     ))
 }
 
-/// Utility function for converting UnsyncBoxBody to Full bodies.
-///
-/// Currently only used in snapshot testing
+/// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
 #[cfg(test)]
-pub(crate) async fn unsync_to_full(
-    input: http::Request<RouterBody>,
-) -> Result<http::Request<Full<Bytes>>, AxumError> {
-    let (parts, body) = input.into_parts();
-
-    let body_bytes = get_body_bytes(body).await?;
-    let new_request = http::Request::from_parts(parts, Full::new(body_bytes));
-    Ok(new_request)
+pub(crate) async fn to_string<B>(input: B) -> Result<String, AxumError>
+where B: HttpBody,
+      B::Error: Into<axum::BoxError>,
+{
+    let bytes = input
+        .collect()
+        .await
+        .map_err(AxumError::new)?
+        .to_bytes()
+        .to_vec();
+    let string = String::from_utf8(bytes).map_err(AxumError::new)?;
+    Ok(string)
 }

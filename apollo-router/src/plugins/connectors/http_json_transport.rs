@@ -633,8 +633,7 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
-    use crate::services::router::body::empty;
-    use crate::services::router::body::unsync_to_full;
+    use crate::services::router::body;
     use crate::Context;
 
     #[test]
@@ -655,7 +654,7 @@ mod tests {
             &IndexMap::with_hasher(Default::default()),
             &Map::default(),
         );
-        let request = request.body(empty()).unwrap();
+        let request = request.body(body::empty()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -688,7 +687,7 @@ mod tests {
             &config,
             &Map::default(),
         );
-        let request = request.body(empty()).unwrap();
+        let request = request.body(body::empty()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
@@ -749,9 +748,7 @@ mod tests {
         )
         .unwrap();
 
-        let new_req = (unsync_to_full(req.0).await.expect("body converted"), req.1);
-
-        assert_debug_snapshot!(new_req, @r###"
+        assert_debug_snapshot!(req, @r###"
         (
             Request {
                 method: POST,
@@ -761,15 +758,14 @@ mod tests {
                     "content-type": "application/json",
                     "content-length": "8",
                 },
-                body: Full {
-                    data: Some(
-                        b"{\"a\":42}",
-                    ),
-                },
+                body: UnsyncBoxBody,
             },
             None,
         )
         "###);
+
+        let body = body::to_string(req.0.into_body()).await.unwrap();
+        insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -804,9 +800,7 @@ mod tests {
         )
         .unwrap();
 
-        let new_req = (unsync_to_full(req.0).await.expect("body converted"), req.1);
-
-        assert_debug_snapshot!(new_req, @r###"
+        assert_debug_snapshot!(req, @r###"
         (
             Request {
                 method: POST,
@@ -816,14 +810,13 @@ mod tests {
                     "content-type": "application/x-www-form-urlencoded",
                     "content-length": "4",
                 },
-                body: Full {
-                    data: Some(
-                        b"a=42",
-                    ),
-                },
+                body: UnsyncBoxBody,
             },
             None,
         )
         "###);
+
+        let body = body::to_string(req.0.into_body()).await.unwrap();
+        insta::assert_snapshot!(body, @r#"a=42"#);
     }
 }
