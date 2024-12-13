@@ -22,6 +22,7 @@ struct TraceSpec {
     unmeasured_spans: HashSet<&'static str>,
     priority_sampled: Option<&'static str>,
     subgraph_sampled: Option<bool>,
+    trace_id: Option<&'static str>,
     span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
 }
 
@@ -38,6 +39,7 @@ impl TraceSpec {
         unmeasured_spans: HashSet<&'static str>,
         priority_sampled: Option<&'static str>,
         subgraph_sampled: Option<bool>,
+        trace_id: Option<&'static str>,
         span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
     ) -> Self {
         Self {
@@ -50,6 +52,7 @@ impl TraceSpec {
             priority_sampled,
             subgraph_sampled,
             span_attributes,
+            trace_id,
         }
     }
 }

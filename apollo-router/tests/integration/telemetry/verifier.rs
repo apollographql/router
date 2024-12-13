@@ -18,6 +18,9 @@ pub trait Verifier {
         query: Query,
     ) -> Result<(), BoxError> {
         let (id, response) = router.execute_query(query).await;
+        if let Some(spec_id) = self.spec().trace_id {
+            assert_eq!(id.to_string(), spec_id, "trace id");
+        }
         for _ in 0..20 {
             if self.find_valid_trace(id).await.is_ok() {
                 break;

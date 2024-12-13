@@ -440,6 +440,39 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_header_propagator_override() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_header_propagator_override.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .trace_id("00000000000000000000000000000001")
+        .build()
+        .validate_datadog_trace(
+            &mut router,
+            Query::builder()
+                .header("trace-id", "00000000000000000000000000000001")
+                .header("x-datadog-trace-id", "2")
+                .traced(false)
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
