@@ -947,17 +947,20 @@ impl Telemetry {
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
+        if propagation.datadog || tracing.datadog.enabled() {
+            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
+        }
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
         }
+
+        // This propagator MUST come last because the user is trying to override the default behavior of the
+        // other propagators.
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
                 propagation.request.format.clone(),
             )));
-        }
-        if propagation.datadog || tracing.datadog.enabled() {
-            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
 
         TextMapCompositePropagator::new(propagators)
