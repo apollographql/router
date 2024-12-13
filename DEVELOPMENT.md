@@ -1,41 +1,27 @@
 # Development
 
-The **Apollo Router Core** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/):
+> [!NOTE]
+> 👋 This documentation is **not** intended for general users of the Router.  It is specifically for developers **doing core development on the router itself**.
 
-## Crates
+## Getting started
 
-* `configuration` - Config model and loading.
-* `query planner` - Query plan model and a caching wrapper for calling out to the nodejs query planner.
-* `execution` - Converts a query plan to a stream.
-* `server` - Handles requests,
-     obtains a query plan from the query planner,
-     obtains an execution pipeline,
-     returns the results
+### Dependencies
 
-## Binaries
+> [!WARNING]
+> This is not a complete list, and we would appreciate pull requests to this document!
 
-* `router` - Starts a server.
+- Rust
+- Docker (or an alternative like `colima` or `podman`)
+- [Install `protoc`](https://grpc.io/docs/protoc-installation/)
+- [`cmake`](https://cmake.org/)
+- Various `cargo` tools, like `cargo-about`, `cargo-deny`
 
-## Development
-
-You will need a recent version of rust (`1.72` works well as of writing).
-Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
-the recommended way to do it as it will install rustup, rustfmt and other
-goodies that are not always included by default in other rust distribution channels:
+You will need a specific version of Rust (Check the [`rust-toolchain.toml`](https://github.com/apollographql/router/blob/dev/rust-toolchain.toml) file at the root of the repository for the correct version).
+[Using rustup](https://www.rust-lang.org/tools/install) is a recommended way to do it as it will install `rustup`, `rustfmt` and other tools which are not always included by default in other distribution channels:
 
 ```
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
-
-In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/) and [cmake](https://cmake.org/).
-
-Set up your git hooks:
-
-```shell
-git config --local core.hooksPath .githooks/
-```
-
-### Getting started
 
 Use `cargo build --all-targets` to build the project.
 
