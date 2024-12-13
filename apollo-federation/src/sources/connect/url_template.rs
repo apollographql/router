@@ -15,9 +15,9 @@ use crate::sources::connect::string_template::StringTemplate;
 /// generating new URL paths from provided variables and for extracting variable
 /// values from concrete URL paths.
 ///
-/// TODO: In the future, when we add RFC 6570 features, this could contain one big
-///     [`StringTemplate`], but for now we have to store pieces independently so we can leverage
-///     [`Url`] to do percent-encoding for us.
+// TODO: In the future, when we add RFC 6570 features, this could contain one big
+//     `StringTemplate`, but for now we have to store pieces independently so we can leverage
+//     `Url` to do percent-encoding for us.
 #[derive(Debug, Clone, Default)]
 pub struct URLTemplate {
     /// Scheme + host if this is an absolute URL
