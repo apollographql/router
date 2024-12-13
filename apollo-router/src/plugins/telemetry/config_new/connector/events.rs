@@ -48,7 +48,7 @@ pub(crate) struct ConnectorEventRequest(pub(crate) StandardEvent<ConnectorSelect
 pub(crate) struct ConnectorEventResponse(pub(crate) StandardEvent<ConnectorSelector>);
 
 pub(crate) type ConnectorEvents =
-    CustomEvents<ConnectorRequest, ConnectorResponse, ConnectorAttributes, ConnectorSelector>;
+    CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, ConnectorSelector>;
 
 pub(crate) fn new_connector_events(
     config: &Extendable<ConnectorEventsConfig, Event<ConnectorAttributes, ConnectorSelector>>,
@@ -67,6 +67,7 @@ pub(crate) fn new_connector_events(
                     selectors: event_cfg.attributes.clone().into(),
                     condition: event_cfg.condition.clone(),
                     attributes: Vec::new(),
+                    _phantom: Default::default(),
                 }),
             }),
         })
@@ -81,7 +82,13 @@ pub(crate) fn new_connector_events(
 }
 
 impl Instrumented
-    for CustomEvents<ConnectorRequest, ConnectorResponse, ConnectorAttributes, ConnectorSelector>
+    for CustomEvents<
+        ConnectorRequest,
+        ConnectorResponse,
+        (),
+        ConnectorAttributes,
+        ConnectorSelector,
+    >
 {
     type Request = ConnectorRequest;
     type Response = ConnectorResponse;

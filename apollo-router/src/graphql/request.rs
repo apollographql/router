@@ -202,9 +202,11 @@ impl Request {
                 mode = %BatchingMode::BatchHttpLink // Only supported mode right now
             );
 
-            tracing::info!(
-                monotonic_counter.apollo.router.operations.batching = 1u64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            u64_counter!(
+                "apollo.router.operations.batching",
+                "Total requests with batched operations",
+                1,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
             for entry in value
                 .as_array()
@@ -229,9 +231,11 @@ impl Request {
                 mode = "batch_http_link" // Only supported mode right now
             );
 
-            tracing::info!(
-                monotonic_counter.apollo.router.operations.batching = 1u64,
-                mode = "batch_http_link" // Only supported mode right now
+            u64_counter!(
+                "apollo.router.operations.batching",
+                "Total requests with batched operations",
+                1,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
             for entry in value
                 .as_array()

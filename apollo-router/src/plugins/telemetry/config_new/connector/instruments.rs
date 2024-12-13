@@ -74,6 +74,7 @@ pub(crate) struct ConnectorInstruments {
         CustomHistogram<
             ConnectorRequest,
             ConnectorResponse,
+            (),
             ConnectorAttributes,
             ConnectorSelector,
         >,
@@ -82,6 +83,7 @@ pub(crate) struct ConnectorInstruments {
         CustomHistogram<
             ConnectorRequest,
             ConnectorResponse,
+            (),
             ConnectorAttributes,
             ConnectorSelector,
         >,
@@ -90,6 +92,7 @@ pub(crate) struct ConnectorInstruments {
         CustomHistogram<
             ConnectorRequest,
             ConnectorResponse,
+            (),
             ConnectorAttributes,
             ConnectorSelector,
         >,
@@ -139,6 +142,7 @@ impl ConnectorInstruments {
                             selector: None,
                             selectors,
                             updated: false,
+                            _phantom: Default::default()
                         }),
                     }
                 });
@@ -180,6 +184,7 @@ impl ConnectorInstruments {
                             })),
                             selectors,
                             updated: false,
+                            _phantom: Default::default()
                         }),
                     }
                 });
@@ -221,6 +226,7 @@ impl ConnectorInstruments {
                             })),
                             selectors,
                             updated: false,
+                            _phantom: Default::default()
                         }),
                     }
                 });
@@ -336,6 +342,7 @@ impl Instrumented for ConnectorInstruments {
 pub(crate) type ConnectorCustomInstruments = CustomInstruments<
     HttpRequest,
     ConnectorResponse,
+    (),
     ConnectorAttributes,
     ConnectorSelector,
     ConnectorValue,

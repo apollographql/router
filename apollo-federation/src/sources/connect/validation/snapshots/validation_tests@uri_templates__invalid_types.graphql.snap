@@ -3,4 +3,10 @@ source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:#?}\", errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templates/invalid_types.graphql
 ---
-[]
+[
+    Message {
+        code: GraphQLError,
+        message: "Variables used in connector (`$this.anObject`) for `This` cannot be used to create a valid `@key` directive.",
+        locations: [],
+    },
+]

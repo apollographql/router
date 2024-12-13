@@ -404,6 +404,7 @@ impl FetchNode {
         }
 
         let (value, errors) = self.response_at_path(schema, current_dir, paths, response);
+
         (value, errors)
     }
 
@@ -416,7 +417,11 @@ impl FetchNode {
     ) {
         if let Some(id) = id {
             if let Some(sender) = deferred_fetches.get(id.as_str()) {
-                tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
+                u64_counter!(
+                    "apollo.router.operations.defer.fetch",
+                    "Number of deferred responses fetched from subgraphs",
+                    1
+                );
                 if let Err(e) = sender.clone().send((value.clone(), Vec::from(errors))) {
                     tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, id, e);
                 }

@@ -26,9 +26,9 @@ type This {
         selection: "$"
     )
     anObject: Object @external
-    thisIsObject: String
+    requiresAnObject: String
     @connect(
-        http: { GET: "http://127.0.0.1/{$this}?obj={$this.anObject}" }
+        http: { GET: "http://127.0.0.1?obj={$this.anObject}" }
         selection: "$"
     )
 }

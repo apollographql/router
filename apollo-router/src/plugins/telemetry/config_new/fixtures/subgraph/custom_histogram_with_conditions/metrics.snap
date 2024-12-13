@@ -28,6 +28,7 @@ info:
   data:
     datapoints:
       - sum: 1
+        count: 1
         attributes:
           custom_attribute: allowed
           subgraph.graphql.document: "query { hello }"

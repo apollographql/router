@@ -12,8 +12,8 @@ use tower_service::Service;
 
 use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::PlannerMode;
 use crate::services::execution;
@@ -65,12 +65,12 @@ use crate::Notify;
 /// You can pass in a configuration and a schema to the test harness. If you pass in a schema, the test harness will create a query planner and use the schema to extract subgraph schemas.
 ///
 ///
-pub(crate) struct PluginTestHarness<T> {
+pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
     plugin: Box<dyn DynPlugin>,
     phantom: std::marker::PhantomData<T>,
 }
 #[buildstructor::buildstructor]
-impl<T: DynPlugin> PluginTestHarness<T> {
+impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
     pub(crate) async fn new<'a, 'b>(config: Option<&'a str>, schema: Option<&'b str>) -> Self {
         let factory = crate::plugin::plugins()
@@ -217,7 +217,7 @@ impl<T: DynPlugin> PluginTestHarness<T> {
 
 impl<T> Deref for PluginTestHarness<T>
 where
-    T: Plugin,
+    T: PluginPrivate,
 {
     type Target = T;
 

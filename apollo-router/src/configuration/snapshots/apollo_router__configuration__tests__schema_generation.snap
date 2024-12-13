@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -256,41 +255,6 @@ snapshot_kind: text
         }
       ]
     },
-    "AttributesForwardConf": {
-      "additionalProperties": false,
-      "description": "Configuration to add custom attributes/labels on metrics to subgraphs",
-      "properties": {
-        "context": {
-          "description": "Configuration to forward values from the context to custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/ContextForward",
-            "description": "#/definitions/ContextForward"
-          },
-          "type": "array"
-        },
-        "errors": {
-          "$ref": "#/definitions/ErrorsForward",
-          "description": "#/definitions/ErrorsForward"
-        },
-        "request": {
-          "$ref": "#/definitions/Forward",
-          "description": "#/definitions/Forward"
-        },
-        "response": {
-          "$ref": "#/definitions/Forward",
-          "description": "#/definitions/Forward"
-        },
-        "static": {
-          "description": "Configuration to insert custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/Insert2",
-            "description": "#/definitions/Insert2"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "AuthConfig": {
       "oneOf": [
         {
@@ -404,30 +368,6 @@ snapshot_kind: text
           "type": "string"
         }
       ]
-    },
-    "BodyForward": {
-      "additionalProperties": false,
-      "description": "Configuration to forward body values in metric attributes/labels",
-      "properties": {
-        "default": {
-          "$ref": "#/definitions/AttributeValue",
-          "description": "#/definitions/AttributeValue",
-          "nullable": true
-        },
-        "name": {
-          "description": "The name of the attribute",
-          "type": "string"
-        },
-        "path": {
-          "description": "The path in the body",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "path"
-      ],
-      "type": "object"
     },
     "CSRFConfig": {
       "additionalProperties": false,
@@ -1409,6 +1349,9 @@ snapshot_kind: text
       "type": "object"
     },
     "Conf5": {
+      "type": "object"
+    },
+    "Conf6": {
       "anyOf": [
         {
           "additionalProperties": {
@@ -1420,7 +1363,7 @@ snapshot_kind: text
       ],
       "description": "Subgraph URL mappings"
     },
-    "Conf6": {
+    "Conf7": {
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
@@ -1437,7 +1380,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "Conf7": {
+    "Conf8": {
       "additionalProperties": false,
       "description": "Telemetry configuration",
       "properties": {
@@ -1888,7 +1831,7 @@ snapshot_kind: text
         },
         "client_name_header": {
           "default": "apollographql-client-name",
-          "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.",
           "nullable": true,
           "type": "string"
         },
@@ -2218,30 +2161,6 @@ snapshot_kind: text
           "type": "object"
         }
       },
-      "type": "object"
-    },
-    "ContextForward": {
-      "additionalProperties": false,
-      "description": "Configuration to forward context values in metric attributes/labels",
-      "properties": {
-        "default": {
-          "$ref": "#/definitions/AttributeValue",
-          "description": "#/definitions/AttributeValue",
-          "nullable": true
-        },
-        "named": {
-          "description": "The name of the value in the context",
-          "type": "string"
-        },
-        "rename": {
-          "description": "The optional output name",
-          "nullable": true,
-          "type": "string"
-        }
-      },
-      "required": [
-        "named"
-      ],
       "type": "object"
     },
     "Cors": {
@@ -2758,26 +2677,6 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "ErrorsForward": {
-      "additionalProperties": false,
-      "properties": {
-        "extensions": {
-          "description": "Forward extensions values as custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/BodyForward",
-            "description": "#/definitions/BodyForward"
-          },
-          "type": "array"
-        },
-        "include_messages": {
-          "default": null,
-          "description": "Will include the error message in a \"message\" attribute",
-          "nullable": true,
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "EventLevel": {
       "enum": [
         "info",
@@ -3190,29 +3089,6 @@ snapshot_kind: text
       "description": "Forbid mutations configuration",
       "type": "boolean"
     },
-    "Forward": {
-      "additionalProperties": false,
-      "description": "Configuration to forward from headers/body",
-      "properties": {
-        "body": {
-          "description": "Forward body values as custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/BodyForward",
-            "description": "#/definitions/BodyForward"
-          },
-          "type": "array"
-        },
-        "header": {
-          "description": "Forward header values as custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/HeaderForward",
-            "description": "#/definitions/HeaderForward"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "ForwardHeaders": {
       "description": "Forward headers",
       "oneOf": [
@@ -3522,49 +3398,6 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "HeaderForward": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "description": "Match via header name",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "named": {
-              "description": "The name of the header",
-              "type": "string"
-            },
-            "rename": {
-              "description": "The optional output name",
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          "required": [
-            "named"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Match via rgex",
-          "properties": {
-            "matching": {
-              "description": "Using a regex on the header name",
-              "type": "string"
-            }
-          },
-          "required": [
-            "matching"
-          ],
-          "type": "object"
-        }
-      ],
-      "description": "Configuration to forward header values in metric labels"
-    },
     "HeadersLocation": {
       "additionalProperties": false,
       "properties": {
@@ -3708,25 +3541,6 @@ snapshot_kind: text
         }
       ],
       "description": "Insert header"
-    },
-    "Insert2": {
-      "additionalProperties": false,
-      "description": "Configuration to insert custom attributes/labels in metrics",
-      "properties": {
-        "name": {
-          "description": "The name of the attribute to insert",
-          "type": "string"
-        },
-        "value": {
-          "$ref": "#/definitions/AttributeValue",
-          "description": "#/definitions/AttributeValue"
-        }
-      },
-      "required": [
-        "name",
-        "value"
-      ],
-      "type": "object"
     },
     "InsertFromBody": {
       "additionalProperties": false,
@@ -4373,28 +4187,9 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "MetricsAttributesConf": {
-      "additionalProperties": false,
-      "description": "Configuration to add custom attributes/labels on metrics",
-      "properties": {
-        "subgraph": {
-          "$ref": "#/definitions/SubgraphAttributesConf",
-          "description": "#/definitions/SubgraphAttributesConf"
-        },
-        "supergraph": {
-          "$ref": "#/definitions/AttributesForwardConf",
-          "description": "#/definitions/AttributesForwardConf"
-        }
-      },
-      "type": "object"
-    },
     "MetricsCommon": {
       "additionalProperties": false,
       "properties": {
-        "attributes": {
-          "$ref": "#/definitions/MetricsAttributesConf",
-          "description": "#/definitions/MetricsAttributesConf"
-        },
         "buckets": {
           "default": [
             0.001,
@@ -4922,6 +4717,13 @@ snapshot_kind: text
           "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "both_best_effort"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the new Rust-based implementation but fall back to the legacy one for supergraph schemas composed with legacy Apollo Federation 1.",
+          "enum": [
+            "new_best_effort"
           ],
           "type": "string"
         }
@@ -6247,6 +6049,11 @@ snapshot_kind: text
     "SubgraphAttributes": {
       "additionalProperties": false,
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -6266,25 +6073,6 @@ snapshot_kind: text
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
           "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "SubgraphAttributesConf": {
-      "additionalProperties": false,
-      "description": "Configuration to add custom attributes/labels on metrics to subgraphs",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/AttributesForwardConf",
-          "description": "#/definitions/AttributesForwardConf"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/AttributesForwardConf",
-            "description": "#/definitions/AttributesForwardConf"
-          },
-          "description": "Attributes per subgraph",
-          "type": "object"
         }
       },
       "type": "object"
@@ -6767,6 +6555,24 @@ snapshot_kind: text
           "additionalProperties": false,
           "properties": {
             "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "subgraph_resend_count": {
+              "description": "The subgraph http resend count",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_resend_count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
               "description": "Optional default value.",
               "nullable": true,
               "type": "string"
@@ -7147,7 +6953,7 @@ snapshot_kind: text
         },
         "experimental_reuse_query_fragments": {
           "default": null,
-          "description": "Enable reuse of query fragments Default: depends on the federation version",
+          "description": "Enable reuse of query fragments This feature is deprecated and will be removed in next release. The config can only be set when the legacy query planner is explicitly enabled.",
           "nullable": true,
           "type": "boolean"
         },
@@ -8297,6 +8103,11 @@ snapshot_kind: text
         "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -8326,6 +8137,11 @@ snapshot_kind: text
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -8987,6 +8803,10 @@ snapshot_kind: text
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
     },
+    "fleet_detector": {
+      "$ref": "#/definitions/Conf5",
+      "description": "#/definitions/Conf5"
+    },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig",
       "description": "#/definitions/ForbidMutationsConfig"
@@ -9012,8 +8832,8 @@ snapshot_kind: text
       "description": "#/definitions/Config"
     },
     "override_subgraph_url": {
-      "$ref": "#/definitions/Conf5",
-      "description": "#/definitions/Conf5"
+      "$ref": "#/definitions/Conf6",
+      "description": "#/definitions/Conf6"
     },
     "persisted_queries": {
       "$ref": "#/definitions/PersistedQueries",
@@ -9040,8 +8860,8 @@ snapshot_kind: text
       "description": "#/definitions/Config8"
     },
     "rhai": {
-      "$ref": "#/definitions/Conf6",
-      "description": "#/definitions/Conf6"
+      "$ref": "#/definitions/Conf7",
+      "description": "#/definitions/Conf7"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
@@ -9056,8 +8876,8 @@ snapshot_kind: text
       "description": "#/definitions/Supergraph"
     },
     "telemetry": {
-      "$ref": "#/definitions/Conf7",
-      "description": "#/definitions/Conf7"
+      "$ref": "#/definitions/Conf8",
+      "description": "#/definitions/Conf8"
     },
     "tls": {
       "$ref": "#/definitions/Tls",

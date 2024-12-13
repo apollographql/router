@@ -235,7 +235,7 @@ async fn test_root_field_plus_entity() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username } }",
+        "query { users { __typename id name username } }",
         Default::default(),
         None,
         |_| {},
@@ -247,11 +247,13 @@ async fn test_root_field_plus_entity() {
       "data": {
         "users": [
           {
+            "__typename": "User",
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
+            "__typename": "User",
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette"
@@ -280,7 +282,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(json!({
-              "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
+              "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { c } } }",
               "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
             })))
             .respond_with(
@@ -302,7 +304,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username d } }",
+        "query { users { __typename id name username d } }",
         Default::default(),
         None,
         |_| {},
@@ -314,12 +316,14 @@ async fn test_root_field_plus_entity_plus_requires() {
       "data": {
         "users": [
           {
+            "__typename": "User",
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret",
             "d": "1-770-736-8031 x56442"
           },
           {
+            "__typename": "User",
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette",
@@ -334,9 +338,9 @@ async fn test_root_field_plus_entity_plus_requires() {
         &mock_server.received_requests().await.unwrap(),
         vec![
             Matcher::new().method("GET").path("/users"),
-            Matcher::new().method("POST").path("/graphql"),
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
+            Matcher::new().method("POST").path("/graphql"),
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
         ],
@@ -1216,23 +1220,22 @@ async fn test_interface_object() {
         &mock_server.received_requests().await.unwrap(),
         vec![
           Matcher::new().method("GET").path("/itfs"),
+          Matcher::new().method("GET").path("/itfs/1/e"),
+          Matcher::new().method("GET").path("/itfs/2/e"),
+          Matcher::new().method("GET").path("/itfs/1"),
+          Matcher::new().method("GET").path("/itfs/2"),
           Matcher::new()
             .method("POST")
             .path("/graphql")
             .body(serde_json::json!({
-              "query": r#"query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onItf3_0}}fragment _generated_onItf3_0 on Itf{__typename ...on T1{a}...on T2{b}}"#,
+              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ..._generated_onItf3_0 } } fragment _generated_onItf3_0 on Itf { __typename ... on T1 { a } ... on T2 { b } }"#,
               "variables": {
                 "representations": [
                   { "__typename": "Itf", "id": 1 },
                   { "__typename": "Itf", "id": 2 }
                 ]
               }
-            }))
-            ,
-          Matcher::new().method("GET").path("/itfs/1"),
-          Matcher::new().method("GET").path("/itfs/2"),
-          Matcher::new().method("GET").path("/itfs/1/e"),
-          Matcher::new().method("GET").path("/itfs/2/e"),
+            })),
         ],
     );
 }

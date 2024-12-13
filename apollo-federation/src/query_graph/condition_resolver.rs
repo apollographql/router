@@ -23,9 +23,13 @@ pub(crate) struct ContextMapEntry {
     pub(crate) levels_in_query_path: usize,
     pub(crate) path_tree: Option<Arc<OpPathTree>>,
     pub(crate) selection_set: SelectionSet,
-    pub(crate) param_name: Name,
-    pub(crate) arg_type: Node<Type>,
-    pub(crate) id: Name,
+    // PORT_NOTE: This field was renamed from the JS name (`paramName`) to better align with naming
+    // in ContextCondition.
+    pub(crate) argument_name: Name,
+    // PORT_NOTE: This field was renamed from the JS name (`argType`) to better align with naming in
+    // ContextCondition.
+    pub(crate) argument_type: Node<Type>,
+    pub(crate) context_id: Name,
 }
 
 /// Note that `ConditionResolver`s are guaranteed to be only called for edge with conditions.
