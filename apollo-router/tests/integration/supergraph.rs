@@ -1,3 +1,6 @@
+#[cfg(feature = "hyper_header_limits")]
+use std::collections::HashMap;
+
 use serde_json::json;
 use tower::BoxError;
 
@@ -45,7 +48,12 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     }
 
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 431);
     Ok(())
@@ -73,7 +81,12 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
     }
 
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
