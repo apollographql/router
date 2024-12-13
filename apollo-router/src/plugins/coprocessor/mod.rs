@@ -811,7 +811,7 @@ where
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
     let mut stream = body.into_data_stream();
-    let first = stream.next().await.transpose().expect("XXX FIX LATER");
+    let first = stream.next().await.transpose()?;
     let rest = stream;
 
     // If first is None, or contains an error we return an error
