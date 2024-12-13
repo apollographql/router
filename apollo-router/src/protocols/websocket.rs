@@ -841,7 +841,7 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-ws"]).on_upgrade(move |mut socket| async move {
                 let init_connection = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let init_msg: ClientMessage = serde_json::from_str(&init_connection).unwrap();
                 assert!(matches!(init_msg, ClientMessage::ConnectionInit { .. }));
