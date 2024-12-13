@@ -274,10 +274,13 @@ fn cmd_plan(
 
     let query_doc =
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
-    print!(
-        "{}",
-        planner.build_query_plan(&query_doc, None, Default::default())?
-    );
+    let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
+    println!("{query_plan}");
+    apollo_federation::query_plan::correctness::check_plan(
+        planner.api_schema(),
+        &query_doc,
+        &query_plan,
+    )?;
     Ok(())
 }
 
