@@ -82,7 +82,8 @@ below.
 
 ```ebnf
 JSONSelection        ::= PathSelection | NamedSelection*
-SubSelection         ::= "{" NamedSelection* "}"
+SubSelection         ::= "{" OutputTypeAnnotation? NamedSelection* "}"
+OutputTypeAnnotation ::= "<" Identifier ">"
 NamedSelection       ::= NamedPathSelection | PathWithSubSelection | NamedFieldSelection | NamedGroupSelection
 NamedPathSelection   ::= (Alias | "...") PathSelection
 NamedFieldSelection  ::= Alias? Key SubSelection?
@@ -241,6 +242,21 @@ object, much like a nested selection set in a GraphQL operation.
 Note that `SubSelection` may appear recursively within itself, as part of one of
 the various `NamedSelection` rules. This recursion allows for arbitrarily deep
 nesting of selections, which is necessary to handle complex JSON structures.
+
+### `OutputTypeAnnotation ::=`
+
+![OutputTypeAnnotation](./grammar/OutputTypeAnnotation.svg)
+
+`OutputTypeAnnotation` is an optional syntax for declaring the GraphQL type name
+of a `SubSelection` object, which helps determine `__typename` in situations
+where abstract types (interfaces or unions) are involved.
+
+Generally speaking, declaring `{ <Type> ... }` is equivalent to declaring `{
+__typename: $("Type") ... }`, but the former is more concise and enforces that
+the type name is always an identifier.
+
+There can be no more than one `OutputTypeAnnotation` per `SubSelection`, and it
+must come before all other selections (but inside the opening `{`).
 
 ### `NamedSelection ::=`
 

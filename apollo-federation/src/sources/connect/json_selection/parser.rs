@@ -980,11 +980,7 @@ impl SubSelection {
 
     fn parse_naked(input: Span) -> ParseResult<Self> {
         tuple((
-            opt(delimited(
-                tuple((spaces_or_comments, char('<'))),
-                parse_identifier,
-                tuple((spaces_or_comments, char('>'))),
-            )),
+            opt(Self::parse_output_type_annotation),
             many0(NamedSelection::parse),
         ))(input)
         .map(|(remainder, (output_shape, selections))| {
@@ -1002,6 +998,14 @@ impl SubSelection {
                 },
             )
         })
+    }
+
+    pub(super) fn parse_output_type_annotation(input: Span) -> ParseResult<WithRange<String>> {
+        delimited(
+            tuple((spaces_or_comments, char('<'))),
+            parse_identifier,
+            tuple((spaces_or_comments, char('>'))),
+        )(input)
     }
 
     // Returns an Iterator over each &NamedSelection that contributes a single
