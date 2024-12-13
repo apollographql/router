@@ -704,7 +704,7 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
                 if let ClientMessage::ConnectionInit { payload } = ack_msg {
