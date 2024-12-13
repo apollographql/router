@@ -135,7 +135,11 @@ async fn handle(
 
     {
         // check if we have an existing snapshot for this request
-        let key = snapshot_key(Some(method.as_str()), Some(path.as_str()), &request_json_body);
+        let key = snapshot_key(
+            Some(method.as_str()),
+            Some(path.as_str()),
+            &request_json_body,
+        );
         let mut snapshots = state.snapshots.lock().unwrap();
         let existing = snapshots.get(&key);
         if let Some(snapshot) = existing {
@@ -147,7 +151,10 @@ async fn handle(
                     method = %method,
                     "Found existing snapshot"
                 );
-                return Ok(snapshot.clone().try_into().unwrap());
+                match snapshot.clone().try_into() {
+                    Ok(response) => return Ok(response),
+                    Err(e) => error!("Unable to convert snapshot into HTTP response: {:?}", e),
+                }
             }
         }
     }
@@ -448,8 +455,8 @@ impl TryFrom<Snapshot> for http::Response<RouterBody> {
 impl Snapshot {
     fn key(&self) -> String {
         snapshot_key(
-            self.request.method.as_ref().map(String::as_str),
-            self.request.path.as_ref().map(String::as_str),
+            self.request.method.as_deref(),
+            self.request.path.as_deref(),
             &self.request.body,
         )
     }
