@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 
 pub(crate) mod conditions;
+pub mod correctness;
 pub(crate) mod display;
 pub(crate) mod fetch_dependency_graph;
 pub(crate) mod fetch_dependency_graph_processor;
