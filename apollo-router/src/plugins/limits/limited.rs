@@ -200,9 +200,12 @@ mod test {
             _ => panic!("it should be ready with Some(Ok(_)"),
         }
         assert!(semaphore.try_acquire().is_err());
-        if let std::task::Poll::Ready(_) = Pin::new(&mut limited).poll_frame(
-            &mut std::task::Context::from_waker(&futures::task::noop_waker()),
-        ) {
+        if Pin::new(&mut limited)
+            .poll_frame(&mut std::task::Context::from_waker(
+                &futures::task::noop_waker(),
+            ))
+            .is_ready()
+        {
             panic!("it should be pending");
         }
         assert!(semaphore.try_acquire().is_ok());

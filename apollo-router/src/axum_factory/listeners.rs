@@ -232,7 +232,6 @@ async fn process_error(io_error: std::io::Error) {
         std::io::ErrorKind::NotConnected => {
             // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
             // we should ignore that and get to the next one
-            return;
         }
 
         // ignored errors, these should not happen with accept()
@@ -246,7 +245,6 @@ async fn process_error(io_error: std::io::Error) {
         std::io::ErrorKind::Unsupported |
         std::io::ErrorKind::UnexpectedEof |
         std::io::ErrorKind::OutOfMemory => {
-            return;
         }
 
         // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
@@ -262,7 +260,6 @@ async fn process_error(io_error: std::io::Error) {
                 }
                 _ => {}
             }
-            return;
         }
     }
 }
