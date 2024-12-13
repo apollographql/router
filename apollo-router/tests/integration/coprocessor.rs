@@ -43,7 +43,7 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     // Expect a small query
     Mock::given(method("POST"))
         .and(path("/"))
-        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
+        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query ExampleQuery {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
         )
