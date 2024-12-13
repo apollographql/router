@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
 
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -24,8 +24,8 @@ impl SpecDefinition for LinkSpecDefinition {
     }
 }
 
-lazy_static! {
-    pub(crate) static ref CORE_VERSIONS: SpecDefinitions<LinkSpecDefinition> = {
+pub(crate) static CORE_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::core_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 1 },
@@ -36,13 +36,13 @@ lazy_static! {
             Identity::core_identity(),
         ));
         definitions
-    };
-    pub(crate) static ref LINK_VERSIONS: SpecDefinitions<LinkSpecDefinition> = {
+    });
+pub(crate) static LINK_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::link_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
             Identity::link_identity(),
         ));
         definitions
-    };
-}
+    });

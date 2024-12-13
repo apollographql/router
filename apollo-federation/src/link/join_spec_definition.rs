@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -7,7 +9,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 
 use super::argument::directive_optional_list_argument;
 use crate::bail;
@@ -410,8 +411,8 @@ impl SpecDefinition for JoinSpecDefinition {
     }
 }
 
-lazy_static! {
-    pub(crate) static ref JOIN_VERSIONS: SpecDefinitions<JoinSpecDefinition> = {
+pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
         definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 1 }));
         definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 2 }));
@@ -419,5 +420,4 @@ lazy_static! {
         definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 4 }));
         definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 5 }));
         definitions
-    };
-}
+    });
