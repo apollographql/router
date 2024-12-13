@@ -55,9 +55,7 @@ download_binary() {
     _file="$_dir/input.tar.gz"
     _router="$_dir/router$_ext"
 
-    local _safe_url
-    _safe_url=$(echo "$_url" | sed  -E 's|https://[^@]+@|https://|')
-    say "Downloading router from $_safe_url ..." 1>&2
+    say "Downloading router from $_url ..." 1>&2
 
     ensure mkdir -p "$_dir"
     downloader "$_url" "$_file"
