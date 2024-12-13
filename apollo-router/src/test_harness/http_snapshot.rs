@@ -41,7 +41,7 @@
 //! This module should also not be used in conjunction with performance testing, as returning
 //! snapshot data locally will be much faster than sending HTTP requests to an external server.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::Path;
@@ -57,6 +57,7 @@ use base64::Engine;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::Method;
 use http::Uri;
 use hyper::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
@@ -98,7 +99,7 @@ pub struct SnapshotServer {
 struct SnapshotServerState {
     client: HttpClientService,
     base_url: Uri,
-    snapshots: Arc<Mutex<HashMap<String, Snapshot>>>,
+    snapshots: Arc<Mutex<BTreeMap<String, Snapshot>>>,
     snapshot_file: Box<Path>,
     offline: bool,
     update: bool,
@@ -130,44 +131,22 @@ async fn handle(
     let version = req.version();
     let request_headers = req.headers().clone();
     let hyper_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-    let router_body: RouterBody = RouterBody::from(hyper_body.clone());
     let request_json_body = serde_json::from_slice(&hyper_body).unwrap_or(Value::Null);
 
-    {
-        // check if we have an existing snapshot for this request
-        let key = snapshot_key(
-            Some(method.as_str()),
-            Some(path.as_str()),
-            &request_json_body,
-        );
-        let mut snapshots = state.snapshots.lock().unwrap();
-        let existing = snapshots.get(&key);
-        if let Some(snapshot) = existing {
-            if state.update {
-                snapshots.remove(&key);
-            } else {
-                info!(
-                    url = %uri,
-                    method = %method,
-                    "Found existing snapshot"
-                );
-                match snapshot.clone().try_into() {
-                    Ok(response) => return Ok(response),
-                    Err(e) => error!("Unable to convert snapshot into HTTP response: {:?}", e),
-                }
-            }
-        }
-    }
+    let key = snapshot_key(
+        Some(method.as_str()),
+        Some(path.as_str()),
+        &request_json_body,
+    );
 
-    let error_message;
-    if state.offline && !state.update {
-        let message = "Offline mode enabled and no snapshot available".to_string();
-        error_message = message.clone();
-        error!(
-            url = %uri,
-            method = %method,
-            message,
-        );
+    if let Some(response) = response_from_snapshot(&state, &uri, &method, &key) {
+        Ok(response)
+    } else if state.offline && !state.update {
+        fail(
+            uri,
+            method,
+            "Offline mode enabled and no snapshot available",
+        )
     } else {
         info!(
             url = %uri,
@@ -178,7 +157,7 @@ async fn handle(
             .method(method.clone())
             .version(version)
             .uri(uri.clone())
-            .body(router_body)
+            .body(RouterBody::from(hyper_body))
             .unwrap();
         *request.headers_mut() = request_headers.clone();
         let response = state
@@ -213,7 +192,7 @@ async fn handle(
                 };
                 {
                     let mut snapshots = state.snapshots.lock().unwrap();
-                    snapshots.insert(snapshot.key(), snapshot.clone());
+                    snapshots.insert(key, snapshot.clone());
                     if let Err(e) = save(state.snapshot_file, &mut snapshots) {
                         error!(
                             url = %uri,
@@ -223,31 +202,56 @@ async fn handle(
                         );
                     }
                 }
-                return Ok(snapshot.try_into().unwrap());
+                Ok(snapshot.try_into().unwrap())
             } else {
-                let message = "Unable to parse response body as JSON".to_string();
-                error_message = message.clone();
-                error!(
-                    url = %uri,
-                    method = %method,
-                    message,
-                )
+                fail(uri, method, "Unable to parse response body as JSON")
             }
         } else {
-            let message = "Unable to read response body".to_string();
-            error_message = message.clone();
-            error!(
-                url = %uri,
-                method = %method,
-                message
-            )
+            fail(uri, method, "Unable to read response body")
         }
     }
+}
 
-    Ok(http::Response::builder()
-        .status(500)
-        .body(json!({ "error": error_message}).to_string().into())
-        .unwrap())
+fn response_from_snapshot(
+    state: &SnapshotServerState,
+    uri: &String,
+    method: &Method,
+    key: &String,
+) -> Option<http::Response<RouterBody>> {
+    let mut snapshots = state.snapshots.lock().unwrap();
+    if state.update {
+        snapshots.remove(key);
+        None
+    } else {
+        snapshots.get(key).and_then(|snapshot| {
+            info!(
+                url = %uri,
+                method = %method,
+                "Found existing snapshot"
+            );
+            snapshot
+                .clone()
+                .try_into()
+                .map_err(|e| error!("Unable to convert snapshot into HTTP response: {:?}", e))
+                .ok()
+        })
+    }
+}
+
+fn fail(
+    uri: String,
+    method: Method,
+    message: &str,
+) -> Result<http::Response<RouterBody>, StatusCode> {
+    error!(
+        url = %uri,
+        method = %method,
+        message
+    );
+    http::Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(json!({ "error": message}).to_string().into())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 fn map_headers<F: Fn(&str) -> bool>(
@@ -269,21 +273,17 @@ fn map_headers<F: Fn(&str) -> bool>(
 
 fn save<P: AsRef<Path>>(
     path: P,
-    snapshots: &mut HashMap<String, Snapshot>,
+    snapshots: &mut BTreeMap<String, Snapshot>,
 ) -> Result<(), SnapshotError> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-
-    // Keep the snapshots sorted to make source control merges easier when updating snapshots
-    let mut snapshots = snapshots.values().cloned().collect::<Vec<_>>();
-    snapshots.sort_by_key(Snapshot::key);
-
+    let snapshots = snapshots.values().cloned().collect::<Vec<_>>();
     std::fs::write(path, serde_json::to_string_pretty(&snapshots)?).map_err(Into::into)
 }
 
-fn load<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Snapshot>, SnapshotError> {
+fn load<P: AsRef<Path>>(path: P) -> Result<BTreeMap<String, Snapshot>, SnapshotError> {
     let str = std::fs::read_to_string(path)?;
     let snapshots: Vec<Snapshot> = serde_json::from_str(&str)?;
     info!("Loaded {} snapshots", snapshots.len());
@@ -364,7 +364,7 @@ impl SnapshotServer {
             if offline {
                 warn!("Unable to load snapshot file in offline mode - all requests will fail");
             }
-            HashMap::default()
+            BTreeMap::default()
         });
 
         let http_service = HttpClientService::new(
