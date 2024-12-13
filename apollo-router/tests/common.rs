@@ -116,6 +116,11 @@ impl Query {
         self
     }
 
+    pub fn with_anonymous(mut self) -> Self {
+        self.body = json!({"query":"query {topProducts{name}}","variables":{}});
+        self
+    }
+
     pub fn with_huge_query(mut self) -> Self {
         self.body = json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}});
         self

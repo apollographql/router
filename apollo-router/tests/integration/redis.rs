@@ -41,7 +41,7 @@ use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use crate::integration::common::graph_os_enabled;
+use crate::integration::common::{graph_os_enabled, Query};
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1109,11 +1109,11 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
-    router.execute_default_query().await;
+    router.execute_query(Query::default().with_anonymous()).await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
     router.assert_reloaded().await;
-    router.execute_default_query().await;
+    router.execute_query(Query::default().with_anonymous()).await;
     router
         .assert_redis_cache_contains(new_cache_key, Some(starting_key))
         .await;
