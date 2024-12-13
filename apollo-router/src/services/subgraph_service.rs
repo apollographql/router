@@ -1741,7 +1741,7 @@ mod tests {
 
         let server = axum::serve(
             listener,
-            Router::new().route("/", axum::routing::any_service(service_fn(handle))),
+            Router::new().route("/", axum::routing::any_service(tower::service_fn(handle))),
         );
         server.await.unwrap();
     }
