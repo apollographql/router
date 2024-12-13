@@ -378,7 +378,7 @@ impl SnapshotServer {
         .expect("can create a HttpService");
         let app = Router::new()
             .route("/", any(root_handler))
-            .route("/*path", any(handler))
+            .route("/*path", any(handler)) // won't match root, so we need the root handler above
             .with_state(SnapshotServerState {
                 client: http_service,
                 base_url: base_url.clone(),
@@ -498,6 +498,7 @@ pub(crate) mod standalone {
 
     use clap::Parser;
     use http::Uri;
+    use tracing_core::Level;
 
     use super::SnapshotServer;
 
@@ -524,17 +525,25 @@ pub(crate) mod standalone {
         /// Optional port to listen on (defaults to an ephemeral port).
         #[arg(short, long)]
         port: Option<u16>,
+
+        /// Turn on verbose output
+        #[arg(short = 'v', long)]
+        verbose: bool,
     }
 
     /// Run the snapshot server as a standalone application
     pub async fn main() {
+        let args = Args::parse();
+
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
-            .with_max_level(tracing_core::Level::INFO)
+            .with_max_level(if args.verbose {
+                Level::INFO
+            } else {
+                Level::WARN
+            })
             .finish();
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
-
-        let args = Args::parse();
 
         let listener = args.port.map(|port| {
             TcpListener::bind(format!("127.0.0.1:{port}"))
