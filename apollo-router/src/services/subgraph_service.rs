@@ -2164,7 +2164,7 @@ mod tests {
         ) -> Result<impl IntoResponse, Infallible> {
             // finalize the upgrade process by returning upgrade callback.
             // we can customize the callback by sending additional info such as address.
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
