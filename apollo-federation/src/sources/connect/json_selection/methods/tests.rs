@@ -367,14 +367,14 @@ fn test_then_method() {
 fn test_then_shape() {
     assert_eq!(
         selection!("id ... $->has('kind')->then($ { kind })")
-            .static_shape()
+            .shape()
             .pretty_print(),
         "One<{ id: $root.*.id, kind: $root.*.kind }, { id: $root.*.id }>",
     );
 
     assert_eq!(
         selection!("id kind: $->has('kind')->then($.kind)")
-            .static_shape()
+            .shape()
             .pretty_print(),
         "{ id: $root.*.id, kind: One<$root.*.kind, None> }",
     );
@@ -388,7 +388,7 @@ fn test_then_shape() {
     .expect("parse error");
 
     assert_eq!(
-        multi_then.static_shape().pretty_print(),
+        multi_then.shape().pretty_print(),
         "One<{ a: 1, b: All<\"hi\", \"hola\">, c: true }, { a: 1, b: \"hi\" }, { b: \"hola\", c: true, d: 4 }, { d: 4 }>",
     );
 }

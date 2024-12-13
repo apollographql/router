@@ -74,7 +74,7 @@ impl JSONSelection {
         (value, errors.into_iter().collect())
     }
 
-    pub fn static_shape(&self) -> Shape {
+    pub fn shape(&self) -> Shape {
         self.compute_output_shape(
             // If we don't know anything about the shape of the input data, we
             // can represent the data symbolically using the $root variable
@@ -2515,16 +2515,16 @@ mod tests {
 
     #[test]
     fn test_compute_output_shape() {
-        assert_eq!(selection!("").static_shape().pretty_print(), "{}");
+        assert_eq!(selection!("").shape().pretty_print(), "{}");
 
         assert_eq!(
-            selection!("id name").static_shape().pretty_print(),
+            selection!("id name").shape().pretty_print(),
             "{ id: $root.*.id, name: $root.*.name }",
         );
 
         assert_eq!(
             selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
-                .static_shape()
+                .shape()
                 .pretty_print(),
             // Technically $.data could be an array, so this should be a union
             // of this shape and a list of this shape, except with
@@ -2545,7 +2545,7 @@ mod tests {
                 friends: friend_ids { id: @ }
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).static_shape().pretty_print(),
+            "#).shape().pretty_print(),
 
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
@@ -2563,7 +2563,7 @@ mod tests {
                 friends: friend_ids->map({ id: @ })
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).static_shape().pretty_print(),
+            "#).shape().pretty_print(),
             "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
         );
 
@@ -2575,41 +2575,41 @@ mod tests {
                     ["movie", ${ director title }],
                 )
                 price: $($.price, $.cost, "unknown")
-            "#).static_shape().pretty_print(),
+            "#).shape().pretty_print(),
             "One<{ author: $root.*.author, price: One<$root.*.price, $root.*.cost, \"unknown\">, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: One<$root.*.price, $root.*.cost, \"unknown\">, title: $root.*.title, upc: $root.*.upc }, { price: One<$root.*.price, $root.*.cost, \"unknown\">, upc: $root.*.upc }>",
         );
 
         assert_eq!(
             selection!("$->echo({ thrice: [@, @, @] })")
-                .static_shape()
+                .shape()
                 .pretty_print(),
             "{ thrice: [$root, $root, $root] }",
         );
 
         assert_eq!(
             selection!("$->echo({ thrice: [@, @, @] })->entries")
-                .static_shape()
+                .shape()
                 .pretty_print(),
             "[{ key: \"thrice\", value: [$root, $root, $root] }]",
         );
 
         assert_eq!(
             selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-                .static_shape()
+                .shape()
                 .pretty_print(),
             "[\"thrice\"]",
         );
 
         assert_eq!(
             selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-                .static_shape()
+                .shape()
                 .pretty_print(),
             "[[$root, $root, $root]]",
         );
 
         assert_eq!(
             selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-                .static_shape()
+                .shape()
                 .pretty_print(),
             "[{ k: \"wrapped\", v: $root }]",
         );
@@ -2618,13 +2618,13 @@ mod tests {
     #[test]
     fn test_match_output_shape() {
         assert_eq!(
-            selection!("<Product>").static_shape().pretty_print(),
+            selection!("<Product>").shape().pretty_print(),
             "{ __typename: \"Product\" }",
         );
 
         assert_eq!(
             selection!("__typename: $('Product')")
-                .static_shape()
+                .shape()
                 .pretty_print(),
             "{ __typename: \"Product\" }",
         );
@@ -2638,7 +2638,7 @@ mod tests {
                     ["album", ${ artist title }],
                 )
                 price: cost
-            "#).static_shape().pretty_print(),
+            "#).shape().pretty_print(),
             "One<{ author: $root.*.author, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { artist: $root.*.artist, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { price: $root.*.cost, upc: $root.*.upc }>"
         );
 
@@ -2650,7 +2650,7 @@ mod tests {
                     ["album", ${ <Album> artist }],
                     [@, ${ <Unknown> }],
                 )
-            "#).static_shape().pretty_print(),
+            "#).shape().pretty_print(),
             "One<{ __typename: \"Book\", title: $root.*.title, upc: $root.*.upc }, { __typename: \"Film\", director: $root.*.director, upc: $root.*.upc }, { __typename: \"Album\", artist: $root.*.artist, upc: $root.*.upc }, { __typename: \"Unknown\", upc: $root.*.upc }>",
         );
 
@@ -2664,7 +2664,7 @@ mod tests {
                     ["movie", ${ <Film> director }],
                 )
                 price: cost
-            "#).static_shape().pretty_print(),
+            "#).shape().pretty_print(),
             // Note All<Book, Product> would theoretically simplify down to just
             // Book if the shape system knows Book is a subtype of Product.
             "One<{ __typename: All<\"Book\", \"Product\">, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { __typename: All<\"Film\", \"Product\">, director: $root.*.director, price: $root.*.cost, upc: $root.*.upc }, { __typename: \"Product\", price: $root.*.cost, upc: $root.*.upc }>",
