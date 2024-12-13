@@ -413,6 +413,7 @@ impl NamedSelection {
                 path,
                 inline,
             } => {
+                #[allow(clippy::if_same_then_else)]
                 if let Some(alias) = alias {
                     vec![alias.name.as_str()]
                 } else if let Some(sub) = path.next_subselection() {
@@ -796,7 +797,7 @@ impl PathList {
 
         // If we failed to parse "." Key above, but the input starts with a '.'
         // character, it's an error unless it's the beginning of a ... token.
-        if input.fragment().starts_with(".") && !input.fragment().starts_with("...") {
+        if input.fragment().starts_with('.') && !input.fragment().starts_with("...") {
             return Err(nom_fail_message(
                 input,
                 "Path selection . must be followed by key (identifier or quoted string literal)",

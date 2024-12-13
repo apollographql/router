@@ -121,7 +121,7 @@ fn then_method(
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
-        if args.len() < 1 || args.len() > 2 {
+        if args.is_empty() || args.len() > 2 {
             (
                 None,
                 vec![ApplyToError::new(
@@ -136,11 +136,11 @@ fn then_method(
         } else if is_truthy(data) {
             args[0]
                 .apply_to_path(data, vars, input_path)
-                .and_then_collecting_errors(|value| tail.apply_to_path(&value, vars, input_path))
+                .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path))
         } else if args.len() > 1 {
             args[1]
                 .apply_to_path(data, vars, input_path)
-                .and_then_collecting_errors(|value| tail.apply_to_path(&value, vars, input_path))
+                .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path))
         } else {
             // Allows ... $(false)->then(expression) to have no output keys.
             (None, Vec::new())
