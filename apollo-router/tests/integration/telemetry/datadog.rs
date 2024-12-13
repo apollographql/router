@@ -70,8 +70,6 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
     Ok(())
 }
 
-
-
 // We want to check we're able to override the behavior of preview_datadog_agent_sampling configuration even if we set a datadog exporter
 #[tokio::test(flavor = "multi_thread")]
 async fn test_sampling_datadog_agent_disabled_always_sample() -> Result<(), BoxError> {
@@ -92,8 +90,52 @@ async fn test_sampling_datadog_agent_disabled_always_sample() -> Result<(), BoxE
     TraceSpec::builder()
         .services(["router", "subgraph"].into())
         .subgraph_sampled(true)
+        .priority_sampled("1")
         .build()
         .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
+        .await?;
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sampling_datadog_agent_disabled_never_sample() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled_0.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
     router.graceful_shutdown().await;
 
@@ -911,7 +953,8 @@ impl Verifier for DatadogTraceSpec {
                         .as_f64()
                         .expect("psr not string")
                         .to_string(),
-                    psr
+                    psr,
+                    "psr mismatch"
                 );
             }
         }
