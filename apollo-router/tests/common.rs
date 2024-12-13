@@ -106,26 +106,31 @@ impl Query {
     }
 }
 impl Query {
+    #[allow(dead_code)]
     pub fn with_bad_content_type(mut self) -> Self {
         self.content_type = "garbage".to_string();
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_bad_query(mut self) -> Self {
         self.body = json!({"garbage":{}});
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_anonymous(mut self) -> Self {
         self.body = json!({"query":"query {topProducts{name}}","variables":{}});
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_huge_query(mut self) -> Self {
         self.body = json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}});
         self
     }
 
+    #[allow(dead_code)]
     pub fn introspection() -> Query {
         Query::builder()
             .body(json!({"query":"{__schema {types {name}}}","variables":{}}))
@@ -492,6 +497,7 @@ impl IntegrationTest {
         Dispatch::new(subscriber)
     }
 
+    #[allow(dead_code)]
     pub fn subgraph_context(&self) -> SpanContext {
         self.subgraph_context
             .lock()
@@ -627,12 +633,14 @@ impl IntegrationTest {
         fs::copy(supergraph_path, &self.test_schema_location).expect("could not write schema");
     }
 
+    #[allow(dead_code)]
     pub fn execute_default_query(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query(Query::builder().build())
     }
 
+    #[allow(dead_code)]
     pub fn execute_query(
         &self,
         query: Query,
