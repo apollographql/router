@@ -70,6 +70,36 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
     Ok(())
 }
 
+
+
+// We want to check we're able to override the behavior of preview_datadog_agent_sampling configuration even if we set a datadog exporter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sampling_datadog_agent_disabled_always_sample() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled_1.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {

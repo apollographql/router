@@ -450,7 +450,13 @@ pub(crate) mod propagator {
                     let sampling_priority = span_context
                         .trace_state()
                         .sampling_priority()
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| {
+                            if span_context.is_sampled() {
+                                SamplingPriority::AutoKeep
+                            } else {
+                                SamplingPriority::AutoReject
+                            }
+                        });
                     injector.set(
                         DATADOG_SAMPLING_PRIORITY_HEADER,
                         (sampling_priority as i32).to_string(),
