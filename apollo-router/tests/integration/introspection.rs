@@ -1,9 +1,10 @@
-use crate::integration::common::Query;
-use crate::integration::IntegrationTest;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph::Request;
 use serde_json::json;
 use tower::ServiceExt;
+
+use crate::integration::common::Query;
+use crate::integration::IntegrationTest;
 
 #[tokio::test]
 async fn simple() {

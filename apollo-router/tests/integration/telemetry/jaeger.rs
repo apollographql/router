@@ -9,7 +9,8 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::integration::common::{Query, Telemetry};
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
 use crate::integration::telemetry::verifier::Verifier;
 use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
@@ -258,30 +259,49 @@ async fn test_span_attributes() -> Result<(), BoxError> {
         TraceSpec::builder()
             .services(["client", "router", "subgraph"].into())
             .operation_name("ExampleQuery")
-            .span_attribute("router", [("http.request.method", "POST"),
-                ("http.response.status_code", "200"),
-                ("url.path", "/"),
-                ("http.request.header.x-my-header", "test"),
-                ("http.request.header.x-not-present", "nope"),
-                ("http.request.header.x-my-header-condition", "test"),
-                ("studio.operation.id", "*"),
-            ].into())
-            .span_attribute("supergraph", [
-                ("graphql.operation.name", "ExampleQuery"),
-                ("graphql.operation.type", "query"),
-                ("graphql.document", "query ExampleQuery {topProducts{name}}"),
-            ].into())
-            .span_attribute("subgraph", [
-                ("subgraph.graphql.operation.type", "query"),
-                ("subgraph.name", "products")].into())
+            .span_attribute(
+                "router",
+                [
+                    ("http.request.method", "POST"),
+                    ("http.response.status_code", "200"),
+                    ("url.path", "/"),
+                    ("http.request.header.x-my-header", "test"),
+                    ("http.request.header.x-not-present", "nope"),
+                    ("http.request.header.x-my-header-condition", "test"),
+                    ("studio.operation.id", "*"),
+                ]
+                .into(),
+            )
+            .span_attribute(
+                "supergraph",
+                [
+                    ("graphql.operation.name", "ExampleQuery"),
+                    ("graphql.operation.type", "query"),
+                    ("graphql.document", "query ExampleQuery {topProducts{name}}"),
+                ]
+                .into(),
+            )
+            .span_attribute(
+                "subgraph",
+                [
+                    ("subgraph.graphql.operation.type", "query"),
+                    ("subgraph.name", "products"),
+                ]
+                .into(),
+            )
             .build()
-            .validate_jaeger_trace(&mut router, Query::builder().header("x-my-header", "test").header("x-my-header-condition", "condition").build())
+            .validate_jaeger_trace(
+                &mut router,
+                Query::builder()
+                    .header("x-my-header", "test")
+                    .header("x-my-header-condition", "condition")
+                    .build(),
+            )
             .await?;
         router.graceful_shutdown().await;
     }
     Ok(())
 }
-
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_decimal_trace_id() -> Result<(), BoxError> {
@@ -327,19 +347,26 @@ impl Verifier for JaegerTraceSpec {
     fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
         for (span, attributes) in &self.span_attributes {
             for (key, value) in attributes {
-                let binding = trace.select_path(&format!("$..spans[?(@.operationName == '{span}')]..tags..[?(@.key == '{key}')].value"))?;
+                let binding = trace.select_path(&format!(
+                    "$..spans[?(@.operationName == '{span}')]..tags..[?(@.key == '{key}')].value"
+                ))?;
 
                 let actual_value = binding
                     .first()
-                    .expect(&format!("could not find attribute {key} on {span}"));
+                    .unwrap_or_else(|| panic!("could not find attribute {key} on {span}"));
                 match actual_value {
                     Value::String(_) if *value == "*" => continue,
-                    Value::String(s) => assert_eq!(s, value, "unexpected attribute {key} on {span}"),
+                    Value::String(s) => {
+                        assert_eq!(s, value, "unexpected attribute {key} on {span}")
+                    }
                     Value::Number(_) if *value == "*" => continue,
-                    Value::Number(n) => assert_eq!(n.to_string(), *value, "unexpected attribute {key} on {span}"),
+                    Value::Number(n) => assert_eq!(
+                        n.to_string(),
+                        *value,
+                        "unexpected attribute {key} on {span}"
+                    ),
                     _ => panic!("unexpected value type"),
                 }
-
             }
         }
         Ok(())

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use buildstructor::{buildstructor};
+use buildstructor::buildstructor;
 use fred::clients::RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
@@ -335,7 +335,11 @@ impl Telemetry {
         }
     }
 
-    pub(crate) fn extract_context(&self, request: &wiremock::Request, context: &Context) -> Context {
+    pub(crate) fn extract_context(
+        &self,
+        request: &wiremock::Request,
+        context: &Context,
+    ) -> Context {
         let headers: HashMap<String, String> = request
             .headers
             .iter()
@@ -362,8 +366,7 @@ impl Telemetry {
                         .expect("psr");
                     let new_trace_id = if original_span_context.is_valid() {
                         original_span_context.trace_id()
-                    }
-                    else {
+                    } else {
                         context.span().span_context().trace_id()
                     };
                     context = context.with_remote_span_context(SpanContext::new(

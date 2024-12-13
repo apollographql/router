@@ -7,7 +7,8 @@ use wiremock::matchers::path;
 use wiremock::Mock;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::{graph_os_enabled, Query};
+use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -75,7 +76,9 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     assert_eq!(response.status(), 200);
 
     // This query is huge and will be rejected because it is too large before hitting the coprocessor
-    let (_trace_id, response) = router.execute_query(Query::default().with_huge_query()).await;
+    let (_trace_id, response) = router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     assert_eq!(response.status(), 413);
     assert_yaml_snapshot!(response.text().await?);
 

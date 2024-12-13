@@ -790,7 +790,6 @@ impl Verifier for DatadogTraceSpec {
     }
 
     fn validate_span_kind(&self, trace: &Value, name: &str, kind: &str) -> Result<(), BoxError> {
-
         let binding1 = trace.select_path(&format!(
             "$..[?(@.meta.['otel.original_name'] == '{}')].meta.['span.kind']",
             name

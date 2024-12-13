@@ -16,11 +16,12 @@ use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
+use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
-use crate::integration::common::{graph_os_enabled, Query};
-use crate::integration::IntegrationTest;
-use crate::integration::telemetry::TraceSpec;
 use crate::integration::telemetry::verifier::Verifier;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -62,11 +63,7 @@ async fn test_basic() -> Result<(), BoxError> {
             )
             .subgraph_sampled(true)
             .build()
-            .validate_otlp_trace(
-                &mut router,
-                &mock_server,
-                Query::default(),
-            )
+            .validate_otlp_trace(&mut router, &mock_server, Query::default())
             .await?;
         TraceSpec::builder()
             .service("router")
@@ -105,11 +102,7 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
         .priority_sampled("1")
         .subgraph_sampled(true)
         .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::default(),
-        )
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
         .await?;
     router.graceful_shutdown().await;
     Ok(())
@@ -277,12 +270,14 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_agent_no_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let mut router = IntegrationTest::builder().config(&config)
+    let mut router = IntegrationTest::builder()
+        .config(&config)
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .extra_propagator(Telemetry::Datadog)
-        .build().await;
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
@@ -316,7 +311,8 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .extra_propagator(Telemetry::Datadog)
-        .build().await;
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
@@ -542,7 +538,7 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
 
 struct OtlpTraceSpec<'a> {
     trace_spec: TraceSpec,
-    mock_server: &'a MockServer
+    mock_server: &'a MockServer,
 }
 impl Deref for OtlpTraceSpec<'_> {
     type Target = TraceSpec;
@@ -551,7 +547,6 @@ impl Deref for OtlpTraceSpec<'_> {
         &self.trace_spec
     }
 }
-
 
 impl Verifier for OtlpTraceSpec<'_> {
     fn verify_span_attributes(&self, _span: &Value) -> Result<(), BoxError> {
@@ -580,7 +575,8 @@ impl Verifier for OtlpTraceSpec<'_> {
     }
 
     async fn find_valid_metrics(&self) -> Result<(), BoxError> {
-        let requests = self.mock_server
+        let requests = self
+            .mock_server
             .received_requests()
             .await
             .expect("Could not get otlp requests");
@@ -595,7 +591,6 @@ impl Verifier for OtlpTraceSpec<'_> {
             Err(anyhow!("No metrics received").into())
         }
     }
-
 
     async fn get_trace(&self, trace_id: TraceId) -> Result<Value, axum::BoxError> {
         let requests = self.mock_server.received_requests().await;
@@ -641,8 +636,6 @@ impl Verifier for OtlpTraceSpec<'_> {
         }
         Ok(())
     }
-
-
 
     fn verify_services(&self, trace: &Value) -> Result<(), axum::BoxError> {
         let actual_services: HashSet<String> = trace
@@ -713,7 +706,6 @@ impl Verifier for OtlpTraceSpec<'_> {
         Ok(())
     }
 
-
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError> {
         if let Some(expected_operation_name) = &self.operation_name {
             let binding =
@@ -752,7 +744,6 @@ impl Verifier for OtlpTraceSpec<'_> {
         }
         Ok(())
     }
-
 }
 
 async fn mock_otlp_server() -> MockServer {
@@ -788,18 +779,26 @@ impl DatadogId for TraceId {
     }
 }
 
-
 impl TraceSpec {
-    async fn validate_otlp_trace(self, router: &mut IntegrationTest, mock_server: &MockServer, query: Query) -> Result<(), BoxError>{
+    async fn validate_otlp_trace(
+        self,
+        router: &mut IntegrationTest,
+        mock_server: &MockServer,
+        query: Query,
+    ) -> Result<(), BoxError> {
         OtlpTraceSpec {
             trace_spec: self,
-            mock_server
-        }.validate_trace(router, query).await
+            mock_server,
+        }
+        .validate_trace(router, query)
+        .await
     }
-    async fn validate_otlp_metrics(self, mock_server: &MockServer) -> Result<(), BoxError>{
+    async fn validate_otlp_metrics(self, mock_server: &MockServer) -> Result<(), BoxError> {
         OtlpTraceSpec {
             trace_spec: self,
-            mock_server
-        }.validate_metrics().await
+            mock_server,
+        }
+        .validate_metrics()
+        .await
     }
 }

@@ -1,15 +1,22 @@
+use std::time::Duration;
+
+use anyhow::anyhow;
+use opentelemetry_api::trace::SpanContext;
+use opentelemetry_api::trace::TraceId;
+use serde_json::Value;
+use tower::BoxError;
+
 use crate::integration::common::Query;
 use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
-use opentelemetry_api::trace::{SpanContext, TraceId};
-use serde_json::Value;
-use std::time::Duration;
-use anyhow::anyhow;
-use tower::BoxError;
 
 pub trait Verifier {
     fn spec(&self) -> &TraceSpec;
-    async fn validate_trace(&self, router: &mut IntegrationTest, query: Query) -> Result<(), BoxError> {
+    async fn validate_trace(
+        &self,
+        router: &mut IntegrationTest,
+        query: Query,
+    ) -> Result<(), BoxError> {
         let (id, response) = router.execute_query(query).await;
         for _ in 0..20 {
             if self.find_valid_trace(id).await.is_ok() {
@@ -22,7 +29,6 @@ pub trait Verifier {
         assert!(response.status().is_success());
         self.validate_subgraph(subgraph_context)?;
         Ok(())
-
     }
 
     async fn validate_metrics(&self) -> Result<(), BoxError> {
@@ -40,18 +46,12 @@ pub trait Verifier {
         unimplemented!("find_valid_metrics")
     }
 
-    fn validate_subgraph(
-        &self,
-        subgraph_context: SpanContext,
-    ) -> Result<(), BoxError> {
+    fn validate_subgraph(&self, subgraph_context: SpanContext) -> Result<(), BoxError> {
         self.validate_subgraph_priority_sampled(&subgraph_context)?;
         self.validate_subgraph_sampled(&subgraph_context)?;
         Ok(())
     }
-    fn validate_subgraph_sampled(
-        &self,
-        subgraph_context: &SpanContext,
-    ) -> Result<(), BoxError> {
+    fn validate_subgraph_sampled(&self, subgraph_context: &SpanContext) -> Result<(), BoxError> {
         if let Some(sampled) = self.spec().priority_sampled {
             assert_eq!(
                 subgraph_context.trace_state().get("psr"),
@@ -60,21 +60,18 @@ pub trait Verifier {
             );
         }
 
-
         Ok(())
     }
 
     fn validate_subgraph_priority_sampled(
         &self,
         subgraph_context: &SpanContext,
-    ) -> Result<(), BoxError>{
+    ) -> Result<(), BoxError> {
         if let Some(sampled) = self.spec().subgraph_sampled {
             assert_eq!(subgraph_context.is_sampled(), sampled, "subgraph sampled");
         }
         Ok(())
     }
-
-
 
     #[allow(clippy::too_many_arguments)]
     async fn find_valid_trace(&self, trace_id: TraceId) -> Result<(), BoxError> {
@@ -156,5 +153,4 @@ pub trait Verifier {
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError>;
 
     fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError>;
-
 }

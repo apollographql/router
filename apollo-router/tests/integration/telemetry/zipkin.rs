@@ -3,15 +3,17 @@ extern crate core;
 use std::collections::HashSet;
 use std::ops::Deref;
 
-use crate::integration::common::{Query, Telemetry};
-use crate::integration::telemetry::verifier::Verifier;
-use crate::integration::telemetry::TraceSpec;
-use crate::integration::IntegrationTest;
-use crate::integration::ValueExt;
 use anyhow::anyhow;
 use opentelemetry_api::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
+
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::telemetry::verifier::Verifier;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::IntegrationTest;
+use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
@@ -38,7 +40,6 @@ async fn test_basic() -> Result<(), BoxError> {
     Ok(())
 }
 
-
 struct ZipkinTraceSpec {
     trace_spec: TraceSpec,
 }
@@ -55,10 +56,8 @@ impl Verifier for ZipkinTraceSpec {
         Ok(())
     }
     fn verify_version(&self, _trace: &Value) -> Result<(), BoxError> {
-
         Ok(())
     }
-
 
     fn measured_span(&self, _trace: &Value, _name: &str) -> Result<bool, BoxError> {
         Ok(true)
@@ -76,7 +75,9 @@ impl Verifier for ZipkinTraceSpec {
             .collect();
         tracing::debug!("found services {:?}", actual_services);
 
-        let expected_services = self.trace_spec.services
+        let expected_services = self
+            .trace_spec
+            .services
             .iter()
             .map(|s| s.to_string())
             .collect::<HashSet<_>>();
@@ -98,8 +99,8 @@ impl Verifier for ZipkinTraceSpec {
 
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError> {
         if let Some(expected_operation_name) = &self.operation_name {
-            let binding =
-                trace.select_path("$..[?(@.name == 'supergraph')].tags..['graphql.operation.name']")?;
+            let binding = trace
+                .select_path("$..[?(@.name == 'supergraph')].tags..['graphql.operation.name']")?;
             let operation_name = binding.first();
             assert_eq!(
                 operation_name
@@ -116,10 +117,15 @@ impl Verifier for ZipkinTraceSpec {
         Ok(())
     }
 
-
     async fn get_trace(&self, trace_id: TraceId) -> Result<Value, BoxError> {
         let params = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("service", self.trace_spec.services.first().expect("expected root service"))
+            .append_pair(
+                "service",
+                self.trace_spec
+                    .services
+                    .first()
+                    .expect("expected root service"),
+            )
             .finish();
 
         let id = trace_id.to_string();

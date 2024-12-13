@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::integration::common::{graph_os_enabled, Query};
+use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
@@ -106,9 +107,7 @@ async fn test_subgraph_auth_metrics() {
     router.update_config(PROMETHEUS_CONFIG).await;
     router.assert_reloaded().await;
     // This one will not be signed, counters shouldn't increment.
-    router
-        .execute_query(Query::default())
-        .await;
+    router.execute_query(Query::default()).await;
 
     // Get Prometheus metrics.
     let metrics_response = router.get_metrics_response().await.unwrap();
@@ -267,11 +266,7 @@ async fn test_gauges_on_reload() {
     router.execute_default_query().await;
 
     // Introspection query
-    router
-        .execute_query(Query::introspection()
-
-        )
-        .await;
+    router.execute_query(Query::introspection()).await;
 
     // Persisted query
     router

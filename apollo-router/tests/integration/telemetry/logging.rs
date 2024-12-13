@@ -1,8 +1,9 @@
 use tower::BoxError;
 use uuid::Uuid;
 
-use crate::integration::common::{graph_os_enabled, Query};
+use crate::integration::common::graph_os_enabled;
 use crate::integration::common::IntegrationTest;
+use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 
 #[tokio::test(flavor = "multi_thread")]

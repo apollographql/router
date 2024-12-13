@@ -5,7 +5,8 @@ use serde_json::json;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::{graph_os_enabled, Query};
+use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::IntegrationTest;
 
@@ -99,9 +100,13 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(Query::builder().body(json!({
-            "query": "query UniqueName { topProducts { name } }"
-        })).build())
+        .execute_query(
+            Query::builder()
+                .body(json!({
+                    "query": "query UniqueName { topProducts { name } }"
+                }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 504);
     let response = response.text().await?;
