@@ -482,8 +482,10 @@ impl Verifier for JaegerTraceSpec {
         if let Some(expected_operation_name) = &self.operation_name {
             let binding =
                 trace.select_path("$..spans[?(@.operationName == 'supergraph')]..tags[?(@.key == 'graphql.operation.name')].value")?;
-            println!("binding: {:?}", binding);
             let operation_name = binding.first();
+            if operation_name.is_none() {
+                return Err(BoxError::from("graphql.operation.name not found"));
+            }
             assert_eq!(
                 operation_name
                     .expect("graphql.operation.name expected")
