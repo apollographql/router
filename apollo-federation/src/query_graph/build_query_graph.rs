@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -8,7 +9,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -2357,12 +2357,11 @@ fn resolvable_key_applications<'doc>(
     Ok(applications)
 }
 
-lazy_static! {
-    static ref CONTEXT_PARSING_LEADING_PATTERN: Regex =
-        Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap();
-    static ref CONTEXT_PARSING_CONTEXT_PATTERN: Regex =
-        Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap();
-}
+static CONTEXT_PARSING_LEADING_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap());
+
+static CONTEXT_PARSING_CONTEXT_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap());
 
 fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     // PORT_NOTE: The original JS regex, as shown below

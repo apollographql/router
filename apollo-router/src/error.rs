@@ -1,12 +1,12 @@
 //! Router errors.
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::error::FederationError;
 use displaydoc::Display;
-use lazy_static::__Deref;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;

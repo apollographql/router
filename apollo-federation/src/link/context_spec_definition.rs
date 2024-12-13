@@ -1,9 +1,10 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::name;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::internal_error;
@@ -61,10 +62,9 @@ impl SpecDefinition for ContextSpecDefinition {
     }
 }
 
-lazy_static! {
-    pub(crate) static ref CONTEXT_VERSIONS: SpecDefinitions<ContextSpecDefinition> = {
+pub(crate) static CONTEXT_VERSIONS: LazyLock<SpecDefinitions<ContextSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::context_identity());
         definitions.add(ContextSpecDefinition::new(Version { major: 0, minor: 1 }));
         definitions
-    };
-}
+    });

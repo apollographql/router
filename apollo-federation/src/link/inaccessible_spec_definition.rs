@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::LazyLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -13,7 +14,6 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -97,8 +97,8 @@ impl SpecDefinition for InaccessibleSpecDefinition {
     }
 }
 
-lazy_static! {
-    pub(crate) static ref INACCESSIBLE_VERSIONS: SpecDefinitions<InaccessibleSpecDefinition> = {
+pub(crate) static INACCESSIBLE_VERSIONS: LazyLock<SpecDefinitions<InaccessibleSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::inaccessible_identity());
         definitions.add(InaccessibleSpecDefinition::new(Version {
             major: 0,
@@ -109,8 +109,7 @@ lazy_static! {
             minor: 2,
         }));
         definitions
-    };
-}
+    });
 
 fn is_type_system_location(location: DirectiveLocation) -> bool {
     matches!(
