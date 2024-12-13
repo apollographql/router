@@ -1,5 +1,4 @@
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Type;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
@@ -31,8 +30,10 @@ impl<'a> NamespaceResolver for ThisResolver<'a> {
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
         schema: &SchemaInfo,
-    ) -> Result<Option<Type>, Message> {
-        let root = resolver::get_root(reference, expression, schema)?;
+    ) -> Result<(), Message> {
+        let Some(root) = resolver::get_root(reference) else {
+            return Ok(()); // Not something we can type check this way
+        };
         let field_type = self
             .object
             .fields

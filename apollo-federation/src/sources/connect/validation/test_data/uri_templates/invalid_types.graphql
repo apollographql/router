@@ -19,13 +19,13 @@ type Query {
 }
 
 type This {
-    anArray: [String]
+    anArray: [String] @external
     thisIsArray: String
     @connect(
         http: { GET: "http://127.0.0.1/{$this.anArray}" }
         selection: "$"
     )
-    anObject: Object
+    anObject: Object @external
     thisIsObject: String
     @connect(
         http: { GET: "http://127.0.0.1/{$this}?obj={$this.anObject}" }
@@ -38,5 +38,5 @@ input Input {
 }
 
 type Object {
-    stuff: String
+    stuff: String @external
 }

@@ -22,32 +22,66 @@ Ok(
             },
         ),
         path: [],
-        query: {
-            Component {
-                parts: [
-                    Text(
-                        "abc",
-                    ),
-                ],
-            }: Component {
-                parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $args,
-                                location: 24..29,
+        query: [
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "abc",
+                                location: 19..22,
                             },
-                            path: [
-                                VariablePathPart {
-                                    part: "abc",
-                                    location: 30..33,
-                                },
-                            ],
-                            location: 24..33,
-                        },
-                    ),
-                ],
-            },
-        },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "abc",
+                                                            ),
+                                                            range: Some(
+                                                                6..9,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                9..9,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..9,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..9,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 24..33,
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ],
     },
 )

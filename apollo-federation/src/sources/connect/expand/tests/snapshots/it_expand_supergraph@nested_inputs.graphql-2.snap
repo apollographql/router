@@ -38,77 +38,194 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Var(
-                                VariableReference {
-                                    namespace: VariableNamespace {
-                                        namespace: $args,
-                                        location: 2..7,
-                                    },
-                                    path: [
-                                        VariablePathPart {
-                                            part: "bar",
-                                            location: 8..11,
+                            Expression(
+                                Expression {
+                                    expression: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "bar",
+                                                                ),
+                                                                range: Some(
+                                                                    6..9,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    9..9,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..9,
+                                                ),
+                                            },
                                         },
-                                    ],
+                                    ),
                                     location: 2..11,
                                 },
                             ),
                         ],
                     },
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Var(
-                                VariableReference {
-                                    namespace: VariableNamespace {
-                                        namespace: $args,
-                                        location: 14..19,
-                                    },
-                                    path: [
-                                        VariablePathPart {
-                                            part: "doubleBaz",
-                                            location: 20..29,
+                            Expression(
+                                Expression {
+                                    expression: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "doubleBaz",
+                                                                ),
+                                                                range: Some(
+                                                                    6..15,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "buzz",
+                                                                        ),
+                                                                        range: Some(
+                                                                            16..20,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Empty,
+                                                                        range: Some(
+                                                                            20..20,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    15..20,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..20,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..20,
+                                                ),
+                                            },
                                         },
-                                        VariablePathPart {
-                                            part: "buzz",
-                                            location: 30..34,
-                                        },
-                                    ],
+                                    ),
                                     location: 14..34,
                                 },
                             ),
                         ],
                     },
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Var(
-                                VariableReference {
-                                    namespace: VariableNamespace {
-                                        namespace: $args,
-                                        location: 37..42,
-                                    },
-                                    path: [
-                                        VariablePathPart {
-                                            part: "baz",
-                                            location: 43..46,
+                            Expression(
+                                Expression {
+                                    expression: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "baz",
+                                                                ),
+                                                                range: Some(
+                                                                    6..9,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "quux",
+                                                                        ),
+                                                                        range: Some(
+                                                                            10..14,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Key(
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "quaz",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    15..19,
+                                                                                ),
+                                                                            },
+                                                                            WithRange {
+                                                                                node: Empty,
+                                                                                range: Some(
+                                                                                    19..19,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                        range: Some(
+                                                                            14..19,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    9..19,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..19,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..19,
+                                                ),
+                                            },
                                         },
-                                        VariablePathPart {
-                                            part: "quux",
-                                            location: 47..51,
-                                        },
-                                        VariablePathPart {
-                                            part: "quaz",
-                                            location: 52..56,
-                                        },
-                                    ],
+                                    ),
                                     location: 37..56,
                                 },
                             ),
                         ],
                     },
                 ],
-                query: {},
+                query: [],
             },
             method: Get,
             headers: {},

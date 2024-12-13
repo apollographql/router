@@ -467,8 +467,18 @@ mod helpers {
                 .into_iter()
                 .flatten();
 
-            // The HTTP body might contain references to $this, so we grab those usages as well
-            let url_parameters = connector.transport.connect_template.variables().cloned();
+            // The URI or headers might reference $this, so we check for that too
+            let url_parameters = connector
+                .transport
+                .connect_template
+                .expressions()
+                .map(|e| &e.expression)
+                .flat_map(extract_params_from_selection);
+            // TODO: add a test for header keys
+            let header_parameters =
+                connector.transport.headers.values().flat_map(|header| {
+                    header.expressions().flat_map(extract_params_from_selection)
+                });
 
             // The actual selection might make use of the $this variable, so we grab them too
             let selection_parameters = extract_params_from_selection(&connector.selection);
@@ -492,6 +502,7 @@ mod helpers {
             for VariableReference { path, .. } in body_parameters
                 .into_iter()
                 .chain(url_parameters)
+                .chain(header_parameters)
                 .chain(selection_parameters)
                 .unique()
                 .filter(|var| var.namespace.namespace == namespace_filter)

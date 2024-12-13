@@ -10,6 +10,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use either::Either;
 use http::header;
 use http::HeaderName;
 use serde_json::Value;
@@ -17,7 +18,7 @@ use url::Url;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
-use super::url_template;
+use super::string_template;
 use super::variable::Namespace;
 use super::ConnectId;
 use super::JSONSelection;
@@ -25,7 +26,6 @@ use super::URLTemplate;
 use crate::error::FederationError;
 use crate::schema::ValidFederationSchema;
 use crate::sources::connect::header::HeaderValue;
-use crate::sources::connect::header::HeaderValueError;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
@@ -210,10 +210,10 @@ impl HttpJsonTransport {
 
         Ok(Self {
             source_url: source.map(|s| s.base_url.clone()),
-            connect_template: connect_url.parse().map_err(|e: url_template::Error| {
+            connect_template: connect_url.parse().map_err(|e: string_template::Error| {
                 FederationError::internal(format!(
                     "could not parse URL template: {message}",
-                    message = e.message()
+                    message = e.message
                 ))
             })?,
             method,
@@ -229,16 +229,18 @@ impl HttpJsonTransport {
     fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
         let url_variables = self
             .connect_template
-            .variables()
-            .map(|v| v.namespace.namespace);
+            .expressions()
+            .flat_map(|e| e.expression.external_variables());
         let header_variables = self
             .headers
             .iter()
             .filter_map(|(_, source)| match source {
                 HeaderSource::From(_) => None,
-                HeaderSource::Value(source) => {
-                    Some(source.variable_references().map(|v| v.namespace.namespace))
-                }
+                HeaderSource::Value(source) => Some(
+                    source
+                        .expressions()
+                        .flat_map(|e| e.expression.external_variables()),
+                ),
             })
             .flatten();
         let body_variables = self.body.iter().flat_map(|b| b.external_variables());
@@ -272,7 +274,16 @@ impl HTTPMethod {
 #[derive(Clone, Debug)]
 pub enum HeaderSource {
     From(HeaderName),
-    Value(HeaderValue<'static>),
+    Value(HeaderValue),
+}
+
+impl HeaderSource {
+    pub(crate) fn expressions(&self) -> impl Iterator<Item = &JSONSelection> {
+        match self {
+            HeaderSource::From(_) => Either::Left(std::iter::empty()),
+            HeaderSource::Value(value) => Either::Right(value.expressions().map(|e| &e.expression)),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -431,7 +442,7 @@ impl<'a> Header<'a> {
 #[derive(Debug)]
 pub(crate) enum HeaderParseError<'a> {
     ValueError {
-        err: HeaderValueError,
+        err: string_template::Error,
         node: &'a Node<ast::Value>,
     },
     /// Both `value` and `from` are set
@@ -531,15 +542,18 @@ mod tests {
                     connect_template: URLTemplate {
                         base: None,
                         path: [
-                            Component {
+                            StringTemplate {
                                 parts: [
-                                    Text(
-                                        "users",
+                                    Constant(
+                                        Constant {
+                                            value: "users",
+                                            location: 1..6,
+                                        },
                                     ),
                                 ],
                             },
                         ],
-                        query: {},
+                        query: [],
                     },
                     method: Get,
                     headers: {
@@ -547,13 +561,18 @@ mod tests {
                             "x-auth-token",
                         ),
                         "user-agent": Value(
-                            HeaderValue {
-                                parts: [
-                                    Constant(
-                                        "Firefox",
-                                    ),
-                                ],
-                            },
+                            HeaderValue(
+                                StringTemplate {
+                                    parts: [
+                                        Constant(
+                                            Constant {
+                                                value: "Firefox",
+                                                location: 0..7,
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ),
                         ),
                     },
                     body: None,
@@ -643,15 +662,18 @@ mod tests {
                     connect_template: URLTemplate {
                         base: None,
                         path: [
-                            Component {
+                            StringTemplate {
                                 parts: [
-                                    Text(
-                                        "posts",
+                                    Constant(
+                                        Constant {
+                                            value: "posts",
+                                            location: 1..6,
+                                        },
                                     ),
                                 ],
                             },
                         ],
-                        query: {},
+                        query: [],
                     },
                     method: Get,
                     headers: {
@@ -659,13 +681,18 @@ mod tests {
                             "x-auth-token",
                         ),
                         "user-agent": Value(
-                            HeaderValue {
-                                parts: [
-                                    Constant(
-                                        "Firefox",
-                                    ),
-                                ],
-                            },
+                            HeaderValue(
+                                StringTemplate {
+                                    parts: [
+                                        Constant(
+                                            Constant {
+                                                value: "Firefox",
+                                                location: 0..7,
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ),
                         ),
                     },
                     body: None,

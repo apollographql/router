@@ -76,6 +76,12 @@ impl<'schema> GraphQLString<'schema> {
 
         Some(start..end)
     }
+
+    pub(crate) fn slice(mut self, range: Range<usize>) -> Self {
+        self.offset += range.start;
+        self.raw_string = &self.raw_string[range];
+        self
+    }
 }
 
 #[cfg(test)]
