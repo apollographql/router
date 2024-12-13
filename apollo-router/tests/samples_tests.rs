@@ -30,6 +30,7 @@ use wiremock::ResponseTemplate;
 #[path = "./common.rs"]
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
+use crate::common::Query;
 
 fn main() -> Result<ExitCode, Box<dyn Error>> {
     let args = Arguments::from_args();
@@ -497,7 +498,7 @@ impl TestExecution {
         writeln!(out, "header: {:?}\n", headers).unwrap();
 
         let (_, response) = router
-            .execute_query_with_headers(&request, headers.clone())
+            .execute_query(Query::builder().body(request).headers(headers.clone()).build())
             .await;
         writeln!(out, "response headers: {:?}", response.headers()).unwrap();
 

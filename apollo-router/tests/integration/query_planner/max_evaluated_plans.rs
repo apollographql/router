@@ -1,5 +1,5 @@
 use serde_json::json;
-
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 fn assert_evaluated_plans(prom: &str, expected: u64) {
@@ -31,10 +31,10 @@ async fn reports_evaluated_plans() {
     router.start().await;
     router.assert_started().await;
     router
-        .execute_query(&json!({
+        .execute_query(Query::builder().body(json!({
             "query": r#"{ t { v1 v2 v3 v4 } }"#,
             "variables": {},
-        }))
+        })).build())
         .await;
 
     let metrics = router
@@ -71,10 +71,10 @@ async fn does_not_exceed_max_evaluated_plans_legacy() {
     router.start().await;
     router.assert_started().await;
     router
-        .execute_query(&json!({
+        .execute_query(Query::builder().body(json!({
             "query": r#"{ t { v1 v2 v3 v4 } }"#,
             "variables": {},
-        }))
+        })).build())
         .await;
 
     let metrics = router
@@ -111,10 +111,10 @@ async fn does_not_exceed_max_evaluated_plans() {
     router.start().await;
     router.assert_started().await;
     router
-        .execute_query(&json!({
+        .execute_query(Query::builder().body(json!({
             "query": r#"{ t { v1 v2 v3 v4 } }"#,
             "variables": {},
-        }))
+        })).build())
         .await;
 
     let metrics = router

@@ -856,7 +856,7 @@ mod helper {
     use wiremock::ResponseTemplate;
 
     use super::test_is_enabled;
-    use crate::integration::common::IntegrationTest;
+    use crate::integration::common::{IntegrationTest, Query};
 
     /// Helper type for specifying a valid handler
     pub type Handler = fn(&wiremock::Request) -> ResponseTemplate;
@@ -916,7 +916,7 @@ mod helper {
 
         // Execute the request
         let request = serde_json::to_value(requests)?;
-        let (_span, response) = router.execute_query(&request).await;
+        let (_span, response) = router.execute_query(Query::builder().body(request).build()).await;
 
         serde_json::from_slice::<Vec<Response>>(&response.bytes().await?).map_err(BoxError::from)
     }

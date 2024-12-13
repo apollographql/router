@@ -1,9 +1,9 @@
 use serde_json::json;
 use tower::BoxError;
 
-use crate::integration::common::graph_os_enabled;
 use crate::integration::common::IntegrationTest;
 use crate::integration::common::Telemetry;
+use crate::integration::common::{graph_os_enabled, Query};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id_via_header() -> Result<(), BoxError> {
@@ -12,8 +12,7 @@ async fn test_trace_id_via_header() -> Result<(), BoxError> {
         return Ok(());
     }
     async fn make_call(router: &mut IntegrationTest, trace_id: &str) {
-        let _ = router.execute_query_with_headers(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}),
-                                                  [("id_from_header".to_string(), trace_id.to_string())].into()).await;
+        let _ = router.execute_query(Query::builder().body(json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}})).header("id_from_header".to_string(), trace_id.to_string()).build()).await;
     }
 
     let mut router = IntegrationTest::builder()

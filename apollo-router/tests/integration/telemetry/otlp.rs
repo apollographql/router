@@ -1,18 +1,13 @@
 extern crate core;
 
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::ops::Deref;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
-use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 use wiremock::matchers::method;
@@ -21,9 +16,11 @@ use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Telemetry;
+use crate::integration::common::{graph_os_enabled, Query};
 use crate::integration::IntegrationTest;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
 use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -45,15 +42,8 @@ async fn test_basic() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
     for _ in 0..2 {
-        let (id, result) = router.execute_query(&query).await;
-        assert!(!result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .is_empty());
-        Spec::builder()
+        TraceSpec::builder()
             .operation_name("ExampleQuery")
             .services(["client", "router", "subgraph"].into())
             .span_names(
@@ -72,12 +62,16 @@ async fn test_basic() -> Result<(), BoxError> {
             )
             .subgraph_sampled(true)
             .build()
-            .validate_trace(id, &mock_server)
+            .validate_otlp_trace(
+                &mut router,
+                &mock_server,
+                Query::default(),
+            )
             .await?;
-        Spec::builder()
+        TraceSpec::builder()
             .service("router")
             .build()
-            .validate_metrics(&mock_server)
+            .validate_otlp_metrics(&mock_server)
             .await?;
         router.touch_config().await;
         router.assert_reloaded().await;
@@ -98,6 +92,7 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
+        .extra_propagator(Telemetry::Datadog)
         .config(&config)
         .build()
         .await;
@@ -105,14 +100,16 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_query(&query).await;
-    Spec::builder()
+    TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::default(),
+        )
         .await?;
     router.graceful_shutdown().await;
     Ok(())
@@ -137,13 +134,15 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_query(&query).await;
-    Spec::builder()
+    TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .subgraph_sampled(true)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).build(),
+        )
         .await?;
     router.graceful_shutdown().await;
     Ok(())
@@ -158,12 +157,11 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let context = Arc::new(Mutex::new(None));
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
-        .subgraph_context(context.clone())
+        .extra_propagator(Telemetry::Datadog)
         .config(&config)
         .build()
         .await;
@@ -171,108 +169,99 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_query(&query).await;
-
-    Spec::builder()
-        .subgraph_context(context.clone())
+    TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).build(),
+        )
         .await?;
     // ---------------------- zipkin propagator with unsampled trace
     // Testing for an unsampled trace, so it should be sent to the otlp exporter with sampling priority set 0
     // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    let id = TraceId::from_hex("80f198ee56343ba864fe8b2a57d3eff7").unwrap();
-    let headers: HashMap<String, String> = [
-        (
-            "X-B3-TraceId".to_string(),
-            "80f198ee56343ba864fe8b2a57d3eff7".to_string(),
-        ),
-        (
-            "X-B3-ParentSpanId".to_string(),
-            "05e3ac9a4f6e3b90".to_string(),
-        ),
-        ("X-B3-SpanId".to_string(), "e457b5a2e4d86bd1".to_string()),
-        ("X-B3-Sampled".to_string(), "0".to_string()),
-    ]
-    .into();
-
-    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
-    Spec::builder()
-        .subgraph_context(context.clone())
+    TraceSpec::builder()
         .services(["router"].into())
         .priority_sampled("0")
-        .subgraph_sampled(true)
+        .subgraph_sampled(false)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder()
+                .traced(false)
+                .header("X-B3-TraceId", "80f198ee56343ba864fe8b2a57d3eff7")
+                .header("X-B3-ParentSpanId", "05e3ac9a4f6e3b90")
+                .header("X-B3-SpanId", "e457b5a2e4d86bd1")
+                .header("X-B3-Sampled", "0")
+                .build(),
+        )
         .await?;
     // ---------------------- trace context propagation
     // Testing for a trace containing the right tracestate with m and psr for DD and a sampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
     // And it should also send the trace to subgraph as the trace is sampled
-    let id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap();
-    let headers: HashMap<String, String> = [
-        (
-            "traceparent".to_string(),
-            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".to_string(),
-        ),
-        ("tracestate".to_string(), "m=1,psr=1".to_string()),
-    ]
-    .into();
-
-    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
-    Spec::builder()
-        .subgraph_context(context.clone())
-        .services(["router", "subgraph"].into())
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder()
+                .traced(true)
+                .header(
+                    "traceparent",
+                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                )
+                .header("tracestate", "m=1,psr=1")
+                .build(),
+        )
         .await?;
     // ----------------------
     // Testing for a trace containing the right tracestate with m and psr for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 0
     // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    let id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319d").unwrap();
-    let headers: HashMap<String, String> = [
-        (
-            "traceparent".to_string(),
-            "00-0af7651916cd43dd8448eb211c80319d-b7ad6b7169203331-00".to_string(),
-        ),
-        ("tracestate".to_string(), "m=1,psr=0".to_string()),
-    ]
-    .into();
-
-    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
-    Spec::builder()
-        .subgraph_context(context.clone())
+    TraceSpec::builder()
         .services(["router"].into())
         .priority_sampled("0")
+        .subgraph_sampled(false)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder()
+                .traced(false)
+                .header(
+                    "traceparent",
+                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-02",
+                )
+                .header("tracestate", "m=1,psr=0")
+                .build(),
+        )
         .await?;
     // ----------------------
     // Testing for a trace containing a tracestate m and psr with psr set to 1 for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
     // It should not send the trace to the subgraph as we didn't use the datadog propagator and therefore the trace will remain unsampled.
-    let id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319e").unwrap();
-    let headers: HashMap<String, String> = [
-        (
-            "traceparent".to_string(),
-            "00-0af7651916cd43dd8448eb211c80319e-b7ad6b7169203331-00".to_string(),
-        ),
-        ("tracestate".to_string(), "m=1,psr=1".to_string()),
-    ]
-    .into();
-
-    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
-    Spec::builder()
-        .subgraph_context(context.clone())
-        .services(["router"].into())
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder()
+                .traced(false)
+                .header(
+                    "traceparent",
+                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03",
+                )
+                .header("tracestate", "m=1,psr=1")
+                .build(),
+        )
         .await?;
 
     // Be careful if you add the same kind of test crafting your own trace id, make sure to increment the previous trace id by 1 if not you'll receive all the previous spans tested with the same trace id before
@@ -288,25 +277,26 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_agent_no_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let context = Arc::new(Mutex::new(None));
-    let mut router = IntegrationTest::builder()
-        .subgraph_context(context.clone())
-        .config(&config)
-        .build()
-        .await;
+    let mut router = IntegrationTest::builder().config(&config)
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .extra_propagator(Telemetry::Datadog)
+        .build().await;
 
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_untraced_query(&query, None).await;
-    Spec::builder()
-        .subgraph_context(context)
+    TraceSpec::builder()
         .services(["router"].into())
         .priority_sampled("0")
         .subgraph_sampled(false)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(false).build(),
+        )
         .await?;
     router.graceful_shutdown().await;
     Ok(())
@@ -320,25 +310,27 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_agent_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let context = Arc::new(Mutex::new(None));
     let mut router = IntegrationTest::builder()
-        .subgraph_context(context.clone())
         .config(&config)
-        .build()
-        .await;
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .extra_propagator(Telemetry::Datadog)
+        .build().await;
 
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_untraced_query(&query, None).await;
-    Spec::builder()
-        .subgraph_context(context.clone())
-        .services(["router"].into())
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(false).build(),
+        )
         .await?;
     router.graceful_shutdown().await;
     Ok(())
@@ -350,14 +342,13 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
         panic!("Error: test skipped because GraphOS is not enabled");
     }
     let mock_server = mock_otlp_server().await;
-    let context = Arc::new(Mutex::new(None));
     let config = include_str!("fixtures/otlp_datadog_agent_sample_no_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
-        .subgraph_context(context.clone())
+        .extra_propagator(Telemetry::Datadog)
         .config(&config)
         .build()
         .await;
@@ -365,15 +356,16 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_untraced_query(&query, None).await;
-    Spec::builder()
+    TraceSpec::builder()
         .services(["router"].into())
         .priority_sampled("0")
         .subgraph_sampled(false)
-        .subgraph_context(context.clone())
         .build()
-        .validate_trace(id, &mock_server)
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(false).build(),
+        )
         .await?;
     router.graceful_shutdown().await;
     Ok(())
@@ -387,7 +379,6 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_propagation.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let context = Arc::new(Mutex::new(None));
     let mut router = IntegrationTest::builder()
         // We're using datadog propagation as this is what we are trying to test.
         .telemetry(Telemetry::Otlp {
@@ -395,10 +386,6 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
         })
         .extra_propagator(Telemetry::Datadog)
         .config(config)
-        .responder(ResponseTemplate::new(200).set_body_json(
-            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
-        ))
-        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -406,67 +393,63 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     router.assert_started().await;
 
     // Parent based sampling. psr MUST be populated with the value that we pass in.
-    test_psr(
-        &mut router,
-        Some("-1"),
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router"].into())
-            .priority_sampled("-1")
-            .subgraph_sampled(false)
-            .build(),
-        &mock_server,
-    )
-    .await?;
-    test_psr(
-        &mut router,
-        Some("0"),
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router"].into())
-            .priority_sampled("0")
-            .subgraph_sampled(false)
-            .build(),
-        &mock_server,
-    )
-    .await?;
-    test_psr(
-        &mut router,
-        Some("1"),
-        Spec::builder()
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("1")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
-    test_psr(
-        &mut router,
-        Some("2"),
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("2")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("-1")
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("-1").build(),
+        )
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("0").build(),
+        )
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("1").build(),
+        )
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("2")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("2").build(),
+        )
+        .await?;
 
     // No psr was passed in the router is free to set it. This will be 1 as we are going to sample here.
-    test_psr(
-        &mut router,
-        None,
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("1")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).build(),
+        )
+        .await?;
 
     router.graceful_shutdown().await;
 
@@ -481,17 +464,12 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_propagation_no_parent_sampler.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let context = Arc::new(Mutex::new(None));
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(config)
-        .responder(ResponseTemplate::new(200).set_body_json(
-            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
-        ))
-        .subgraph_context(context.clone())
         .build()
         .await;
 
@@ -499,227 +477,89 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     router.assert_started().await;
 
     // The router will ignore the upstream PSR as parent based sampling is disabled.
-    test_psr(
-        &mut router,
-        Some("-1"),
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("1")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
-    test_psr(
-        &mut router,
-        Some("0"),
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("1")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
-    test_psr(
-        &mut router,
-        Some("1"),
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("1")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
-    test_psr(
-        &mut router,
-        Some("2"),
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("1")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
 
-    test_psr(
-        &mut router,
-        None,
-        Spec::builder()
-            .subgraph_context(context.clone())
-            .services(["client", "router", "subgraph"].into())
-            .priority_sampled("1")
-            .subgraph_sampled(true)
-            .build(),
-        &mock_server,
-    )
-    .await?;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("-1").build(),
+        )
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("0").build(),
+        )
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("1").build(),
+        )
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).psr("2").build(),
+        )
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).build(),
+        )
+        .await?;
 
     router.graceful_shutdown().await;
 
     Ok(())
 }
 
-async fn test_psr(
-    router: &mut IntegrationTest,
-    psr: Option<&str>,
-    trace_spec: Spec,
-    mock_server: &MockServer,
-) -> Result<(), BoxError> {
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let headers = if let Some(psr) = psr {
-        vec![("x-datadog-sampling-priority".to_string(), psr.to_string())]
-    } else {
-        vec![]
-    };
-    let (id, result) = router
-        .execute_query_with_headers(&query, headers.into_iter().collect())
-        .await;
+struct OtlpTraceSpec<'a> {
+    trace_spec: TraceSpec,
+    mock_server: &'a MockServer
+}
+impl Deref for OtlpTraceSpec<'_> {
+    type Target = TraceSpec;
 
-    assert!(result.status().is_success());
-
-    trace_spec.validate_trace(id, mock_server).await?;
-    Ok(())
+    fn deref(&self) -> &Self::Target {
+        &self.trace_spec
+    }
 }
 
-#[derive(buildstructor::Builder)]
-struct Spec {
-    subgraph_context: Option<Arc<Mutex<Option<SpanContext>>>>,
-    operation_name: Option<String>,
-    version: Option<String>,
-    services: HashSet<&'static str>,
-    span_names: HashSet<&'static str>,
-    measured_spans: HashSet<&'static str>,
-    unmeasured_spans: HashSet<&'static str>,
-    priority_sampled: Option<&'static str>,
-    subgraph_sampled: Option<bool>,
-}
 
-impl Spec {
-    #[allow(clippy::too_many_arguments)]
-    async fn validate_trace(&self, id: TraceId, mock_server: &MockServer) -> Result<(), BoxError> {
-        for _ in 0..10 {
-            if self.find_valid_trace(id, mock_server).await.is_ok() {
-                return Ok(());
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        self.find_valid_trace(id, mock_server).await?;
-
-        if let Some(subgraph_context) = &self.subgraph_context {
-            let subgraph_context = subgraph_context.lock().expect("poisoned");
-            let subgraph_span_context = subgraph_context.as_ref().expect("state").clone();
-
-            assert_eq!(
-                subgraph_span_context.trace_state().get("psr"),
-                self.priority_sampled
-            );
-            if let Some(sampled) = self.subgraph_sampled {
-                assert_eq!(subgraph_span_context.is_sampled(), sampled);
-            }
-        }
-
+impl Verifier for OtlpTraceSpec<'_> {
+    fn verify_span_attributes(&self, _span: &Value) -> Result<(), BoxError> {
+        // TODO
         Ok(())
     }
-
-    async fn validate_metrics(&self, mock_server: &MockServer) -> Result<(), BoxError> {
-        for _ in 0..10 {
-            if self.find_valid_metrics(mock_server).await.is_ok() {
-                return Ok(());
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        self.find_valid_metrics(mock_server).await?;
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn find_valid_trace(
-        &self,
-        trace_id: TraceId,
-        mock_server: &MockServer,
-    ) -> Result<(), BoxError> {
-        // A valid trace has:
-        // * All three services
-        // * The correct spans
-        // * All spans are parented
-        // * Required attributes of 'router' span has been set
-
-        let requests = mock_server.received_requests().await;
-        let trace= Value::Array(requests.unwrap_or_default().iter().filter(|r| r.url.path().ends_with("/traces"))
-            .filter_map(|r|{
-                match opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(
-                    bytes::Bytes::copy_from_slice(&r.body),
-                ) {
-                    Ok(trace) => {
-                        match serde_json::to_value(trace) {
-                            Ok(trace) => {
-                                Some(trace) }
-                            Err(_) => {
-                                None
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        None
-                    }
-                }
-            }).filter(|t| {
-
-            let datadog_trace_id = TraceId::from_u128(trace_id.to_datadog() as u128);
-            let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", trace_id)).unwrap_or_default().is_empty();
-            let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", datadog_trace_id)).unwrap_or_default().is_empty();
-            trace_found1 | trace_found2
-        }).collect());
-
-        self.verify_services(&trace)?;
-        self.verify_spans_present(&trace)?;
-        self.verify_measured_spans(&trace)?;
-        self.verify_operation_name(&trace)?;
-        self.verify_priority_sampled(&trace)?;
-        self.verify_version(&trace)?;
-        self.verify_span_kinds(&trace)?;
-
-        Ok(())
-    }
-
-    fn verify_version(&self, trace: &Value) -> Result<(), BoxError> {
-        if let Some(expected_version) = &self.version {
-            let binding = trace.select_path("$..version")?;
-            let version = binding.first();
-            assert_eq!(
-                version
-                    .expect("version expected")
-                    .as_str()
-                    .expect("version must be a string"),
-                expected_version
-            );
-        }
-        Ok(())
-    }
-
-    fn verify_measured_spans(&self, trace: &Value) -> Result<(), BoxError> {
-        for expected in &self.measured_spans {
-            assert!(
-                self.measured_span(trace, expected)?,
-                "missing measured span {}",
-                expected
-            );
-        }
-        for unexpected in &self.unmeasured_spans {
-            assert!(
-                !self.measured_span(trace, unexpected)?,
-                "unexpected measured span {}",
-                unexpected
-            );
-        }
-        Ok(())
+    fn spec(&self) -> &TraceSpec {
+        &self.trace_spec
     }
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
@@ -739,15 +579,72 @@ impl Spec {
             .unwrap_or_default())
     }
 
-    fn verify_span_kinds(&self, trace: &Value) -> Result<(), BoxError> {
-        // Validate that the span.kind has been propagated. We can just do this for a selection of spans.
-        self.validate_span_kind(trace, "router", "server")?;
-        self.validate_span_kind(trace, "supergraph", "internal")?;
-        self.validate_span_kind(trace, "http_request", "client")?;
+    async fn find_valid_metrics(&self) -> Result<(), BoxError> {
+        let requests = self.mock_server
+            .received_requests()
+            .await
+            .expect("Could not get otlp requests");
+        if let Some(metrics) = requests.iter().find(|r| r.url.path().ends_with("/metrics")) {
+            let metrics = opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes::Bytes::copy_from_slice(&metrics.body))?;
+            let json_metrics = serde_json::to_value(metrics)?;
+            // For now just validate service name.
+            self.verify_services(&json_metrics)?;
+
+            Ok(())
+        } else {
+            Err(anyhow!("No metrics received").into())
+        }
+    }
+
+
+    async fn get_trace(&self, trace_id: TraceId) -> Result<Value, axum::BoxError> {
+        let requests = self.mock_server.received_requests().await;
+        let trace = Value::Array(requests.unwrap_or_default().iter().filter(|r| r.url.path().ends_with("/traces"))
+            .filter_map(|r| {
+                match opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(
+                    bytes::Bytes::copy_from_slice(&r.body),
+                ) {
+                    Ok(trace) => {
+                        match serde_json::to_value(trace) {
+                            Ok(trace) => {
+                                Some(trace)
+                            }
+                            Err(_) => {
+                                None
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        None
+                    }
+                }
+            }).filter(|t| {
+            let datadog_trace_id = TraceId::from_u128(trace_id.to_datadog() as u128);
+            let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", trace_id)).unwrap_or_default().is_empty();
+            let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", datadog_trace_id)).unwrap_or_default().is_empty();
+            trace_found1 | trace_found2
+        }).collect());
+        Ok(trace)
+    }
+
+    fn verify_version(&self, trace: &Value) -> Result<(), BoxError> {
+        if let Some(expected_version) = &self.version {
+            let binding = trace.select_path("$..version")?;
+            let version = binding.first();
+            assert_eq!(
+                version
+                    .expect("version expected")
+                    .as_str()
+                    .expect("version must be a string"),
+                expected_version
+            );
+        }
         Ok(())
     }
 
-    fn verify_services(&self, trace: &Value) -> Result<(), BoxError> {
+
+
+    fn verify_services(&self, trace: &Value) -> Result<(), axum::BoxError> {
         let actual_services: HashSet<String> = trace
             .select_path("$..resource.attributes..[?(@.key == 'service.name')].value.stringValue")?
             .into_iter()
@@ -774,7 +671,7 @@ impl Spec {
             .filter_map(|span_name| span_name.as_string())
             .collect();
         let mut span_names: HashSet<&str> = self.span_names.clone();
-        if self.services.contains("client") {
+        if self.services.contains(&"client") {
             span_names.insert("client_request");
         }
         tracing::debug!("found spans {:?}", operation_names);
@@ -816,6 +713,7 @@ impl Spec {
         Ok(())
     }
 
+
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError> {
         if let Some(expected_operation_name) = &self.operation_name {
             let binding =
@@ -855,22 +753,6 @@ impl Spec {
         Ok(())
     }
 
-    async fn find_valid_metrics(&self, mock_server: &MockServer) -> Result<(), BoxError> {
-        let requests = mock_server
-            .received_requests()
-            .await
-            .expect("Could not get otlp requests");
-        if let Some(metrics) = requests.iter().find(|r| r.url.path().ends_with("/metrics")) {
-            let metrics = opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes::Bytes::copy_from_slice(&metrics.body))?;
-            let json_metrics = serde_json::to_value(metrics)?;
-            // For now just validate service name.
-            self.verify_services(&json_metrics)?;
-
-            Ok(())
-        } else {
-            Err(anyhow!("No metrics received").into())
-        }
-    }
 }
 
 async fn mock_otlp_server() -> MockServer {
@@ -903,5 +785,21 @@ impl DatadogId for TraceId {
     fn to_datadog(&self) -> u64 {
         let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
         u64::from_be_bytes(bytes.try_into().unwrap())
+    }
+}
+
+
+impl TraceSpec {
+    async fn validate_otlp_trace(self, router: &mut IntegrationTest, mock_server: &MockServer, query: Query) -> Result<(), BoxError>{
+        OtlpTraceSpec {
+            trace_spec: self,
+            mock_server
+        }.validate_trace(router, query).await
+    }
+    async fn validate_otlp_metrics(self, mock_server: &MockServer) -> Result<(), BoxError>{
+        OtlpTraceSpec {
+            trace_spec: self,
+            mock_server
+        }.validate_metrics().await
     }
 }

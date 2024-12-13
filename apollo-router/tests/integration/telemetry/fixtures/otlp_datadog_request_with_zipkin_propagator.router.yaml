@@ -5,6 +5,7 @@ telemetry:
     tracing:
       propagation:
         zipkin: true
+        datadog: true
         trace_context: true
       common:
         service_name: router

@@ -4,7 +4,7 @@ use http::HeaderValue;
 use serde_json::json;
 use tower::BoxError;
 
-use super::common::IntegrationTest;
+use super::common::{IntegrationTest, Query};
 use super::common::Telemetry;
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("../fixtures/subscription.router.yaml");
@@ -59,8 +59,7 @@ async fn test_subscription_load() -> Result<(), BoxError> {
 
     for _ in 0..100 {
         let (_id, resp) = router
-            .execute_query(
-                &json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}}),
+            .execute_query(Query::builder().body(json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}})).build(),
             )
             .await;
         assert!(resp.status().is_success());
