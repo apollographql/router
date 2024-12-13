@@ -40,6 +40,8 @@
 //!
 //! This module should also not be used in conjunction with performance testing, as returning
 //! snapshot data locally will be much faster than sending HTTP requests to an external server.
+
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::Path;
@@ -51,6 +53,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::routing::any;
 use axum::Router;
+use base64::Engine;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -65,6 +68,7 @@ use serde_json_bytes::Value;
 use tower::ServiceExt;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use crate::configuration::shared::Client;
 use crate::services::http::HttpClientService;
@@ -94,7 +98,7 @@ pub struct SnapshotServer {
 struct SnapshotServerState {
     client: HttpClientService,
     base_url: Uri,
-    snapshots: Arc<Mutex<Vec<Snapshot>>>,
+    snapshots: Arc<Mutex<HashMap<String, Snapshot>>>,
     snapshot_file: Box<Path>,
     offline: bool,
     update: bool,
@@ -131,15 +135,16 @@ async fn handle(
 
     {
         // check if we have an existing snapshot for this request
+        let key = snapshot_key(
+            &Some(method.to_string()),
+            &Some(path.clone()),
+            &request_json_body,
+        );
         let mut snapshots = state.snapshots.lock().unwrap();
-        let existing = snapshots.iter().enumerate().find(|(_, snapshot)| {
-            snapshot.request.path == Some(path.clone())
-                && snapshot.request.method == Some(method.to_string())
-                && snapshot.request.body.clone() == request_json_body
-        });
-        if let Some((i, snapshot)) = existing {
+        let existing = snapshots.get(&key);
+        if let Some(snapshot) = existing {
             if state.update {
-                snapshots.remove(i);
+                snapshots.remove(&key);
             } else {
                 info!(
                     url = %uri,
@@ -205,8 +210,8 @@ async fn handle(
                 };
                 {
                     let mut snapshots = state.snapshots.lock().unwrap();
-                    snapshots.push(snapshot.clone());
-                    if let Err(e) = save(state.snapshot_file, snapshots.as_mut()) {
+                    snapshots.insert(snapshot.key(), snapshot.clone());
+                    if let Err(e) = save(state.snapshot_file, &mut snapshots) {
                         error!(
                             url = %uri,
                             method = %method,
@@ -259,36 +264,30 @@ fn map_headers<F: Fn(&str) -> bool>(
     )
 }
 
-fn save<P: AsRef<Path>>(path: P, snapshots: &mut Vec<Snapshot>) -> Result<(), SnapshotError> {
+fn save<P: AsRef<Path>>(
+    path: P,
+    snapshots: &mut HashMap<String, Snapshot>,
+) -> Result<(), SnapshotError> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
     // Keep the snapshots sorted to make source control merges easier when updating snapshots
-    snapshots.sort_by_key(|snapshot| {
-        format!(
-            "{}-{}",
-            &snapshot
-                .request
-                .method
-                .as_ref()
-                .unwrap_or(&String::from("GET")),
-            &snapshot.request.path.as_ref().unwrap_or(&String::from("/"))
-        )
-    });
+    let mut snapshots = snapshots.values().cloned().collect::<Vec<_>>();
+    snapshots.sort_by_key(Snapshot::key);
 
     std::fs::write(path, serde_json::to_string_pretty(&snapshots)?).map_err(Into::into)
 }
 
-fn load<P: AsRef<Path>>(path: P) -> Result<Vec<Snapshot>, SnapshotError> {
+fn load<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Snapshot>, SnapshotError> {
     let str = std::fs::read_to_string(path)?;
-    let result: Result<Vec<Snapshot>, SnapshotError> =
-        serde_json::from_str(&str).map_err(Into::into);
-    if let Ok(snapshots) = &result {
-        info!("Loaded {} snapshots", snapshots.len());
-    }
-    result
+    let snapshots: Vec<Snapshot> = serde_json::from_str(&str)?;
+    info!("Loaded {} snapshots", snapshots.len());
+    Ok(snapshots
+        .into_iter()
+        .map(|snapshot| (snapshot.key(), snapshot))
+        .collect())
 }
 
 impl SnapshotServer {
@@ -357,7 +356,13 @@ impl SnapshotServer {
         }
 
         let snapshot_file = snapshot_path.as_ref();
-        let snapshots: Vec<Snapshot> = load(snapshot_file).unwrap_or(vec![]);
+
+        let snapshots = load(snapshot_file).unwrap_or_else(|_| {
+            if offline {
+                warn!("Unable to load snapshot file in offline mode - all requests will fail");
+            }
+            HashMap::default()
+        });
 
         let http_service = HttpClientService::new(
             "test",
@@ -431,6 +436,8 @@ impl TryFrom<Snapshot> for http::Response<RouterBody> {
                             headers.insert(name.clone(), value);
                         }
                     }
+                } else {
+                    warn!("Invalid header name `{}` in snapshot", name);
                 }
             }
         }
@@ -439,6 +446,30 @@ impl TryFrom<Snapshot> for http::Response<RouterBody> {
             return Ok(response);
         }
         Err(())
+    }
+}
+
+impl Snapshot {
+    fn key(&self) -> String {
+        snapshot_key(&self.request.method, &self.request.path, &self.request.body)
+    }
+}
+
+fn snapshot_key(method: &Option<String>, path: &Option<String>, body: &Value) -> String {
+    if body.is_null() {
+        format!(
+            "{}-{}",
+            method.as_ref().unwrap_or(&String::from("GET")),
+            path.as_ref().unwrap_or(&String::from("/"))
+        )
+    } else {
+        let body = base64::engine::general_purpose::STANDARD.encode(body.to_string());
+        format!(
+            "{}-{}-{}",
+            method.as_ref().unwrap_or(&String::from("GET")),
+            path.as_ref().unwrap_or(&String::from("/")),
+            body,
+        )
     }
 }
 
