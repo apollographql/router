@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use opentelemetry_api::trace::TraceId;
+
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod datadog;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
@@ -22,7 +24,7 @@ struct TraceSpec {
     unmeasured_spans: HashSet<&'static str>,
     priority_sampled: Option<&'static str>,
     subgraph_sampled: Option<bool>,
-    trace_id: Option<&'static str>,
+    trace_id: Option<String>,
     span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
 }
 
@@ -39,7 +41,7 @@ impl TraceSpec {
         unmeasured_spans: HashSet<&'static str>,
         priority_sampled: Option<&'static str>,
         subgraph_sampled: Option<bool>,
-        trace_id: Option<&'static str>,
+        trace_id: Option<String>,
         span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
     ) -> Self {
         Self {
@@ -54,5 +56,16 @@ impl TraceSpec {
             span_attributes,
             trace_id,
         }
+    }
+}
+
+#[allow(dead_code)]
+pub trait DatadogId {
+    fn to_datadog(&self) -> u64;
+}
+impl DatadogId for TraceId {
+    fn to_datadog(&self) -> u64 {
+        let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
+        u64::from_be_bytes(bytes.try_into().unwrap())
     }
 }

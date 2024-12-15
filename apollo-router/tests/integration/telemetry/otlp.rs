@@ -20,6 +20,7 @@ use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::telemetry::verifier::Verifier;
+use crate::integration::telemetry::DatadogId;
 use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
@@ -767,16 +768,6 @@ async fn mock_otlp_server() -> MockServer {
         .mount(&mock_server)
         .await;
     mock_server
-}
-
-pub(crate) trait DatadogId {
-    fn to_datadog(&self) -> u64;
-}
-impl DatadogId for TraceId {
-    fn to_datadog(&self) -> u64 {
-        let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
-        u64::from_be_bytes(bytes.try_into().unwrap())
-    }
 }
 
 impl TraceSpec {

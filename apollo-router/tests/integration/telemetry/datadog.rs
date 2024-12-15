@@ -12,6 +12,7 @@ use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::telemetry::verifier::Verifier;
+use crate::integration::telemetry::DatadogId;
 use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
@@ -358,6 +359,69 @@ async fn test_priority_sampling_parent_sampler_very_small() -> Result<(), BoxErr
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small_no_parent() -> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small_no_parent.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // // The router should respect upstream but also almost never sample if left to its own devices.
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("-1").traced(true).build())
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("0").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("1").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_untraced_request() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
@@ -524,17 +588,19 @@ async fn test_header_propagator_override() -> Result<(), BoxError> {
         .build()
         .await;
 
+    let trace_id = opentelemetry::trace::TraceId::from_u128(uuid::Uuid::new_v4().as_u128());
+
     router.start().await;
     router.assert_started().await;
     TraceSpec::builder()
         .services(["router", "subgraph"].into())
         .subgraph_sampled(true)
-        .trace_id("00000000000000000000000000000001")
+        .trace_id(format!("{:032x}", trace_id.to_datadog()))
         .build()
         .validate_datadog_trace(
             &mut router,
             Query::builder()
-                .header("trace-id", "00000000000000000000000000000001")
+                .header("trace-id", trace_id.to_string())
                 .header("x-datadog-trace-id", "2")
                 .traced(false)
                 .build(),
@@ -777,16 +843,6 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .await?;
     router.graceful_shutdown().await;
     Ok(())
-}
-
-pub(crate) trait DatadogId {
-    fn to_datadog(&self) -> String;
-}
-impl DatadogId for TraceId {
-    fn to_datadog(&self) -> String {
-        let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
-        u64::from_be_bytes(bytes.try_into().unwrap()).to_string()
-    }
 }
 
 struct DatadogTraceSpec {
