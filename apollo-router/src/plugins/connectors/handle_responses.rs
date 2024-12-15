@@ -9,6 +9,7 @@ use tracing::Span;
 
 use crate::error::FetchError;
 use crate::graphql;
+use crate::json_ext::Path;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::ResponseKey;
@@ -133,7 +134,7 @@ impl RawResponse {
                         parts.status.canonical_reason().unwrap_or("Unknown")
                     ),
                 }
-                .to_graphql_error(None)
+                .to_graphql_error(Some((&key).into()))
                 .add_subgraph_name(&connector.id.subgraph_name);
 
                 if let Some(ref debug) = debug_context {
@@ -256,7 +257,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     let raw = match response.result {
         // This occurs when we short-circuit the request when over the limit
         ConnectorResult::Err(error) => RawResponse::Error {
-            error: error.to_graphql_error(connector, None),
+            error: error.to_graphql_error(connector, Some((&response_key).into())),
             key: response_key,
         },
         ConnectorResult::HttpResponse(response) => {
@@ -265,7 +266,15 @@ pub(crate) async fn process_response<T: HttpBody>(
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            match deserialize_response(body, &parts, connector, debug_context, &debug_request).await
+            match deserialize_response(
+                body,
+                &parts,
+                connector,
+                (&response_key).into(),
+                debug_context,
+                &debug_request,
+            )
+            .await
             {
                 Ok(data) => RawResponse::Data {
                     parts,
@@ -338,10 +347,11 @@ async fn deserialize_response<T: HttpBody>(
     body: T,
     parts: &http::response::Parts,
     connector: &Connector,
+    path: Path,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     debug_request: &Option<ConnectorDebugHttpRequest>,
 ) -> Result<Value, graphql::Error> {
-    let make_err = || {
+    let make_err = |path: Path| {
         FetchError::SubrequestHttpError {
             status_code: Some(parts.status.as_u16()),
             service: connector.id.label.clone(),
@@ -351,11 +361,13 @@ async fn deserialize_response<T: HttpBody>(
                 parts.status.canonical_reason().unwrap_or("Unknown")
             ),
         }
-        .to_graphql_error(None)
+        .to_graphql_error(Some(path))
         .add_subgraph_name(&connector.id.subgraph_name)
     };
 
-    let body = &hyper::body::to_bytes(body).await.map_err(|_| make_err())?;
+    let body = &hyper::body::to_bytes(body)
+        .await
+        .map_err(|_| make_err(path.clone()))?;
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {
@@ -365,7 +377,7 @@ async fn deserialize_response<T: HttpBody>(
                     .push_invalid_response(debug_request.clone(), parts, body);
             }
 
-            Err(make_err())
+            Err(make_err(path))
         }
     }
 }
@@ -859,7 +871,19 @@ mod tests {
                         Error {
                             message: "HTTP fetch failed from 'test label': 200: OK",
                             locations: [],
-                            path: None,
+                            path: Some(
+                                Path(
+                                    [
+                                        Key(
+                                            "_entities",
+                                            None,
+                                        ),
+                                        Index(
+                                            0,
+                                        ),
+                                    ],
+                                ),
+                            ),
                             extensions: {
                                 "code": String(
                                     "SUBREQUEST_HTTP_ERROR",
@@ -881,7 +905,19 @@ mod tests {
                         Error {
                             message: "HTTP fetch failed from 'test label': 404: Not Found",
                             locations: [],
-                            path: None,
+                            path: Some(
+                                Path(
+                                    [
+                                        Key(
+                                            "_entities",
+                                            None,
+                                        ),
+                                        Index(
+                                            1,
+                                        ),
+                                    ],
+                                ),
+                            ),
                             extensions: {
                                 "code": String(
                                     "SUBREQUEST_HTTP_ERROR",
@@ -903,7 +939,19 @@ mod tests {
                         Error {
                             message: "HTTP fetch failed from 'test label': 500: Internal Server Error",
                             locations: [],
-                            path: None,
+                            path: Some(
+                                Path(
+                                    [
+                                        Key(
+                                            "_entities",
+                                            None,
+                                        ),
+                                        Index(
+                                            3,
+                                        ),
+                                    ],
+                                ),
+                            ),
                             extensions: {
                                 "code": String(
                                     "SUBREQUEST_HTTP_ERROR",
