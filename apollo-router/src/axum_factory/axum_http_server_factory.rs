@@ -756,7 +756,9 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::from_bytes(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(
+                            r#"{"query":"query { me { name }}"}"#,
+                        ))
                         .unwrap(),
                 ),
             )
@@ -790,7 +792,9 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::from_bytes(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(
+                            r#"{"query":"query { me { name }}"}"#,
+                        ))
                         .unwrap(),
                 ),
             )

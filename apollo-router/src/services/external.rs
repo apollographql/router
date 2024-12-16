@@ -293,9 +293,9 @@ where
             .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
-            .body(crate::services::router::body::from_bytes(serde_json::to_vec(
-                &self,
-            )?))?;
+            .body(crate::services::router::body::from_bytes(
+                serde_json::to_vec(&self)?,
+            ))?;
 
         get_text_map_propagator(|propagator| {
             propagator.inject_context(

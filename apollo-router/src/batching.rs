@@ -462,7 +462,8 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    let request = http::Request::from_parts(parts, crate::services::router::body::from_bytes(bytes));
+    let request =
+        http::Request::from_parts(parts, crate::services::router::body::from_bytes(bytes));
     Ok((operation_name, contexts, request, txs))
 }
 

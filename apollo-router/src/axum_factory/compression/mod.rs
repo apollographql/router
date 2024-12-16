@@ -268,7 +268,8 @@ mod tests {
     #[tokio::test]
     async fn gzip_header_writing() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
-        let body: RouterBody = body::from_bytes(r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#);
+        let body: RouterBody =
+            body::from_bytes(r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#);
 
         let mut stream = compressor.process(body);
         let _ = stream.next().await.unwrap().unwrap();

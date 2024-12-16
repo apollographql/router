@@ -431,7 +431,9 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(crate::services::router::body::from_bytes(r#"{"data":"world"}"#))
+            .body(crate::services::router::body::from_bytes(
+                r#"{"data":"world"}"#,
+            ))
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -440,7 +442,9 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(crate::services::router::body::from_bytes(r#"{"data":"world"}"#))
+            .body(crate::services::router::body::from_bytes(
+                r#"{"data":"world"}"#,
+            ))
             .unwrap();
         let response_key2 = ResponseKey::RootField {
             name: "hello2".to_string(),
@@ -645,7 +649,9 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(crate::services::router::body::from_bytes(r#"{"data":"value1"}"#))
+            .body(crate::services::router::body::from_bytes(
+                r#"{"data":"value1"}"#,
+            ))
             .unwrap();
         let response_key1 = ResponseKey::EntityField {
             index: 0,
@@ -656,7 +662,9 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(crate::services::router::body::from_bytes(r#"{"data":"value2"}"#))
+            .body(crate::services::router::body::from_bytes(
+                r#"{"data":"value2"}"#,
+            ))
             .unwrap();
         let response_key2 = ResponseKey::EntityField {
             index: 1,
@@ -796,7 +804,9 @@ mod tests {
 
         let response3: http::Response<RouterBody> = http::Response::builder()
             .status(500)
-            .body(crate::services::router::body::from_bytes(r#"{"error":"whoops"}"#))
+            .body(crate::services::router::body::from_bytes(
+                r#"{"error":"whoops"}"#,
+            ))
             .unwrap();
         let response_key3 = ResponseKey::Entity {
             index: 3,

@@ -399,8 +399,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap()).unwrap();
                 assert_eq!(
                     deserialized_request.subgraph_request_id.as_deref(),
                     Some("5678")
@@ -1032,8 +1031,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap()).unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1146,8 +1144,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap()).unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1272,8 +1269,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap()).unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1371,8 +1367,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap()).unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1462,8 +1457,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap()).unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
