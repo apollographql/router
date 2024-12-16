@@ -1138,3 +1138,84 @@ fn test_logical_methods() {
         (Some(json!(false)), vec![]),
     );
 }
+
+#[test]
+fn test_with_error_method() {
+    assert_eq!(
+        selection!("$->withError('This is an error')").apply_to(&json!(null)),
+        (
+            Some(json!(null)),
+            vec![ApplyToError::from_json(&json!({
+                "message": "This is an error",
+                "path": ["->withError"],
+                "range": [13, 31],
+            })),],
+        ),
+    );
+
+    assert_eq!(
+        selection!("$->withError({ hi: @.name }) { name }").apply_to(&json!({
+            "name": "Alice",
+        })),
+        (
+            Some(json!({ "name": "Alice" })),
+            vec![ApplyToError::from_json(&json!({
+                "message": "{\"hi\":\"Alice\"}",
+                "path": ["->withError"],
+                "range": [13, 27],
+            })),],
+        ),
+    );
+
+    let match_error_selection = selection!(
+        r#"
+        input->match(
+            ["hi", $("hello")->withError("Ok error")],
+            ["bye", $("goodbye")->withError("Sad error")],
+            [@, @->withError({ "unknown": @ })]
+        )
+    "#
+    );
+
+    assert_eq!(
+        match_error_selection.apply_to(&json!({
+            "input": "hi",
+        })),
+        (
+            Some(json!("hello")),
+            vec![ApplyToError::new(
+                "Ok error".to_string(),
+                vec![json!("input"), json!("->match"), json!("->withError"),],
+                Some(64..74),
+            ),],
+        ),
+    );
+
+    assert_eq!(
+        match_error_selection.apply_to(&json!({
+            "input": "bye",
+        })),
+        (
+            Some(json!("goodbye")),
+            vec![ApplyToError::new(
+                "Sad error".to_string(),
+                vec![json!("input"), json!("->match"), json!("->withError"),],
+                Some(122..133),
+            ),],
+        ),
+    );
+
+    assert_eq!(
+        match_error_selection.apply_to(&json!({
+            "input": null,
+        })),
+        (
+            Some(json!(null)),
+            vec![ApplyToError::new(
+                "{\"unknown\":null}".to_string(),
+                vec![json!("input"), json!("->match"), json!("->withError"),],
+                Some(166..182),
+            ),],
+        ),
+    );
+}
