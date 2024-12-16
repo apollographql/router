@@ -1,5 +1,6 @@
 ### Fix coprocessor empty body object panic ([PR #6398](https://github.com/apollographql/router/pull/6398))
-If a coprocessor responds with an empty body object at the supergraph stage then the router would panic.
+
+Previously, the router would panic if a coprocessor responds with an empty body object at the supergraph stage: 
 
 ```json
 {
@@ -8,6 +9,8 @@ If a coprocessor responds with an empty body object at the supergraph stage then
 }
 ```
 
-This does not affect coprocessors that respond with formed responses.
+This has been fixed in this release.
+
+> Note: the previous issue didn't affect coprocessors that responded with formed responses.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6398

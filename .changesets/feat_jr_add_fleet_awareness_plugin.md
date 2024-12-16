@@ -1,13 +1,10 @@
-### Adds Fleet Awareness Plugin
+### Add fleet awareness plugin ([PR #6151](https://github.com/apollographql/router/pull/6151))
 
-Adds a new plugin that reports telemetry to Apollo on the configuration and deployment of the Router. Initially this
-covers CPU & Memory usage, CPU Frequency, and other deployment characteristics such as Operating System, and Cloud
-Provider. For more details, along with a full list of data captured and how to opt out, please see our guidance
-[here](https://www.apollographql.com/docs/graphos/reference/data-privacy).
+A new `fleet_awareness` plugin has been added that reports telemetry to Apollo about the configuration and deployment of the router. 
 
-As part of the above PluginPrivate has been extended with a new `activate` hook which is guaranteed to be called once
-the OTEL meter has been refreshed. This ensures that code, particularly that concerned with gauges, will survive a hot
-reload of the router.
+The reported telemetry include CPU and memory usage, CPU frequency, and other deployment characteristics such as operating system and cloud provider. For more details, along with a full list of data captured and how to opt out, go to our 
+[data privacy policy](https://www.apollographql.com/docs/graphos/reference/data-privacy).
+
 
 By [@jonathanrainer](https://github.com/jonathanrainer), [@nmoutschen](https://github.com/nmoutschen), [@loshz](https://github.com/loshz)
 in https://github.com/apollographql/router/pull/6151
