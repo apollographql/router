@@ -174,8 +174,7 @@ where
                         location: self.location(),
                     }),
                     Value::Array(_) | Value::Object(_) => Err(Error {
-                        message: "Header expressions can't evaluate to arrays or objects."
-                            .to_string(),
+                        message: "Expressions can't evaluate to arrays or objects.".to_string(),
                         location: self.location(),
                     }),
                 }
@@ -196,4 +195,167 @@ pub(crate) struct Constant<T> {
 pub(crate) struct Expression {
     pub(crate) expression: JSONSelection,
     pub(crate) location: Range<usize>,
+}
+
+#[cfg(test)]
+mod test_parse {
+    use insta::assert_debug_snapshot;
+
+    use super::*;
+
+    #[test]
+    fn simple_constant() {
+        let template =
+            StringTemplate::<String>::parse("text", 0).expect("simple template should be valid");
+        assert_debug_snapshot!(template);
+    }
+
+    #[test]
+    fn simple_expression() {
+        assert_debug_snapshot!(StringTemplate::<String>::parse("{$config.one}", 0).unwrap());
+    }
+    #[test]
+    fn mixed_constant_and_expression() {
+        assert_debug_snapshot!(StringTemplate::<String>::parse("text{$config.one}text", 0).unwrap());
+    }
+
+    #[test]
+    fn offset() {
+        assert_debug_snapshot!(StringTemplate::<String>::parse("text{$config.one}text", 9).unwrap());
+    }
+
+    #[test]
+    fn expressions_with_nested_braces() {
+        assert_debug_snapshot!(StringTemplate::<String>::parse(
+            "const{$config.one { two { three } }}another-const",
+            0
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn missing_closing_braces() {
+        assert_debug_snapshot!(
+            StringTemplate::<String>::parse("{$config.one", 0),
+            @r###"
+        Err(
+            Error {
+                message: "Invalid expression, missing closing }",
+                location: 0..12,
+            },
+        )
+        "###
+        )
+    }
+}
+
+#[cfg(test)]
+mod test_interpolate {
+    use insta::assert_debug_snapshot;
+    use pretty_assertions::assert_eq;
+    use serde_json_bytes::json;
+
+    use super::*;
+    #[test]
+    fn test_interpolate() {
+        let template = StringTemplate::<String>::parse("before {$config.one} after", 0).unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": "foo"}));
+        assert_eq!(template.interpolate(&vars).unwrap(), "before foo after");
+    }
+
+    #[test]
+    fn test_interpolate_missing_value() {
+        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let vars = IndexMap::default();
+        assert_eq!(template.interpolate(&vars).unwrap(), "");
+    }
+
+    #[test]
+    fn test_interpolate_value_array() {
+        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": ["one", "two"]}));
+        assert_debug_snapshot!(
+            template.interpolate(&vars),
+            @r###"
+        Err(
+            Error {
+                message: "Expressions can't evaluate to arrays or objects.",
+                location: 1..12,
+            },
+        )
+        "###
+        );
+    }
+
+    #[test]
+    fn test_interpolate_value_bool() {
+        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": true}));
+        assert_eq!(template.interpolate(&vars).unwrap(), "true");
+    }
+
+    #[test]
+    fn test_interpolate_value_null() {
+        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": null}));
+        assert_eq!(template.interpolate(&vars).unwrap(), "");
+    }
+
+    #[test]
+    fn test_interpolate_value_number() {
+        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": 1}));
+        assert_eq!(template.interpolate(&vars).unwrap(), "1");
+    }
+
+    #[test]
+    fn test_interpolate_value_object() {
+        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": {}}));
+        assert_debug_snapshot!(
+            template.interpolate(&vars),
+            @r###"
+        Err(
+            Error {
+                message: "Expressions can't evaluate to arrays or objects.",
+                location: 1..12,
+            },
+        )
+        "###
+        );
+    }
+
+    #[test]
+    fn test_interpolate_value_string() {
+        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": "string"}));
+        assert_eq!(template.interpolate(&vars).unwrap(), "string");
+    }
+}
+
+#[cfg(test)]
+mod test_get_expressions {
+    use super::*;
+
+    #[test]
+    fn test_variable_references() {
+        let value =
+            StringTemplate::<String>::parse("a {$this.a.b.c} b {$args.a.b.c} c {$config.a.b.c}", 0)
+                .unwrap();
+        let references: Vec<_> = value
+            .expressions()
+            .map(|e| e.expression.to_string())
+            .collect();
+        assert_eq!(
+            references,
+            vec!["$this.a.b.c", "$args.a.b.c", "$config.a.b.c"]
+        );
+    }
 }
