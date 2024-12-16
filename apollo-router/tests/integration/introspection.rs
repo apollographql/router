@@ -3,6 +3,7 @@ use apollo_router::services::supergraph::Request;
 use serde_json::json;
 use tower::ServiceExt;
 
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test]
@@ -226,7 +227,9 @@ async fn integration() {
     let query = json!({
         "query": include_str!("../fixtures/introspect_full_schema.graphql"),
     });
-    let (_trace_id, response) = router.execute_query(&query).await;
+    let (_trace_id, response) = router
+        .execute_query(Query::builder().body(query).build())
+        .await;
     insta::assert_json_snapshot!(response.json::<serde_json::Value>().await.unwrap());
     router.graceful_shutdown().await;
 }

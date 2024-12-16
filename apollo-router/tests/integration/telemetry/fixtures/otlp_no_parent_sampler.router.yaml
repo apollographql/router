@@ -6,10 +6,11 @@ telemetry:
         header_name: apollo-custom-trace-id
       common:
         service_name: router
+        parent_based_sampler: false
       otlp:
         enabled: true
         protocol: http
-        endpoint: <otel-collector-endpoint>
+        endpoint: <otel-collector-endpoint>/traces
         batch_processor:
           scheduled_delay: 10ms
     metrics:
@@ -22,15 +23,3 @@ telemetry:
         batch_processor:
           scheduled_delay: 10ms
 
-
-  instrumentation:
-    spans:
-      mode: spec_compliant
-      supergraph:
-        attributes:
-          graphql.operation.name: true
-
-      subgraph:
-        attributes:
-          otel.name:
-            subgraph_operation_name: string
