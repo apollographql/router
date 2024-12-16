@@ -276,6 +276,7 @@ impl Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub async fn new(
         config: String,
         telemetry: Option<Telemetry>,

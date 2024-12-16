@@ -40,7 +40,6 @@ use std::sync::Arc;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use super::Fragment;
 use super::FragmentSpreadSelection;
@@ -106,16 +105,6 @@ impl SelectionSet {
             iter,
         ))
     }
-}
-
-//=============================================================================
-// Matching fragments with selection set (`try_optimize_with_fragments`)
-
-/// The return type for `SelectionSet::try_optimize_with_fragments`.
-#[derive(derive_more::From)]
-enum SelectionSetOrFragment {
-    SelectionSet(SelectionSet),
-    Fragment(Node<Fragment>),
 }
 
 // Note: `retain_fragments` methods may return a selection or a selection set.
@@ -392,7 +381,6 @@ mod tests {
     ///
     /// empty branches removal
     ///
-
     mod test_empty_branch_removal {
         use apollo_compiler::name;
 

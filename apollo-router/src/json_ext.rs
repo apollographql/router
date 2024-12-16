@@ -26,9 +26,25 @@ pub(crate) type Object = Map<ByteString, Value>;
 const FRAGMENT_PREFIX: &str = "... on ";
 
 static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:\|\[)(?<condition>.+?)(?:,\s*|)(?:\])")
+    Regex::new(r"\|\[(?<condition>.+?)?\]")
         .expect("this regex to check for type conditions is valid")
 });
+
+/// Extract the condition list from the regex captures.
+fn extract_matched_conditions(caps: &Captures) -> TypeConditions {
+    caps.name("condition")
+        .map(|c| c.as_str().split(',').map(|s| s.to_string()).collect())
+        .unwrap_or_default()
+}
+
+fn split_path_element_and_type_conditions(s: &str) -> (String, Option<TypeConditions>) {
+    let mut type_conditions = None;
+    let path_element = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
+        type_conditions = Some(extract_matched_conditions(caps));
+        ""
+    });
+    (path_element.to_string(), type_conditions)
+}
 
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
@@ -151,9 +167,6 @@ pub(crate) trait ValueExt {
     /// function to handle `PathElement::Fragment`).
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
-
-    /// value type
-    fn json_type_name(&self) -> &'static str;
 
     fn as_i32(&self) -> Option<i32>;
 }
@@ -528,17 +541,6 @@ impl ValueExt for Value {
                 })
     }
 
-    fn json_type_name(&self) -> &'static str {
-        match self {
-            Value::Array(_) => "array",
-            Value::Null => "null",
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Object(_) => "object",
-        }
-    }
-
     fn as_i32(&self) -> Option<i32> {
         self.as_i64()?.to_i32()
     }
@@ -836,13 +838,13 @@ where
 
 struct FlattenVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
+impl serde::de::Visitor<'_> for FlattenVisitor {
     type Value = Option<TypeConditions>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(
             formatter,
-            "a string that is '@', potentially preceded of followed by type conditions"
+            "a string that is '@', potentially followed by type conditions"
         )
     }
 
@@ -850,23 +852,9 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     where
         E: serde::de::Error,
     {
-        let mut type_conditions: Vec<String> = Vec::new();
-        let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions.extend(
-                caps.name("condition")
-                    .map(|c| {
-                        c.as_str()
-                            .split(',')
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default(),
-            );
-            ""
-        });
-
-        if path == "@" {
-            Ok((!type_conditions.is_empty()).then_some(type_conditions))
+        let (path_element, type_conditions) = split_path_element_and_type_conditions(s);
+        if path_element == "@" {
+            Ok(type_conditions)
         } else {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str(s),
@@ -884,11 +872,7 @@ where
     S: serde::Serializer,
 {
     let tc_string = if let Some(c) = type_conditions {
-        if !c.is_empty() {
-            format!("|[{}]", c.join(","))
-        } else {
-            "".to_string()
-        }
+        format!("|[{}]", c.join(","))
     } else {
         "".to_string()
     };
@@ -905,13 +889,13 @@ where
 
 struct KeyVisitor;
 
-impl<'de> serde::de::Visitor<'de> for KeyVisitor {
+impl serde::de::Visitor<'_> for KeyVisitor {
     type Value = (String, Option<TypeConditions>);
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(
             formatter,
-            "a string, potentially preceded of followed by type conditions"
+            "a string, potentially followed by type conditions"
         )
     }
 
@@ -919,21 +903,7 @@ impl<'de> serde::de::Visitor<'de> for KeyVisitor {
     where
         E: serde::de::Error,
     {
-        let mut type_conditions = Vec::new();
-        let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions.extend(
-                caps.extract::<1>()
-                    .1
-                    .map(|s| s.split(',').map(|s| s.to_string()))
-                    .into_iter()
-                    .flatten(),
-            );
-            ""
-        });
-        Ok((
-            key.to_string(),
-            (!type_conditions.is_empty()).then_some(type_conditions),
-        ))
+        Ok(split_path_element_and_type_conditions(s))
     }
 }
 
@@ -946,11 +916,7 @@ where
     S: serde::Serializer,
 {
     let tc_string = if let Some(c) = type_conditions {
-        if !c.is_empty() {
-            format!("|[{}]", c.join(","))
-        } else {
-            "".to_string()
-        }
+        format!("|[{}]", c.join(","))
     } else {
         "".to_string()
     };
@@ -967,7 +933,7 @@ where
 
 struct FragmentVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FragmentVisitor {
+impl serde::de::Visitor<'_> for FragmentVisitor {
     type Value = String;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -992,43 +958,16 @@ where
 }
 
 fn flatten_from_str(s: &str) -> Result<PathElement, String> {
-    let mut type_conditions = Vec::new();
-    let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions.extend(
-            caps.extract::<1>()
-                .1
-                .map(|s| s.split(',').map(|s| s.to_string()))
-                .into_iter()
-                .flatten(),
-        );
-        ""
-    });
-
-    if path != "@" {
+    let (path_element, type_conditions) = split_path_element_and_type_conditions(s);
+    if path_element != "@" {
         return Err("invalid flatten".to_string());
     }
-    Ok(PathElement::Flatten(
-        (!type_conditions.is_empty()).then_some(type_conditions),
-    ))
+    Ok(PathElement::Flatten(type_conditions))
 }
 
 fn key_from_str(s: &str) -> Result<PathElement, String> {
-    let mut type_conditions = Vec::new();
-    let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions.extend(
-            caps.extract::<1>()
-                .1
-                .map(|s| s.split(',').map(|s| s.to_string()))
-                .into_iter()
-                .flatten(),
-        );
-        ""
-    });
-
-    Ok(PathElement::Key(
-        key.to_string(),
-        (!type_conditions.is_empty()).then_some(type_conditions),
-    ))
+    let (key, type_conditions) = split_path_element_and_type_conditions(s);
+    Ok(PathElement::Key(key, type_conditions))
 }
 
 /// A path into the result document.
@@ -1119,9 +1058,7 @@ impl Path {
             PathElement::Key(key, type_conditions) => {
                 let mut tc = String::new();
                 if let Some(c) = type_conditions {
-                    if !c.is_empty() {
-                        tc = format!("|[{}]", c.join(","));
-                    }
+                    tc = format!("|[{}]", c.join(","));
                 };
                 Some(format!("{}{}", key, tc))
             }
@@ -1191,17 +1128,13 @@ impl fmt::Display for Path {
                 PathElement::Key(key, type_conditions) => {
                     write!(f, "{key}")?;
                     if let Some(c) = type_conditions {
-                        if !c.is_empty() {
-                            write!(f, "|[{}]", c.join(","))?;
-                        }
+                        write!(f, "|[{}]", c.join(","))?;
                     };
                 }
                 PathElement::Flatten(type_conditions) => {
                     write!(f, "@")?;
                     if let Some(c) = type_conditions {
-                        if !c.is_empty() {
-                            write!(f, "|[{}]", c.join(","))?;
-                        }
+                        write!(f, "|[{}]", c.join(","))?;
                     };
                 }
                 PathElement::Fragment(name) => {

@@ -486,8 +486,7 @@ fn verify_root_span_fields(trace: &Value, operation_name: Option<&str>) -> Resul
     } else {
         assert!(request_span
             .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
-            .first()
-            .is_none(),);
+            .is_empty(),);
     }
 
     assert_eq!(
@@ -519,8 +518,7 @@ fn verify_supergraph_span_fields(
     } else {
         assert!(supergraph_span
             .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
-            .first()
-            .is_none(),);
+            .is_empty(),);
     }
     if custom_span_instrumentation {
         assert_eq!(

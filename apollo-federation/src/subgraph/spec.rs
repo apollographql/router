@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
@@ -23,7 +24,6 @@ use apollo_compiler::ty;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::link::spec::Identity;
@@ -105,8 +105,8 @@ enum FederationDirectiveName {
     Tag,
 }
 
-lazy_static! {
-    static ref FEDERATION_DIRECTIVE_NAMES_TO_ENUM: IndexMap<Name, FederationDirectiveName> = {
+static FEDERATION_DIRECTIVE_NAMES_TO_ENUM: LazyLock<IndexMap<Name, FederationDirectiveName>> =
+    LazyLock::new(|| {
         IndexMap::from_iter([
             (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
             (CONTEXT_DIRECTIVE_NAME, FederationDirectiveName::Context),
@@ -131,8 +131,7 @@ lazy_static! {
             (SHAREABLE_DIRECTIVE_NAME, FederationDirectiveName::Shareable),
             (TAG_DIRECTIVE_NAME, FederationDirectiveName::Tag),
         ])
-    };
-}
+    });
 
 const MIN_FEDERATION_VERSION: Version = Version { major: 2, minor: 0 };
 const MAX_FEDERATION_VERSION: Version = Version { major: 2, minor: 5 };
