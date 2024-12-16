@@ -1,4 +1,4 @@
-### Ability to skip Persisted Query List safelisting enforcement via plugin ([PR #6403](https://github.com/apollographql/router/pull/6403))
+### Ability to skip persisted query list safelisting enforcement via plugin ([PR #6403](https://github.com/apollographql/router/pull/6403))
 
 If safelisting is enabled, a `router_service` plugin can skip enforcement of the safelist (including the `require_id` check) by adding the key `apollo_persisted_queries::safelist::skip_enforcement` with value `true` to the request context.
 

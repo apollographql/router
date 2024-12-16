@@ -1,7 +1,8 @@
-### Distributed query plan cache keys include the Router version number ([PR #6406](https://github.com/apollographql/router/pull/6406))
+### Add version number to distributed query plan cache keys ([PR #6406](https://github.com/apollographql/router/pull/6406))
 
-More often than not, an Apollo Router release may contain changes that affect what query plans are generated or how they’re represented. To avoid using outdated entries from distributed cache, the cache key includes a counter that was manually incremented with relevant data structure or algorithm changes. Instead the cache key now includes the Router version number, so that different versions will always use separate cache entries.
+The router now includes its version number in the cache keys of distributed cache entries. Given that a new router release may change how query plans are generated or represented, including the router version in a cache key enables the router to use separate cache entries for different versions.
 
-If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), starting with this release and going forward you should anticipate additional cache regeneration cost when updating between any Router versions.
+If you have enabled [distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), expect additional processing for your cache to update for this router release.
+
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6406
