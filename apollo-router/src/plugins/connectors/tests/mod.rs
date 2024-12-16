@@ -1488,6 +1488,194 @@ async fn test_variables() {
     );
 }
 
+mod quickstart_tests {
+    use http::Uri;
+
+    use super::*;
+    use crate::test_harness::http_snapshot::SnapshotServer;
+
+    const SNAPSHOT_DIR: &str = "./src/plugins/connectors/testdata/quickstart_api_snapshots/";
+
+    macro_rules! map {
+        ($($tt:tt)*) => {
+          serde_json_bytes::json!($($tt)*).as_object().unwrap().clone()
+        };
+    }
+
+    async fn execute(
+        query: &str,
+        variables: JsonMap,
+        snapshot_file_name: &str,
+    ) -> serde_json::Value {
+        let snapshot_path = [SNAPSHOT_DIR, snapshot_file_name, ".json"].concat();
+
+        let server = SnapshotServer::spawn(
+            snapshot_path,
+            Uri::from_str("https://jsonPlaceholder.typicode.com/").unwrap(),
+            true,
+            false,
+            Some(vec![CONTENT_TYPE.to_string()]),
+        )
+        .await;
+
+        super::execute(
+            &QUICKSTART_SCHEMA.replace("https://jsonplaceholder.typicode.com", &server.uri()),
+            &server.uri(),
+            query,
+            variables,
+            None,
+            |_| {},
+        )
+        .await
+    }
+    #[tokio::test]
+    async fn query_1() {
+        let query = r#"
+          query Posts {
+            posts {
+              id
+              body
+              title
+            }
+          }
+        "#;
+
+        let response = execute(query, Default::default(), "query_1").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "posts": [
+              {
+                "id": 1,
+                "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
+                "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"
+              },
+              {
+                "id": 2,
+                "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla",
+                "title": "qui est esse"
+              }
+            ]
+          }
+        }
+        "###);
+    }
+
+    #[tokio::test]
+    async fn query_2() {
+        let query = r#"
+          query Post($postId: ID!) {
+            post(id: $postId) {
+              id
+              title
+              body
+            }
+          }
+        "#;
+
+        let response = execute(query, map!({ "postId": "1" }), "query_2").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "post": {
+              "id": 1,
+              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+            }
+          }
+        }
+        "###);
+    }
+
+    #[tokio::test]
+    async fn query_3() {
+        let query = r#"
+          query PostWithAuthor($postId: ID!) {
+            post(id: $postId) {
+              id
+              title
+              body
+              author {
+                id
+                name
+              }
+            }
+          }
+      "#;
+
+        let response = execute(query, map!({ "postId": "1" }), "query_3").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "post": {
+              "id": 1,
+              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
+              "author": {
+                "id": 1,
+                "name": "Leanne Graham"
+              }
+            }
+          }
+        }
+        "###);
+    }
+
+    #[tokio::test]
+    async fn query_4() {
+        let query = r#"
+          query PostsForUser($userId: ID!) {
+            user(id: $userId) {
+              id
+              name
+              posts {
+                id
+                title
+                author {
+                  id
+                  name
+                }
+              }
+            }
+          }
+      "#;
+
+        let response = execute(query, map!({ "userId": "1" }), "query_4").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "user": {
+              "id": 1,
+              "name": "Leanne Graham",
+              "posts": [
+                {
+                  "id": 1,
+                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 2,
+                  "title": "qui est esse",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                }
+              ]
+            }
+          }
+        }
+        "###);
+    }
+}
+
 async fn execute(
     schema: &str,
     uri: &str,
