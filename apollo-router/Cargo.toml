@@ -391,6 +391,11 @@ name = "samples"
 path = "tests/samples_tests.rs"
 harness = false
 
+[[bin]]
+name = "snapshot"
+path = "src/test_harness/http_snapshot_main.rs"
+test = false
+
 [[bench]]
 name = "huge_requests"
 harness = false
