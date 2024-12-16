@@ -88,7 +88,7 @@ query planner to have slight differences when compared to the legacy, JavaScript
 comparing ~630 million operations across actual router deployments in shadow
 mode for a four month duration.
 
-The native query planner supports Federation v2 supergraphs. If you are using Federation v1 today, see our [migration guide](https://www.apollographql.com/docs/graphos/reference/migration/to-federation-version-2) on how to update your composition build step and subgraph changes are typically not needed.
+The native query planner supports Federation v2 supergraphs. If you are using Federation v1 today, see our [migration guide](https://www.apollographql.com/docs/graphos/reference/migration/to-federation-version-2) on how to update your composition build step. Subgraph changes are typically not needed.
 
 The legacy, JavaScript, query planner is deprecated in this release, but you can still switch
 back to it if you are still using Federation v1 supergraph:
