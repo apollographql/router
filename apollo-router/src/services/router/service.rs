@@ -31,7 +31,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::body::from_result_stream;
 use super::Body;
 use super::ClientRequestAccepts;
 use crate::axum_factory::CanceledRequest;
@@ -338,11 +337,14 @@ impl RouterService {
                     let response = match response.subscribed {
                         Some(true) => http::Response::from_parts(
                             parts,
-                            from_result_stream(Multipart::new(body, ProtocolMode::Subscription)),
+                            router::body::from_result_stream(Multipart::new(
+                                body,
+                                ProtocolMode::Subscription,
+                            )),
                         ),
                         _ => http::Response::from_parts(
                             parts,
-                            from_result_stream(Multipart::new(
+                            router::body::from_result_stream(Multipart::new(
                                 once(ready(response)).chain(body),
                                 ProtocolMode::Defer,
                             )),
