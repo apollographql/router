@@ -1,6 +1,7 @@
 {
     "enterprise": true,
     "redis": true,
+    "snapshot": true,
     "actions": [
         {
             "type": "Start",

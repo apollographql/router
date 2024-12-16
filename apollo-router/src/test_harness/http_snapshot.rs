@@ -14,7 +14,7 @@
 //! or as a standalone application by invoking [`standalone::main`]. In the latter case, there
 //! is a binary wrapper in `http_snapshot_main` that can be run like this:
 //!
-//! `cargo run --bin snapshot -- --snapshot-path <file> --url <base URL to snapshot> [--offline] [--update] [--port <port number>]`
+//! `cargo run --bin snapshot --features snapshot -- --snapshot-path <file> --url <base URL to snapshot> [--offline] [--update] [--port <port number>] [-v]`
 //!
 //! Any requests made to the snapshot server will be proxied on to the given base URL, and the
 //! responses will be saved to the given file. The next time the snapshot server receives the
@@ -75,6 +75,7 @@ use tracing::warn;
 use crate::configuration::shared::Client;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 
 /// An error from the snapshot server
@@ -131,8 +132,10 @@ async fn handle(
     let method = req.method().clone();
     let version = req.version();
     let request_headers = req.headers().clone();
-    let hyper_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-    let request_json_body = serde_json::from_slice(&hyper_body).unwrap_or(Value::Null);
+    let body_bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let request_json_body = serde_json::from_slice(&body_bytes).unwrap_or(Value::Null);
 
     let key = snapshot_key(
         Some(method.as_str()),
@@ -158,7 +161,7 @@ async fn handle(
             .method(method.clone())
             .version(version)
             .uri(uri.clone())
-            .body(RouterBody::from(hyper_body))
+            .body(router::body::from_bytes(body_bytes))
             .unwrap();
         *request.headers_mut() = request_headers.clone();
         let response = state
@@ -171,7 +174,7 @@ async fn handle(
             .unwrap();
         let (parts, body) = response.http_response.into_parts();
 
-        if let Ok(body_bytes) = body.to_bytes().await {
+        if let Ok(body_bytes) = router::body::into_bytes(body).await {
             if let Ok(response_json_body) = serde_json::from_slice(&body_bytes) {
                 let snapshot = Snapshot {
                     request: Request {
@@ -203,7 +206,11 @@ async fn handle(
                         );
                     }
                 }
-                Ok(snapshot.try_into().unwrap())
+                if let Ok(response) = snapshot.into_body() {
+                    Ok(response)
+                } else {
+                    fail(uri, method, "Unable to convert snapshot into response body")
+                }
             } else {
                 fail(uri, method, "Unable to parse response body as JSON")
             }
@@ -232,7 +239,7 @@ fn response_from_snapshot(
             );
             snapshot
                 .clone()
-                .try_into()
+                .into_body()
                 .map_err(|e| error!("Unable to convert snapshot into HTTP response: {:?}", e))
                 .ok()
         })
@@ -251,7 +258,9 @@ fn fail(
     );
     http::Response::builder()
         .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .body(json!({ "error": message}).to_string().into())
+        .body(router::body::from_bytes(
+            json!({ "error": message}).to_string(),
+        ))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
@@ -368,11 +377,13 @@ impl SnapshotServer {
             BTreeMap::default()
         });
 
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let http_service = HttpClientService::new(
             "test",
             rustls::ClientConfig::builder()
-                .with_safe_defaults()
                 .with_native_roots()
+                .expect("Able to load native roots")
                 .with_no_client_auth(),
             Client::builder().build(),
         )
@@ -402,15 +413,13 @@ impl SnapshotServer {
         );
         if spawn {
             tokio::spawn(async move {
-                axum::Server::from_tcp(listener)
-                    .expect("Unable to start snapshot server")
+                axum_server::Server::from_tcp(listener)
                     .serve(app.into_make_service())
                     .await
                     .unwrap();
             });
         } else {
-            axum::Server::from_tcp(listener)
-                .expect("Unable to start snapshot server")
+            axum_server::from_tcp(listener)
                 .serve(app.into_make_service())
                 .await
                 .unwrap();
@@ -427,13 +436,11 @@ struct Snapshot {
     response: Response,
 }
 
-impl TryFrom<Snapshot> for http::Response<RouterBody> {
-    type Error = ();
-
-    fn try_from(snapshot: Snapshot) -> Result<Self, Self::Error> {
-        let mut response = http::Response::builder().status(snapshot.response.status);
+impl Snapshot {
+    fn into_body(self) -> Result<http::Response<RouterBody>, ()> {
+        let mut response = http::Response::builder().status(self.response.status);
         if let Some(headers) = response.headers_mut() {
-            for (name, values) in snapshot.response.headers.into_iter() {
+            for (name, values) in self.response.headers.into_iter() {
                 if let Ok(name) = HeaderName::from_str(&name.clone()) {
                     for value in values {
                         if let Ok(value) = HeaderValue::from_str(&value.clone()) {
@@ -445,15 +452,13 @@ impl TryFrom<Snapshot> for http::Response<RouterBody> {
                 }
             }
         }
-        let body_string = snapshot.response.body.to_string();
-        if let Ok(response) = response.body(RouterBody::from(body_string)) {
+        let body_string = self.response.body.to_string();
+        if let Ok(response) = response.body(router::body::from_bytes(body_string)) {
             return Ok(response);
         }
         Err(())
     }
-}
 
-impl Snapshot {
     fn key(&self) -> String {
         snapshot_key(
             self.request.method.as_deref(),

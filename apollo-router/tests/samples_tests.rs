@@ -10,12 +10,7 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::str::FromStr;
 
-use apollo_router::SnapshotServer;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
-use http::Uri;
 use libtest_mimic::Arguments;
 use libtest_mimic::Failed;
 use libtest_mimic::Trial;
@@ -125,6 +120,11 @@ fn lookup_dir(
 
                 #[cfg(all(feature = "ci", not(all(target_arch = "x86_64", target_os = "linux"))))]
                 if plan.redis {
+                    continue;
+                }
+
+                #[cfg(not(feature = "snapshot"))]
+                if plan.snapshot {
                     continue;
                 }
 
@@ -347,30 +347,43 @@ impl TestExecution {
         &mut self,
         subgraphs_server: &mut MockServer,
         url: &str,
-        path: &Path,
+        #[cfg_attr(not(feature = "snapshot"), allow(unused_variables))] path: &Path,
+        #[cfg_attr(not(feature = "snapshot"), allow(unused_variables, clippy::ptr_arg))]
         out: &mut String,
     ) -> HashMap<String, String> {
         let mut subgraph_overrides = HashMap::new();
 
+        #[cfg_attr(not(feature = "snapshot"), allow(unused_variables))]
         for (name, subgraph) in &self.subgraphs {
             if let Some(snapshot) = subgraph.snapshot.as_ref() {
-                let snapshot_server = SnapshotServer::spawn(
-                    &path.join(&snapshot.path),
-                    Uri::from_str(&snapshot.base_url).unwrap(),
-                    true,
-                    snapshot.update.unwrap_or(false),
-                    Some(vec![CONTENT_TYPE.to_string(), CONTENT_LENGTH.to_string()]),
-                )
-                .await;
-                let snapshot_url = snapshot_server.uri();
-                writeln!(
-                    out,
-                    "snapshot server for {name} listening on {snapshot_url}"
-                )
-                .unwrap();
-                subgraph_overrides
-                    .entry(name.to_string())
-                    .or_insert(snapshot_url.clone());
+                #[cfg(feature = "snapshot")]
+                {
+                    use std::str::FromStr;
+
+                    use http::header::CONTENT_LENGTH;
+                    use http::header::CONTENT_TYPE;
+                    use http::Uri;
+
+                    let snapshot_server = apollo_router::SnapshotServer::spawn(
+                        &path.join(&snapshot.path),
+                        Uri::from_str(&snapshot.base_url).unwrap(),
+                        true,
+                        snapshot.update.unwrap_or(false),
+                        Some(vec![CONTENT_TYPE.to_string(), CONTENT_LENGTH.to_string()]),
+                    )
+                    .await;
+                    let snapshot_url = snapshot_server.uri();
+                    writeln!(
+                        out,
+                        "snapshot server for {name} listening on {snapshot_url}"
+                    )
+                    .unwrap();
+                    subgraph_overrides
+                        .entry(name.to_string())
+                        .or_insert(snapshot_url.clone());
+                }
+                #[cfg(not(feature = "snapshot"))]
+                panic!("Tests using the snapshot feature must have `snapshot` set to `true`")
             } else {
                 for SubgraphRequestMock { request, response } in
                     subgraph.requests.as_ref().unwrap_or(&vec![])
@@ -743,6 +756,8 @@ struct Plan {
     enterprise: bool,
     #[serde(default)]
     redis: bool,
+    #[serde(default)]
+    snapshot: bool,
     actions: Vec<Action>,
 }
 
@@ -784,6 +799,7 @@ enum Action {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(not(feature = "snapshot"), allow(dead_code))]
 struct Snapshot {
     path: String,
     base_url: String,
