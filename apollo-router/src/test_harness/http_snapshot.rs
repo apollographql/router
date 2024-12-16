@@ -67,6 +67,7 @@ use serde::Serialize;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use tower::ServiceExt;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
@@ -148,7 +149,7 @@ async fn handle(
             "Offline mode enabled and no snapshot available",
         )
     } else {
-        info!(
+        debug!(
             url = %uri,
             method = %method,
             "Taking snapshot"
@@ -224,7 +225,7 @@ fn response_from_snapshot(
         None
     } else {
         snapshots.get(key).and_then(|snapshot| {
-            info!(
+            debug!(
                 url = %uri,
                 method = %method,
                 "Found existing snapshot"
@@ -537,9 +538,9 @@ pub(crate) mod standalone {
 
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
             .with_max_level(if args.verbose {
-                Level::INFO
+                Level::DEBUG
             } else {
-                Level::WARN
+                Level::INFO
             })
             .finish();
         tracing::subscriber::set_global_default(subscriber)
