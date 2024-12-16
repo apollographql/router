@@ -316,11 +316,21 @@ impl IntegrationTest {
             .await;
 
         Mock::given(method("POST"))
-            .respond_with(TracedResponder{response_template:responder.unwrap_or_else(||
-                ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
+            .respond_with(TracedResponder {
+                response_template: responder.unwrap_or_else(|| {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "data": {
+                            "topProducts": [
+                                { "name": "Table" },
+                                { "name": "Couch" },
+                                { "name": "Chair" },
+                            ],
+                        },
+                    }))
+                }),
                 telemetry: telemetry.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
-                subgraph_callback
+                subgraph_callback,
             })
             .mount(&subgraphs)
             .await;
