@@ -23,12 +23,14 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::InterfaceType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
+use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use hashbrown::HashSet;
 use indexmap::map::Entry::Occupied;
 use indexmap::map::Entry::Vacant;
 use indexmap::map::Iter;
@@ -52,6 +54,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
+use crate::subgraph::spec::COMPOSE_DIRECTIVE_NAME;
 use crate::subgraph::ValidSubgraph;
 use crate::ValidFederationSubgraph;
 use crate::ValidFederationSubgraphs;
@@ -175,6 +178,11 @@ impl Merger {
             let metadata = subgraph.schema.metadata();
             let relevant_directives = DirectiveNames::for_metadata(&metadata);
 
+            // extract names of directives specified in @composeDirective uses
+            let composed_directives_names = Self::extract_composed_directives_names(
+                &subgraph.schema.schema().schema_definition,
+            );
+
             for (type_name, ty) in &subgraph.schema.schema().types {
                 if ty.is_built_in() || !is_mergeable_type(type_name) {
                     // skip built-ins and federation specific types
@@ -206,6 +214,7 @@ impl Merger {
                     ExtendedType::Object(value) => self.merge_object_type(
                         &mut supergraph.types,
                         &relevant_directives,
+                        &composed_directives_names,
                         subgraph_name.clone(),
                         type_name.clone(),
                         value,
@@ -273,6 +282,40 @@ impl Merger {
         }
     }
 
+    fn extract_composed_directives_names(
+        subgraph_def: &Node<SchemaDefinition>,
+    ) -> Option<HashSet<String>> {
+        // @composeDirective indicates to composition that all uses of a particular custom type
+        // system directive in the subgraph schema should be preserved in the supergraph schema
+        // (by default, composition omits most directives from the supergraph schema).
+        if subgraph_def
+            .directives
+            .iter()
+            .any(|d| d.name == COMPOSE_DIRECTIVE_NAME)
+        {
+            Some(
+                subgraph_def
+                    .directives
+                    .iter()
+                    .filter_map(|d| {
+                        if d.name != COMPOSE_DIRECTIVE_NAME {
+                            None
+                        } else {
+                            // @composeDirective has a single String! argument with the name of the
+                            // directive to include. The leading @ is removed as it is not part of
+                            // the directive's name.
+                            d.arguments.first().map(|a| {
+                                a.value.as_str().unwrap_or("").replace('@', "").to_string()
+                            })
+                        }
+                    })
+                    .collect::<HashSet<_>>(),
+            )
+        } else {
+            None
+        }
+    }
+
     fn merge_schema(&mut self, supergraph_schema: &mut Schema, subgraph: &ValidFederationSubgraph) {
         let supergraph_def = &mut supergraph_schema.schema_definition.make_mut();
         let subgraph_def = &subgraph.schema.schema().schema_definition;
@@ -291,6 +334,23 @@ impl Merger {
                 .subscription
                 .clone_from(&subgraph_def.subscription);
             // TODO mismatch on subscription types
+        }
+
+        if let Some(composed_directives_names) =
+            Self::extract_composed_directives_names(subgraph_def)
+        {
+            subgraph
+                .schema
+                .schema()
+                .directive_definitions
+                .iter()
+                .filter(|(name, _)| composed_directives_names.contains(name.as_str()))
+                .for_each(|(name, def)| {
+                    supergraph_schema
+                        .directive_definitions
+                        .entry(name.clone())
+                        .or_insert_with(|| def.clone().into());
+                });
         }
     }
 
@@ -465,6 +525,7 @@ impl Merger {
         &mut self,
         types: &mut IndexMap<NamedType, ExtendedType>,
         directive_names: &DirectiveNames,
+        composed_directives_names: &Option<HashSet<String>>,
         subgraph_name: Name,
         object_name: NamedType,
         object: &Node<ObjectType>,
@@ -561,6 +622,18 @@ impl Merger {
                         );
                         arguments_to_merge.push(argument.into());
                     };
+                }
+
+                // if this field contains directives whose names are specified in @composeDirective
+                // preserve those directives in the supergraph
+                if let Some(composed_directives_names) = composed_directives_names.as_ref() {
+                    let _ = &field
+                        .directives
+                        .iter()
+                        .filter(|d| composed_directives_names.contains(d.name.as_str()))
+                        .for_each(|d| {
+                            supergraph_field.make_mut().directives.push(d.clone());
+                        });
                 }
 
                 let requires_directive_option = field
