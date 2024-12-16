@@ -676,7 +676,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    fn make_request() {
+    async fn make_request() {
         let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
