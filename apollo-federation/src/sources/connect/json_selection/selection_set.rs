@@ -59,7 +59,7 @@ impl SubSelection {
 
         // When the operation contains __typename, it might be used to complete
         // an entity reference (e.g. `__typename id`) for a subsequent fetch.
-        // This encodes the typename selection as `__typename: $->echo("Product")`
+        // This encodes the typename selection as `__typename: $("Product")`.
         //
         // TODO: this must change before we support interfaces and unions
         // because it will emit the abstract type's name which is invalid.
