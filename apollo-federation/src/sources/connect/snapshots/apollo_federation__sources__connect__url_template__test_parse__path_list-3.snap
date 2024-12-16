@@ -6,33 +6,64 @@ Ok(
     URLTemplate {
         base: None,
         path: [
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "abc",
+                    Constant(
+                        Constant {
+                            value: "abc",
+                            location: 1..4,
+                        },
                     ),
                 ],
             },
-            Component {
+            StringTemplate {
                 parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $args,
-                                location: 6..11,
-                            },
-                            path: [
-                                VariablePathPart {
-                                    part: "def",
-                                    location: 12..15,
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $args,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "def",
+                                                        ),
+                                                        range: Some(
+                                                            6..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            9..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..9,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..9,
+                                        ),
+                                    },
                                 },
-                            ],
+                            ),
                             location: 6..15,
                         },
                     ),
                 ],
             },
         ],
-        query: {},
+        query: [],
     },
 )

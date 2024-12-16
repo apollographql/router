@@ -6,44 +6,89 @@ Ok(
     URLTemplate {
         base: None,
         path: [
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "abc",
+                    Constant(
+                        Constant {
+                            value: "abc",
+                            location: 1..4,
+                        },
                     ),
                 ],
             },
-            Component {
+            StringTemplate {
                 parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $this,
-                                location: 6..11,
-                            },
-                            path: [
-                                VariablePathPart {
-                                    part: "def",
-                                    location: 12..15,
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "def",
+                                                        ),
+                                                        range: Some(
+                                                            6..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "thing",
+                                                                ),
+                                                                range: Some(
+                                                                    10..15,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    15..15,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            9..15,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..15,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..15,
+                                        ),
+                                    },
                                 },
-                                VariablePathPart {
-                                    part: "thing",
-                                    location: 16..21,
-                                },
-                            ],
+                            ),
                             location: 6..21,
                         },
                     ),
                 ],
             },
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "ghi",
+                    Constant(
+                        Constant {
+                            value: "ghi",
+                            location: 23..26,
+                        },
                     ),
                 ],
             },
         ],
-        query: {},
+        query: [],
     },
 )

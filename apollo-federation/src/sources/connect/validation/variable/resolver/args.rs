@@ -1,7 +1,6 @@
 use std::format;
 
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Type;
 use apollo_compiler::schema::Component;
 
 use crate::sources::connect::validation::graphql::GraphQLString;
@@ -30,8 +29,10 @@ impl<'a> NamespaceResolver for ArgsResolver<'a> {
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
         schema: &SchemaInfo,
-    ) -> Result<Option<Type>, Message> {
-        let root = resolver::get_root(reference, expression, schema)?;
+    ) -> Result<(), Message> {
+        let Some(root) = resolver::get_root(reference) else {
+            return Ok(()); // Not something we can type check this way TODO: delete all of this when Shape is available
+        };
 
         let field_type = self
             .field

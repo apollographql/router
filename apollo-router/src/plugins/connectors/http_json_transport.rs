@@ -13,8 +13,6 @@ use http::HeaderName;
 use http::HeaderValue;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
@@ -35,11 +33,10 @@ pub(crate) fn make_request(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(http::Request<RouterBody>, Option<ConnectorDebugHttpRequest>), HttpJsonTransportError>
 {
-    let flat_inputs = flatten_keys(&inputs);
     let uri = make_uri(
         transport.source_url.as_ref(),
         &transport.connect_template,
-        &flat_inputs,
+        &inputs,
     )?;
 
     let request = http::Request::builder()
@@ -51,7 +48,7 @@ pub(crate) fn make_request(
         request,
         original_request.supergraph_request.headers(),
         &transport.headers,
-        &flat_inputs,
+        &inputs,
     );
 
     let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
@@ -128,7 +125,7 @@ pub(crate) fn make_request(
 fn make_uri(
     source_url: Option<&Url>,
     template: &URLTemplate,
-    inputs: &Map<ByteString, Value>,
+    inputs: &IndexMap<String, Value>,
 ) -> Result<Url, HttpJsonTransportError> {
     let mut url = source_url
         .or(template.base.as_ref())
@@ -143,38 +140,16 @@ fn make_uri(
         .extend(
             template
                 .interpolate_path(inputs)
-                .map_err(HttpJsonTransportError::TemplateGenerationError)?,
+                .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?,
         );
 
     let query_params = template
         .interpolate_query(inputs)
-        .map_err(HttpJsonTransportError::TemplateGenerationError)?;
+        .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?;
     if !query_params.is_empty() {
         url.query_pairs_mut().extend_pairs(query_params);
     }
     Ok(url)
-}
-
-// URLTemplate expects a map with flat dot-delimited keys.
-fn flatten_keys(inputs: &IndexMap<String, Value>) -> Map<ByteString, Value> {
-    let mut flat = serde_json_bytes::Map::with_capacity(inputs.len());
-    for (key, value) in inputs {
-        flatten_keys_recursive(value, &mut flat, key.clone());
-    }
-    flat
-}
-
-fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, prefix: String) {
-    match inputs {
-        Value::Object(map) => {
-            for (key, value) in map {
-                flatten_keys_recursive(value, flat, [prefix.as_str(), ".", key.as_str()].concat());
-            }
-        }
-        _ => {
-            flat.insert(prefix, inputs.clone());
-        }
-    }
 }
 
 #[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
@@ -182,7 +157,7 @@ fn add_headers(
     mut request: http::request::Builder,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     config: &IndexMap<HeaderName, HeaderSource>,
-    inputs: &Map<ByteString, Value>,
+    inputs: &IndexMap<String, Value>,
 ) -> (http::request::Builder, Option<mime::Mime>) {
     let mut content_type = None;
 
@@ -233,7 +208,7 @@ pub(crate) enum HttpJsonTransportError {
     /// Error building URI: {0:?}
     InvalidUrl(url::ParseError),
     /// Could not generate URI from inputs: {0}
-    TemplateGenerationError(&'static str),
+    TemplateGenerationError(String),
     /// Either a source or a fully qualified URL must be provided to `@connect`
     NoBaseUrl,
 }
@@ -246,18 +221,12 @@ mod test_make_uri {
 
     use super::*;
 
-    macro_rules! map {
-        ($($key:expr => $value:expr),* $(,)?) => {
-            {
-                let mut variables = IndexMap::with_hasher(Default::default());
-                let mut this = IndexMap::with_hasher(Default::default());
-                $(
-                    this.insert($key.to_string(), json!($value));
-                )*
-                variables.insert("$this".to_string(), json!(this));
-                flatten_keys(&variables)
-            }
-        };
+    macro_rules! this {
+        ($($value:tt)*) => {{
+            let mut map = IndexMap::with_capacity_and_hasher(1, Default::default());
+            map.insert("$this".to_string(), json!({ $($value)* }));
+            map
+        }};
     }
 
     #[test]
@@ -294,7 +263,7 @@ mod test_make_uri {
             make_uri(
                 Some(&Url::parse("https://localhost:8080/v1/").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &map! { "id" => 42 },
+                &this! { "id": 42 },
             )
             .unwrap()
             .as_str(),
@@ -307,7 +276,7 @@ mod test_make_uri {
             make_uri(
                 Some(&Url::parse("https://localhost:8080/v1?foo=bar").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &map! {"id" => 42 },
+                &this! {"id": 42 },
             )
             .unwrap()
             .as_str(),
@@ -320,7 +289,7 @@ mod test_make_uri {
             make_uri(
                 Some(&Url::parse("https://localhost:8080/v1/?foo=bar").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &map! {"id" => 42 },
+                &this! {"id": 42 },
             )
             .unwrap()
             .as_str(),
@@ -345,10 +314,10 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "user_id" => 123,
-                    "b" => "456",
-                    "f.g" => "abc"
+                &this! {
+                    "user_id": 123,
+                    "b": "456",
+                    "f": {"g": "abc"}
                 }
             )
             .unwrap()
@@ -360,9 +329,9 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "user_id" => 123,
-                    "f" => "not an object"
+                &this! {
+                    "user_id": 123,
+                    "f": "not an object"
                 }
             )
             .unwrap()
@@ -374,10 +343,10 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
+                &this! {
                     // The order of the variables should not matter.
-                    "b" => "456",
-                    "user_id" => "123"
+                    "b": "456",
+                    "user_id": "123"
                 }
             )
             .unwrap()
@@ -389,12 +358,12 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "user_id" => "123",
-                    "b" => "a",
-                    "f.g" => "e",
+                &this! {
+                    "user_id": "123",
+                    "b": "a",
+                    "f": {"g": "e"},
                     // Extra variables should be ignored.
-                    "extra" => "ignored"
+                    "extra": "ignored"
                 }
             )
             .unwrap()
@@ -414,15 +383,15 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "x" => 1,
-                    "y" => 2,
-                    "z" => 3,
-                    "b" => 4,
-                    "c" => 5,
-                    "d" => 6,
-                    "e" => 7,
-                    "f" => 8,
+                &this! {
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6,
+                    "e": 7,
+                    "f": 8,
                 }
             )
             .unwrap()
@@ -434,15 +403,15 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "x" => 1,
-                    "y" => 2,
-                    "z" => 3,
-                    "b" => 4,
-                    "c" => 5,
-                    "d" => 6,
-                    "e" => 7
-                    // "f" => 8,
+                &this! {
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6,
+                    "e": 7
+                    // "f": 8,
                 }
             )
             .unwrap()
@@ -454,15 +423,15 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "x" => 1,
-                    "y" => 2,
-                    "z" => 3,
-                    "b" => 4,
-                    "c" => 5,
-                    "d" => 6,
-                    // "e" => 7,
-                    "f" => 8
+                &this! {
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6,
+                    // "e": 7,
+                    "f": 8
                 }
             )
             .unwrap()
@@ -474,13 +443,13 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "x" => 1,
-                    "y" => 2,
-                    "z" => 3,
-                    "b" => 4,
-                    "c" => 5,
-                    "d" => 6
+                &this! {
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6
                 }
             )
             .unwrap()
@@ -492,10 +461,10 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    // "x" => 1,
-                    "y" => 2,
-                    "z" => 3
+                &this! {
+                    // "x": 1,
+                    "y": 2,
+                    "z": 3
                 }
             )
             .unwrap()
@@ -507,10 +476,10 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "x" => 1,
-                    "y" => 2
-                    // "z" => 3,
+                &this! {
+                    "x": 1,
+                    "y": 2
+                    // "z": 3,
                 }
             )
             .unwrap()
@@ -522,13 +491,13 @@ mod test_make_uri {
             make_uri(
                 None,
                 &template,
-                &map! {
-                    "b" => 4,
-                    // "c" => 5,
-                    "d" => 6,
-                    "x" => 1,
-                    "y" => 2,
-                    "z" => 3
+                &this! {
+                    "b": 4,
+                    // "c": 5,
+                    "d": 6,
+                    "x": 1,
+                    "y": 2,
+                    "z": 3
                 }
             )
             .unwrap()
@@ -544,13 +513,17 @@ mod test_make_uri {
             make_uri(
                 None,
                 &line_template,
-                &map! {
-                    "p1.x" => 1,
-                    "p1.y" => 2,
-                    "p1.z" => 3,
-                    "p2.x" => 4,
-                    "p2.y" => 5,
-                    "p2.z" => 6,
+                &this! {
+                    "p1": {
+                        "x": 1,
+                        "y": 2,
+                        "z": 3,
+                    },
+                    "p2": {
+                        "x": 4,
+                        "y": 5,
+                        "z": 6,
+                    }
                 }
             )
             .unwrap()
@@ -562,14 +535,18 @@ mod test_make_uri {
             make_uri(
                 None,
                 &line_template,
-                &map! {
-                    "p1.x" => 1,
-                    "p1.y" => 2,
-                    "p1.z" => 3,
-                    "p2.x" => 4,
-                    "p2.y" => 5
-                    // "p2.z" => 6,
+            &this! {
+                "p1": {
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                },
+                "p2": {
+                    "x": 4,
+                    "y": 5,
+                    // "z": 6,
                 }
+            }
             )
             .unwrap()
             .as_str(),
@@ -580,13 +557,17 @@ mod test_make_uri {
             make_uri(
                 None,
                 &line_template,
-                &map! {
-                    "p1.x" => 1,
-                    // "p1.y" => 2,
-                    "p1.z" => 3,
-                    "p2.x" => 4,
-                    "p2.y" => 5,
-                    "p2.z" => 6
+                &this! {
+                    "p1": {
+                        "x": 1,
+                        // "y": 2,
+                        "z": 3,
+                    },
+                    "p2": {
+                        "x": 4,
+                        "y": 5,
+                        "z": 6,
+                    }
                 }
             )
             .unwrap()
@@ -599,11 +580,11 @@ mod test_make_uri {
     /// no nested query params, etc. When we expand values, we have to make sure they're safe.
     #[test]
     fn parameter_encoding() {
-        let vars = &map! {
-            "path" => "/some/path",
-            "question_mark" => "a?b",
-            "ampersand" => "a&b=b",
-            "hash" => "a#b",
+        let vars = &this! {
+            "path": "/some/path",
+            "question_mark": "a?b",
+            "ampersand": "a&b=b",
+            "hash": "a#b",
         };
 
         let template = "http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}"
@@ -652,7 +633,7 @@ mod tests {
             request,
             &incoming_supergraph_headers,
             &IndexMap::with_hasher(Default::default()),
-            &Map::default(),
+            &IndexMap::with_hasher(Default::default()),
         );
         let request = request.body(body::empty()).unwrap();
         assert!(request.headers().is_empty());
@@ -685,40 +666,13 @@ mod tests {
             request,
             &incoming_supergraph_headers,
             &config,
-            &Map::default(),
+            &IndexMap::with_hasher(Default::default()),
         );
         let request = request.body(body::empty()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
         assert_eq!(result.get("x-insert"), Some(&"inserted".parse().unwrap()));
-    }
-
-    #[test]
-    fn test_flatten_keys() {
-        let mut inputs = IndexMap::with_hasher(Default::default());
-        inputs.insert("a".to_string(), json!(1));
-        inputs.insert(
-            "b".to_string(),
-            json!({
-                    "c": 2,
-                    "d": {
-                        "e": 3
-                    }
-            }),
-        );
-        let flat = flatten_keys(&inputs);
-        assert_eq!(
-            flat,
-            json!({
-                "a": 1,
-                "b.c": 2,
-                "b.d.e": 3
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
