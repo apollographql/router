@@ -1210,9 +1210,7 @@ struct LoadCertError(std::io::Error);
 pub(crate) fn load_certs(data: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     rustls_pemfile::certs(&mut BufReader::new(data.as_bytes()))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| {
-            io::Error::new(io::ErrorKind::InvalidInput, LoadCertError(error))
-        })
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, LoadCertError(error)))
 }
 
 pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
