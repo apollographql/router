@@ -336,10 +336,7 @@ impl SigningParamsConfig {
                 error
             })?
             .into_parts();
-        req = Request::<RouterBody>::from_parts(
-            parts,
-            crate::services::router::body::from_bytes(body_bytes),
-        );
+        req = Request::<RouterBody>::from_parts(parts, router::body::from_bytes(body_bytes));
         signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)

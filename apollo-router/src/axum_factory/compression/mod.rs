@@ -215,7 +215,7 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::*;
-    use crate::services::router::body::from_result_stream;
+    use crate::services::router;
     use crate::services::router::body::{self};
 
     #[tokio::test]
@@ -292,7 +292,7 @@ content-type: application/json
 "#;
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: RouterBody = from_result_stream(stream::iter(vec![
+        let body: RouterBody = router::body::from_result_stream(stream::iter(vec![
             Ok::<_, BoxError>(Bytes::from(primary_response)),
             Ok(Bytes::from(deferred_response)),
         ]));

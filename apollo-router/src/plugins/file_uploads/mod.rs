@@ -29,7 +29,6 @@ use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
 use crate::services::execution;
 use crate::services::router;
-use crate::services::router::body::from_result_stream;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -192,7 +191,7 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        let request_body = from_result_stream(operations_stream);
+        let request_body = router::body::from_result_stream(operations_stream);
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
             req.context,
@@ -362,7 +361,7 @@ pub(crate) async fn http_request_wrapper(
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
-        let request_body = from_result_stream(form.into_stream(operations).await);
+        let request_body = router::body::from_result_stream(form.into_stream(operations).await);
 
         return http::Request::from_parts(request_parts, request_body);
     }

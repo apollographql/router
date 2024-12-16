@@ -56,7 +56,6 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::body::into_bytes;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
@@ -469,10 +468,12 @@ impl RouterService {
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
-            bytes.extend_from_slice(&into_bytes(body).await?);
+            bytes.extend_from_slice(&router::body::into_bytes(body).await?);
             for result in results_it {
                 bytes.put(&b", "[..]);
-                bytes.extend_from_slice(&into_bytes(result.response.into_body()).await?);
+                bytes.extend_from_slice(
+                    &router::body::into_bytes(result.response.into_body()).await?,
+                );
             }
             bytes.put_u8(b']');
 
@@ -739,7 +740,7 @@ impl RouterService {
             if parts.method == Method::GET {
                 self.translate_query_request(parts).await
             } else {
-                let bytes = into_bytes(body)
+                let bytes = router::body::into_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await?;
                 self.translate_bytes_request(&bytes)

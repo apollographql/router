@@ -26,7 +26,7 @@ use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
-use crate::services::router::body::into_bytes;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
@@ -441,7 +441,7 @@ pub(crate) async fn assemble_batch(
     let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
 
     // Construct the actual byte body of the batched request
-    let bytes = into_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
 
     // Retain the various contexts for later use
     let contexts = requests
@@ -462,8 +462,7 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    let request =
-        http::Request::from_parts(parts, crate::services::router::body::from_bytes(bytes));
+    let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
     Ok((operation_name, contexts, request, txs))
 }
 
@@ -547,7 +546,8 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&body::into_bytes(request.into_body()).await.unwrap()).unwrap(),
+            std::str::from_utf8(&router::body::into_bytes(request.into_body()).await.unwrap())
+                .unwrap(),
         )
         .unwrap();
 

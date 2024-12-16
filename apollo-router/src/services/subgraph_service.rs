@@ -1660,7 +1660,7 @@ mod tests {
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
-    use crate::services::router::body::into_bytes;
+    use crate::services::router;
     use crate::Context;
 
     async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
@@ -1858,7 +1858,7 @@ mod tests {
     async fn emulate_persisted_query_not_supported_message(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = into_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1911,7 +1911,7 @@ mod tests {
     async fn emulate_persisted_query_not_supported_extension_code(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = into_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1966,7 +1966,7 @@ mod tests {
     async fn emulate_persisted_query_not_found_message(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = into_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2024,7 +2024,7 @@ mod tests {
     async fn emulate_persisted_query_not_found_extension_code(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = into_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2082,7 +2082,7 @@ mod tests {
     async fn emulate_expected_apq_enabled_configuration(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = into_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2121,7 +2121,7 @@ mod tests {
     async fn emulate_expected_apq_disabled_configuration(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = into_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2234,7 +2234,7 @@ mod tests {
                 .get_all(ACCEPT)
                 .iter()
                 .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT));
-            let graphql_request: Result<graphql::Request, &str> = into_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))

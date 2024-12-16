@@ -41,7 +41,7 @@ use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
-use crate::services::router::body::from_result_stream;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::Configuration;
 use crate::Context;
@@ -285,7 +285,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let body = match opt_compressor {
             None => body,
-            Some(compressor) => from_result_stream(compressor.process(body)),
+            Some(compressor) => router::body::from_result_stream(compressor.process(body)),
         };
 
         let mut http_request = http::Request::from_parts(parts, body);

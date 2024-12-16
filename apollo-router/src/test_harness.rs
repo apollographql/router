@@ -548,6 +548,6 @@ pub fn make_fake_batch(
         result.push(b',');
         result.append(&mut json_bytes_new_req);
         result.push(b']');
-        crate::services::router::body::from_bytes(result)
+        router::body::from_bytes(result)
     })
 }

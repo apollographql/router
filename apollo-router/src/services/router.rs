@@ -489,8 +489,8 @@ mod test {
     use http_body::Frame;
     use tower::BoxError;
 
-    use crate::services::router::body::into_bytes;
-    use crate::services::router::convert_to_body;
+    use super::convert_to_body;
+    use crate::services::router;
 
     struct MockBody {
         data: Option<&'static str>,
@@ -515,7 +515,7 @@ mod test {
     async fn test_convert_from_http_body() {
         let body = convert_to_body(MockBody { data: Some("test") });
         assert_eq!(
-            &String::from_utf8(into_bytes(body).await.unwrap().to_vec()).unwrap(),
+            &String::from_utf8(router::body::into_bytes(body).await.unwrap().to_vec()).unwrap(),
             "test"
         );
     }
@@ -524,7 +524,7 @@ mod test {
     async fn test_convert_from_hyper_body() {
         let body = convert_to_body(String::from("test"));
         assert_eq!(
-            &String::from_utf8(into_bytes(body).await.unwrap().to_vec()).unwrap(),
+            &String::from_utf8(router::body::into_bytes(body).await.unwrap().to_vec()).unwrap(),
             "test"
         );
     }

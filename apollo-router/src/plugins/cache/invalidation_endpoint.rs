@@ -24,7 +24,6 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::router;
-use crate::services::router::body::into_bytes;
 use crate::ListenAddr;
 
 pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
@@ -119,7 +118,7 @@ impl Service<router::Request> for InvalidationService {
                 }
                 match parts.method {
                     Method::POST => {
-                        let body = into_bytes(body)
+                        let body = router::body::into_bytes(body)
                             .instrument(tracing::info_span!("into_bytes"))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
