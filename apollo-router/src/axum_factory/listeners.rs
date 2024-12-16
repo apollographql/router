@@ -201,7 +201,7 @@ pub(super) async fn get_extra_listeners(
 
 async fn process_error(io_error: std::io::Error) {
     match io_error.kind() {
-        // this is already handled by moi and tokio
+        // this is already handled by mio and tokio
         //std::io::ErrorKind::WouldBlock => todo!(),
 
         // should be treated as EAGAIN
