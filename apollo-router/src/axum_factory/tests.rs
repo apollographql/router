@@ -23,6 +23,7 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
+#[cfg(unix)]
 use http_body_util::BodyExt;
 use hyper::rt::ReadBufCursor;
 use hyper_util::rt::TokioIo;
@@ -2094,6 +2095,7 @@ async fn listening_to_unix_socket() {
     server.shutdown().await.unwrap();
 }
 
+#[cfg(unix)]
 pin_project! {
     /// Wrapper around [`tokio::net::UnixStream`].
     #[derive(Debug)]
@@ -2103,6 +2105,7 @@ pin_project! {
     }
 }
 
+#[cfg(unix)]
 impl UnixStream {
     async fn connect(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
         let unix_stream = tokio::net::UnixStream::connect(path).await?;
@@ -2110,6 +2113,7 @@ impl UnixStream {
     }
 }
 
+#[cfg(unix)]
 impl AsyncWrite for UnixStream {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -2146,6 +2150,7 @@ impl AsyncWrite for UnixStream {
     }
 }
 
+#[cfg(unix)]
 impl hyper::rt::Write for UnixStream {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -2170,6 +2175,7 @@ impl hyper::rt::Write for UnixStream {
     }
 }
 
+#[cfg(unix)]
 impl AsyncRead for UnixStream {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -2180,6 +2186,7 @@ impl AsyncRead for UnixStream {
     }
 }
 
+#[cfg(unix)]
 impl hyper::rt::Read for UnixStream {
     fn poll_read(
         self: Pin<&mut Self>,

@@ -28,6 +28,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+#[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio_rustls::TlsAcceptor;
 use tower::BoxError;
@@ -120,6 +121,7 @@ where
     }
 }
 
+#[cfg(unix)]
 async fn serve_unix<Handler, Fut>(listener: UnixListener, handle: Handler) -> std::io::Result<()>
 where
     Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,

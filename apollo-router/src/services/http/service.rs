@@ -20,6 +20,7 @@ use opentelemetry::global;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
+#[cfg(unix)]
 use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
