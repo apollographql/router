@@ -27,20 +27,20 @@ use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::trace::config;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::sdk::Resource;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::KeyValue;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::trace::config;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use regex::Regex;
 use reqwest::Request;
@@ -150,7 +150,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_sync_agent_exporter()
                             .expect("jaeger pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -167,7 +167,7 @@ impl Telemetry {
                         )
                         .build_span_exporter()
                         .expect("otlp pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -181,7 +181,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -195,7 +195,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .init_exporter()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -216,28 +216,28 @@ impl Telemetry {
                 let propagator = opentelemetry_jaeger::Propagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Datadog => {
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Zipkin => {
                 let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             _ => {}
@@ -261,7 +261,7 @@ impl Telemetry {
                 propagator.extract(&headers)
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.extract(&headers)
             }
             Telemetry::Zipkin => {
@@ -316,11 +316,21 @@ impl IntegrationTest {
             .await;
 
         Mock::given(method("POST"))
-            .respond_with(TracedResponder{response_template:responder.unwrap_or_else(||
-                ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
+            .respond_with(TracedResponder {
+                response_template: responder.unwrap_or_else(|| {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "data": {
+                            "topProducts": [
+                                { "name": "Table" },
+                                { "name": "Couch" },
+                                { "name": "Chair" },
+                            ],
+                        },
+                    }))
+                }),
                 telemetry: telemetry.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
-                subgraph_callback
+                subgraph_callback,
             })
             .mount(&subgraphs)
             .await;
@@ -689,7 +699,7 @@ impl IntegrationTest {
                 global::get_text_map_propagator(|propagator| {
                     propagator.inject_context(
                         &tracing::span::Span::current().context(),
-                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                        &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                     );
                 });
                 request.headers_mut().remove(ACCEPT);
@@ -730,7 +740,7 @@ impl IntegrationTest {
         global::get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &span.context(),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
             );
         });
 

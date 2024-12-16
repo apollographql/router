@@ -7,11 +7,11 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
-use axum::body::BoxBody;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::poll_fn;
@@ -23,10 +23,14 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
-use http_body::Body;
+#[cfg(unix)]
+use http_body_util::BodyExt;
+use hyper::rt::ReadBufCursor;
+use hyper_util::rt::TokioIo;
 use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
+use pin_project_lite::pin_project;
 use reqwest::header::ACCEPT;
 use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
@@ -43,7 +47,9 @@ use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
+use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
@@ -1918,11 +1924,11 @@ async fn http_deferred_service() -> impl Service<
         .await
         .unwrap()
         .map_err(Into::into)
-        .map_response(|response: http::Response<BoxBody>| {
+        .map_response(|response: http::Response<axum::body::Body>| {
             let response = response.map(|body| {
                 // Convert from axum’s BoxBody to AsyncBufRead
-                let mut body = Box::pin(body);
-                let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
+                let mut body = body.into_data_stream();
+                let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
                     .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
                 StreamReader::new(stream)
             });
@@ -2090,23 +2096,124 @@ async fn listening_to_unix_socket() {
 }
 
 #[cfg(unix)]
+pin_project! {
+    /// Wrapper around [`tokio::net::UnixStream`].
+    #[derive(Debug)]
+    struct UnixStream {
+        #[pin]
+        unix_stream: tokio::net::UnixStream,
+    }
+}
+
+#[cfg(unix)]
+impl UnixStream {
+    async fn connect(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        let unix_stream = tokio::net::UnixStream::connect(path).await?;
+        Ok(Self { unix_stream })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncWrite for UnixStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.project().unix_stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        self.project().unix_stream.poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.unix_stream.is_write_vectored()
+    }
+}
+
+#[cfg(unix)]
+impl hyper::rt::Write for UnixStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.project().unix_stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_shutdown(cx)
+    }
+}
+
+#[cfg(unix)]
+impl AsyncRead for UnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.project().unix_stream.poll_read(cx, buf)
+    }
+}
+
+#[cfg(unix)]
+impl hyper::rt::Read for UnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: ReadBufCursor<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        let mut t = TokioIo::new(self.project().unix_stream);
+        Pin::new(&mut t).poll_read(cx, buf)
+    }
+}
+
+#[cfg(unix)]
 async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
-    use tokio::net::UnixStream;
     let stream = UnixStream::connect(addr.to_string()).await.unwrap();
-    let (mut sender, conn) = hyper::client::conn::handshake(stream).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
             println!("Connection failed: {:?}", err);
         }
     });
 
-    let http_body = hyper::Body::from(body.to_string());
     let mut request = http::Request::builder()
         .method(method.clone())
         .header("Host", "localhost:4100")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .body(http_body)
+        .body(body.to_string())
         .unwrap();
     if method == Method::GET {
         *request.uri_mut() = body.parse().unwrap();

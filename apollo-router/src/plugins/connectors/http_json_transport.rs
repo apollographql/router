@@ -23,6 +23,7 @@ use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::services::connect;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 
 pub(crate) fn make_request(
@@ -62,19 +63,19 @@ pub(crate) fn make_request(
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
                     let len = encoded.bytes().len();
-                    (hyper::Body::from(encoded), len)
+                    (router::body::from_bytes(encoded), len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
-                    (hyper::Body::from(bytes), len)
+                    (router::body::from_bytes(bytes), len)
                 }
             } else {
-                (hyper::Body::empty(), 0)
+                (router::body::empty(), 0)
             };
             (json_body, form_body, body, content_length, apply_to_errors)
         } else {
-            (None, None, hyper::Body::empty(), 0, vec![])
+            (None, None, router::body::empty(), 0, vec![])
         };
 
     match transport.method {
@@ -85,7 +86,7 @@ pub(crate) fn make_request(
     }
 
     let request = request
-        .body(body.into())
+        .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
     let debug_request = debug.as_ref().map(|_| {
@@ -613,6 +614,7 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
+    use crate::services::router::body;
     use crate::Context;
 
     #[test]
@@ -633,7 +635,7 @@ mod tests {
             &IndexMap::with_hasher(Default::default()),
             &IndexMap::with_hasher(Default::default()),
         );
-        let request = request.body(hyper::Body::empty()).unwrap();
+        let request = request.body(body::empty()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -666,14 +668,14 @@ mod tests {
             &config,
             &IndexMap::with_hasher(Default::default()),
         );
-        let request = request.body(hyper::Body::empty()).unwrap();
+        let request = request.body(body::empty()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
         assert_eq!(result.get("x-insert"), Some(&"inserted".parse().unwrap()));
     }
 
-    #[test]
+    #[tokio::test(flavor = "multi_thread")]
     fn make_request() {
         let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
@@ -710,19 +712,18 @@ mod tests {
                     "content-type": "application/json",
                     "content-length": "8",
                 },
-                body: Body(
-                    Full(
-                        b"{\"a\":42}",
-                    ),
-                ),
+                body: UnsyncBoxBody,
             },
             None,
         )
         "###);
+
+        let body = body::into_string(req.0.into_body()).await.unwrap();
+        insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
 
-    #[test]
-    fn make_request_form_encoded() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn make_request_form_encoded() {
         let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
@@ -763,14 +764,13 @@ mod tests {
                     "content-type": "application/x-www-form-urlencoded",
                     "content-length": "4",
                 },
-                body: Body(
-                    Full(
-                        b"a=42",
-                    ),
-                ),
+                body: UnsyncBoxBody,
             },
             None,
         )
         "###);
+
+        let body = body::into_string(req.0.into_body()).await.unwrap();
+        insta::assert_snapshot!(body, @r#"a=42"#);
     }
 }

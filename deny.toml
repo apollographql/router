@@ -54,6 +54,7 @@ allow = [
     "MIT",
     "MPL-2.0",
     "Elastic-2.0",
+    "OpenSSL", # required by aws-lc-sys
     "Unicode-DFS-2016",
     "Unicode-3.0",
     "Zlib"

@@ -135,7 +135,7 @@ async fn max_requests() {
           "message": "Request limit exceeded",
           "path": [
             "users",
-            "@"
+            1
           ],
           "extensions": {
             "service": "connectors.json http: GET /users/{$args.id}",
@@ -205,7 +205,7 @@ async fn source_max_requests() {
           "message": "Request limit exceeded",
           "path": [
             "users",
-            "@"
+            1
           ],
           "extensions": {
             "service": "connectors.json http: GET /users/{$args.id}",
@@ -287,7 +287,7 @@ async fn test_root_field_plus_entity_plus_requires() {
             })))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .insert_header(wiremock::http::HeaderName::from_string(CONTENT_TYPE.to_string()).unwrap(), APPLICATION_JSON.essence_str())
                     .set_body_json(json!({
                       "data": {
                         "_entities": [{
@@ -406,35 +406,94 @@ async fn basic_errors() {
         })))
         .mount(&mock_server)
         .await;
+    Mock::given(method("GET"))
+        .and(path("/posts"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([{ "id": "1", "userId": "1" }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"error": "bad"})))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/1/nicknames"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"error": "bad"})))
+        .mount(&mock_server)
+        .await;
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "{ users { id } }",
+        "{ users { id } posts { id user { name nickname } } }",
         Default::default(),
         None,
         |_| {},
     )
     .await;
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users")],
-    );
-
     insta::assert_json_snapshot!(response, @r###"
     {
-      "data": null,
+      "data": {
+        "users": null,
+        "posts": [
+          {
+            "id": "1",
+            "user": {
+              "name": null,
+              "nickname": null
+            }
+          }
+        ]
+      },
       "errors": [
         {
           "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
-          "path": [],
+          "path": [
+            "users"
+          ],
           "extensions": {
             "code": "SUBREQUEST_HTTP_ERROR",
             "service": "connectors.json http: GET /users",
             "reason": "404: Not Found",
             "http": {
               "status": 404
+            }
+          }
+        },
+        {
+          "message": "HTTP fetch failed from 'connectors.json http: GET /users/{$args.id}': 400: Bad Request",
+          "path": [
+            "posts",
+            0,
+            "user"
+          ],
+          "extensions": {
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "connectors.json http: GET /users/{$args.id}",
+            "reason": "400: Bad Request",
+            "http": {
+              "status": 400
+            }
+          }
+        },
+        {
+          "message": "HTTP fetch failed from 'connectors.json http: GET /users/{$this.id}/nicknames': 400: Bad Request",
+          "path": [
+            "posts",
+            0,
+            "user",
+            "nickname"
+          ],
+          "extensions": {
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "connectors.json http: GET /users/{$this.id}/nicknames",
+            "reason": "400: Bad Request",
+            "http": {
+              "status": 400
             }
           }
         }
@@ -1067,7 +1126,9 @@ async fn error_not_redacted() {
       "errors": [
         {
           "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
-          "path": [],
+          "path": [
+            "users"
+          ],
           "extensions": {
             "code": "SUBREQUEST_HTTP_ERROR",
             "service": "connectors.json http: GET /users",
@@ -1116,7 +1177,9 @@ async fn error_redacted() {
       "errors": [
         {
           "message": "Subgraph errors redacted",
-          "path": []
+          "path": [
+            "users"
+          ]
         }
       ]
     }

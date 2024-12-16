@@ -19,7 +19,7 @@ mod test {
             let mut response = test_harness
                 .call_router(
                     router::Request::fake_builder()
-                        .body("query { foo }")
+                        .body(router::body::from_bytes("query { foo }"))
                         .build()
                         .expect("expecting valid request"),
                     |_r| async {

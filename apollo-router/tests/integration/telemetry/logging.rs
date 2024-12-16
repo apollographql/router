@@ -45,6 +45,10 @@ async fn test_json() -> Result<(), BoxError> {
         .await;
     router.execute_query(&query).await;
     router.assert_log_contains(r#""response_status":200"#).await;
+    router.execute_query(&query).await;
+    router.assert_log_contains(r#""http.response.body":"{\"data\":{\"topProducts\":[{\"name\":\"Table\"},{\"name\":\"Couch\"},{\"name\":\"Chair\"}]}}"#).await;
+    router.execute_query(&query).await;
+    router.assert_log_contains(r#""http.request.body":"\"{\\\"query\\\":\\\"query ExampleQuery {topProducts{name}}\\\",\\\"variables\\\":{}}\"""#).await;
     router.graceful_shutdown().await;
 
     Ok(())

@@ -224,13 +224,13 @@ where
 mod test {
     use futures::stream::StreamExt;
     use http::StatusCode;
+    use http_body_util::BodyStream;
     use tower::BoxError;
     use tower::ServiceBuilder;
     use tower_service::Service;
 
     use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::layer::RequestBodyLimitLayer;
-    use crate::services;
 
     #[tokio::test]
     async fn test_body_content_length_limit_exceeded() {
@@ -238,9 +238,7 @@ mod test {
         let mut service = ServiceBuilder::new()
             .layer(RequestBodyLimitLayer::new(control.clone()))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 panic!("should have rejected request");
             });
         let resp: Result<http::Response<String>, BoxError> = service
@@ -255,9 +253,7 @@ mod test {
         let mut service = ServiceBuilder::new()
             .layer(RequestBodyLimitLayer::new(control.clone()))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 Ok(http::Response::builder()
                     .status(StatusCode::OK)
                     .body("This is a test".to_string())
@@ -277,9 +273,7 @@ mod test {
         let mut service = ServiceBuilder::new()
             .layer(RequestBodyLimitLayer::new(control.clone()))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 panic!("should have rejected request");
             });
         let resp: Result<http::Response<String>, BoxError> = service
@@ -299,9 +293,7 @@ mod test {
         let mut service = ServiceBuilder::new()
             .layer(RequestBodyLimitLayer::new(control.clone()))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 Ok(http::Response::builder()
                     .status(StatusCode::OK)
                     .body("This is a test".to_string())
@@ -329,9 +321,7 @@ mod test {
             .service_fn(move |r: http::Request<_>| {
                 let control = control.clone();
                 async move {
-                    services::http::body_stream::BodyStream::new(r.into_body())
-                        .collect::<Vec<_>>()
-                        .await;
+                    BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                     control.update_limit(100);
                     Ok(http::Response::builder()
                         .status(StatusCode::OK)
@@ -351,9 +341,7 @@ mod test {
         let mut service = ServiceBuilder::new()
             .layer(RequestBodyLimitLayer::new(control.clone()))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 Ok(http::Response::builder()
                     .status(StatusCode::OK)
                     .body("This is a test".to_string())
