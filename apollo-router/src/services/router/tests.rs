@@ -15,7 +15,7 @@ use tower_service::Service;
 
 use crate::graphql;
 use crate::services::router;
-use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::into_bytes;
 use crate::services::router::service::from_supergraph_mock_callback;
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
@@ -204,7 +204,7 @@ async fn test_http_max_request_bytes() {
                      in `apollo-router/src/services/supergraph.rs` has changed. \
                      Please update `CANNED_REQUEST_LEN` accordingly."
                 );
-                router::body::full(json_bytes)
+                router::body::from_bytes(json_bytes)
             });
         let config = serde_json::json!({
             "limits": {
@@ -260,7 +260,7 @@ async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
     let data: serde_json::Value =
-        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
+        serde_json::from_slice(&into_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -294,7 +294,7 @@ async fn it_processes_a_valid_query_batch() {
                 result.push(b',');
                 result.append(&mut json_bytes_3);
                 result.push(b']');
-                router::body::full(result)
+                router::body::from_bytes(result)
             });
         let config = serde_json::json!({
             "batching": {
@@ -316,7 +316,7 @@ async fn it_processes_a_valid_query_batch() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::OK);
     let data: serde_json::Value =
-        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
+        serde_json::from_slice(&into_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -350,7 +350,7 @@ async fn it_will_not_process_a_query_batch_without_enablement() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
     let data: serde_json::Value =
-        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
+        serde_json::from_slice(&into_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -374,7 +374,7 @@ async fn it_will_not_process_a_poorly_formatted_query_batch() {
                 result.push(b',');
                 result.append(&mut json_bytes);
                 // Deliberately omit the required trailing ]
-                router::body::full(result)
+                router::body::from_bytes(result)
             });
         let config = serde_json::json!({
             "batching": {
@@ -396,7 +396,7 @@ async fn it_will_not_process_a_poorly_formatted_query_batch() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
     let data: serde_json::Value =
-        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
+        serde_json::from_slice(&into_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -427,7 +427,7 @@ async fn it_will_process_a_non_batched_defered_query() {
             .supergraph_request
             .map(|req: graphql::Request| {
                 let bytes = serde_json::to_vec(&req).unwrap();
-                router::body::full(bytes)
+                router::body::from_bytes(bytes)
             });
         let config = serde_json::json!({
             "batching": {
@@ -448,7 +448,7 @@ async fn it_will_process_a_non_batched_defered_query() {
     // Send a request
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::OK);
-    let bytes = get_body_bytes(response.into_body()).await.unwrap();
+    let bytes = into_bytes(response.into_body()).await.unwrap();
     let data = String::from_utf8_lossy(&bytes);
     assert_eq!(expected_response, data);
 }
@@ -501,7 +501,7 @@ async fn it_will_not_process_a_batched_deferred_query() {
     // Send a request
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::NOT_ACCEPTABLE);
-    let bytes = get_body_bytes(response.into_body()).await.unwrap();
+    let bytes = into_bytes(response.into_body()).await.unwrap();
     let data = String::from_utf8_lossy(&bytes);
     assert_eq!(expected_response, data);
 }

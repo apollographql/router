@@ -176,7 +176,7 @@ where
                     async move {
                         Ok(router::Response {
                             response: http::Response::builder().status(status_code).body(
-                                crate::services::router::body::full(
+                                crate::services::router::body::from_bytes(
                                     serde_json::to_vec(&health).map_err(BoxError::from)?,
                                 ),
                             )?,
@@ -756,7 +756,7 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::full(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(r#"{"query":"query { me { name }}"}"#))
                         .unwrap(),
                 ),
             )
@@ -790,7 +790,7 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::full(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(r#"{"query":"query { me { name }}"}"#))
                         .unwrap(),
                 ),
             )

@@ -44,8 +44,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
-use crate::services::router::body::full;
-use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::into_bytes;
 use crate::services::supergraph;
 use crate::Configuration;
 use crate::Context;
@@ -195,7 +194,9 @@ async fn tls_self_signed() {
             http_request: http::Request::builder()
                 .uri(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .body(full(r#"{"query":"{ me { name username } }"#))
+                .body(crate::services::router::body::from_bytes(
+                    r#"{"query":"{ me { name username } }"#,
+                ))
                 .unwrap(),
             context: Context::new(),
         })
@@ -204,7 +205,7 @@ async fn tls_self_signed() {
 
     assert_eq!(
         std::str::from_utf8(
-            &get_body_bytes(response.http_response.into_parts().1)
+            &into_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -252,7 +253,9 @@ async fn tls_custom_root() {
             http_request: http::Request::builder()
                 .uri(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .body(full(r#"{"query":"{ me { name username } }"#))
+                .body(crate::services::router::body::from_bytes(
+                    r#"{"query":"{ me { name username } }"#,
+                ))
                 .unwrap(),
             context: Context::new(),
         })
@@ -260,7 +263,7 @@ async fn tls_custom_root() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &get_body_bytes(response.http_response.into_parts().1)
+            &into_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -377,7 +380,9 @@ async fn tls_client_auth() {
             http_request: http::Request::builder()
                 .uri(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .body(full(r#"{"query":"{ me { name username } }"#))
+                .body(crate::services::router::body::from_bytes(
+                    r#"{"query":"{ me { name username } }"#,
+                ))
                 .unwrap(),
             context: Context::new(),
         })
@@ -385,7 +390,7 @@ async fn tls_client_auth() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &get_body_bytes(response.http_response.into_parts().1)
+            &into_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -442,7 +447,9 @@ async fn test_subgraph_h2c() {
             http_request: http::Request::builder()
                 .uri(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .body(full(r#"{"query":"{ me { name username } }"#))
+                .body(crate::services::router::body::from_bytes(
+                    r#"{"query":"{ me { name username } }"#,
+                ))
                 .unwrap(),
             context: Context::new(),
         })
@@ -450,7 +457,7 @@ async fn test_subgraph_h2c() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &get_body_bytes(response.http_response.into_parts().1)
+            &into_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -462,7 +469,7 @@ async fn test_subgraph_h2c() {
 // starts a local server emulating a subgraph returning compressed response
 async fn emulate_subgraph_compressed_response(listener: TcpListener) {
     async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-        let body = get_body_bytes(request.into_body()).await.unwrap().to_vec();
+        let body = into_bytes(request.into_body()).await.unwrap().to_vec();
         let mut decoder = GzipDecoder::new(Vec::new());
         decoder.write_all(&body).await.unwrap();
         decoder.shutdown().await.unwrap();
@@ -522,7 +529,9 @@ async fn test_compressed_request_response_body() {
                 .uri(url)
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header(CONTENT_ENCODING, "gzip")
-                .body(full(r#"{"query":"{ me { name username } }"#))
+                .body(crate::services::router::body::from_bytes(
+                    r#"{"query":"{ me { name username } }"#,
+                ))
                 .unwrap(),
             context: Context::new(),
         })
@@ -531,7 +540,7 @@ async fn test_compressed_request_response_body() {
 
     assert_eq!(
         std::str::from_utf8(
-            &get_body_bytes(response.http_response.into_parts().1)
+            &into_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -654,7 +663,7 @@ async fn test_unix_socket() {
     let schema = make_schema(path.to_str().unwrap());
 
     async fn handle(mut req: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-        let data = get_body_bytes(req.body_mut()).await.unwrap();
+        let data = into_bytes(req.body_mut()).await.unwrap();
         let body = std::str::from_utf8(&data).unwrap();
         println!("{:?}", body);
         let response = http::Response::builder()

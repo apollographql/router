@@ -16,7 +16,7 @@ http-body = "0.4.6" -> "1.0.1"
 http-body-util = NEW "0.1.2"
 
 hyper = { version = "0.14.28", features = ["server", "client", "stream"] } -> hyper = { version = "1.5.1", features = ["full"] }
-hyper-util = NEW { version = "0.1.10", fetaured = ["full"] }
+hyper-util = NEW { version = "0.1.10", features = ["full"] }
 
 ## Type Changes
 

@@ -79,17 +79,17 @@ impl From<Body> for IntoBody {
 }
 impl From<String> for IntoBody {
     fn from(value: String) -> Self {
-        Self(self::body::full(value))
+        Self(self::body::from_bytes(value))
     }
 }
 impl From<Bytes> for IntoBody {
     fn from(value: Bytes) -> Self {
-        Self(self::body::full(value))
+        Self(self::body::from_bytes(value))
     }
 }
 impl From<Vec<u8>> for IntoBody {
     fn from(value: Vec<u8>) -> Self {
-        Self(self::body::full(value))
+        Self(self::body::from_bytes(value))
     }
 }
 
@@ -188,7 +188,7 @@ impl TryFrom<supergraph::Request> for Request {
         } else {
             http::Request::from_parts(
                 parts,
-                self::body::full(
+                self::body::from_bytes(
                     serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
                 ),
             )
@@ -262,7 +262,7 @@ impl Response {
             }
         }
 
-        let response = builder.body(self::body::full(serde_json::to_vec(&res)?))?;
+        let response = builder.body(self::body::from_bytes(serde_json::to_vec(&res)?))?;
 
         Ok(Self { response, context })
     }
@@ -325,7 +325,7 @@ impl Response {
         }
 
         let response = builder
-            .body(self::body::full(
+            .body(self::body::from_bytes(
                 serde_json::to_vec(&res).expect("can't fail"),
             ))
             .expect("can't fail");
@@ -489,7 +489,7 @@ mod test {
     use http_body::Frame;
     use tower::BoxError;
 
-    use crate::services::router::body::get_body_bytes;
+    use crate::services::router::body::into_bytes;
     use crate::services::router::convert_to_body;
 
     struct MockBody {
@@ -515,7 +515,7 @@ mod test {
     async fn test_convert_from_http_body() {
         let body = convert_to_body(MockBody { data: Some("test") });
         assert_eq!(
-            &String::from_utf8(get_body_bytes(body).await.unwrap().to_vec()).unwrap(),
+            &String::from_utf8(into_bytes(body).await.unwrap().to_vec()).unwrap(),
             "test"
         );
     }
@@ -524,7 +524,7 @@ mod test {
     async fn test_convert_from_hyper_body() {
         let body = convert_to_body(String::from("test"));
         assert_eq!(
-            &String::from_utf8(get_body_bytes(body).await.unwrap().to_vec()).unwrap(),
+            &String::from_utf8(into_bytes(body).await.unwrap().to_vec()).unwrap(),
             "test"
         );
     }

@@ -66,12 +66,12 @@ pub(crate) fn make_request(
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
                     let len = encoded.bytes().len();
-                    (router::body::full(encoded), len)
+                    (router::body::from_bytes(encoded), len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
-                    (router::body::full(bytes), len)
+                    (router::body::from_bytes(bytes), len)
                 }
             } else {
                 (router::body::empty(), 0)
@@ -764,7 +764,7 @@ mod tests {
         )
         "###);
 
-        let body = body::to_string(req.0.into_body()).await.unwrap();
+        let body = body::into_string(req.0.into_body()).await.unwrap();
         insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
 
@@ -816,7 +816,7 @@ mod tests {
         )
         "###);
 
-        let body = body::to_string(req.0.into_body()).await.unwrap();
+        let body = body::into_string(req.0.into_body()).await.unwrap();
         insta::assert_snapshot!(body, @r#"a=42"#);
     }
 }

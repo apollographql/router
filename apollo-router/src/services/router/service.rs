@@ -57,7 +57,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::into_bytes;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
@@ -284,7 +284,7 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(router::body::full(
+                        .body(router::body::from_bytes(
                             "router service is not available to process request",
                         ))
                         .expect("cannot fail"),
@@ -306,7 +306,7 @@ impl RouterService {
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
                         Ok(router::Response {
-                            response: http::Response::from_parts(parts, router::body::full(body)),
+                            response: http::Response::from_parts(parts, router::body::from_bytes(body)),
                             context,
                         })
                     })
@@ -464,15 +464,15 @@ impl RouterService {
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
-            bytes.extend_from_slice(&get_body_bytes(body).await?);
+            bytes.extend_from_slice(&into_bytes(body).await?);
             for result in results_it {
                 bytes.put(&b", "[..]);
-                bytes.extend_from_slice(&get_body_bytes(result.response.into_body()).await?);
+                bytes.extend_from_slice(&into_bytes(result.response.into_body()).await?);
             }
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
-                response: http::Response::from_parts(parts, router::body::full(bytes.freeze())),
+                response: http::Response::from_parts(parts, router::body::from_bytes(bytes.freeze())),
                 context,
             })
         } else {
@@ -731,7 +731,7 @@ impl RouterService {
             if parts.method == Method::GET {
                 self.translate_query_request(parts).await
             } else {
-                let bytes = get_body_bytes(body)
+                let bytes = into_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await?;
                 self.translate_bytes_request(&bytes)

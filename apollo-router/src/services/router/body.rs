@@ -12,7 +12,7 @@ use hyper::body::Body as HttpBody;
 
 pub type RouterBody = UnsyncBoxBody<Bytes, AxumError>;
 
-pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
+pub(crate) async fn into_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
     Ok(body.collect().await?.to_bytes())
 }
 
@@ -27,7 +27,7 @@ pub(crate) fn empty() -> UnsyncBoxBody<Bytes, AxumError> {
 }
 
 /// Create a Full RouterBody using the supplied chunk
-pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, AxumError> {
+pub(crate) fn from_bytes<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, AxumError> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed_unsync()
@@ -47,7 +47,7 @@ where
 
 /// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
 #[cfg(test)]
-pub(crate) async fn to_string<B>(input: B) -> Result<String, AxumError>
+pub(crate) async fn into_string<B>(input: B) -> Result<String, AxumError>
 where
     B: HttpBody,
     B::Error: Into<axum::BoxError>,

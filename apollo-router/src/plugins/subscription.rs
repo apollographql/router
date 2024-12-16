@@ -430,7 +430,7 @@ impl Service<router::Request> for CallbackService {
 
                 match parts.method {
                     Method::POST => {
-                        let cb_body = router::body::get_body_bytes(Into::<RouterBody>::into(body))
+                        let cb_body = router::body::into_bytes(Into::<RouterBody>::into(body))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -447,7 +447,7 @@ impl Service<router::Request> for CallbackService {
                                 return Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::BAD_REQUEST)
-                                        .body(router::body::full(err))
+                                        .body(router::body::from_bytes(err))
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 });
@@ -474,7 +474,7 @@ impl Service<router::Request> for CallbackService {
                             return Ok(router::Response {
                                 response: http::Response::builder()
                                     .status(StatusCode::UNAUTHORIZED)
-                                    .body(router::body::full("verifier doesn't match"))
+                                    .body(router::body::from_bytes("verifier doesn't match"))
                                     .map_err(BoxError::from)?,
                                 context: req.context,
                             });
@@ -495,7 +495,7 @@ impl Service<router::Request> for CallbackService {
                                         return Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::NOT_FOUND)
-                                                .body(router::body::full("suscription doesn't exist"))
+                                                .body(router::body::from_bytes("suscription doesn't exist"))
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         });
@@ -536,7 +536,7 @@ impl Service<router::Request> for CallbackService {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
                                             .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body(router::body::full("suscription doesn't exist"))
+                                            .body(router::body::from_bytes("suscription doesn't exist"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -551,7 +551,7 @@ impl Service<router::Request> for CallbackService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::UNAUTHORIZED)
-                                            .body(router::body::full("id used for the verifier is not part of ids array"))
+                                            .body(router::body::from_bytes("id used for the verifier is not part of ids array"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -570,7 +570,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body(router::body::full("suscriptions don't exist"))
+                                            .body(router::body::from_bytes("suscriptions don't exist"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -592,7 +592,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body(router::body::full(
+                                            .body(router::body::from_bytes(
                                                 serde_json::to_string_pretty(&InvalidIdsPayload{
                                                     invalid_ids,
                                                     id,
@@ -615,7 +615,7 @@ impl Service<router::Request> for CallbackService {
                                             return Ok(router::Response {
                                                 response: http::Response::builder()
                                                     .status(StatusCode::NOT_FOUND)
-                                                    .body(router::body::full("unknown topic"))
+                                                    .body(router::body::from_bytes("unknown topic"))
                                                     .map_err(BoxError::from)?,
                                                 context: req.context,
                                             });
@@ -624,7 +624,7 @@ impl Service<router::Request> for CallbackService {
                                             return Ok(router::Response {
                                                 response: http::Response::builder()
                                                     .status(StatusCode::NOT_FOUND)
-                                                    .body(router::body::full(err.to_string()))
+                                                    .body(router::body::from_bytes(err.to_string()))
                                                     .map_err(BoxError::from)?,
                                                 context: req.context,
                                             });
@@ -643,7 +643,7 @@ impl Service<router::Request> for CallbackService {
                                         return Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::NOT_FOUND)
-                                                .body(router::body::full("cannot send errors to the client"))
+                                                .body(router::body::from_bytes("cannot send errors to the client"))
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         });
@@ -653,7 +653,7 @@ impl Service<router::Request> for CallbackService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body(router::body::full("cannot force delete"))
+                                            .body(router::body::from_bytes("cannot force delete"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -704,7 +704,7 @@ fn ensure_id_consistency(
             Err(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(router::body::full(
+                    .body(router::body::from_bytes(
                         "id from url path and id from body are different",
                     ))
                     .expect("this body is valid"),
@@ -794,7 +794,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                 id: new_sub_id.clone(),
                 verifier: verifier.clone(),
@@ -814,7 +814,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -843,7 +843,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -861,7 +861,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(
                 SubscriptionPayload::Heartbeat {
                     id: new_sub_id.clone(),
@@ -936,7 +936,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                 id: new_sub_id.clone(),
                 verifier: verifier.clone(),
@@ -950,7 +950,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1026,7 +1026,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                 id: new_sub_id.clone(),
                 verifier: verifier.clone(),
@@ -1046,7 +1046,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1073,7 +1073,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(
                 SubscriptionPayload::Complete {
                     id: new_sub_id.clone(),
@@ -1105,7 +1105,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(router::body::full(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()

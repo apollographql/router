@@ -30,7 +30,7 @@ mod tests {
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
-    use crate::services::router::body::get_body_bytes;
+    use crate::services::router::body::into_bytes;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
@@ -132,7 +132,7 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -194,7 +194,7 @@ mod tests {
                     "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -255,7 +255,7 @@ mod tests {
                     "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -298,7 +298,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -399,14 +399,14 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
                         .unwrap();
                 assert_eq!(
                     deserialized_request.subgraph_request_id.as_deref(),
                     Some("5678")
                 );
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -514,7 +514,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -571,7 +571,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -637,7 +637,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -712,7 +712,7 @@ mod tests {
             Box::pin(async move {
                 let (_, body) = r.into_parts();
                 let body: Value = serde_json::from_slice(
-                    &crate::services::router::body::get_body_bytes(body)
+                    &crate::services::router::body::into_bytes(body)
                         .await
                         .unwrap(),
                 )
@@ -721,7 +721,7 @@ mod tests {
                 assert_eq!(subgraph_id.as_str(), Some("5678"));
 
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
@@ -842,7 +842,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
@@ -955,7 +955,7 @@ mod tests {
         let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SupergraphResponse",
@@ -1032,7 +1032,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1087,7 +1087,7 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -1146,7 +1146,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1201,7 +1201,7 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -1272,7 +1272,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1329,7 +1329,7 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -1371,7 +1371,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1402,7 +1402,7 @@ mod tests {
                 }
                 );
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -1428,7 +1428,7 @@ mod tests {
         assert_eq!("a value", value);
 
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &get_body_bytes(response.into_body()).await.unwrap(),
+            &into_bytes(response.into_body()).await.unwrap(),
         )
         .unwrap();
 
@@ -1462,7 +1462,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&into_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -1483,7 +1483,7 @@ mod tests {
                 }
                 );
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         serde_json::to_string(&input).unwrap(),
                     ))
                     .unwrap())
@@ -1507,7 +1507,7 @@ mod tests {
 
         assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &get_body_bytes(response.into_body()).await.unwrap(),
+            &into_bytes(response.into_body()).await.unwrap(),
         )
         .unwrap();
 
@@ -1551,7 +1551,7 @@ mod tests {
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
                     let deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
+                        serde_json::from_slice(&into_bytes(res.into_body()).await.unwrap())
                             .unwrap();
 
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
@@ -1613,7 +1613,7 @@ mod tests {
                       "sdl": "the sdl shouldnt change"
                     });
                     Ok(http::Response::builder()
-                        .body(crate::services::router::body::full(
+                        .body(crate::services::router::body::from_bytes(
                             serde_json::to_string(&input).unwrap(),
                         ))
                         .unwrap())
@@ -1650,7 +1650,7 @@ mod tests {
         assert_eq!(
             json!({ "data": { "test": 42_u32 } }),
             serde_json::from_slice::<serde_json::Value>(
-                &get_body_bytes(res.response.into_body()).await.unwrap()
+                &into_bytes(res.response.into_body()).await.unwrap()
             )
             .unwrap()
         );

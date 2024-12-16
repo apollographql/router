@@ -518,7 +518,7 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::services::execution;
-    use crate::services::router::body::get_body_bytes;
+    use crate::services::router::body::into_bytes;
     use crate::services::router::body::RouterBody;
 
     #[allow(clippy::type_complexity)]
@@ -624,7 +624,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -720,7 +720,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(crate::services::router::body::full(
+                    .body(crate::services::router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -803,7 +803,7 @@ mod tests {
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
                     let deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
+                        serde_json::from_slice(&into_bytes(res.into_body()).await.unwrap())
                             .unwrap();
 
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
@@ -865,7 +865,7 @@ mod tests {
                       "sdl": "the sdl shouldn't change"
                     });
                     Ok(http::Response::builder()
-                        .body(crate::services::router::body::full(
+                        .body(crate::services::router::body::from_bytes(
                             serde_json::to_string(&input).unwrap(),
                         ))
                         .unwrap())
@@ -952,7 +952,7 @@ mod tests {
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
                     let mut deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
+                        serde_json::from_slice(&into_bytes(res.into_body()).await.unwrap())
                             .unwrap();
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
@@ -979,7 +979,7 @@ mod tests {
                         );
 
                     Ok(http::Response::builder()
-                        .body(crate::services::router::body::full(
+                        .body(crate::services::router::body::from_bytes(
                             serde_json::to_string(&deserialized_response).unwrap_or_default(),
                         ))
                         .unwrap())
