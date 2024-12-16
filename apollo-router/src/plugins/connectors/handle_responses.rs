@@ -21,6 +21,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::connect::Response;
 use crate::services::fetch::AddSubgraphNameExt;
+use crate::services::router;
 use crate::Context;
 
 const ENTITIES: &str = "_entities";
@@ -365,7 +366,7 @@ async fn deserialize_response<T: HttpBody>(
         .add_subgraph_name(&connector.id.subgraph_name)
     };
 
-    let body = &hyper::body::to_bytes(body)
+    let body = &router::body::into_bytes(body)
         .await
         .map_err(|_| make_err(path.clone()))?;
     match serde_json::from_slice::<Value>(body) {
@@ -400,6 +401,7 @@ mod tests {
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::plugins::connectors::http::Response as ConnectorResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
+    use crate::services::router;
     use crate::services::router::body::RouterBody;
     use crate::Context;
 
@@ -431,7 +433,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"world"}"#).into())
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -439,8 +441,8 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"world"}"#).into())
+        let response2 = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
             .unwrap();
         let response_key2 = ResponseKey::RootField {
             name: "hello2".to_string(),
@@ -533,7 +535,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
+            .body(router::body::from_bytes(r#"{"data":{"id": "1"}}"#))
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 0,
@@ -541,8 +543,8 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#).into())
+        let response2 = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":{"id": "2"}}"#))
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 1,
@@ -641,7 +643,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"value1"}"#).into())
+            .body(router::body::from_bytes(r#"{"data":"value1"}"#))
             .unwrap();
         let response_key1 = ResponseKey::EntityField {
             index: 0,
@@ -651,8 +653,8 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":"value2"}"#).into())
+        let response2 = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":"value2"}"#))
             .unwrap();
         let response_key2 = ResponseKey::EntityField {
             index: 1,
@@ -759,7 +761,7 @@ mod tests {
         };
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"plain text"#).into())
+            .body(router::body::from_bytes(r#"plain text"#))
             .unwrap();
         let response_key_plaintext = ResponseKey::Entity {
             index: 0,
@@ -769,7 +771,7 @@ mod tests {
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .status(404)
-            .body(hyper::Body::from(r#"{"error":"not found"}"#).into())
+            .body(router::body::from_bytes(r#"{"error":"not found"}"#))
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 1,
@@ -777,8 +779,8 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let response2: http::Response<RouterBody> = http::Response::builder()
-            .body(hyper::Body::from(r#"{"data":{"id":"2"}}"#).into())
+        let response2 = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":{"id":"2"}}"#))
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 2,
@@ -788,7 +790,7 @@ mod tests {
 
         let response3: http::Response<RouterBody> = http::Response::builder()
             .status(500)
-            .body(hyper::Body::from(r#"{"error":"whoops"}"#).into())
+            .body(router::body::from_bytes(r#"{"error":"whoops"}"#))
             .unwrap();
         let response_key3 = ResponseKey::Entity {
             index: 3,
@@ -1012,7 +1014,7 @@ mod tests {
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .status(201)
-            .body(hyper::Body::from(r#"{}"#).into())
+            .body(router::body::from_bytes(r#"{}"#))
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),

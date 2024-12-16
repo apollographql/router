@@ -50,14 +50,15 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
         .part("0", Part::text(FILE).file_name(FILE_NAME));
 
     async fn subgraph_handler(
-        mut request: http::Request<hyper::Body>,
+        request: http::Request<axum::body::Body>,
     ) -> impl axum::response::IntoResponse {
         let boundary = request
             .headers()
             .get(CONTENT_TYPE)
             .and_then(|v| multer::parse_boundary(v.to_str().ok()?).ok())
             .expect("subgraph request should have valid Content-Type header");
-        let mut multipart = multer::Multipart::new(request.body_mut(), boundary);
+        let mut multipart =
+            multer::Multipart::new(request.into_body().into_data_stream(), boundary);
 
         let operations_field = multipart
             .next_field()
@@ -683,21 +684,21 @@ async fn it_fails_upload_without_file() -> Result<(), BoxError> {
         .subgraph_mapping("uploads", "/")
         .build()
         .run_test(|response| {
-            insta::assert_json_snapshot!(response, @r###"
+            insta::assert_json_snapshot!(response, @r#"
             {
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '0'.",
+                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's Body stream: Missing files in the request: '0'.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
-                    "reason": "HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '0'."
+                    "reason": "HTTP fetch failed from 'uploads': error from user's Body stream: Missing files in the request: '0'."
                   }
                 }
               ]
             }
-            "###);
+            "#);
         })
         .await
 }
@@ -761,21 +762,21 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
         .subgraph_mapping("uploads", "/")
         .build()
         .run_test(|response| {
-            insta::assert_json_snapshot!(response, @r###"
+            insta::assert_json_snapshot!(response, @r#"
             {
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
+                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
-                    "reason": "HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file."
+                    "reason": "HTTP fetch failed from 'uploads': error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file."
                   }
                 }
               ]
             }
-            "###);
+            "#);
         })
         .await
 }
@@ -875,7 +876,7 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
         .subgraph_mapping("uploads_clone", "/s2")
         .build()
         .run_test(|response| {
-            insta::assert_json_snapshot!(response, @r###"
+            insta::assert_json_snapshot!(response, @r#"
             {
               "data": {
                 "file0": {
@@ -886,17 +887,17 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
               },
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'.",
+                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's Body stream: Missing files in the request: '1'.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads_clone",
-                    "reason": "HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'."
+                    "reason": "HTTP fetch failed from 'uploads_clone': error from user's Body stream: Missing files in the request: '1'."
                   }
                 }
               ]
             }
-            "###);
+            "#);
         })
         .await
 }
@@ -1018,6 +1019,7 @@ mod helper {
     use std::net::SocketAddr;
     use std::path::PathBuf;
 
+    use axum::body::Body;
     use axum::extract::State;
     use axum::response::IntoResponse;
     use axum::BoxError;
@@ -1028,7 +1030,6 @@ mod helper {
     use http::header::CONTENT_TYPE;
     use http::Request;
     use http::StatusCode;
-    use hyper::Body;
     use itertools::Itertools;
     use multer::Multipart;
     use reqwest::multipart::Form;
@@ -1131,15 +1132,13 @@ mod helper {
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
             // Start the server using the tcp listener randomly assigned above
-            let server = axum::Server::from_tcp(bound.into_std().unwrap())
-                .unwrap()
-                .serve(self.handler.into_make_service())
+            let server = axum::serve(bound, self.handler.into_make_service())
                 .with_graceful_shutdown(async {
                     shutdown_rx.await.ok();
                 });
 
             // Spawn the server in the background, controlled by the shutdown signal
-            tokio::spawn(server);
+            tokio::spawn(async { server.await.unwrap() });
 
             // Make the request and pass it into the validator callback
             let (_span, response) = router
@@ -1265,7 +1264,8 @@ mod helper {
             .part("map", mappings);
         for (index, (file_name, file)) in names.into_iter().zip(files).enumerate() {
             let file_name: String = file_name.into();
-            let part = Part::stream(hyper::Body::wrap_stream(file)).file_name(file_name);
+
+            let part = Part::stream(reqwest::Body::wrap_stream(file)).file_name(file_name);
 
             request = request.part(index.to_string(), part);
         }
@@ -1276,10 +1276,8 @@ mod helper {
     /// Handler that echos back the contents of the file that it receives
     ///
     /// Note: This will error if more than one file is received
-    pub async fn echo_single_file(
-        mut request: Request<Body>,
-    ) -> Result<Json<Value>, FileUploadError> {
-        let (_, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_single_file(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (_, map, mut multipart) = decode_request(request).await?;
 
         // Assert that we only have 1 file
         if map.len() > 1 {
@@ -1315,8 +1313,8 @@ mod helper {
     }
 
     /// Handler that echos back the contents of the files that it receives
-    pub async fn echo_files(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
-        let (operation, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_files(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (operation, map, mut multipart) = decode_request(request).await?;
 
         // Make sure that we have some mappings
         if map.is_empty() {
@@ -1369,10 +1367,8 @@ mod helper {
     }
 
     /// Handler that echos back the contents of the list of files that it receives
-    pub async fn echo_file_list(
-        mut request: Request<Body>,
-    ) -> Result<Json<Value>, FileUploadError> {
-        let (operation, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_file_list(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (operation, map, mut multipart) = decode_request(request).await?;
 
         // Make sure that we have some mappings
         if map.is_empty() {
@@ -1432,9 +1428,10 @@ mod helper {
     }
 
     /// A handler that always fails. Useful for tests that should not reach the subgraph at all.
-    pub async fn always_fail(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+    pub async fn always_fail(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
         // Consume the stream
-        while request.body_mut().next().await.is_some() {}
+        let mut body = request.into_body().into_data_stream();
+        while body.next().await.is_some() {}
 
         // Signal a failure
         Err(FileUploadError::ShouldHaveFailed)
@@ -1445,9 +1442,9 @@ mod helper {
     /// Note: Make sure to use a router with state (Expected stream length, expected value).
     pub async fn verify_stream(
         State((expected_length, byte_value)): State<(usize, u8)>,
-        mut request: Request<Body>,
+        request: Request<Body>,
     ) -> Result<Json<Value>, FileUploadError> {
-        let (_, _, mut multipart) = decode_request(&mut request).await?;
+        let (_, _, mut multipart) = decode_request(request).await?;
 
         let mut file = multipart
             .next_field()
@@ -1524,8 +1521,9 @@ mod helper {
     /// Note: The order of the mapping must correspond with the order in the request, so
     /// we use a [BTreeMap] here to keep the order when traversing the list of files.
     async fn decode_request(
-        request: &mut Request<Body>,
-    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart), FileUploadError> {
+        request: Request<Body>,
+    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart<'static>), FileUploadError>
+    {
         let content_type = request
             .headers()
             .get(CONTENT_TYPE)
@@ -1535,7 +1533,7 @@ mod helper {
             FileUploadError::BadHeaders(format!("could not parse multipart boundary: {e}"))
         })?)?;
 
-        let mut multipart = Multipart::new(request.body_mut(), boundary);
+        let mut multipart = Multipart::new(request.into_body().into_data_stream(), boundary);
 
         // Extract the operations
         // TODO: Should we be streaming here?

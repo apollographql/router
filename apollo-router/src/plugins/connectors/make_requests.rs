@@ -2664,21 +2664,28 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        let requests = super::make_requests(req, &connector, &None).unwrap();
+        let requests: Vec<_> = super::make_requests(req, &connector, &None)
+            .unwrap()
+            .into_iter()
+            .map(|req| {
+                let (parts, _body) = req.request.into_parts();
+                let new_req =
+                    http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
+                (new_req, req.key, req.debug_request)
+            })
+            .collect();
 
         assert_debug_snapshot!(requests, @r###"
         [
-            Request {
-                request: Request {
+            (
+                Request {
                     method: GET,
                     uri: http://localhost/api/path,
                     version: HTTP/1.1,
                     headers: {},
-                    body: Body(
-                        Empty,
-                    ),
+                    body: Empty,
                 },
-                key: RootField {
+                RootField {
                     name: "a",
                     selection: Path(
                         PathSelection {
@@ -2723,8 +2730,8 @@ mod tests {
                         this: {},
                     },
                 },
-                debug_request: None,
-            },
+                None,
+            ),
         ]
         "###);
     }

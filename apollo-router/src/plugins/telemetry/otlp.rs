@@ -5,6 +5,7 @@ use std::str::FromStr;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
+use http_0_2 as http;
 use lazy_static::lazy_static;
 use opentelemetry::sdk::metrics::reader::TemporalitySelector;
 use opentelemetry::sdk::metrics::InstrumentKind;
@@ -19,6 +20,7 @@ use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
+use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 
@@ -65,7 +67,7 @@ pub(crate) struct Config {
     pub(crate) temporality: Temporality,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum TelemetryDataKind {
     Traces,
     Metrics,
@@ -78,7 +80,7 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
+                let endpoint = self.endpoint.to_uri_0_2(&DEFAULT_GRPC_ENDPOINT);
                 let grpc = self.grpc.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
@@ -97,7 +99,7 @@ impl Config {
                 let endpoint = add_missing_path(
                     kind,
                     self.endpoint
-                        .to_uri(&DEFAULT_HTTP_ENDPOINT)
+                        .to_uri_0_2(&DEFAULT_HTTP_ENDPOINT)
                         .map(|e| e.into_parts()),
                 )?;
                 let http = self.http.clone();
@@ -179,7 +181,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) key: Option<String>,
 
     /// gRPC metadata
-    #[serde(with = "http_serde::header_map")]
+    #[serde(with = "http_serde_1_1::header_map")]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: http::HeaderMap,
 }
