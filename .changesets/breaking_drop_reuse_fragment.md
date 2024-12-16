@@ -1,4 +1,4 @@
-### Drop experimental reuse fragment query optimization option ([PR #6353](https://github.com/apollographql/router/pull/6353))
+### Drop experimental reuse fragment query optimization option ([PR #6354](https://github.com/apollographql/router/pull/6354))
 
 Drop support for the experimental reuse fragment query optimization. This implementation was not only very slow but also very buggy due to its complexity.
 
