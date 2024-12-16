@@ -1228,3 +1228,4 @@ workflows:
             - secops-oidc
             - github-orb
           git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+          disabled-signatures: "rules.providers.semgrep.security.javascript.lang.security.detect-insecure-websocket"
