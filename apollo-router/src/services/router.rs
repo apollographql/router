@@ -68,7 +68,7 @@ impl From<(http::Request<Body>, Context)> for Request {
 
 /// Helper type to conveniently construct a body from several types used commonly in tests.
 ///
-/// It's only meant for tests, as the "real" router should create bodies explicitly accounting for
+/// It's only meant for integration tests, as the "real" router should create bodies explicitly accounting for
 /// streaming, size limits, etc.
 pub struct IntoBody(Body);
 
