@@ -9,6 +9,7 @@ use tracing::Span;
 
 use crate::error::FetchError;
 use crate::graphql;
+use crate::json_ext::Path;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::ResponseKey;
@@ -20,6 +21,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::connect::Response;
 use crate::services::fetch::AddSubgraphNameExt;
+use crate::services::router;
 use crate::Context;
 
 const ENTITIES: &str = "_entities";
@@ -133,7 +135,7 @@ impl RawResponse {
                         parts.status.canonical_reason().unwrap_or("Unknown")
                     ),
                 }
-                .to_graphql_error(None)
+                .to_graphql_error(Some((&key).into()))
                 .add_subgraph_name(&connector.id.subgraph_name);
 
                 if let Some(ref debug) = debug_context {
@@ -256,7 +258,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     let raw = match response.result {
         // This occurs when we short-circuit the request when over the limit
         ConnectorResult::Err(error) => RawResponse::Error {
-            error: error.to_graphql_error(connector, None),
+            error: error.to_graphql_error(connector, Some((&response_key).into())),
             key: response_key,
         },
         ConnectorResult::HttpResponse(response) => {
@@ -265,7 +267,15 @@ pub(crate) async fn process_response<T: HttpBody>(
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            match deserialize_response(body, &parts, connector, debug_context, &debug_request).await
+            match deserialize_response(
+                body,
+                &parts,
+                connector,
+                (&response_key).into(),
+                debug_context,
+                &debug_request,
+            )
+            .await
             {
                 Ok(data) => RawResponse::Data {
                     parts,
@@ -338,10 +348,11 @@ async fn deserialize_response<T: HttpBody>(
     body: T,
     parts: &http::response::Parts,
     connector: &Connector,
+    path: Path,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     debug_request: &Option<ConnectorDebugHttpRequest>,
 ) -> Result<Value, graphql::Error> {
-    let make_err = || {
+    let make_err = |path: Path| {
         FetchError::SubrequestHttpError {
             status_code: Some(parts.status.as_u16()),
             service: connector.id.label.clone(),
@@ -351,13 +362,13 @@ async fn deserialize_response<T: HttpBody>(
                 parts.status.canonical_reason().unwrap_or("Unknown")
             ),
         }
-        .to_graphql_error(None)
+        .to_graphql_error(Some(path))
         .add_subgraph_name(&connector.id.subgraph_name)
     };
 
-    let body = &crate::services::router::body::get_body_bytes(body)
+    let body = &router::body::into_bytes(body)
         .await
-        .map_err(|_| make_err())?;
+        .map_err(|_| make_err(path.clone()))?;
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {
@@ -367,7 +378,7 @@ async fn deserialize_response<T: HttpBody>(
                     .push_invalid_response(debug_request.clone(), parts, body);
             }
 
-            Err(make_err())
+            Err(make_err(path))
         }
     }
 }
@@ -390,6 +401,7 @@ mod tests {
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::plugins::connectors::http::Response as ConnectorResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
+    use crate::services::router;
     use crate::services::router::body::RouterBody;
     use crate::Context;
 
@@ -421,7 +433,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(crate::services::router::body::full(r#"{"data":"world"}"#))
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -430,7 +442,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(crate::services::router::body::full(r#"{"data":"world"}"#))
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
             .unwrap();
         let response_key2 = ResponseKey::RootField {
             name: "hello2".to_string(),
@@ -523,9 +535,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(crate::services::router::body::full(
-                r#"{"data":{"id": "1"}}"#,
-            ))
+            .body(router::body::from_bytes(r#"{"data":{"id": "1"}}"#))
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 0,
@@ -534,9 +544,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(crate::services::router::body::full(
-                r#"{"data":{"id": "2"}}"#,
-            ))
+            .body(router::body::from_bytes(r#"{"data":{"id": "2"}}"#))
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 1,
@@ -635,7 +643,7 @@ mod tests {
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
-            .body(crate::services::router::body::full(r#"{"data":"value1"}"#))
+            .body(router::body::from_bytes(r#"{"data":"value1"}"#))
             .unwrap();
         let response_key1 = ResponseKey::EntityField {
             index: 0,
@@ -646,7 +654,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(crate::services::router::body::full(r#"{"data":"value2"}"#))
+            .body(router::body::from_bytes(r#"{"data":"value2"}"#))
             .unwrap();
         let response_key2 = ResponseKey::EntityField {
             index: 1,
@@ -753,7 +761,7 @@ mod tests {
         };
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
-            .body(crate::services::router::body::full(r#"plain text"#))
+            .body(router::body::from_bytes(r#"plain text"#))
             .unwrap();
         let response_key_plaintext = ResponseKey::Entity {
             index: 0,
@@ -763,9 +771,7 @@ mod tests {
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .status(404)
-            .body(crate::services::router::body::full(
-                r#"{"error":"not found"}"#,
-            ))
+            .body(router::body::from_bytes(r#"{"error":"not found"}"#))
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 1,
@@ -774,9 +780,7 @@ mod tests {
         };
 
         let response2 = http::Response::builder()
-            .body(crate::services::router::body::full(
-                r#"{"data":{"id":"2"}}"#,
-            ))
+            .body(router::body::from_bytes(r#"{"data":{"id":"2"}}"#))
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 2,
@@ -786,7 +790,7 @@ mod tests {
 
         let response3: http::Response<RouterBody> = http::Response::builder()
             .status(500)
-            .body(crate::services::router::body::full(r#"{"error":"whoops"}"#))
+            .body(router::body::from_bytes(r#"{"error":"whoops"}"#))
             .unwrap();
         let response_key3 = ResponseKey::Entity {
             index: 3,
@@ -869,7 +873,19 @@ mod tests {
                         Error {
                             message: "HTTP fetch failed from 'test label': 200: OK",
                             locations: [],
-                            path: None,
+                            path: Some(
+                                Path(
+                                    [
+                                        Key(
+                                            "_entities",
+                                            None,
+                                        ),
+                                        Index(
+                                            0,
+                                        ),
+                                    ],
+                                ),
+                            ),
                             extensions: {
                                 "code": String(
                                     "SUBREQUEST_HTTP_ERROR",
@@ -891,7 +907,19 @@ mod tests {
                         Error {
                             message: "HTTP fetch failed from 'test label': 404: Not Found",
                             locations: [],
-                            path: None,
+                            path: Some(
+                                Path(
+                                    [
+                                        Key(
+                                            "_entities",
+                                            None,
+                                        ),
+                                        Index(
+                                            1,
+                                        ),
+                                    ],
+                                ),
+                            ),
                             extensions: {
                                 "code": String(
                                     "SUBREQUEST_HTTP_ERROR",
@@ -913,7 +941,19 @@ mod tests {
                         Error {
                             message: "HTTP fetch failed from 'test label': 500: Internal Server Error",
                             locations: [],
-                            path: None,
+                            path: Some(
+                                Path(
+                                    [
+                                        Key(
+                                            "_entities",
+                                            None,
+                                        ),
+                                        Index(
+                                            3,
+                                        ),
+                                    ],
+                                ),
+                            ),
                             extensions: {
                                 "code": String(
                                     "SUBREQUEST_HTTP_ERROR",
@@ -974,7 +1014,7 @@ mod tests {
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .status(201)
-            .body(crate::services::router::body::full(r#"{}"#))
+            .body(router::body::from_bytes(r#"{}"#))
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),

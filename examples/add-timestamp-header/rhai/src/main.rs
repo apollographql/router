@@ -82,10 +82,7 @@ mod tests {
         assert_eq!(response.errors, []);
 
         // Rhai should return a 200...
-        assert_eq!(
-            StatusCode::OK.as_u16(),
-            service_response.response.status().as_u16()
-        );
+        assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected header
         service_response

@@ -255,7 +255,7 @@ where
                 "content-type",
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),
             );
-            request.map(|body| router::body::full(serde_json::to_vec(&body).unwrap()))
+            request.map(|body| router::body::from_bytes(serde_json::to_vec(&body).unwrap()))
         })
         .map_response(|response: http::Response<MaybeMultipart<Vec<u8>>>| {
             let (parts, body) = response.into_parts();

@@ -33,7 +33,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::body::from_result_stream;
 use super::Body;
 use super::ClientRequestAccepts;
 use crate::axum_factory::CanceledRequest;
@@ -67,7 +66,6 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::body::get_body_bytes;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
@@ -298,7 +296,7 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(router::body::full(
+                        .body(router::body::from_bytes(
                             "router service is not available to process request",
                         ))
                         .expect("cannot fail"),
@@ -331,7 +329,7 @@ impl RouterService {
                     }
 
                     Ok(router::Response {
-                        response: http::Response::from_parts(parts, router::body::full(body)),
+                        response: http::Response::from_parts(parts, router::body::from_bytes(body)),
                         context,
                     })
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
@@ -359,11 +357,14 @@ impl RouterService {
                     let response = match response.subscribed {
                         Some(true) => http::Response::from_parts(
                             parts,
-                            from_result_stream(Multipart::new(body, ProtocolMode::Subscription)),
+                            router::body::from_result_stream(Multipart::new(
+                                body,
+                                ProtocolMode::Subscription,
+                            )),
                         ),
                         _ => http::Response::from_parts(
                             parts,
-                            from_result_stream(Multipart::new(
+                            router::body::from_result_stream(Multipart::new(
                                 once(ready(response)).chain(body),
                                 ProtocolMode::Defer,
                             )),
@@ -488,15 +489,20 @@ impl RouterService {
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
-            bytes.extend_from_slice(&get_body_bytes(body).await?);
+            bytes.extend_from_slice(&router::body::into_bytes(body).await?);
             for result in results_it {
                 bytes.put(&b", "[..]);
-                bytes.extend_from_slice(&get_body_bytes(result.response.into_body()).await?);
+                bytes.extend_from_slice(
+                    &router::body::into_bytes(result.response.into_body()).await?,
+                );
             }
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
-                response: http::Response::from_parts(parts, router::body::full(bytes.freeze())),
+                response: http::Response::from_parts(
+                    parts,
+                    router::body::from_bytes(bytes.freeze()),
+                ),
                 context,
             })
         } else {
@@ -756,7 +762,7 @@ impl RouterService {
             if parts.method == Method::GET {
                 self.translate_query_request(parts).await
             } else {
-                let bytes = get_body_bytes(body)
+                let bytes = router::body::into_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await?;
                 if let Some(level) = context

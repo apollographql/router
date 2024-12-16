@@ -141,7 +141,7 @@ mod test {
         let control = BodyLimitControl::new(100);
         let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
         let lock = semaphore.clone().try_acquire_owned().unwrap();
-        let mut limited = super::Limited::new(body::full("test".to_string()), control, lock);
+        let mut limited = super::Limited::new(body::from_bytes("test".to_string()), control, lock);
 
         match Pin::new(&mut limited).poll_frame(&mut std::task::Context::from_waker(
             &futures::task::noop_waker(),

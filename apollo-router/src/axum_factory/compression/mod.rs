@@ -215,7 +215,7 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::*;
-    use crate::services::router::body::from_result_stream;
+    use crate::services::router;
     use crate::services::router::body::{self};
 
     #[tokio::test]
@@ -223,7 +223,7 @@ mod tests {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
         let mut rng = rand::thread_rng();
-        let body: RouterBody = body::full(
+        let body: RouterBody = body::from_bytes(
             std::iter::repeat(())
                 .map(|_| rng.gen_range(0u8..3))
                 .take(5000)
@@ -248,7 +248,7 @@ mod tests {
     async fn small_input() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: RouterBody = body::full(vec![0u8, 1, 2, 3]);
+        let body: RouterBody = body::from_bytes(vec![0u8, 1, 2, 3]);
 
         let mut stream = compressor.process(body);
         let mut decoder = GzipDecoder::new(Vec::new());
@@ -268,7 +268,8 @@ mod tests {
     #[tokio::test]
     async fn gzip_header_writing() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
-        let body: RouterBody = body::full(r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#);
+        let body: RouterBody =
+            body::from_bytes(r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#);
 
         let mut stream = compressor.process(body);
         let _ = stream.next().await.unwrap().unwrap();
@@ -291,7 +292,7 @@ content-type: application/json
 "#;
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: RouterBody = from_result_stream(stream::iter(vec![
+        let body: RouterBody = router::body::from_result_stream(stream::iter(vec![
             Ok::<_, BoxError>(Bytes::from(primary_response)),
             Ok(Bytes::from(deferred_response)),
         ]));

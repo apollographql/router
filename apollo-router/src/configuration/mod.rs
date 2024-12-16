@@ -1203,12 +1203,14 @@ where
     load_key(&data).map_err(serde::de::Error::custom)
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("could not load TLS certificate: {0}")]
+struct LoadCertError(std::io::Error);
+
 pub(crate) fn load_certs(data: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     rustls_pemfile::certs(&mut BufReader::new(data.as_bytes()))
         .collect::<Result<Vec<_>, _>>()
-        // XXX(@goto-bus-stop): `certs()` already returns an io::Error, should we wrap it instead
-        // of replacing it with this generic error?
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, LoadCertError(error)))
 }
 
 pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {

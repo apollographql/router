@@ -201,7 +201,7 @@ pub(super) async fn get_extra_listeners(
 
 async fn process_error(io_error: std::io::Error) {
     match io_error.kind() {
-        // this is already handled by moi and tokio
+        // this is already handled by mio and tokio
         //std::io::ErrorKind::WouldBlock => todo!(),
 
         // should be treated as EAGAIN
@@ -556,7 +556,9 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>(body::full("this is a test".to_string()))
+                    .body::<crate::services::router::Body>(body::from_bytes(
+                        "this is a test".to_string(),
+                    ))
                     .unwrap(),
                 context: req.context,
             })
@@ -595,7 +597,9 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>(body::full("this is a test".to_string()))
+                    .body::<crate::services::router::Body>(body::from_bytes(
+                        "this is a test".to_string(),
+                    ))
                     .unwrap(),
                 context: req.context,
             })

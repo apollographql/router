@@ -53,7 +53,6 @@ use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
-use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 
@@ -648,7 +647,7 @@ where
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.router_request.into_parts();
-    let bytes = get_body_bytes(body).await?;
+    let bytes = router::body::into_bytes(body).await?;
 
     let headers_to_send = request_config
         .headers
@@ -761,8 +760,8 @@ where
     // are present in our co_processor_output.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => router::body::full(bytes),
-        None => router::body::full(bytes),
+        Some(bytes) => router::body::from_bytes(bytes),
+        None => router::body::from_bytes(bytes),
     };
 
     request.router_request = http::Request::from_parts(parts, new_body);
@@ -874,8 +873,8 @@ where
     // bits that we sent to the co_processor.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => router::body::full(bytes),
-        None => router::body::full(bytes),
+        Some(bytes) => router::body::from_bytes(bytes),
+        None => router::body::from_bytes(bytes),
     };
 
     response.response = http::Response::from_parts(parts, new_body);
@@ -968,7 +967,7 @@ where
 
     // Create our response stream which consists of the bytes from our first body chained with the
     // rest of the responses in our mapped stream.
-    let bytes = get_body_bytes(body).await.map_err(BoxError::from);
+    let bytes = router::body::into_bytes(body).await.map_err(BoxError::from);
     let final_stream = RouterBody::new(http_body_util::StreamBody::new(
         once(ready(bytes))
             .chain(mapped_stream)

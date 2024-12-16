@@ -58,7 +58,6 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::services::router::body::from_result_stream;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -176,7 +175,7 @@ where
                     async move {
                         Ok(router::Response {
                             response: http::Response::builder().status(status_code).body(
-                                crate::services::router::body::full(
+                                router::body::from_bytes(
                                     serde_json::to_vec(&health).map_err(BoxError::from)?,
                                 ),
                             )?,
@@ -628,7 +627,7 @@ async fn handle_graphql<RF: RouterFactory>(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    from_result_stream(compressor.process(body))
+                    router::body::from_result_stream(compressor.process(body))
                 }
             };
 
@@ -756,7 +755,9 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::full(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(
+                            r#"{"query":"query { me { name }}"}"#,
+                        ))
                         .unwrap(),
                 ),
             )
@@ -790,7 +791,9 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::full(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(
+                            r#"{"query":"query { me { name }}"}"#,
+                        ))
                         .unwrap(),
                 ),
             )

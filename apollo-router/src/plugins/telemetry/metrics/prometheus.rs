@@ -198,7 +198,7 @@ impl Service<router::Request> for PrometheusService {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
                     .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body(router::body::full(modified_stats))
+                    .body(router::body::from_bytes(modified_stats))
                     .map_err(BoxError::from)?,
                 context: req.context,
             })

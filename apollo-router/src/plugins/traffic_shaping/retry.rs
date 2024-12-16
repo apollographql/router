@@ -87,3 +87,73 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
         Some(req.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::FetchError;
+    use crate::graphql;
+    use crate::http_ext;
+    use crate::metrics::FutureMetricsExt;
+
+    #[tokio::test]
+    async fn test_retry_with_error() {
+        async {
+            let mut retry = RetryPolicy::new(
+                Some(Duration::from_secs(10)),
+                Some(10),
+                Some(0.2),
+                Some(false),
+            );
+
+            let mut subgraph_req = subgraph::Request::fake_builder()
+                .subgraph_name("my_subgraph_name_error")
+                .subgraph_request(
+                    http_ext::Request::fake_builder()
+                        .header("test", "my_value_set")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .query(String::from("query { test }"))
+                                .build(),
+                        )
+                        .build()
+                        .unwrap(),
+                )
+                .build();
+
+            assert!(retry
+                .retry(
+                    &mut subgraph_req,
+                    &mut Err::<subgraph::Response, &Box<FetchError>>(&Box::new(
+                        FetchError::SubrequestHttpError {
+                            status_code: None,
+                            service: String::from("my_subgraph_name_error"),
+                            reason: String::from("cannot contact the subgraph"),
+                        }
+                    ))
+                )
+                .is_some());
+
+            assert!(retry
+                .retry(
+                    &mut subgraph_req,
+                    &mut Err::<subgraph::Response, &Box<FetchError>>(&Box::new(
+                        FetchError::SubrequestHttpError {
+                            status_code: None,
+                            service: String::from("my_subgraph_name_error"),
+                            reason: String::from("cannot contact the subgraph"),
+                        }
+                    ))
+                )
+                .is_some());
+
+            assert_counter!(
+                "apollo_router_http_request_retry_total",
+                2,
+                "subgraph" = "my_subgraph_name_error"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+}
