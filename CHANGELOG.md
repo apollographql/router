@@ -162,13 +162,6 @@ The router includes a schema-aware query hashing algorithm designed to return th
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/6205
 
-### Fix and test experimental_retry ([PR #6338](https://github.com/apollographql/router/pull/6338))
-
-Fix the behavior of `experimental_retry` and make sure both the feature and metrics are working.
-An entry in the context was also added, which would be useful later to implement a new standard attribute and selector for advanced telemetry.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6338
-
 ### Fix typo in persisted query metric attribute ([PR #6332](https://github.com/apollographql/router/pull/6332))
 
 The `apollo.router.operations.persisted_queries` metric reports an attribute when a persisted query was not found.
