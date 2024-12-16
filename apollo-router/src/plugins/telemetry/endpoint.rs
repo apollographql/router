@@ -69,8 +69,8 @@ impl UriEndpoint {
 
     // Temp pending Otel upgrade
     pub(crate) fn to_uri_0_2(&self, default_endpoint: &http_0_2::Uri) -> Option<http_0_2::Uri> {
-        self.uri.as_ref().map(|_uri| {
-            let mut parts = http_0_2::uri::Parts::default();
+        self.uri.as_ref().and_then(|uri| {
+            let mut parts = http_0_2::Uri::from_str(&uri.to_string()).ok()?.into_parts();
             if parts.scheme.is_none() {
                 parts.scheme = default_endpoint.scheme().cloned();
             }
@@ -112,8 +112,10 @@ impl UriEndpoint {
                 parts.path_and_query = default_endpoint.path_and_query().cloned();
             }
 
-            http_0_2::Uri::from_parts(parts)
-                .expect("uri cannot be invalid as it was constructed from existing parts")
+            Some(
+                http_0_2::Uri::from_parts(parts)
+                    .expect("uri cannot be invalid as it was constructed from existing parts"),
+            )
         })
     }
 }

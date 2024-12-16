@@ -67,7 +67,7 @@ pub(crate) struct Config {
     pub(crate) temporality: Temporality,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum TelemetryDataKind {
     Traces,
     Metrics,
