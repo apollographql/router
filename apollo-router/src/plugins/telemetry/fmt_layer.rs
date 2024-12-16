@@ -267,6 +267,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
     use tracing::info_span;
@@ -924,12 +925,18 @@ connector:
                     .build()
                     .unwrap();
                 router_events.on_request(&router_req);
-
+                let ctx = crate::Context::new();
+                ctx.extensions().with_lock(|mut ext| {
+                    ext.insert(RouterResponseBodyExtensionType(
+                        r#"{"data": {"data": "res"}}"#.to_string(),
+                    ));
+                });
                 let router_resp = router::Response::fake_builder()
                     .header("custom-header", "val1")
                     .header(CONTENT_LENGTH, "25")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json_bytes::json!({"data": "res"}))
+                    .context(ctx)
                     .build()
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);

@@ -24,6 +24,8 @@ use http::Method;
 use http::StatusCode;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
+use opentelemetry::KeyValue;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -45,6 +47,14 @@ use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
+use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::events::DisplayRouterRequest;
+use crate::plugins::telemetry::config_new::events::DisplayRouterResponse;
+use crate::plugins::telemetry::config_new::events::RouterResponseBodyExtensionType;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
@@ -266,6 +276,10 @@ impl RouterService {
             .extensions()
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
+        let display_router_response: DisplayRouterResponse = context
+            .extensions()
+            .with_lock(|lock| lock.get().cloned())
+            .unwrap_or_default();
 
         let (mut parts, mut body) = response.into_parts();
         process_vary_header(&mut parts.headers);
@@ -303,12 +317,22 @@ impl RouterService {
                     parts
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
-                    tracing::trace_span!("serialize_response").in_scope(|| {
-                        let body = serde_json::to_string(&response)?;
-                        Ok(router::Response {
-                            response: http::Response::from_parts(parts, router::body::full(body)),
-                            context,
-                        })
+                    let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
+                        .in_scope(|| {
+                            let body = serde_json::to_string(&response)?;
+                            Ok(body)
+                        });
+                    let body = body?;
+
+                    if display_router_response.0 {
+                        context.extensions().with_lock(|mut ext| {
+                            ext.insert(RouterResponseBodyExtensionType(body.clone()));
+                        });
+                    }
+
+                    Ok(router::Response {
+                        response: http::Response::from_parts(parts, router::body::full(body)),
+                        context,
                     })
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
@@ -386,7 +410,7 @@ impl RouterService {
     async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context;
         let (parts, body) = req.router_request.into_parts();
-        let requests = self.get_graphql_requests(&parts, body).await?;
+        let requests = self.get_graphql_requests(&context, &parts, body).await?;
 
         let (supergraph_requests, is_batch) = match futures::future::ready(requests)
             .and_then(|r| self.translate_request(&context, parts, r))
@@ -724,6 +748,7 @@ impl RouterService {
 
     async fn get_graphql_requests(
         &self,
+        context: &Context,
         parts: &Parts,
         body: Body,
     ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
@@ -734,6 +759,48 @@ impl RouterService {
                 let bytes = get_body_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await?;
+                if let Some(level) = context
+                    .extensions()
+                    .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+                    .map(|d| d.0)
+                {
+                    let mut attrs = Vec::with_capacity(5);
+                    #[cfg(test)]
+                    let mut headers: indexmap::IndexMap<String, HeaderValue> = parts
+                        .headers
+                        .clone()
+                        .into_iter()
+                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                        .collect();
+                    #[cfg(test)]
+                    headers.sort_keys();
+                    #[cfg(not(test))]
+                    let headers = &parts.headers;
+
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_HEADERS,
+                        opentelemetry::Value::String(format!("{:?}", headers).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_METHOD,
+                        opentelemetry::Value::String(format!("{}", parts.method).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_URI,
+                        opentelemetry::Value::String(format!("{}", parts.uri).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_VERSION,
+                        opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_BODY,
+                        opentelemetry::Value::String(
+                            format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                        ),
+                    ));
+                    log_event(level, "router.request", attrs, "");
+                }
                 self.translate_bytes_request(&bytes)
             };
         Ok(graphql_requests)
