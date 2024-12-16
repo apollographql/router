@@ -663,25 +663,11 @@ impl ApplyToInternal for WithRange<PathList> {
                 }
             }
 
-            PathList::Expr(expr_seq, tail) => {
-                let mut arg_shapes = Vec::with_capacity(expr_seq.len());
-
-                for expr in expr_seq.as_ref() {
-                    let expr_shape = expr.compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                    );
-
-                    arg_shapes.push(tail.compute_output_shape(
-                        expr_shape,
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                    ));
-                }
-
-                Shape::one(&arg_shapes)
-            }
+            PathList::Expr(expr, tail) => tail.compute_output_shape(
+                expr.compute_output_shape(input_shape, dollar_shape.clone(), named_var_shapes),
+                dollar_shape.clone(),
+                named_var_shapes,
+            ),
 
             PathList::Method(method_name, method_args, tail) => {
                 if input_shape.is_none() {
@@ -2522,21 +2508,22 @@ mod tests {
             "{ id: $root.*.id, name: $root.*.name }",
         );
 
-        assert_eq!(
-            selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
-                .shape()
-                .pretty_print(),
-            // Technically $.data could be an array, so this should be a union
-            // of this shape and a list of this shape, except with
-            // $root.data.0.maybe.{this,that} shape references.
-            //
-            // We could try to say that any { ... } shape represents either an
-            // object or a list of objects, by policy, to avoid having to write
-            // One<{...}, List<{...}>> everywhere a SubSelection appears.
-            //
-            // But then we don't know where the array indexes should go...
-            "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
-        );
+        // // On hold until variadic $(...) is merged (PR #6456).
+        // assert_eq!(
+        //     selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
+        //         .shape()
+        //         .pretty_print(),
+        //     // Technically $.data could be an array, so this should be a union
+        //     // of this shape and a list of this shape, except with
+        //     // $root.data.0.maybe.{this,that} shape references.
+        //     //
+        //     // We could try to say that any { ... } shape represents either an
+        //     // object or a list of objects, by policy, to avoid having to write
+        //     // One<{...}, List<{...}>> everywhere a SubSelection appears.
+        //     //
+        //     // But then we don't know where the array indexes should go...
+        //     "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
+        // );
 
         assert_eq!(
             selection!(r#"
@@ -2574,9 +2561,9 @@ mod tests {
                     ["book", ${ author title }],
                     ["movie", ${ director title }],
                 )
-                price: $($.price, $.cost, "unknown")
+                price
             "#).shape().pretty_print(),
-            "One<{ author: $root.*.author, price: One<$root.*.price, $root.*.cost, \"unknown\">, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: One<$root.*.price, $root.*.cost, \"unknown\">, title: $root.*.title, upc: $root.*.upc }, { price: One<$root.*.price, $root.*.cost, \"unknown\">, upc: $root.*.upc }>",
+            "One<{ author: $root.*.author, price: $root.*.price, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: $root.*.price, title: $root.*.title, upc: $root.*.upc }, { price: $root.*.price, upc: $root.*.upc }>",
         );
 
         assert_eq!(
@@ -2739,7 +2726,7 @@ mod tests {
                 r#"
                 <Product>
                 upc
-                ... $($.kind, null)->match(
+                ... kind->match(
                     ["book", ${ <Book> title }],
                     ["movie", ${ <Film> director }],
                     ["album", ${ <Album> artist }],
@@ -2791,61 +2778,63 @@ mod tests {
                         "upc": "9780593734223",
                     })),
                     vec![ApplyToError::new(
-                        "Method ->match did not match any [candidate, value] pair".to_string(),
-                        vec![json!("->match")],
-                        Some(84..262),
+                        "Property .kind not found in object".to_string(),
+                        vec![json!("kind")],
+                        Some(67..71),
                     )],
                 )
             );
 
-            let selection_with_unknown_match_case = selection!(
-                r#"
-                upc
-                ... $($.kind, null)->match(
-                    ["book", ${ <Book> title }],
-                    ["movie", ${ <Film> director }],
-                    ["album", ${ <Album> artist }],
-                    # It's too bad the @ gets rebound by the selection set here...
-                    [@, ${ <Unknown> }],
-                )
-            "#
-            );
+            // { // On hold until variadic $(...) is merged (PR #6456).
+            //     let selection_with_unknown_match_case = selection!(
+            //         r#"
+            //         upc
+            //         ... $($.kind, null)->match(
+            //             ["book", ${ <Book> title }],
+            //             ["movie", ${ <Film> director }],
+            //             ["album", ${ <Album> artist }],
+            //             # It's too bad the @ gets rebound by the selection set here...
+            //             [@, ${ <Unknown> }],
+            //         )
+            //     "#
+            //     );
 
-            assert_eq!(
-                selection_with_unknown_match_case.apply_to(&unknown_data),
-                (
-                    Some(json!({
-                        "__typename": "Unknown",
-                        "upc": "9780593734223",
-                    })),
-                    vec![],
-                )
-            );
+            //     assert_eq!(
+            //         selection_with_unknown_match_case.apply_to(&unknown_data),
+            //         (
+            //             Some(json!({
+            //                 "__typename": "Unknown",
+            //                 "upc": "9780593734223",
+            //             })),
+            //             vec![],
+            //         )
+            //     );
 
-            let default_whole_match = selection!(
-                r#"
-                upc
-                ... $(
-                    kind->match(
-                        ["book", ${ <Book> title }],
-                        ["movie", ${ <Film> director }],
-                        ["album", ${ <Album> artist }],
-                    ),
-                    ${ <Product> },
-                )
-            "#
-            );
+            //     let default_whole_match = selection!(
+            //         r#"
+            //         upc
+            //         ... $(
+            //             kind->match(
+            //                 ["book", ${ <Book> title }],
+            //                 ["movie", ${ <Film> director }],
+            //                 ["album", ${ <Album> artist }],
+            //             ),
+            //             ${ <Product> },
+            //         )
+            //     "#
+            //     );
 
-            assert_eq!(
-                default_whole_match.apply_to(&unknown_data),
-                (
-                    Some(json!({
-                        "__typename": "Product",
-                        "upc": "9780593734223",
-                    })),
-                    vec![],
-                )
-            );
+            //     assert_eq!(
+            //         default_whole_match.apply_to(&unknown_data),
+            //         (
+            //             Some(json!({
+            //                 "__typename": "Product",
+            //                 "upc": "9780593734223",
+            //             })),
+            //             vec![],
+            //         )
+            //     );
+            // }
         }
     }
 
