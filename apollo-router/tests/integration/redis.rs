@@ -42,6 +42,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1077,11 +1078,15 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     let starting_key = "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734";
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
-    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_anonymous())
+        .await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
     router.assert_reloaded().await;
-    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_anonymous())
+        .await;
     router
         .assert_redis_cache_contains(new_cache_key, Some(starting_key))
         .await;

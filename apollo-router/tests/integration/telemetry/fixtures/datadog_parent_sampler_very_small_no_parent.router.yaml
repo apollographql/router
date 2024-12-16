@@ -7,10 +7,14 @@ telemetry:
         format: datadog
       common:
         service_name: router
+        sampler: 0.00001
+        parent_based_sampler: false
+        resource:
+          env: local1
+          service.version: router_version_override
         preview_datadog_agent_sampling: true
       datadog:
         enabled: true
-        enable_span_mapping: true
         batch_processor:
           scheduled_delay: 100ms
   instrumentation:
@@ -19,6 +23,3 @@ telemetry:
       supergraph:
         attributes:
           graphql.operation.name: true
-
-
-
