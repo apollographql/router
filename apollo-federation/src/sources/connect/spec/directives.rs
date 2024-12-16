@@ -530,6 +530,7 @@ mod tests {
                         range: Some(
                             0..7,
                         ),
+                        output_shape: None,
                     },
                 ),
                 entity: false,
@@ -599,6 +600,7 @@ mod tests {
                         range: Some(
                             0..13,
                         ),
+                        output_shape: None,
                     },
                 ),
                 entity: false,

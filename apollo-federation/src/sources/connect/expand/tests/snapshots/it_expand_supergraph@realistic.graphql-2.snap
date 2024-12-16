@@ -232,6 +232,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     range: Some(
                                                                                         81..92,
                                                                                     ),
+                                                                                    output_shape: None,
                                                                                 },
                                                                             ),
                                                                         ),
@@ -239,6 +240,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     range: Some(
                                                                         49..94,
                                                                     ),
+                                                                    output_shape: None,
                                                                 },
                                                             ),
                                                         ),
@@ -246,6 +248,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                     range: Some(
                                                         12..96,
                                                     ),
+                                                    output_shape: None,
                                                 },
                                             ),
                                             range: Some(
@@ -285,6 +288,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 range: Some(
                     0..2,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -353,8 +357,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -369,7 +373,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -405,11 +410,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         ),
                                     },
                                 },
-                            ),
+                            },
                         ],
                         range: Some(
                             0..24,
                         ),
+                        output_shape: None,
                     },
                 ),
             ),
@@ -445,6 +451,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 range: Some(
                     0..7,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -607,6 +614,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 range: Some(
                                     16..45,
                                 ),
+                                output_shape: None,
                             },
                         ),
                     ),
@@ -614,6 +622,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 range: Some(
                     0..45,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -838,6 +847,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 range: Some(
                                                     73..94,
                                                 ),
+                                                output_shape: None,
                                             },
                                         ),
                                     ),
@@ -845,6 +855,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 range: Some(
                                     31..96,
                                 ),
+                                output_shape: None,
                             },
                         ),
                     ),
@@ -937,6 +948,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 range: Some(
                                     119..156,
                                 ),
+                                output_shape: None,
                             },
                         ),
                     ),
@@ -944,6 +956,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 range: Some(
                     0..156,
                 ),
+                output_shape: None,
             },
         ),
         config: None,

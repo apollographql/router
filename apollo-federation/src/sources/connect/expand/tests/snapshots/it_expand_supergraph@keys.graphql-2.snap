@@ -112,6 +112,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 range: Some(
                     0..17,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -259,6 +260,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 range: Some(
                     0..17,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -380,6 +382,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 range: Some(
                     0..29,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -489,6 +492,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 range: Some(
                     0..6,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -624,6 +628,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 range: Some(
                     0..6,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -717,8 +722,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         },
                         None,
                     ),
-                    Path(
-                        Some(
+                    Path {
+                        alias: Some(
                             Alias {
                                 name: WithRange {
                                     node: Field(
@@ -733,7 +738,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                 ),
                             },
                         ),
-                        PathSelection {
+                        inline: false,
+                        path: PathSelection {
                             path: WithRange {
                                 node: Var(
                                     WithRange {
@@ -769,11 +775,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                 ),
                             },
                         },
-                    ),
+                    },
                 ],
                 range: Some(
                     0..17,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -837,8 +844,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -853,7 +860,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -889,11 +897,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                         ),
                                     },
                                 },
-                            ),
+                            },
                         ],
                         range: Some(
                             0..12,
                         ),
+                        output_shape: None,
                     },
                 ),
             ),
@@ -929,6 +938,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 range: Some(
                     0..6,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -990,8 +1000,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1006,7 +1016,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1042,11 +1053,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                         ),
                                     },
                                 },
-                            ),
+                            },
                         ],
                         range: Some(
                             0..12,
                         ),
+                        output_shape: None,
                     },
                 ),
             ),
@@ -1066,8 +1078,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         },
                         None,
                     ),
-                    Path(
-                        Some(
+                    Path {
+                        alias: Some(
                             Alias {
                                 name: WithRange {
                                     node: Field(
@@ -1082,7 +1094,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                 ),
                             },
                         ),
-                        PathSelection {
+                        inline: false,
+                        path: PathSelection {
                             path: WithRange {
                                 node: Var(
                                     WithRange {
@@ -1118,11 +1131,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                 ),
                             },
                         },
-                    ),
+                    },
                 ],
                 range: Some(
                     0..17,
                 ),
+                output_shape: None,
             },
         ),
         config: None,

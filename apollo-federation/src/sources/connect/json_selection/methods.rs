@@ -1,4 +1,6 @@
+use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::Shape;
 
 use super::immutable::InputPath;
 use super::location::WithRange;
@@ -36,6 +38,7 @@ pub(super) enum ArrowMethod {
     // Future methods:
     TypeOf,
     Eq,
+    Then,
     MatchIf,
     Add,
     Sub,
@@ -53,7 +56,7 @@ pub(super) enum ArrowMethod {
 
 #[macro_export]
 macro_rules! impl_arrow_method {
-    ($struct_name:ident, $impl_fn_name:ident) => {
+    ($struct_name:ident, $impl_fn_name:ident, $shape_fn_name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub(super) struct $struct_name;
         impl $crate::sources::connect::json_selection::methods::ArrowMethodImpl for $struct_name {
@@ -67,6 +70,24 @@ macro_rules! impl_arrow_method {
                 tail: &WithRange<PathList>,
             ) -> (Option<JSON>, Vec<ApplyToError>) {
                 $impl_fn_name(method_name, method_args, data, vars, input_path, tail)
+            }
+
+            fn shape(
+                &self,
+                method_name: &WithRange<String>,
+                method_args: Option<&MethodArgs>,
+                input_shape: Shape,
+                dollar_shape: Shape,
+                named_var_shapes: &IndexMap<&str, Shape>,
+            ) -> Shape {
+                // TODO
+                $shape_fn_name(
+                    method_name,
+                    method_args,
+                    input_shape,
+                    dollar_shape,
+                    named_var_shapes,
+                )
             }
         }
     };
@@ -82,6 +103,29 @@ pub(super) trait ArrowMethodImpl {
         input_path: &InputPath<JSON>,
         tail: &WithRange<PathList>,
     ) -> (Option<JSON>, Vec<ApplyToError>);
+
+    fn shape(
+        &self,
+        // Shape processing errors for methods can benefit from knowing the name
+        // of the method and its source range. Note that ArrowMethodImpl::shape
+        // is invoked for every invocation of a method, with appropriately
+        // different source ranges.
+        method_name: &WithRange<String>,
+        // Most methods implementing ArrowMethodImpl::shape will need to know
+        // the shapes of their arguments, which can be computed from MethodArgs
+        // using the compute_output_shape method.
+        method_args: Option<&MethodArgs>,
+        // The input_shape is the shape of the @ variable, or the value from the
+        // left hand side of the -> token.
+        input_shape: Shape,
+        // The dollar_shape is the shape of the $ variable, or the input object
+        // associated with the closest enclosing subselection.
+        dollar_shape: Shape,
+        // Other variable shapes may also be provided here, though in general
+        // variables and their subproperties can be represented abstractly using
+        // $var.nested.property ShapeCase::Name shapes.
+        named_var_shapes: &IndexMap<&str, Shape>,
+    ) -> Shape;
 }
 
 // This Deref implementation allows us to call .apply(...) directly on the
@@ -104,6 +148,7 @@ impl std::ops::Deref for ArrowMethod {
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
             Self::Eq => &future::EqMethod,
+            Self::Then => &future::ThenMethod,
             Self::MatchIf => &future::MatchIfMethod,
             Self::Add => &future::AddMethod,
             Self::Sub => &future::SubMethod,
@@ -130,6 +175,7 @@ impl ArrowMethod {
             "echo" => Some(Self::Echo),
             "map" => Some(Self::Map),
             "eq" => Some(Self::Eq),
+            "then" => Some(Self::Then),
             "match" => Some(Self::Match),
             // As this case suggests, we can't necessarily provide a name()
             // method for ArrowMethod (the opposite of lookup), because method

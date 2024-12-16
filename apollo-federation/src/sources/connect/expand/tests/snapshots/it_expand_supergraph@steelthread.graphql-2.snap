@@ -83,6 +83,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                 range: Some(
                     0..7,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -202,6 +203,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                 range: Some(
                     0..16,
                 ),
+                output_shape: None,
             },
         ),
         config: None,

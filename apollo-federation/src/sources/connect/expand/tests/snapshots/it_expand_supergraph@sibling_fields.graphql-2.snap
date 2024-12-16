@@ -82,6 +82,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                                 range: Some(
                                     2..8,
                                 ),
+                                output_shape: None,
                             },
                         ),
                     ),
@@ -89,6 +90,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                 range: Some(
                     0..8,
                 ),
+                output_shape: None,
             },
         ),
         config: None,
@@ -186,6 +188,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                 range: Some(
                     0..1,
                 ),
+                output_shape: None,
             },
         ),
         config: None,

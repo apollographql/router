@@ -11,6 +11,7 @@ use nom::combinator::opt;
 use nom::combinator::recognize;
 use nom::error::ParseError;
 use nom::multi::many0;
+use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::terminated;
@@ -250,9 +251,11 @@ impl ExternalVarPaths for JSONSelection {
 }
 
 // NamedSelection       ::= NamedPathSelection | PathWithSubSelection | NamedFieldSelection | NamedGroupSelection
-// NamedPathSelection   ::= Alias PathSelection
+// NamedPathSelection   ::= (Alias | "...") PathSelection
 // NamedFieldSelection  ::= Alias? Key SubSelection?
 // NamedGroupSelection  ::= Alias SubSelection
+// PathSelection        ::= Path SubSelection?
+// PathWithSubSelection ::= Path SubSelection
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum NamedSelection {
@@ -260,7 +263,11 @@ pub enum NamedSelection {
     // Represents either NamedPathSelection or PathWithSubSelection, with the
     // invariant alias.is_some() || path.has_subselection() enforced by
     // NamedSelection::parse_path.
-    Path(Option<Alias>, PathSelection),
+    Path {
+        alias: Option<Alias>,
+        inline: bool,
+        path: PathSelection,
+    },
     Group(Alias, SubSelection),
 }
 
@@ -268,7 +275,7 @@ pub enum NamedSelection {
 // entirely from its children, so NamedSelection itself does not need to provide
 // separate storage for its own range, and therefore does not need to be wrapped
 // as WithRange<NamedSelection>, but merely needs to implement the Ranged trait.
-impl Ranged<NamedSelection> for NamedSelection {
+impl Ranged for NamedSelection {
     fn range(&self) -> OffsetRange {
         match self {
             Self::Field(alias, key, sub) => {
@@ -284,7 +291,7 @@ impl Ranged<NamedSelection> for NamedSelection {
                     range
                 }
             }
-            Self::Path(alias, path) => {
+            Self::Path { alias, path, .. } => {
                 let alias_range = alias.as_ref().and_then(|alias| alias.range());
                 merge_ranges(alias_range, path.range())
             }
@@ -324,16 +331,67 @@ impl NamedSelection {
 
     // Parses either NamedPathSelection or PathWithSubSelection.
     fn parse_path(input: Span) -> ParseResult<Self> {
-        let (remainder, (alias_opt, path)) =
-            tuple((opt(Alias::parse), PathSelection::parse))(input)?;
-
-        if alias_opt.is_none() && !path.has_subselection() {
-            Err(nom_fail_message(
-                input,
-                "Named path selection must either begin with alias or end with subselection",
-            ))
+        if let Ok((remainder, alias)) = Alias::parse(input) {
+            match PathSelection::parse(remainder) {
+                Ok((remainder, path)) => Ok((
+                    remainder,
+                    Self::Path {
+                        alias: Some(alias),
+                        inline: false,
+                        path,
+                    },
+                )),
+                Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
+                Err(_) => Err(nom_error_message(
+                    input,
+                    "Path selection alias must be followed by a path",
+                )),
+            }
+        } else if let Ok((remainder, _dots)) =
+            tuple((spaces_or_comments, ranged_span("...")))(input)
+        {
+            // TODO Enforce path has a static output shape with known object keys.
+            match PathSelection::parse(remainder) {
+                Ok((remainder, path)) => Ok((
+                    remainder,
+                    Self::Path {
+                        alias: None,
+                        inline: true,
+                        path,
+                    },
+                )),
+                Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
+                Err(_) => Err(nom_error_message(
+                    input,
+                    "Path selection ... must be followed by a path",
+                )),
+            }
         } else {
-            Ok((remainder, Self::Path(alias_opt, path)))
+            match PathSelection::parse(input) {
+                Ok((remainder, path)) => {
+                    if path.has_subselection() {
+                        Ok((
+                            remainder,
+                            Self::Path {
+                                alias: None,
+                                // Inline without ...
+                                inline: true,
+                                path,
+                            },
+                        ))
+                    } else {
+                        Err(nom_fail_message(
+                        input,
+                        "Named path selection must either begin with alias or ..., or end with subselection",
+                    ))
+                    }
+                }
+                Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
+                Err(_) => Err(nom_error_message(
+                    input,
+                    "Path selection must either begin with alias or ..., or end with subselection",
+                )),
+            }
         }
     }
 
@@ -351,7 +409,12 @@ impl NamedSelection {
                     vec![name.as_str()]
                 }
             }
-            Self::Path(alias, path) => {
+            Self::Path {
+                alias,
+                path,
+                inline,
+            } => {
+                #[allow(clippy::if_same_then_else)]
                 if let Some(alias) = alias {
                     vec![alias.name.as_str()]
                 } else if let Some(sub) = path.next_subselection() {
@@ -362,6 +425,11 @@ impl NamedSelection {
                         name_set.extend(selection.names());
                     }
                     name_set.into_iter().collect()
+                } else if *inline {
+                    // TODO If the path is inlined with ... and has no explicit
+                    // SubSelection, we should use the computed Shape of the
+                    // path to determine the output fields.
+                    vec![]
                 } else {
                     vec![]
                 }
@@ -374,7 +442,7 @@ impl NamedSelection {
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         match self {
             // Paths are complicated because they can have a subselection deeply nested
-            Self::Path(_, path) => path.next_subselection(),
+            Self::Path { path, .. } => path.next_subselection(),
 
             // The other options have it at the root
             Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => Some(sub),
@@ -388,7 +456,7 @@ impl NamedSelection {
     pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         match self {
             // Paths are complicated because they can have a subselection deeply nested
-            Self::Path(_, path) => path.next_mut_subselection(),
+            Self::Path { path, .. } => path.next_mut_subselection(),
 
             // The other options have it at the root
             Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => Some(sub),
@@ -403,7 +471,7 @@ impl ExternalVarPaths for NamedSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
         match self {
             Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => sub.external_var_paths(),
-            Self::Path(_, path) => path.external_var_paths(),
+            Self::Path { path, .. } => path.external_var_paths(),
             _ => vec![],
         }
     }
@@ -427,7 +495,7 @@ pub struct PathSelection {
 // entirely from self.path (a WithRange<PathList>), so PathSelection itself does
 // not need to be wrapped as WithRange<PathSelection>, but merely needs to
 // implement the Ranged trait.
-impl Ranged<PathSelection> for PathSelection {
+impl Ranged for PathSelection {
     fn range(&self) -> OffsetRange {
         self.path.range()
     }
@@ -477,6 +545,7 @@ impl PathSelection {
         }
     }
 
+    #[allow(unused)]
     pub(super) fn has_subselection(&self) -> bool {
         self.path.has_subselection()
     }
@@ -743,23 +812,20 @@ impl PathList {
         // be written as a subproperty of the $ variable, e.g. $.key, which is
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
-        if let Ok((suffix, dot)) = ranged_span(".")(input) {
-            // As soon as we see a leading ., we know what follows must be a
-            // Key, so we can unconditionally return based on what Key::parse
-            // tells us. Note: Key::parse consumes any spaces/comments between
-            // the . and the key.
-            return match Key::parse(suffix) {
-                Ok((remainder, key)) => {
-                    let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
-                    let dot_key_range = merge_ranges(dot.range(), key.range());
-                    let full_range = merge_ranges(dot_key_range, rest.range());
-                    Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
-                }
-                Err(_) => Err(nom_fail_message(
-                    input,
-                    "Path selection . must be followed by key (identifier or quoted string literal)",
-                )),
-            };
+        if let Ok((remainder, (dot, key))) = tuple((ranged_span("."), Key::parse))(input) {
+            let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
+            let dot_key_range = merge_ranges(dot.range(), key.range());
+            let full_range = merge_ranges(dot_key_range, rest.range());
+            return Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)));
+        }
+
+        // If we failed to parse "." Key above, but the input starts with a '.'
+        // character, it's an error unless it's the beginning of a ... token.
+        if input.fragment().starts_with('.') && !input.fragment().starts_with("...") {
+            return Err(nom_fail_message(
+                input,
+                "Path selection . must be followed by key (identifier or quoted string literal)",
+            ));
         }
 
         // PathSelection can never start with a naked ->method (instead, use
@@ -902,9 +968,10 @@ impl ExternalVarPaths for PathList {
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
     pub(super) range: OffsetRange,
+    pub(super) output_shape: Option<WithRange<String>>,
 }
 
-impl Ranged<SubSelection> for SubSelection {
+impl Ranged for SubSelection {
     // Since SubSelection is a struct, we can store its range directly as a
     // field of the struct, allowing SubSelection to implement the Ranged trait
     // without a WithRange<SubSelection> wrapper.
@@ -915,35 +982,57 @@ impl Ranged<SubSelection> for SubSelection {
 
 impl SubSelection {
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
-        tuple((
+        match tuple((
             spaces_or_comments,
             ranged_span("{"),
             Self::parse_naked,
             spaces_or_comments,
             ranged_span("}"),
         ))(input)
-        .map(|(remainder, (_, open_brace, sub, _, close_brace))| {
-            let range = merge_ranges(open_brace.range(), close_brace.range());
+        {
+            Ok((remainder, (_, open_brace, sub, _, close_brace))) => {
+                let range = merge_ranges(open_brace.range(), close_brace.range());
+                Ok((
+                    remainder,
+                    Self {
+                        selections: sub.selections,
+                        output_shape: sub.output_shape,
+                        range,
+                    },
+                ))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn parse_naked(input: Span) -> ParseResult<Self> {
+        tuple((
+            opt(Self::parse_output_type_annotation),
+            many0(NamedSelection::parse),
+        ))(input)
+        .map(|(remainder, (output_shape, selections))| {
+            let range = merge_ranges(
+                selections.first().and_then(|first| first.range()),
+                selections.last().and_then(|last| last.range()),
+            );
+
             (
                 remainder,
                 Self {
-                    selections: sub.selections,
+                    output_shape,
+                    selections,
                     range,
                 },
             )
         })
     }
 
-    fn parse_naked(input: Span) -> ParseResult<Self> {
-        preceded(spaces_or_comments, many0(NamedSelection::parse))(input).map(
-            |(remainder, selections)| {
-                let range = merge_ranges(
-                    selections.first().and_then(|first| first.range()),
-                    selections.last().and_then(|last| last.range()),
-                );
-                (remainder, Self { selections, range })
-            },
-        )
+    pub(super) fn parse_output_type_annotation(input: Span) -> ParseResult<WithRange<String>> {
+        delimited(
+            tuple((spaces_or_comments, char('<'))),
+            parse_identifier,
+            tuple((spaces_or_comments, char('>'))),
+        )(input)
     }
 
     // Returns an Iterator over each &NamedSelection that contributes a single
@@ -956,8 +1045,12 @@ impl SubSelection {
         let mut selections = vec![];
         for selection in &self.selections {
             match selection {
-                NamedSelection::Path(alias_opt, path) => {
-                    if alias_opt.is_some() {
+                NamedSelection::Path {
+                    alias,
+                    path,
+                    inline,
+                } => {
+                    if alias.is_some() {
                         // If the PathSelection has an Alias, then it has a
                         // singular name and should be visited directly.
                         selections.push(selection);
@@ -969,6 +1062,11 @@ impl SubSelection {
                         // names derived from the SubSelection, which need to be
                         // recursively collected.
                         selections.extend(sub.selections_iter());
+                    } else if *inline {
+                        // If the PathSelection is inlined with ... but does not
+                        // have a subselection, we can use the computed Shape of
+                        // the path to synthesize the output selections.
+                        // TODO Implement this.
                     } else {
                         // This no-Alias, no-SubSelection case should be
                         // forbidden by NamedSelection::parse_path.
@@ -1010,7 +1108,7 @@ pub struct Alias {
     pub(super) range: OffsetRange,
 }
 
-impl Ranged<Alias> for Alias {
+impl Ranged for Alias {
     fn range(&self) -> OffsetRange {
         self.range.clone()
     }
@@ -1204,7 +1302,7 @@ pub(super) struct MethodArgs {
     pub(super) range: OffsetRange,
 }
 
-impl Ranged<MethodArgs> for MethodArgs {
+impl Ranged for MethodArgs {
     fn range(&self) -> OffsetRange {
         self.range.clone()
     }
@@ -1521,16 +1619,17 @@ mod tests {
 
         {
             let expected = JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Path(
-                    Some(Alias::new("hi")),
-                    PathSelection::from_slice(
+                selections: vec![NamedSelection::Path {
+                    alias: Some(Alias::new("hi")),
+                    inline: false,
+                    path: PathSelection::from_slice(
                         &[
                             Key::Field("hello".to_string()),
                             Key::Field("world".to_string()),
                         ],
                         None,
                     ),
-                )],
+                }],
                 ..Default::default()
             });
 
@@ -1548,16 +1647,17 @@ mod tests {
             let expected = JSONSelection::Named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, Key::field("before").into_with_range(), None),
-                    NamedSelection::Path(
-                        Some(Alias::new("hi")),
-                        PathSelection::from_slice(
+                    NamedSelection::Path {
+                        alias: Some(Alias::new("hi")),
+                        inline: false,
+                        path: PathSelection::from_slice(
                             &[
                                 Key::Field("hello".to_string()),
                                 Key::Field("world".to_string()),
                             ],
                             None,
                         ),
-                    ),
+                    },
                     NamedSelection::Field(None, Key::field("after").into_with_range(), None),
                 ],
                 ..Default::default()
@@ -1601,9 +1701,10 @@ mod tests {
             let expected = JSONSelection::Named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, Key::field("before").into_with_range(), None),
-                    NamedSelection::Path(
-                        Some(Alias::new("hi")),
-                        PathSelection::from_slice(
+                    NamedSelection::Path {
+                        alias: Some(Alias::new("hi")),
+                        inline: false,
+                        path: PathSelection::from_slice(
                             &[
                                 Key::Field("hello".to_string()),
                                 Key::Field("world".to_string()),
@@ -1624,7 +1725,7 @@ mod tests {
                                 ..Default::default()
                             }),
                         ),
-                    ),
+                    },
                     NamedSelection::Field(None, Key::field("after").into_with_range(), None),
                 ],
                 ..Default::default()
@@ -1992,9 +2093,10 @@ mod tests {
                 PathList::Selection(SubSelection {
                     selections: vec![
                         NamedSelection::Field(None, Key::field("before").into_with_range(), None),
-                        NamedSelection::Path(
-                            Some(Alias::new("alias")),
-                            PathSelection {
+                        NamedSelection::Path {
+                            alias: Some(Alias::new("alias")),
+                            inline: false,
+                            path: PathSelection {
                                 path: PathList::Var(
                                     KnownVariable::from(Namespace::Args).into_with_range(),
                                     PathList::Key(
@@ -2005,7 +2107,7 @@ mod tests {
                                 )
                                 .into_with_range(),
                             },
-                        ),
+                        },
                         NamedSelection::Field(None, Key::field("after").into_with_range(), None),
                     ],
                     ..Default::default()
@@ -2029,9 +2131,10 @@ mod tests {
                                     Key::field("key").into_with_range(),
                                     None,
                                 ),
-                                NamedSelection::Path(
-                                    Some(Alias::new("injected")),
-                                    PathSelection {
+                                NamedSelection::Path {
+                                    alias: Some(Alias::new("injected")),
+                                    inline: false,
+                                    path: PathSelection {
                                         path: PathList::Var(
                                             KnownVariable::from(Namespace::Args).into_with_range(),
                                             PathList::Key(
@@ -2042,7 +2145,7 @@ mod tests {
                                         )
                                         .into_with_range(),
                                     },
-                                ),
+                                },
                             ],
                             ..Default::default()
                         })
@@ -2211,16 +2314,17 @@ mod tests {
             selection!("value: $ a { b c }").strip_ranges(),
             JSONSelection::Named(SubSelection {
                 selections: vec![
-                    NamedSelection::Path(
-                        Some(Alias::new("value")),
-                        PathSelection {
+                    NamedSelection::Path {
+                        alias: Some(Alias::new("value")),
+                        inline: false,
+                        path: PathSelection {
                             path: PathList::Var(
                                 KnownVariable::Dollar.into_with_range(),
                                 PathList::Empty.into_with_range()
                             )
                             .into_with_range(),
                         },
-                    ),
+                    },
                     NamedSelection::Field(
                         None,
                         Key::field("a").into_with_range(),
@@ -2247,9 +2351,10 @@ mod tests {
         assert_eq!(
             selection!("value: $this { b c }").strip_ranges(),
             JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Path(
-                    Some(Alias::new("value")),
-                    PathSelection {
+                selections: vec![NamedSelection::Path {
+                    alias: Some(Alias::new("value")),
+                    inline: false,
+                    path: PathSelection {
                         path: PathList::Var(
                             KnownVariable::from(Namespace::This).into_with_range(),
                             PathList::Selection(SubSelection {
@@ -2271,7 +2376,7 @@ mod tests {
                         )
                         .into_with_range(),
                     },
-                )],
+                }],
                 ..Default::default()
             }),
         );
@@ -2552,9 +2657,10 @@ mod tests {
                                         KnownVariable::Dollar.into_with_range(),
                                         PathList::Selection(
                                             SubSelection {
-                                                selections: vec![NamedSelection::Path(
-                                                    Some(Alias::new("x2")),
-                                                    PathSelection {
+                                                selections: vec![NamedSelection::Path {
+                                                    alias: Some(Alias::new("x2")),
+                                                    inline: false,
+                                                    path: PathSelection {
                                                         path: PathList::Key(
                                                             Key::field("x").into_with_range(),
                                                             PathList::Method(
@@ -2576,7 +2682,7 @@ mod tests {
                                                         )
                                                         .into_with_range(),
                                                     },
-                                                )],
+                                                }],
                                                 ..Default::default()
                                             },
                                         )
@@ -2590,9 +2696,10 @@ mod tests {
                                         KnownVariable::Dollar.into_with_range(),
                                         PathList::Selection(
                                             SubSelection {
-                                                selections: vec![NamedSelection::Path(
-                                                    Some(Alias::new("y2")),
-                                                    PathSelection {
+                                                selections: vec![NamedSelection::Path {
+                                                    alias: Some(Alias::new("y2")),
+                                                    inline: false,
+                                                    path: PathSelection {
                                                         path: PathList::Key(
                                                             Key::field("y").into_with_range(),
                                                             PathList::Method(
@@ -2616,7 +2723,7 @@ mod tests {
                                                         )
                                                         .into_with_range(),
                                                     },
-                                                )],
+                                                }],
                                                 ..Default::default()
                                             },
                                         )
@@ -2879,6 +2986,7 @@ mod tests {
                     None,
                 )],
                 range: Some(0..5),
+                ..Default::default()
             }),
         );
 
@@ -2891,6 +2999,7 @@ mod tests {
                     None,
                 )],
                 range: Some(2..7),
+                ..Default::default()
             }),
         );
 
@@ -2914,9 +3023,11 @@ mod tests {
                             ),
                         ],
                         range: Some(9..20),
+                        ..Default::default()
                     }),
                 )],
                 range: Some(2..20),
+                ..Default::default()
             }),
         );
 
@@ -2979,12 +3090,13 @@ mod tests {
                         WithRange::new(Key::field("before"), Some(0..6)),
                         None,
                     ),
-                    NamedSelection::Path(
-                        Some(Alias {
+                    NamedSelection::Path {
+                        alias: Some(Alias {
                             name: WithRange::new(Key::field("product"), Some(7..14)),
                             range: Some(7..15),
                         }),
-                        PathSelection {
+                        inline: false,
+                        path: PathSelection {
                             path: WithRange::new(
                                 PathList::Var(
                                     WithRange::new(
@@ -3015,6 +3127,7 @@ mod tests {
                                                         ),
                                                     ],
                                                     range: Some(28..37),
+                                                    ..Default::default()
                                                 }),
                                                 Some(28..37),
                                             ),
@@ -3025,7 +3138,7 @@ mod tests {
                                 Some(15..37),
                             ),
                         },
-                    ),
+                    },
                     NamedSelection::Field(
                         None,
                         WithRange::new(Key::field("after"), Some(37..42)),
@@ -3033,6 +3146,7 @@ mod tests {
                     ),
                 ],
                 range: Some(0..42),
+                ..Default::default()
             }),
         );
     }
