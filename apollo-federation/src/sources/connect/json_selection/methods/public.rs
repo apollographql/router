@@ -11,14 +11,13 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
-use crate::sources::connect::json_selection::methods::ArrowMethodImpl;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
-impl_arrow_method!(EchoMethod, ArrowMethodImpl, echo_method);
+impl_arrow_method!(EchoMethod, echo_method);
 fn echo_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -44,7 +43,7 @@ fn echo_method(
     )
 }
 
-impl_arrow_method!(MapMethod, ArrowMethodImpl, map_method);
+impl_arrow_method!(MapMethod, map_method);
 fn map_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -101,7 +100,7 @@ fn map_method(
     )
 }
 
-impl_arrow_method!(MatchMethod, ArrowMethodImpl, match_method);
+impl_arrow_method!(MatchMethod, match_method);
 fn match_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -158,7 +157,7 @@ fn match_method(
     )
 }
 
-impl_arrow_method!(FirstMethod, ArrowMethodImpl, first_method);
+impl_arrow_method!(FirstMethod, first_method);
 fn first_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -202,7 +201,7 @@ fn first_method(
     }
 }
 
-impl_arrow_method!(LastMethod, ArrowMethodImpl, last_method);
+impl_arrow_method!(LastMethod, last_method);
 fn last_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -246,7 +245,7 @@ fn last_method(
     }
 }
 
-impl_arrow_method!(SliceMethod, ArrowMethodImpl, slice_method);
+impl_arrow_method!(SliceMethod, slice_method);
 fn slice_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -337,7 +336,7 @@ fn slice_method(
     }
 }
 
-impl_arrow_method!(SizeMethod, ArrowMethodImpl, size_method);
+impl_arrow_method!(SizeMethod, size_method);
 fn size_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -390,7 +389,7 @@ fn size_method(
     }
 }
 
-impl_arrow_method!(EntriesMethod, ArrowMethodImpl, entries_method);
+impl_arrow_method!(EntriesMethod, entries_method);
 fn entries_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,

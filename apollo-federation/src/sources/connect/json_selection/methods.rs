@@ -53,10 +53,10 @@ pub(super) enum ArrowMethod {
 
 #[macro_export]
 macro_rules! impl_arrow_method {
-    ($struct_name:ident, $trait_name:ident, $impl_fn_name:ident) => {
+    ($struct_name:ident, $impl_fn_name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub(super) struct $struct_name;
-        impl $trait_name for $struct_name {
+        impl $crate::sources::connect::json_selection::methods::ArrowMethodImpl for $struct_name {
             fn apply(
                 &self,
                 method_name: &WithRange<String>,

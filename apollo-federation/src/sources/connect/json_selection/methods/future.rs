@@ -14,14 +14,13 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
-use crate::sources::connect::json_selection::methods::ArrowMethodImpl;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
-impl_arrow_method!(TypeOfMethod, ArrowMethodImpl, typeof_method);
+impl_arrow_method!(TypeOfMethod, typeof_method);
 fn typeof_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -48,7 +47,7 @@ fn typeof_method(
     }
 }
 
-impl_arrow_method!(EqMethod, ArrowMethodImpl, eq_method);
+impl_arrow_method!(EqMethod, eq_method);
 fn eq_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -87,7 +86,7 @@ fn eq_method(
 // boolean, returning the second element of the first pair whose first element
 // is true. This makes providing a final catch-all case easy, since the last
 // pair can be [true, <default>].
-impl_arrow_method!(MatchIfMethod, ArrowMethodImpl, match_if_method);
+impl_arrow_method!(MatchIfMethod, match_if_method);
 fn match_if_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -239,7 +238,7 @@ infix_math_op!(rem_op, %);
 
 macro_rules! infix_math_method {
     ($struct_name:ident, $fn_name:ident, $op:ident) => {
-        impl_arrow_method!($struct_name, ArrowMethodImpl, $fn_name);
+        impl_arrow_method!($struct_name, $fn_name);
         fn $fn_name(
             method_name: &WithRange<String>,
             method_args: Option<&MethodArgs>,
@@ -259,7 +258,7 @@ infix_math_method!(MulMethod, mul_method, mul_op);
 infix_math_method!(DivMethod, div_method, div_op);
 infix_math_method!(ModMethod, mod_method, rem_op);
 
-impl_arrow_method!(HasMethod, ArrowMethodImpl, has_method);
+impl_arrow_method!(HasMethod, has_method);
 fn has_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -354,7 +353,7 @@ fn has_method(
     }
 }
 
-impl_arrow_method!(GetMethod, ArrowMethodImpl, get_method);
+impl_arrow_method!(GetMethod, get_method);
 fn get_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -552,7 +551,7 @@ fn get_method(
     }
 }
 
-impl_arrow_method!(KeysMethod, ArrowMethodImpl, keys_method);
+impl_arrow_method!(KeysMethod, keys_method);
 fn keys_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -595,7 +594,7 @@ fn keys_method(
     }
 }
 
-impl_arrow_method!(ValuesMethod, ArrowMethodImpl, values_method);
+impl_arrow_method!(ValuesMethod, values_method);
 fn values_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -638,7 +637,7 @@ fn values_method(
     }
 }
 
-impl_arrow_method!(NotMethod, ArrowMethodImpl, not_method);
+impl_arrow_method!(NotMethod, not_method);
 fn not_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -674,7 +673,7 @@ fn is_truthy(data: &JSON) -> bool {
     }
 }
 
-impl_arrow_method!(OrMethod, ArrowMethodImpl, or_method);
+impl_arrow_method!(OrMethod, or_method);
 fn or_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -710,7 +709,7 @@ fn or_method(
     }
 }
 
-impl_arrow_method!(AndMethod, ArrowMethodImpl, and_method);
+impl_arrow_method!(AndMethod, and_method);
 fn and_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
