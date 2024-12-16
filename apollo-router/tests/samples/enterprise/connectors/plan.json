@@ -8,27 +8,52 @@
             "configuration_path": "./configuration.yaml",
             "subgraphs": {
                 "jsonPlaceholder": {
-                    "snapshot": {
-                        "path": "./http_snapshots.json",
-                        "base_url": "https://jsonplaceholder.typicode.com/"
-                    }
+                    "requests": [
+                        {
+                            "request": {
+                                "method": "GET",
+                                "path": "/posts"
+                            },
+                            "response": {
+                                "body": [
+                                    {
+                                        "userId": 0,
+                                        "id": 1,
+                                        "title": "Test",
+                                        "body": "Hello World"
+                                    },
+                                    {
+                                        "userId": 1,
+                                        "id": 2,
+                                        "title": "Test2",
+                                        "body": "AAAA"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
                 }
             }
         },
         {
             "type": "Request",
             "request": {
-                "query": "query { post(id: 1) { id author { name } title } }"
+                "query": "query Posts { posts { id body title }}"
             },
             "expected_response": {
                 "data": {
-                    "post": {
-                        "id": 1,
-                        "author": {
-                            "name": "Leanne Graham"
+                    "posts": [
+                        {
+                            "id": 1,
+                            "body": "Hello World",
+                            "title": "Test"
                         },
-                        "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"
-                    }
+                        {
+                            "id": 2,
+                            "body": "AAAA",
+                            "title": "Test2"
+                        }
+                    ]
                 }
             }
         },
