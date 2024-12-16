@@ -25,7 +25,6 @@ use url::Url;
 
 use super::Header;
 use super::CLIENT;
-use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
