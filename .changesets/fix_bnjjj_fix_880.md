@@ -1,7 +1,9 @@
 ### Fix telemetry instrumentation using supergraph query selector ([PR #6324](https://github.com/apollographql/router/pull/6324))
 
-Query selector was raising error logs like `this is a bug and should not happen`. It's now fixed.
-Now this configuration will work properly:
+Previously, router telemetry instrumentation that used query selectors could log errors with messages such as `this is a bug and should not happen`. 
+
+These errors have now been fixed, and configurations with query selectors such as the following work properly:
+  
 ```yaml title=router.yaml
 telemetry:
   exporters:
