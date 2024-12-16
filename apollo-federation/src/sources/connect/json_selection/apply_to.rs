@@ -15,7 +15,7 @@ use super::lit_expr::LitExpr;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::WithRange;
-use super::methods::lookup_arrow_method;
+use super::methods::ArrowMethod;
 use super::parser::*;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
@@ -427,8 +427,8 @@ impl ApplyToInternal for WithRange<PathList> {
                 let method_path =
                     input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
 
-                if let Some(method) = lookup_arrow_method(method_name) {
-                    method(
+                if let Some(method) = ArrowMethod::lookup(method_name) {
+                    method.apply(
                         method_name,
                         method_args.as_ref(),
                         data,
