@@ -45,6 +45,13 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
 
+#[derive(Default, Clone)]
+pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
+#[derive(Default, Clone)]
+pub(crate) struct DisplayRouterResponse(pub(crate) bool);
+#[derive(Default, Clone)]
+pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);
+
 /// Events are
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -257,43 +264,17 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = Vec::with_capacity(5);
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = request
-                .router_request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = request.router_request.headers();
 
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_HEADERS,
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_METHOD,
-                opentelemetry::Value::String(format!("{}", request.router_request.method()).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_URI,
-                opentelemetry::Value::String(format!("{}", request.router_request.uri()).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_VERSION,
-                opentelemetry::Value::String(
-                    format!("{:?}", request.router_request.version()).into(),
-                ),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_BODY,
-                opentelemetry::Value::String(format!("{:?}", request.router_request.body()).into()),
-            ));
-            log_event(self.request.level(), "router.request", attrs, "");
+            request
+                .context
+                .extensions()
+                .with_lock(|mut ext| ext.insert(DisplayRouterRequest(self.request.level())));
+        }
+        if self.response.level() != EventLevel::Off {
+            request
+                .context
+                .extensions()
+                .with_lock(|mut ext| ext.insert(DisplayRouterResponse(true)));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -333,10 +314,18 @@ impl Instrumented
                 HTTP_RESPONSE_VERSION,
                 opentelemetry::Value::String(format!("{:?}", response.response.version()).into()),
             ));
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_BODY,
-                opentelemetry::Value::String(format!("{:?}", response.response.body()).into()),
-            ));
+
+            if let Some(body) = response
+                .context
+                .extensions()
+                .with_lock(|mut ext| ext.remove::<RouterResponseBodyExtensionType>())
+            {
+                attrs.push(KeyValue::new(
+                    HTTP_RESPONSE_BODY,
+                    opentelemetry::Value::String(body.0.into()),
+                ));
+            }
+
             log_event(self.response.level(), "router.response", attrs, "");
         }
         for custom_event in &self.custom {
@@ -852,6 +841,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use router::body;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
@@ -1211,7 +1201,7 @@ mod tests {
             context
                 .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                 .unwrap();
-            let mut http_request = http::Request::builder().body("".into()).unwrap();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
             http_request
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1224,7 +1214,7 @@ mod tests {
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-request", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: http_request.context.clone(),
                 })
@@ -1253,7 +1243,7 @@ mod tests {
             context
                 .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                 .unwrap();
-            let mut http_request = http::Request::builder().body("".into()).unwrap();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
             http_request
                 .headers_mut()
                 .insert("x-log-response", HeaderValue::from_static("log"));
@@ -1266,7 +1256,7 @@ mod tests {
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: http_request.context.clone(),
                 })

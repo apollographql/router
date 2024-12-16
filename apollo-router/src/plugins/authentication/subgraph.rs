@@ -26,7 +26,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::services::router::body::get_body_bytes;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 
@@ -315,7 +315,7 @@ impl SigningParamsConfig {
         // We'll go with default signed headers
         let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
-        let body_bytes = get_body_bytes(body).await?.to_vec();
+        let body_bytes = router::body::into_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
             parts.method.as_str(),
             parts.uri.to_string(),
@@ -336,8 +336,8 @@ impl SigningParamsConfig {
                 error
             })?
             .into_parts();
-        req = Request::<RouterBody>::from_parts(parts, body_bytes.into());
-        signing_instructions.apply_to_request_http0x(&mut req);
+        req = Request::<RouterBody>::from_parts(parts, router::body::from_bytes(body_bytes));
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -376,7 +376,7 @@ impl SigningParamsConfig {
             })?
             .into_parts();
         req = Request::<()>::from_parts(parts, ());
-        signing_instructions.apply_to_request_http0x(&mut req);
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -858,7 +858,7 @@ mod test {
         let http_request = request
             .clone()
             .subgraph_request
-            .map(|body| RouterBody::from(serde_json::to_string(&body).unwrap()));
+            .map(|body| router::body::from_bytes(serde_json::to_string(&body).unwrap()));
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

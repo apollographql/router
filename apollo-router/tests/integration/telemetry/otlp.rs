@@ -74,6 +74,7 @@ async fn test_basic() -> Result<(), BoxError> {
             false,
         )
         .await?;
+
         router.touch_config().await;
         router.assert_reloaded().await;
     }

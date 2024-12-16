@@ -55,7 +55,7 @@ where
                     let response: http::Response<crate::services::router::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(crate::services::router::Body::from(
+                        .body(router::body::from_bytes(
                             serde_json::json!({
                                 "errors": [
                                     graphql::Error::builder()
@@ -88,8 +88,8 @@ where
 
                     Ok(ControlFlow::Continue(req))
                 } else {
-                    let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).header(CONTENT_TYPE, APPLICATION_JSON.essence_str()).body(
-                        hyper::Body::from(
+                    let response: http::Response<crate::services::router::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).header(CONTENT_TYPE, APPLICATION_JSON.essence_str()).body(
+                        router::body::from_bytes(
                             serde_json::json!({
                                 "errors": [
                                     graphql::Error::builder()

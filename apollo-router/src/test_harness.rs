@@ -385,7 +385,7 @@ impl<'a> TestHarness<'a> {
 #[cfg(test)]
 pub(crate) type HttpService = tower::util::BoxService<
     http::Request<crate::services::router::Body>,
-    http::Response<axum::body::BoxBody>,
+    http::Response<axum::body::Body>,
     std::convert::Infallible,
 >;
 
@@ -548,6 +548,6 @@ pub fn make_fake_batch(
         result.push(b',');
         result.append(&mut json_bytes_new_req);
         result.push(b']');
-        crate::services::router::Body::from(result)
+        router::body::from_bytes(result)
     })
 }

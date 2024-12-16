@@ -267,6 +267,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
     use tracing::info_span;
@@ -289,6 +290,7 @@ mod tests {
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router;
+    use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
@@ -837,7 +839,7 @@ connector:
                 context
                     .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                     .unwrap();
-                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -852,7 +854,7 @@ connector:
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: Default::default(),
                 };
@@ -923,12 +925,18 @@ connector:
                     .build()
                     .unwrap();
                 router_events.on_request(&router_req);
-
+                let ctx = crate::Context::new();
+                ctx.extensions().with_lock(|mut ext| {
+                    ext.insert(RouterResponseBodyExtensionType(
+                        r#"{"data": {"data": "res"}}"#.to_string(),
+                    ));
+                });
                 let router_resp = router::Response::fake_builder()
                     .header("custom-header", "val1")
                     .header(CONTENT_LENGTH, "25")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json_bytes::json!({"data": "res"}))
+                    .context(ctx)
                     .build()
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
@@ -1007,7 +1015,7 @@ connector:
                 context
                     .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
                     .unwrap();
-                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1022,7 +1030,7 @@ connector:
                     http_response: http::Response::builder()
                         .status(200)
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .body("".into())
+                        .body(body::empty())
                         .expect("expecting valid response"),
                     context: Default::default(),
                 };

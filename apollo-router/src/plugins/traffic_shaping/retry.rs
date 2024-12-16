@@ -2,7 +2,8 @@ use std::future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tower::retry::budget::Budget;
+use tower::retry::budget::Budget as _;
+use tower::retry::budget::TpsBudget;
 use tower::retry::Policy;
 
 use crate::plugins::telemetry::config_new::attributes::SubgraphRequestResendCountKey;
@@ -11,7 +12,7 @@ use crate::services::subgraph;
 
 #[derive(Clone, Default)]
 pub(crate) struct RetryPolicy {
-    budget: Arc<Budget>,
+    budget: Arc<TpsBudget>,
     retry_mutations: bool,
 }
 
@@ -23,7 +24,7 @@ impl RetryPolicy {
         retry_mutations: Option<bool>,
     ) -> Self {
         Self {
-            budget: Arc::new(Budget::new(
+            budget: Arc::new(TpsBudget::new(
                 duration.unwrap_or_else(|| Duration::from_secs(10)),
                 min_per_sec.unwrap_or(10),
                 retry_percent.unwrap_or(0.2),
@@ -33,13 +34,13 @@ impl RetryPolicy {
     }
 }
 
-impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
-    type Future = future::Ready<Self>;
+impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
+    type Future = future::Ready<()>;
 
     fn retry(
-        &self,
-        req: &subgraph::Request,
-        result: Result<&subgraph::Response, &E>,
+        &mut self,
+        req: &mut subgraph::Request,
+        result: &mut Result<Res, E>,
     ) -> Option<Self::Future> {
         let subgraph_name = req.subgraph_name.clone().unwrap_or_default();
         match result {
@@ -54,8 +55,8 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
                     return None;
                 }
 
-                let withdrew = self.budget.withdraw();
-                if withdrew.is_err() {
+                let can_retry = self.budget.withdraw();
+                if !can_retry {
                     u64_counter!(
                         "apollo_router_http_request_retry_total",
                         "Number of retries for an http request to a subgraph",
@@ -77,12 +78,12 @@ impl<E> Policy<subgraph::Request, subgraph::Response, E> for RetryPolicy {
                     .context
                     .upsert::<_, usize>(SubgraphRequestResendCountKey::new(&req.id), |val| val + 1);
 
-                Some(future::ready(self.clone()))
+                Some(future::ready(()))
             }
         }
     }
 
-    fn clone_request(&self, req: &subgraph::Request) -> Option<subgraph::Request> {
+    fn clone_request(&mut self, req: &subgraph::Request) -> Option<subgraph::Request> {
         Some(req.clone())
     }
 }
@@ -98,14 +99,14 @@ mod tests {
     #[tokio::test]
     async fn test_retry_with_error() {
         async {
-            let retry = RetryPolicy::new(
+            let mut retry = RetryPolicy::new(
                 Some(Duration::from_secs(10)),
                 Some(10),
                 Some(0.2),
                 Some(false),
             );
 
-            let subgraph_req = subgraph::Request::fake_builder()
+            let mut subgraph_req = subgraph::Request::fake_builder()
                 .subgraph_name("my_subgraph_name_error")
                 .subgraph_request(
                     http_ext::Request::fake_builder()
@@ -122,23 +123,27 @@ mod tests {
 
             assert!(retry
                 .retry(
-                    &subgraph_req,
-                    Err(&Box::new(FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: String::from("my_subgraph_name_error"),
-                        reason: String::from("cannot contact the subgraph"),
-                    }))
+                    &mut subgraph_req,
+                    &mut Err::<subgraph::Response, &Box<FetchError>>(&Box::new(
+                        FetchError::SubrequestHttpError {
+                            status_code: None,
+                            service: String::from("my_subgraph_name_error"),
+                            reason: String::from("cannot contact the subgraph"),
+                        }
+                    ))
                 )
                 .is_some());
 
             assert!(retry
                 .retry(
-                    &subgraph_req,
-                    Err(&Box::new(FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: String::from("my_subgraph_name_error"),
-                        reason: String::from("cannot contact the subgraph"),
-                    }))
+                    &mut subgraph_req,
+                    &mut Err::<subgraph::Response, &Box<FetchError>>(&Box::new(
+                        FetchError::SubrequestHttpError {
+                            status_code: None,
+                            service: String::from("my_subgraph_name_error"),
+                            reason: String::from("cannot contact the subgraph"),
+                        }
+                    ))
                 )
                 .is_some());
 
