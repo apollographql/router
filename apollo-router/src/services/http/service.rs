@@ -1,3 +1,4 @@
+use std::error::Error as _;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::task::Poll;
@@ -5,7 +6,6 @@ use std::time::Duration;
 
 use ::serde::Deserialize;
 use futures::future::BoxFuture;
-use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
@@ -317,6 +317,34 @@ impl tower::Service<HttpRequest> for HttpClientService {
     }
 }
 
+/// Hyper client errors are very opaque. This function peels back the layers and attempts to
+/// provide a useful message to end users.
+fn report_hyper_client_error(err: hyper_util::client::legacy::Error) -> String {
+    // At the time of writing, a hyper-util error only prints "client error", and no useful further
+    // information. So if we have a source error (always true in practice), we simply discard the
+    // "client error" part and only report the inner error.
+    let Some(source) = err.source() else {
+        // No further information
+        return err.to_string();
+    };
+
+    // If there was a connection, parsing, http, etc, error, the source will be a
+    // `hyper::Error`. `hyper::Error` provides a minimal error message only, that
+    // will explain vaguely where the problem is, like "error in user's Body stream",
+    // or "error parsing http header".
+    // This is important to preserve as it may clarify the difference between a malfunctioning
+    // subgraph and a buggy router.
+    // It's not enough information though, in particular for the user error kinds, so if there is
+    // another inner error, we report *both* the hyper error and the inner error.
+    let subsource = source
+        .downcast_ref::<hyper::Error>()
+        .and_then(|err| err.source());
+    match subsource {
+        Some(inner_err) => format!("{source}: {inner_err}"),
+        None => source.to_string(),
+    }
+}
+
 async fn do_fetch(
     mut client: MixedClient,
     context: &Context,
@@ -326,15 +354,15 @@ async fn do_fetch(
     let _active_request_guard = context.enter_active_request();
     let (parts, body) = client
         .call(request)
+        .await
         .map_err(|err| {
             tracing::error!(fetch_error = ?err);
             FetchError::SubrequestHttpError {
                 status_code: None,
                 service: service_name.to_string(),
-                reason: err.to_string(),
+                reason: report_hyper_client_error(err),
             }
-        })
-        .await?
+        })?
         .into_parts();
     Ok(http::Response::from_parts(
         parts,
