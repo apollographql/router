@@ -725,17 +725,15 @@ impl Merger {
 
                 // if this field contains directives whose names are specified in @composeDirective
                 // preserve those directives in the supergraph
-                composed_directives_names
-                    .as_ref()
-                    .map(|composed_directives_names| {
-                        &field
-                            .directives
-                            .iter()
-                            .filter(|d| composed_directives_names.contains(d.name.as_str()))
-                            .for_each(|d| {
-                                supergraph_field.make_mut().directives.push(d.clone());
-                            });
-                    });
+                if let Some(composed_directives_names) = composed_directives_names.as_ref() {
+                    let _ = &field
+                        .directives
+                        .iter()
+                        .filter(|d| composed_directives_names.contains(d.name.as_str()))
+                        .for_each(|d| {
+                            supergraph_field.make_mut().directives.push(d.clone());
+                        });
+                }
 
                 let requires_directive_option = field
                     .directives
