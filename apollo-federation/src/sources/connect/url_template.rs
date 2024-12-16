@@ -287,8 +287,10 @@ mod test_interpolate {
         )
         .unwrap();
         let mut vars = IndexMap::default();
-        vars.insert(String::from("$args"), json!({"filter": {"field": null}}));
-        vars.insert(String::from("$args"), json!({"id": null}));
+        vars.insert(
+            String::from("$args"),
+            json!({"filter": {"field": null}, "id": null}),
+        );
         assert_eq!(
             template.interpolate_query(&vars).unwrap(),
             &[("".to_string(), "".to_string())],
