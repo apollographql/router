@@ -8,6 +8,7 @@ use wiremock::Mock;
 use wiremock::ResponseTemplate;
 
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -43,7 +44,7 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     // Expect a small query
     Mock::given(method("POST"))
         .and(path("/"))
-        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
+        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query ExampleQuery {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
         )
@@ -75,7 +76,9 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     assert_eq!(response.status(), 200);
 
     // This query is huge and will be rejected because it is too large before hitting the coprocessor
-    let (_trace_id, response) = router.execute_huge_query().await;
+    let (_trace_id, response) = router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     assert_eq!(response.status(), 413);
     assert_yaml_snapshot!(response.text().await?);
 

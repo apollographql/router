@@ -12,11 +12,16 @@ For general tracing configuration, refer to [Router Tracing Configuration](/rout
 
 ## OTLP configuration
 
-To export traces to Datadog via OTLP, you must do the following:
-- Configure the Datadog agent to accept OTLP traces.
-- Configure the router to send traces to the Datadog agent.
+[OpenTelemetry protocol (OTLP)](https://opentelemetry.io/docs/specs/otel/protocol/) is the recommended protocol for transmitting telemetry, including traces, to Datadog.
 
-To configure the Datadog agent, add OTLP configuration to your `datadog.yaml`. For example:
+To setup traces to Datadog via OTLP, you must do the following:
+
+- Modify the default configuration of the Datadog Agent to accept OTLP traces from the router.
+- Configure the router to send traces to the configured Datadog Agent.
+
+### Datadog Agent configuration
+
+To configure the Datadog Agent, add OTLP configuration to your `datadog.yaml`. For example:
 
 ```yaml title="datadog.yaml"
 otlp_config:
@@ -26,26 +31,68 @@ otlp_config:
         endpoint: <dd-agent-ip>:4317
 ```
 
-To configure the router, enable the [OTLP exporter](/router/configuration/telemetry/exporters/tracing/otlp) and set `endpoint: <datadog-agent-endpoint>`. For example: 
+For additional Datadog Agent configuration details, review Datadog's [Enabling OTLP Ingestion on the Datadog Agent](https://docs.datadoghq.com/opentelemetry/interoperability/otlp_ingest_in_the_agent/?tab=host#enabling-otlp-ingestion-on-the-datadog-agent) documentation.
+
+### Router configuration
+
+To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
   exporters:
     tracing:
+      common:
+        # Configured to forward 10 percent of spans from the Datadog Agent to Datadog. Experiment to find a value that is good for you.
+        preview_datadog_agent_sampling: true
+        sampler: 0.1
+
       otlp:
         enabled: true
-   
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 
+        # Optional batch processor setting, this will enable the batch processor to send concurrent requests in a high load scenario.
+        batch_processor:
+          max_concurrent_exports: 100
 ```
 
-For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
+Adjusting the `sampler` controls the sampling decisions that the router makes on its own and decreases the rate at which you sample. Your sample rate can have a direct impact on your Datadog bill.
+
+<Note>
+
+If you see warning messages from the router regarding the batch span processor, you may need to adjust your `batch_processor` settings in your `exporter` config to match the volume of spans being created in a router instance. This applies to both OTLP and the Datadog native exporters.
+
+</Note>
+
+### Enabling Datadog Agent sampling
+
+The Datadog APM view relies on traces to generate metrics. For these metrics to be accurate, all requests must be sampled and sent to the Datadog agent.
+To prevent all traces from being sent to Datadog, in your router you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Configured to forward 10 percent of spans from the Datadog Agent to Datadog. Experiment to find a value that is good for you.
+        sampler: 0.1
+        preview_datadog_agent_sampling: true
+```
+
+<Note>
+
+    - The router doesn't support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+
+   - Configuring `traces_per_second` in the Datadog Agent will not dynamically adjust the router's sampling rate to meet the target rate.
+
+  - Using `preview_datadog_agent_sampling` will send _all_ spans to the Datadog Agent. This will have an impact on the resource usage and performance of both the router and Datadog Agent.
+
+</Note>
 
 ### Enabling log correlation
 
 To enable Datadog log correlation, you must configure `dd.trace_id` to appear on the `router` span:
-  
+
 ```yaml title="router.yaml"
 telemetry:
   instrumentation:
@@ -72,10 +119,19 @@ The router can be configured to connect to either the native, default Datadog ag
 telemetry:
   exporters:
     tracing:
-     datadog:
-       enabled: true
-       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
-       endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+      common:
+        # Configured to forward 10 percent of spans from the Datadog Agent to Datadog. Experiment to find a value that is good for you.
+        preview_datadog_agent_sampling: true
+        sampler: 0.1
+
+      datadog:
+        enabled: true
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
+        endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+
+        # Optional batch processor setting, this will enable the batch processor to send concurrent requests in a high load scenario.
+        batch_processor:
+          max_concurrent_exports: 100
 
   # Enable graphql.operation.name attribute on supergraph spans.
   instrumentation:
@@ -85,6 +141,12 @@ telemetry:
         attributes:
           graphql.operation.name: true
 ```
+
+<Note>
+
+Depending on the volume of spans being created in a router instance, it will be necessary to adjust the `batch_processor` settings in your `exporter` config. This applies to both OTLP and the Datadog native exporter.
+
+</Note>
 
 ### `enabled`
 
@@ -227,11 +289,11 @@ If you have introduced a new span in a custom build of the Router you can enable
 telemetry:
   exporters:
     tracing:
-      datadog: 
-        batch_processor: 
+      datadog:
+        batch_processor:
           max_export_batch_size: 512
           max_concurrent_exports: 1
-          max_export_timeout: 30s 
+          max_export_timeout: 30s
           max_queue_size: 2048
           scheduled_delay: 5s
 ```
@@ -251,3 +313,108 @@ telemetry:
 | `resource_mapping`    | See [config](#resource_mapping)     | A map of span names to attribute names. |
 | `span_metrics`        | See [config](#span_metrics)         | A map of span names to boolean.         |
 
+## Sampler configuration
+
+When using Datadog to gain insight into your router's performance, you need to decide whether to use the Datadog APM view or rely on OTLP metrics.
+The Datadog APM view is driven by traces. In order for this view to be accurate, all requests must be sampled and sent to the Datadog Agent.
+
+Tracing is expensive both in terms of APM costs and router performance, so you typically will want to set the `sampler` to sample at low rates in production environments.
+This, however, impacts the APM view, which will show only a small percentage of traces.
+
+To mitigate this, you can use Datadog Agent sampling mode, where _all_ traces are sent to the Datadog Agent but only a percentage of them are forwarded to Datadog. This keeps the APM view accurate while lowering costs. Note that the router will incur a performance cost of having an effective sample rate of 100%.
+
+Use the following guidelines on how to configure the `sampler` and `preview_datadog_agent_sampling` to get the desired behavior:
+
+**I want the APM view to show metrics for 100% of traffic, and I am OK with the performance impact on the router.**
+
+Set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # All requests will be traced and sent to the Datadog agent.
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog.
+        preview_datadog_agent_sampling: true
+        sampler: 0.1
+```
+
+**I want the Datadog Agent to be in control of the percentage of traces sent to Datadog.**
+
+Use the Datadog Agent's `probabalistic_sampling` option sampler and set the `sampler` to `always_on` to allow the agent to control the sampling rate.
+
+Router config:
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # All requests will be traced and sent to the Datadog agent.
+        sampler: always_on
+```
+
+Datadog agent config:
+```yaml
+otlp_config:
+  traces:
+    probabilistic_sampling:
+      # Only 10 percent of spans will be forwarded to Datadog
+      sampling_percentage: 10
+```
+
+**I want the best performance from the router and I'm not concerned with the APM view. I use metrics and traces to monitor my application.**
+
+Set the `sample` to a low value to reduce the number of traces sent to Datadog. Leave `preview_datadog_agent_sampling` to `false`.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of requests will be traced and sent to the Datadog agent. The APM view will only show a subset of total request data but the Router will perform better.
+        sampler: 0.1
+        preview_datadog_agent_sampling: false
+```
+
+### `sampler` (default: `always_on`)
+
+The `sampler` configuration allows you to control the sampling decisions that the router will make on its own and decrease the rate at which you sample, which can have a direct impact on your Datadog bill.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded to the Datadog agent. Experiment to find a value that is good for you!
+        sampler: 0.1
+```
+
+If you are using the Datadog APM viw then you should set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+### `preview_datadog_agent_sampling` (default: `false`)
+
+The Datadog APM view relies on traces to generate metrics. For this to be accurate 100% of requests must be sampled and sent to the Datadog agent.
+To prevent ALL traces from then being sent to Datadog, you must set `preview_datadog_agent_sampling` to `true` and adjust the `sampler` to the desired percentage of traces to be sent to Datadog.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        preview_datadog_agent_sampling: true
+        sampler: 0.1
+```
+
+Using `preview_datadog_agent_sampling` will send _all_ spans to the Datadog Agent, but only the percentage of traces configured by the `sampler` will be forwarded to Datadog. This means that your APM view will be accurate, but it will incur performance and resource usage costs for both the router and Datadog Agent to send and receive all spans.
+
+If your use case allows your APM view to show only a subset of traces, then you can set `preview_datadog_agent_sampling` to `false`. You should alternatively rely on OTLP metrics to gain insight into the router's performance.
+
+<Note>
+
+- The router doesn't support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+
+- Configuring `traces_per_second` in the Datadog Agent will not dynamically adjust the router's sampling rate to meet the target rate.
+
+</Note>
