@@ -18,6 +18,8 @@ use serde_json_bytes::Value;
 use super::http::Request;
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::Context;
@@ -132,6 +134,35 @@ impl ResponseKey {
             ResponseKey::RootField { inputs, .. } => inputs,
             ResponseKey::Entity { inputs, .. } => inputs,
             ResponseKey::EntityField { inputs, .. } => inputs,
+        }
+    }
+}
+
+/// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
+/// the behavior of a GraphQL subgraph, including the `_entities` field. When
+/// the path gets to [`FetchNode::response_at_path`], it will be amended and
+/// appended to a parent path to create the full path to the field. For ex:
+///
+/// - parent path: `["posts", @, "user"]
+/// - path from key: `["_entities", 0, "user", "profile"]`
+/// - result: `["posts", 1, "user", "profile"]`
+impl From<&ResponseKey> for Path {
+    fn from(key: &ResponseKey) -> Self {
+        match key {
+            ResponseKey::RootField { name, .. } => {
+                Path::from_iter(vec![PathElement::Key(name.to_string(), None)])
+            }
+            ResponseKey::Entity { index, .. } => Path::from_iter(vec![
+                PathElement::Key("_entities".to_string(), None),
+                PathElement::Index(*index),
+            ]),
+            ResponseKey::EntityField {
+                index, field_name, ..
+            } => Path::from_iter(vec![
+                PathElement::Key("_entities".to_string(), None),
+                PathElement::Index(*index),
+                PathElement::Key(field_name.clone(), None),
+            ]),
         }
     }
 }
