@@ -156,6 +156,13 @@ struct JwksConf {
     )]
     #[schemars(with = "String", default = "default_poll_interval")]
     poll_interval: Duration,
+    /// Timeout for each JWKS endpoint in human-readable format; defaults to 15s
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_timeout"
+    )]
+    #[schemars(with = "String", default = "default_timeout")]
+    timeout: Duration,
     /// Expected issuer for tokens verified by that JWKS
     issuer: Option<String>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
@@ -229,6 +236,10 @@ fn default_header_value_prefix() -> String {
 
 fn default_poll_interval() -> Duration {
     DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
+}
+
+fn default_timeout() -> Duration {
+    DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT
 }
 
 #[derive(Debug, Default)]
@@ -475,6 +486,7 @@ impl Plugin for AuthenticationPlugin {
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
                     poll_interval: jwks_conf.poll_interval,
+                    timeout: jwks_conf.timeout,
                     headers: jwks_conf.headers.clone(),
                 });
             }

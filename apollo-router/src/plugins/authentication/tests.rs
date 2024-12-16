@@ -828,6 +828,7 @@ async fn build_jwks_search_components() -> JwksManager {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            timeout: Duration::from_secs(15),
             headers: Vec::new(),
         });
     }
@@ -939,6 +940,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
         issuer,
         algorithms: None,
         poll_interval: Duration::from_secs(60),
+        timeout: Duration::from_secs(15),
         headers: Vec::new(),
     }];
     let map = HashMap::from([(url, jwks); 1]);
@@ -1129,6 +1131,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            timeout: Duration::from_secs(15),
             headers: Vec::new(),
         });
     }
@@ -1161,6 +1164,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            timeout: Duration::from_secs(15),
             headers: Vec::new(),
         });
     }
@@ -1200,6 +1204,7 @@ async fn it_accepts_key_without_use_or_keyops() {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            timeout: Duration::from_secs(15),
             headers: Vec::new(),
         });
     }
@@ -1231,6 +1236,7 @@ async fn it_accepts_elliptic_curve_key_without_alg() {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            timeout: Duration::from_secs(15),
             headers: Vec::new(),
         });
     }
@@ -1262,6 +1268,7 @@ async fn it_accepts_rsa_key_without_alg() {
             issuer: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            timeout: Duration::from_secs(15),
             headers: Vec::new(),
         });
     }
@@ -1332,6 +1339,7 @@ async fn jwks_send_headers() {
         issuer: None,
         algorithms: Some(HashSet::from([Algorithm::RS256])),
         poll_interval: Duration::from_secs(60),
+        timeout: Duration::from_secs(15),
         headers: vec![Header {
             name: HeaderName::from_static("jwks-authz"),
             value: HeaderValue::from_static("user1"),

@@ -40,6 +40,7 @@ pub(super) struct JwksConfig {
     pub(super) issuer: Option<String>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
     pub(super) poll_interval: Duration,
+    pub(super) timeout: Duration,
     pub(super) headers: Vec<Header>,
 }
 
@@ -57,12 +58,19 @@ impl JwksManager {
         let downloads = list
             .iter()
             .cloned()
-            .map(|JwksConfig { url, headers, .. }| {
-                let span = tracing::info_span!("fetch jwks", url = %url);
-                get_jwks(url.clone(), headers.clone())
-                    .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
-                    .instrument(span)
-            })
+            .map(
+                |JwksConfig {
+                     url,
+                     headers,
+                     timeout,
+                     ..
+                 }| {
+                    let span = tracing::info_span!("fetch jwks", url = %url);
+                    get_jwks(url.clone(), headers.clone(), timeout)
+                        .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+                        .instrument(span)
+                },
+            )
             .collect::<Vec<_>>();
 
         let jwks_map: HashMap<_, _> = join_all(downloads).await.into_iter().flatten().collect();
@@ -111,7 +119,9 @@ async fn poll(
             repeat((config, jwks_map)).then(|(config, jwks_map)| async move {
                 tokio::time::sleep(config.poll_interval).await;
 
-                if let Some(jwks) = get_jwks(config.url.clone(), config.headers.clone()).await {
+                if let Some(jwks) =
+                    get_jwks(config.url.clone(), config.headers.clone(), config.timeout).await
+                {
                     if let Ok(mut map) = jwks_map.write() {
                         map.insert(config.url, jwks);
                     }
@@ -141,7 +151,7 @@ async fn poll(
 // This function is expected to return an Optional value, but we'd like to let
 // users know the various failure conditions. Hence the various clumsy map_err()
 // scattered through the processing.
-pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
+pub(super) async fn get_jwks(url: Url, headers: Vec<Header>, timeout: Duration) -> Option<JwkSet> {
     let data = if url.scheme() == "file" {
         let path = url
             .to_file_path()
@@ -173,7 +183,7 @@ pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
         }
 
         builder
-            .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
+            .timeout(timeout)
             .send()
             .await
             .map_err(|e| {
