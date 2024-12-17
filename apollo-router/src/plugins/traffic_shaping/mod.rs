@@ -32,6 +32,7 @@ use tower::ServiceExt;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 use self::rate::RateLimited;
+use self::rate::RateLimitingLayer;
 pub(crate) use self::retry::RetryPolicy;
 use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
@@ -231,8 +232,8 @@ impl Merge for RateLimitConf {
 // Remove this once the configuration yml changes.
 pub(crate) struct TrafficShaping {
     config: Config,
-    rate_limit_router: Option<RateLimitLayer>,
-    rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
+    rate_limit_router: Option<RateLimitingLayer>,
+    rate_limit_subgraphs: Mutex<HashMap<String, RateLimitingLayer>>,
 }
 
 #[async_trait::async_trait]
@@ -255,9 +256,10 @@ impl Plugin for TrafficShaping {
                         ),
                     })
                 } else {
-                    Ok(RateLimitLayer::new(
+                    Ok(RateLimitingLayer::new(
                         router_rate_limit_conf.capacity,
                         router_rate_limit_conf.interval,
+                        rate::ConfiguredBy::User,
                     ))
                 }
             })
@@ -385,7 +387,11 @@ impl TrafficShaping {
                         .unwrap()
                         .entry(name.to_string())
                         .or_insert_with(|| {
-                            RateLimitLayer::new(rate_limit_conf.capacity, rate_limit_conf.interval)
+                            RateLimitingLayer::new(
+                                rate_limit_conf.capacity,
+                                rate_limit_conf.interval,
+                                rate::ConfiguredBy::User,
+                            )
                         })
                         .clone()
                 });
