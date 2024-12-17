@@ -6,72 +6,10 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.59.0] - 2024-12-16
 
-## ❗ BREAKING ❗
-
-### More consistent attributes on `apollo.router.operations.persisted_queries` metric ([PR #6403](https://github.com/apollographql/router/pull/6403))
-
-Version 1.28.1 added several *unstable* metrics, including `apollo.router.operations.persisted_queries`.
-
-When an operation is rejected, Router includes a `persisted_queries.safelist.rejected.unknown` attribute on the metric. Previously, this attribute had the value `true` if the operation is logged (via `log_unknown`), and `false` if the operation is not logged. (The attribute is not included at all if the operation is not rejected.) This appears to have been a mistake, as you can also tell whether it is logged via the `persisted_queries.logged` attribute.
-
-Router now only sets this attribute to true, and never to false. This may be a breaking change for your use of metrics; note that these metrics should be treated as unstable and may change in the future.
-
-By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/6403
-
-### Drop experimental reuse fragment query optimization option ([PR #6354](https://github.com/apollographql/router/pull/6354))
-
-Drop support for the experimental reuse fragment query optimization. This implementation was not only very slow but also very buggy due to its complexity.
-
-Auto generation of fragments is a much simpler (and faster) algorithm that in most cases produces better results. Fragment auto generation is the default optimization since v1.58 release.
-
-By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/6353
+> [!IMPORTANT]
+> If you have enabled [distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), updates to the query planner in this release will result in query plan caches being regenerated rather than reused.  On account of this, you should anticipate additional cache regeneration cost when updating to this router version while the new query plans come into service.
 
 ## 🚀 Features
-
-### Ability to skip persisted query list safelisting enforcement via plugin ([PR #6403](https://github.com/apollographql/router/pull/6403))
-
-If safelisting is enabled, a `router_service` plugin can skip enforcement of the safelist (including the `require_id` check) by adding the key `apollo_persisted_queries::safelist::skip_enforcement` with value `true` to the request context.
-
-> Note: this doesn't affect the logging of unknown operations by the `persisted_queries.log_unknown` option.
-
-In cases where an operation would have been denied but is allowed due to the context key existing, the attribute `persisted_queries.safelist.enforcement_skipped` is set on the `apollo.router.operations.persisted_queries` metric with value `true`.
-
-By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/6403
-
-### Add fleet awareness plugin ([PR #6151](https://github.com/apollographql/router/pull/6151))
-
-A new `fleet_awareness` plugin has been added that reports telemetry to Apollo about the configuration and deployment of the router. 
-
-The reported telemetry include CPU and memory usage, CPU frequency, and other deployment characteristics such as operating system and cloud provider. For more details, along with a full list of data captured and how to opt out, go to our 
-[data privacy policy](https://www.apollographql.com/docs/graphos/reference/data-privacy).
-
-
-By [@jonathanrainer](https://github.com/jonathanrainer), [@nmoutschen](https://github.com/nmoutschen), [@loshz](https://github.com/loshz)
-in https://github.com/apollographql/router/pull/6151
-
-### Add fleet awareness schema metric ([PR #6283](https://github.com/apollographql/router/pull/6283))
-
-
-The router now supports the `apollo.router.instance.schema` metric for its `fleet_detector` plugin. It has two attributes: `schema_hash` and `launch_id`.
-
-By [@loshz](https://github.com/loshz) and [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/6283
-
-### Support client name for persisted query lists ([PR #6198](https://github.com/apollographql/router/pull/6198))
-
-The persisted query manifest fetched from Apollo Uplink can now contain a `clientName` field in each operation. Two operations with the same `id` but different `clientName` are considered to be distinct operations, and they may have distinct bodies.
-
-The router resolves the client name by taking the first from the following that exists:
-- Reading the `apollo_persisted_queries::client_name` context key that may be set by a `router_service` plugin
-- Reading the HTTP header named by `telemetry.apollo.client_name_header`, which defaults to `apollographql-client-name`
-
-
-If a client name can be resolved for a request, the router first tries to find a persisted query with the specified ID and the resolved client name.
-
-If there is no operation with that ID and client name, or if a client name cannot be resolved, the router tries to find a persisted query with the specified ID and no client name specified. This means that existing PQ lists that don't contain client names will continue to work.
-
-To learn more, go to [persisted queries](https://www.apollographql.com/docs/graphos/routing/security/persisted-queries#apollo_persisted_queriesclient_name) docs.
-
-By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/6198
 
 ### General availability of native query planner
 
@@ -110,6 +48,49 @@ By [@sachindshinde](https://github.com/sachindshinde),
 [@dariuszkuc](https://github.com/dariuszkuc),
 [@lrlna](https://github.com/lrlna), [@clenfest](https://github.com/clenfest),
 and [@o0Ignition0o](https://github.com/o0Ignition0o).
+
+### Ability to skip persisted query list safelisting enforcement via plugin ([PR #6403](https://github.com/apollographql/router/pull/6403))
+
+If safelisting is enabled, a `router_service` plugin can skip enforcement of the safelist (including the `require_id` check) by adding the key `apollo_persisted_queries::safelist::skip_enforcement` with value `true` to the request context.
+
+> Note: this doesn't affect the logging of unknown operations by the `persisted_queries.log_unknown` option.
+
+In cases where an operation would have been denied but is allowed due to the context key existing, the attribute `persisted_queries.safelist.enforcement_skipped` is set on the `apollo.router.operations.persisted_queries` metric with value `true`.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/6403
+
+### Add fleet awareness plugin ([PR #6151](https://github.com/apollographql/router/pull/6151))
+
+A new `fleet_awareness` plugin has been added that reports telemetry to Apollo about the configuration and deployment of the router. 
+
+The reported telemetry include CPU and memory usage, CPU frequency, and other deployment characteristics such as operating system and cloud provider. For more details, along with a full list of data captured and how to opt out, go to our 
+[data privacy policy](https://www.apollographql.com/docs/graphos/reference/data-privacy).
+
+By [@jonathanrainer](https://github.com/jonathanrainer), [@nmoutschen](https://github.com/nmoutschen), [@loshz](https://github.com/loshz)
+in https://github.com/apollographql/router/pull/6151
+
+### Add fleet awareness schema metric ([PR #6283](https://github.com/apollographql/router/pull/6283))
+
+The router now supports the `apollo.router.instance.schema` metric for its `fleet_detector` plugin. It has two attributes: `schema_hash` and `launch_id`.
+
+By [@loshz](https://github.com/loshz) and [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/6283
+
+### Support client name for persisted query lists ([PR #6198](https://github.com/apollographql/router/pull/6198))
+
+The persisted query manifest fetched from Apollo Uplink can now contain a `clientName` field in each operation. Two operations with the same `id` but different `clientName` are considered to be distinct operations, and they may have distinct bodies.
+
+The router resolves the client name by taking the first from the following that exists:
+- Reading the `apollo_persisted_queries::client_name` context key that may be set by a `router_service` plugin
+- Reading the HTTP header named by `telemetry.apollo.client_name_header`, which defaults to `apollographql-client-name`
+
+
+If a client name can be resolved for a request, the router first tries to find a persisted query with the specified ID and the resolved client name.
+
+If there is no operation with that ID and client name, or if a client name cannot be resolved, the router tries to find a persisted query with the specified ID and no client name specified. This means that existing PQ lists that don't contain client names will continue to work.
+
+To learn more, go to [persisted queries](https://www.apollographql.com/docs/graphos/routing/security/persisted-queries#apollo_persisted_queriesclient_name) docs.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/6198
 
 ## 🐛 Fixes
 
@@ -224,6 +205,24 @@ telemetry:
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6324
+
+### More consistent attributes on `apollo.router.operations.persisted_queries` metric ([PR #6403](https://github.com/apollographql/router/pull/6403))
+
+Version 1.28.1 added several *unstable* metrics, including `apollo.router.operations.persisted_queries`.
+
+When an operation is rejected, Router includes a `persisted_queries.safelist.rejected.unknown` attribute on the metric. Previously, this attribute had the value `true` if the operation is logged (via `log_unknown`), and `false` if the operation is not logged. (The attribute is not included at all if the operation is not rejected.) This appears to have been a mistake, as you can also tell whether it is logged via the `persisted_queries.logged` attribute.
+
+Router now only sets this attribute to true, and never to false. This may be a breaking change for your use of metrics; note that these metrics should be treated as unstable and may change in the future.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/6403
+
+### Drop experimental reuse fragment query optimization option ([PR #6354](https://github.com/apollographql/router/pull/6354))
+
+Drop support for the experimental reuse fragment query optimization. This implementation was not only very slow but also very buggy due to its complexity.
+
+Auto generation of fragments is a much simpler (and faster) algorithm that in most cases produces better results. Fragment auto generation is the default optimization since v1.58 release.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/6353
 
 ## 📃 Configuration
 
