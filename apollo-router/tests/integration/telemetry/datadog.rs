@@ -413,7 +413,124 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent() -> Result<
         .priority_sampled("0")
         .subgraph_sampled(false)
         .build()
-        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(false).build())
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling() -> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small_no_parent_no_agent_sampling.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // // The router should not respect upstream but also almost never sample if left to its own devices.
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("-1").traced(true).build())
+        .await?;
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("0").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("1").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling() -> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small_parent_no_agent_sampling.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // // The router should respect upstream but also almost never sample if left to its own devices.
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("-1").traced(true).build())
+        .await?;
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("0").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("1").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
         .await?;
 
     router.graceful_shutdown().await;
