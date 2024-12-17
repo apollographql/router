@@ -33,7 +33,7 @@ pub enum ExpansionResult {
     /// The supergraph had some subgraphs that were expanded
     Expanded {
         raw_sdl: String,
-        api_schema: Valid<Schema>,
+        api_schema: Box<Valid<Schema>>,
         connectors: Connectors,
     },
 
@@ -113,7 +113,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
 
     Ok(ExpansionResult::Expanded {
         raw_sdl: new_supergraph.schema().serialize().to_string(),
-        api_schema: api_schema.schema().clone(),
+        api_schema: Box::new(api_schema.schema().clone()),
         connectors: Connectors {
             by_service_name: Arc::new(connectors_by_service_name),
             labels_by_service_name: Arc::new(labels_by_service_name),

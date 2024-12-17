@@ -112,7 +112,7 @@ where
 #[derive(Default)]
 struct HeaderNameVisitor;
 
-impl<'de> Visitor<'de> for HeaderNameVisitor {
+impl Visitor<'_> for HeaderNameVisitor {
     type Value = HeaderName;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -137,7 +137,7 @@ where
 
 struct JSONQueryVisitor;
 
-impl<'de> Visitor<'de> for JSONQueryVisitor {
+impl Visitor<'_> for JSONQueryVisitor {
     type Value = JSONQuery;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -163,7 +163,7 @@ where
 
 struct HeaderValueVisitor;
 
-impl<'de> Visitor<'de> for HeaderValueVisitor {
+impl Visitor<'_> for HeaderValueVisitor {
     type Value = HeaderValue;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -193,7 +193,7 @@ where
 {
     struct RegexVisitor;
 
-    impl<'de> Visitor<'de> for RegexVisitor {
+    impl Visitor<'_> for RegexVisitor {
         type Value = Regex;
 
         fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -221,7 +221,7 @@ where
 
 struct JSONPathVisitor;
 
-impl<'de> serde::de::Visitor<'de> for JSONPathVisitor {
+impl serde::de::Visitor<'_> for JSONPathVisitor {
     type Value = serde_json_bytes::path::JsonPathInst;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {

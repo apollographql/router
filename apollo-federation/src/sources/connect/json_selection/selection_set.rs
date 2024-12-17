@@ -267,8 +267,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn selection_set(schema: &Valid<Schema>, s: &str) -> (ExecutableDocument, SelectionSet) {
-        let document =
-            apollo_compiler::ExecutableDocument::parse_and_validate(schema, s, "./").unwrap();
+        let document = ExecutableDocument::parse_and_validate(schema, s, "./").unwrap();
         let selection_set = document
             .operations
             .anonymous

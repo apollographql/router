@@ -124,7 +124,7 @@ impl<'de> Deserialize<'de> for UriEndpoint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EndpointVisitor;
 
-        impl<'de> Visitor<'de> for EndpointVisitor {
+        impl Visitor<'_> for EndpointVisitor {
             type Value = UriEndpoint;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -186,7 +186,7 @@ impl<'de> Deserialize<'de> for SocketEndpoint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EndpointVisitor;
 
-        impl<'de> Visitor<'de> for EndpointVisitor {
+        impl Visitor<'_> for EndpointVisitor {
             type Value = SocketEndpoint;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {

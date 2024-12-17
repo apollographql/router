@@ -1,9 +1,9 @@
-use serde_json::json;
 use tower::BoxError;
 use uuid::Uuid;
 
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::IntegrationTest;
+use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -22,16 +22,15 @@ async fn test_json() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("trace_id").await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("span_id").await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""static_one":"test""#).await;
     #[cfg(unix)]
     {
-        router.execute_query(&query).await;
+        router.execute_default_query().await;
         router
             .assert_log_contains(
                 r#""schema.id":"dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9""#,
@@ -39,16 +38,12 @@ async fn test_json() -> Result<(), BoxError> {
             .await;
     }
 
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router
         .assert_log_contains(r#""on_supergraph_response_event":"on_supergraph_event""#)
         .await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""response_status":200"#).await;
-    router.execute_query(&query).await;
-    router.assert_log_contains(r#""http.response.body":"{\"data\":{\"topProducts\":[{\"name\":\"Table\"},{\"name\":\"Couch\"},{\"name\":\"Chair\"}]}}"#).await;
-    router.execute_query(&query).await;
-    router.assert_log_contains(r#""http.request.body":"\"{\\\"query\\\":\\\"query ExampleQuery {topProducts{name}}\\\",\\\"variables\\\":{}}\"""#).await;
     router.graceful_shutdown().await;
 
     Ok(())
@@ -70,24 +65,23 @@ async fn test_json_promote_span_attributes() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("trace_id").await;
-    router.execute_query(&query).await;
+    router.execute_query(Query::default()).await;
     router.assert_log_contains("span_id").await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""static_one":"test""#).await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""response_status":200"#).await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""too_big":true"#).await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""too_big":"nope""#).await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router
         .assert_log_contains(r#""graphql.document":"query ExampleQuery {topProducts{name}}""#)
         .await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_not_contains(r#""should_not_log""#).await;
     router.assert_log_not_contains(r#""another_one""#).await;
     router.graceful_shutdown().await;
@@ -111,14 +105,13 @@ async fn test_json_uuid_format() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("trace_id").await;
-    let (trace_id, _) = router.execute_query(&query).await;
+    let (trace_id, _) = router.execute_default_query().await;
     router
         .assert_log_contains(&format!("{}", Uuid::from_bytes(trace_id.to_bytes())))
         .await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("span_id").await;
     router.graceful_shutdown().await;
 
@@ -141,14 +134,13 @@ async fn test_text_uuid_format() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("trace_id").await;
-    let (trace_id, _) = router.execute_query(&query).await;
+    let (trace_id, _) = router.execute_default_query().await;
     router
         .assert_log_contains(&format!("{}", Uuid::from_bytes(trace_id.to_bytes())))
         .await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("span_id").await;
     router.graceful_shutdown().await;
 
@@ -170,18 +162,17 @@ async fn test_json_sampler_off() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("trace_id").await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("span_id").await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""static_one":"test""#).await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router
         .assert_log_contains(r#""on_supergraph_response_event":"on_supergraph_event""#)
         .await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains(r#""response_status":200"#).await;
     router.graceful_shutdown().await;
 
@@ -204,17 +195,16 @@ async fn test_text() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    router.execute_query(&query).await;
-    router.execute_query(&query).await;
+    router.execute_query(Query::default()).await;
+    router.execute_query(Query::default()).await;
     router.assert_log_contains("trace_id").await;
-    router.execute_query(&query).await;
+    router.execute_query(Query::default()).await;
     router.assert_log_contains("span_id").await;
     router
         .assert_log_contains(r#"on_supergraph_response_event=on_supergraph_event"#)
         .await;
-    router.execute_query(&query).await;
-    router.execute_query(&query).await;
+    router.execute_query(Query::default()).await;
+    router.execute_query(Query::default()).await;
     router.assert_log_contains("response_status=200").await;
     router.graceful_shutdown().await;
     Ok(())
@@ -235,14 +225,12 @@ async fn test_text_sampler_off() -> Result<(), BoxError> {
 
     router.start().await;
     router.assert_started().await;
-
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    router.execute_query(&query).await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
+    router.execute_default_query().await;
     router.assert_log_contains("trace_id").await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("span_id").await;
-    router.execute_query(&query).await;
+    router.execute_default_query().await;
     router.assert_log_contains("response_status=200").await;
     router.graceful_shutdown().await;
     Ok(())

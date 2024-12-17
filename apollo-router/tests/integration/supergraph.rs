@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::json;
 use tower::BoxError;
 
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -26,7 +27,12 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     }
 
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 431);
     Ok(())
@@ -53,7 +59,12 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
     }
 
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -79,11 +90,13 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
     router.start().await;
     router.assert_started().await;
 
-    let mut headers = HashMap::new();
-    headers.insert("test-header".to_string(), "x".repeat(1048576 + 1));
-
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .header("test-header", "x".repeat(1048576 + 1))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 431);
     Ok(())
@@ -104,11 +117,13 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
     router.start().await;
     router.assert_started().await;
 
-    let mut headers = HashMap::new();
-    headers.insert("test-header".to_string(), "x".repeat(1048576 + 1));
-
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .header("test-header", "x".repeat(1048576 + 1))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(

@@ -22,18 +22,10 @@ use crate::plugins::telemetry::config_new::events::CustomEventInner;
 use crate::plugins::telemetry::config_new::events::CustomEvents;
 use crate::plugins::telemetry::config_new::events::Event;
 use crate::plugins::telemetry::config_new::events::EventLevel;
-use crate::plugins::telemetry::config_new::events::StandardEvent;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::Context;
-
-#[derive(Default, Clone)]
-pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
-#[derive(Default, Clone)]
-pub(crate) struct DisplayRouterResponse(pub(crate) bool);
-#[derive(Default, Clone)]
-pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -45,12 +37,6 @@ pub(crate) struct ConnectorEventsConfig {
     /// Log the connector HTTP error
     pub(crate) error: StandardEventConfig<ConnectorSelector>,
 }
-
-#[derive(Clone)]
-pub(crate) struct ConnectorEventRequest(pub(crate) StandardEvent<ConnectorSelector>);
-
-#[derive(Clone)]
-pub(crate) struct ConnectorEventResponse(pub(crate) StandardEvent<ConnectorSelector>);
 
 pub(crate) type ConnectorEvents =
     CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, ConnectorSelector>;

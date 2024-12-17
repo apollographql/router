@@ -309,6 +309,7 @@ enum TreeData {
 #[buildstructor::buildstructor]
 impl Exporter {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new<'a>(
         endpoint: &'a Url,
         otlp_endpoint: &'a Url,

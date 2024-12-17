@@ -461,15 +461,19 @@ supergraph:
 
 The path must start with `/`.
 
-Path parameters and wildcards are supported. For example:
+A path can contain parameters and wildcards:
 
-- `/:my_dynamic_prefix/graphql` matches both `/my_project_a/graphql` and `/my_project_b/graphql`.
-- `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
-- `/g*` matches `/graphql`, `/gateway` and `/graphql/api`.
+- `/:parameter` matches a single segment. For example:
+    - `/abc/:wildcard/def` matches `/abc/1/def` and `/abc/whatever/def`, but it doesn't match `/abc/1/2/def` or `/abc/def`
+
+- `/*parameter` matches all segments in the rest of a path. For example:
+    -  `/abc/*wildcard` matches `/abc/1/def` and `/abc/w/h/a/t/e/v/e/r`, but it doesn't match `/abc/` or `/not_abc_at_all`
 
 <Note>
 
-The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
+- Both `:` and `*` syntaxes require a name, even though you can’t use those names anywhere.
+
+- The router doesn't support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
 
 </Note>
 
@@ -562,98 +566,6 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 **If you have a GraphOS Enterprise plan:** 
 - You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](/router/configuration/distributed-caching/).
 - You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](/router/configuration/entity-caching/).
-
-<MinVersion version ="1.49.0">
-
-### Native query planner
-
-</MinVersion>
-
-Starting with v1.49.0, the router can run a Rust-native query planner. This native query planner can be run by itself to plan all queries, replacing the legacy JavaScript implementation.
-
-<Tip>
-
-Starting with v1.57.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following options in your `router.yaml`:
-
-```yaml title="router.yaml"
-experimental_query_planner_mode: new
-```
-
-You can also improve throughput by reducing the size of queries sent to subgraphs with the following option:
-
-```yaml title="router.yaml"
-supergraph:
-  generate_query_fragments: true
-```
-
-</Tip>
-
-Learn more in [Native Query Planner](/router/executing-operations/native-query-planner) docs.
-
-<MinVersion version ="1.49.0">
-
-### Native query planner
-
-</MinVersion>
-
-Starting with v1.49.0, the router can run a Rust-native query planner. This native query planner can be run by itself to plan all queries, replacing the legacy JavaScript implementation.
-
-<Tip>
-
-Starting with v1.57.0, to run the most performant and resource-efficient native query planner and to disable the V8 JavaScript runtime in the router, set the following option in your `router.yaml`:
-
-```yaml title="router.yaml"
-experimental_query_planner_mode: new
-```
-
-<Note>
-
-In router v1.56, running the most performant and resource-efficient native query planner also requires setting `experimental_introspection_mode: new`.
-
-</Note>
-
-You can also improve throughput by reducing the size of queries sent to subgraphs with the following option:
-
-```yaml title="router.yaml"
-supergraph:
-  generate_query_fragments: true
-```
- 
-</Tip>
-
-Learn more in [Native Query Planner](/router/executing-operations/native-query-planner) docs.
-
-
-<MinVersion version="1.44.0">
-
-### Query planner pools
-
-</MinVersion>
-
-<ExperimentalFeature appendText="And join the [GitHub discussion about query planner pools](https://github.com/apollographql/router/discussions/4917)."
-/>
-
-You can improve the performance of the router's query planner by configuring parallelized query planning.
-
-By default, the query planner plans one operation at a time. It plans one operation to completion before planning the next one. This serial planning can be problematic when an operation takes a long time to plan and consequently blocks the query planner from working on other operations.
-
-To resolve such blocking scenarios, you can enable parallel query planning. Configure it in `router.yaml` with `supergraph.query_planning.experimental_parallelism`:
-
-```yaml title="router.yaml"
-supergraph:
-  query_planning:
-    experimental_parallelism: auto # number of available cpus 
-```
-
-The value of `experimental_parallelism` is the number of query planners in the router's _query planner pool_. A query planner pool is a preallocated set of query planners from which the router can use to plan operations. The total number of pools is the maximum number of query planners that can run in parallel and therefore the maximum number of operations that can be worked on simultaneously. 
-
-Valid values of `experimental_parallelism`:
-- Any integer starting from `1`
-- The special value `auto`, which sets the number of query planners equal to the number of available CPUs on the router's host machine
-
-The default value of `experimental_parallelism` is `1`.
-
-In practice, you should tune `experimental_parallelism` based on metrics and benchmarks gathered from your router.
 
 <MinVersion version="1.49.0">
 
@@ -1283,26 +1195,6 @@ You can explicitly opt-out of this behavior by specifying:
 supergraph:
   generate_query_fragments: false
 ```
-
-<Note>
-
-The legacy query planner still supports an experimental algorithm that attempts to
-reuse fragments from the original operation while forming subgraph requests. The 
-legacy query planner has to be explicitly enabled. This experimental feature used to
-be enabled by default, but is still available to support subgraphs that rely on the
-specific shape of fragments in an operation:
-
-```yaml
-supergraph:
-  generate_query_fragments: false
-  experimental_reuse_query_fragments: true
-```
-
-Note that `generate_query_fragments` and `experimental_reuse_query_fragments` are
-mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments`
-will take precedence.
-
-</Note>
 
 ### Reusing configuration
 

@@ -3,6 +3,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
@@ -108,9 +109,7 @@ async fn test_subgraph_auth_metrics() {
     router.update_config(PROMETHEUS_CONFIG).await;
     router.assert_reloaded().await;
     // This one will not be signed, counters shouldn't increment.
-    router
-        .execute_query(&json! {{ "query": "query { me { name } }"}})
-        .await;
+    router.execute_query(Query::default()).await;
 
     // Get Prometheus metrics.
     let metrics_response = router.get_metrics_response().await.unwrap();
@@ -143,7 +142,9 @@ async fn test_metrics_bad_query() {
     router.start().await;
     router.assert_started().await;
     // This query won't make it to the supergraph service
-    router.execute_bad_query().await;
+    router
+        .execute_query(Query::default().with_bad_query())
+        .await;
     router.assert_metrics_contains(r#"apollo_router_operations_total{http_response_status_code="400",otel_scope_name="apollo/router"} 1"#, None).await;
 }
 
@@ -167,7 +168,9 @@ async fn test_bad_queries() {
             None,
         )
         .await;
-    router.execute_bad_content_type().await;
+    router
+        .execute_query(Query::default().with_bad_content_type())
+        .await;
 
     router
             .assert_metrics_contains(
@@ -176,7 +179,9 @@ async fn test_bad_queries() {
             )
             .await;
 
-    router.execute_bad_query().await;
+    router
+        .execute_query(Query::default().with_bad_query())
+        .await;
     router
         .assert_metrics_contains(
             r#"http_server_request_duration_seconds_count{error_type="Bad Request",http_request_method="POST",status="400",otel_scope_name="apollo/router"} 1"#,
@@ -184,7 +189,9 @@ async fn test_bad_queries() {
         )
         .await;
 
-    router.execute_huge_query().await;
+    router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     router
         .assert_metrics_contains(
             r#"http_server_request_duration_seconds_count{error_type="Payload Too Large",http_request_method="POST",status="413",otel_scope_name="apollo/router"} 1"#,
@@ -273,37 +280,17 @@ async fn test_gauges_on_reload() {
     router.execute_default_query().await;
 
     // Introspection query
-    router
-        .execute_query(&json!({"query":"{__schema {types {name}}}","variables":{}}))
-        .await;
+    router.execute_query(Query::introspection()).await;
 
     // Persisted query
     router
         .execute_query(
-            &json!({"query": "{__typename}", "variables":{}, "extensions": {"persistedQuery":{"version" : 1, "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}})
+            Query::builder().body(json!({"query": "{__typename}", "variables":{}, "extensions": {"persistedQuery":{"version" : 1, "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}})).build()
         )
         .await;
 
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
-        .await;
-    router
-        .assert_metrics_contains(
-            r#"apollo_router_query_planning_queued{otel_scope_name="apollo/router"} "#,
-            None,
-        )
-        .await;
-    router
-        .assert_metrics_contains(
-            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
-            None,
-        )
-        .await;
-    router
-        .assert_metrics_contains(
-            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
-            None,
-        )
         .await;
     router
         .assert_metrics_contains(

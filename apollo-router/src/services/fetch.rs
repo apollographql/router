@@ -77,6 +77,7 @@ impl SubscriptionRequest {
     /// This is the constructor (or builder) to use when constructing a subscription Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
+    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         context: Context,
@@ -103,6 +104,7 @@ impl SubscriptionRequest {
 
 /// Map a fetch error result to a [GraphQL error](GraphQLError).
 pub(crate) trait ErrorMapping<T> {
+    #[allow(clippy::result_large_err)]
     fn map_to_graphql_error(self, service_name: String, current_dir: &Path) -> Result<T, Error>;
 }
 

@@ -480,12 +480,12 @@ pub struct Message {
     ///
     /// # Formatting messages
     /// 1. Messages should be complete sentences, starting with capitalization as appropriate and
-    /// ending with punctuation.
+    ///    ending with punctuation.
     /// 2. When referring to elements of the schema, use
-    /// [schema coordinates](https://github.com/graphql/graphql-wg/blob/main/rfcs/SchemaCoordinates.md)
-    /// with any additional information added as required for clarity (e.g., the value of an arg).
+    ///    [schema coordinates](https://github.com/graphql/graphql-wg/blob/main/rfcs/SchemaCoordinates.md)
+    ///    with any additional information added as required for clarity (e.g., the value of an arg).
     /// 3. When referring to code elements (including schema coordinates), surround them with
-    /// backticks. This clarifies that `Type.field` is not ending a sentence with its period.
+    ///    backticks. This clarifies that `Type.field` is not ending a sentence with its period.
     pub message: String,
     pub locations: Vec<Range<LineColumn>>,
 }

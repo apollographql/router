@@ -422,7 +422,7 @@ impl<'a> FmtThreadName<'a> {
     }
 }
 
-impl<'a> fmt::Display for FmtThreadName<'a> {
+impl fmt::Display for FmtThreadName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use std::sync::atomic::AtomicUsize;
         use std::sync::atomic::Ordering::AcqRel;
@@ -572,7 +572,7 @@ impl<'a> DefaultVisitor<'a> {
     }
 }
 
-impl<'a> field::Visit for DefaultVisitor<'a> {
+impl field::Visit for DefaultVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
         if self.result.is_err() {
             return;
@@ -609,13 +609,13 @@ impl<'a> field::Visit for DefaultVisitor<'a> {
     }
 }
 
-impl<'a> VisitOutput<fmt::Result> for DefaultVisitor<'a> {
+impl VisitOutput<fmt::Result> for DefaultVisitor<'_> {
     fn finish(self) -> fmt::Result {
         self.result
     }
 }
 
-impl<'a> VisitFmt for DefaultVisitor<'a> {
+impl VisitFmt for DefaultVisitor<'_> {
     fn writer(&mut self) -> &mut dyn fmt::Write {
         &mut self.writer
     }
@@ -624,7 +624,7 @@ impl<'a> VisitFmt for DefaultVisitor<'a> {
 /// Renders an error into a list of sources, *including* the error
 struct ErrorSourceList<'a>(&'a (dyn std::error::Error + 'static));
 
-impl<'a> std::fmt::Display for ErrorSourceList<'a> {
+impl std::fmt::Display for ErrorSourceList<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut list = f.debug_list();
         let mut curr = Some(self.0);

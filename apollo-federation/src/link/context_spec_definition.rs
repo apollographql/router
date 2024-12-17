@@ -1,9 +1,10 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::name;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::internal_error;
@@ -25,17 +26,15 @@ pub(crate) struct ContextDirectiveArguments<'doc> {
 #[derive(Clone)]
 pub(crate) struct ContextSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
 }
 
 impl ContextSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::context_identity(),
                 version,
             },
-            minimum_federation_version,
         }
     }
 
@@ -61,19 +60,11 @@ impl SpecDefinition for ContextSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
-    }
 }
 
-lazy_static! {
-    pub(crate) static ref CONTEXT_VERSIONS: SpecDefinitions<ContextSpecDefinition> = {
+pub(crate) static CONTEXT_VERSIONS: LazyLock<SpecDefinitions<ContextSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::context_identity());
-        definitions.add(ContextSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-            Some(Version { major: 2, minor: 8 }),
-        ));
+        definitions.add(ContextSpecDefinition::new(Version { major: 0, minor: 1 }));
         definitions
-    };
-}
+    });
