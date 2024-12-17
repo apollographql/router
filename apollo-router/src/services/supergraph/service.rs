@@ -431,7 +431,6 @@ pub struct SubscriptionTaskParams {
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
     pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
-    pub(crate) service_name: String,
 }
 
 async fn subscription_task(

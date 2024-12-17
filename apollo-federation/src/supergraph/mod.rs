@@ -2107,9 +2107,6 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
     };
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @join__directive extraction
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::name;
