@@ -7,7 +7,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use futures::StreamExt;
-use http_body_util::BodyExt as _;
+use http_body_util::BodyExt;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::metrics::Unit;
@@ -27,7 +27,6 @@ use crate::plugin::PluginPrivate;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
-use crate::services::router::body::from_result_stream;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
@@ -253,7 +252,7 @@ impl PluginPrivate for FleetDetector {
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
                 router_request: req.router_request.map(move |body| {
-                    from_result_stream(body.into_data_stream().inspect(|res| {
+                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
                         if let Ok(bytes) = res {
                             u64_counter!(
                                 "apollo.router.operations.request_size",
@@ -268,7 +267,7 @@ impl PluginPrivate for FleetDetector {
             // Count the number of response bytes from the router to clients
             .map_response(move |res: router::Response| router::Response {
                 response: res.response.map(move |body| {
-                    from_result_stream(body.into_data_stream().inspect(|res| {
+                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
                         if let Ok(bytes) = res {
                             u64_counter!(
                                 "apollo.router.operations.response_size",
@@ -300,17 +299,19 @@ impl PluginPrivate for FleetDetector {
                 HttpRequest {
                     http_request: req.http_request.map(move |body| {
                         let sn = sn.clone();
-                        from_result_stream(body.into_data_stream().inspect(move |res| {
-                            if let Ok(bytes) = res {
-                                let sn = sn.clone();
-                                u64_counter!(
-                                    "apollo.router.operations.fetch.request_size",
-                                    "Total number of request bytes for subgraph fetches",
-                                    bytes.len() as u64,
-                                    subgraph.name = sn.to_string()
-                                );
-                            }
-                        }))
+                        router::body::from_result_stream(body.into_data_stream().inspect(
+                            move |res| {
+                                if let Ok(bytes) = res {
+                                    let sn = sn.clone();
+                                    u64_counter!(
+                                        "apollo.router.operations.fetch.request_size",
+                                        "Total number of request bytes for subgraph fetches",
+                                        bytes.len() as u64,
+                                        subgraph.name = sn.to_string()
+                                    );
+                                }
+                            },
+                        ))
                     }),
                     context: req.context,
                 }
@@ -332,17 +333,19 @@ impl PluginPrivate for FleetDetector {
                         Ok(HttpResponse {
                             http_response: res.http_response.map(move |body| {
                                 let sn = sn.clone();
-                                from_result_stream(body.into_data_stream().inspect(move |res| {
-                                    if let Ok(bytes) = res {
-                                        let sn = sn.clone();
-                                        u64_counter!(
+                                router::body::from_result_stream(body.into_data_stream().inspect(
+                                    move |res| {
+                                        if let Ok(bytes) = res {
+                                            let sn = sn.clone();
+                                            u64_counter!(
                                             "apollo.router.operations.fetch.response_size",
                                             "Total number of response bytes for subgraph fetches",
                                             bytes.len() as u64,
                                             subgraph.name = sn.to_string()
                                         );
-                                    }
-                                }))
+                                        }
+                                    },
+                                ))
                             }),
                             context: res.context,
                         })
@@ -475,7 +478,6 @@ register_private_plugin!("apollo", "fleet_detector", FleetDetector);
 #[cfg(test)]
 mod tests {
     use http::StatusCode;
-    use router::body::from_bytes;
     use tower::Service as _;
 
     use super::*;
@@ -510,7 +512,7 @@ mod tests {
             let mut bad_request_router_service =
                 plugin.router_service(mock_bad_request_service.boxed());
             let router_req = router::Request::fake_builder()
-                .body(from_bytes("request"))
+                .body(router::body::from_bytes("request"))
                 .build()
                 .unwrap();
             let _router_response = bad_request_router_service
@@ -568,7 +570,7 @@ mod tests {
             let mut bad_request_router_service =
                 plugin.router_service(mock_bad_request_service.boxed());
             let router_req = router::Request::fake_builder()
-                .body(from_bytes("request"))
+                .body(router::body::from_bytes("request"))
                 .build()
                 .unwrap();
             let _router_response = bad_request_router_service
@@ -623,7 +625,7 @@ mod tests {
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
-                    .body(from_bytes("request"))
+                    .body(router::body::from_bytes("request"))
                     .unwrap(),
                 context: Default::default(),
             };
@@ -699,7 +701,7 @@ mod tests {
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
-                    .body(from_bytes("request"))
+                    .body(router::body::from_bytes("request"))
                     .unwrap(),
                 context: Default::default(),
             };
