@@ -7,7 +7,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tracing::Span;
 
-use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
@@ -364,18 +363,30 @@ async fn deserialize_response<T: HttpBody>(
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     debug_request: &Option<ConnectorDebugHttpRequest>,
 ) -> Result<Value, graphql::Error> {
+    use serde_json_bytes::*;
+
     let make_err = |path: Path| {
-        FetchError::SubrequestHttpError {
-            status_code: Some(parts.status.as_u16()),
-            service: connector.id.label.clone(),
-            reason: format!(
-                "{}: {}",
-                parts.status.as_str(),
-                parts.status.canonical_reason().unwrap_or("Unknown")
-            ),
-        }
-        .to_graphql_error(Some(path))
-        .add_subgraph_name(&connector.id.subgraph_name)
+        graphql::Error::builder()
+            .message("Request failed".to_string())
+            .extension_code("CONNECTOR_FETCH")
+            .extension("service", connector.id.subgraph_name.clone())
+            .extension(
+                "http",
+                Value::Object(Map::from_iter([(
+                    "status".into(),
+                    Value::Number(parts.status.as_u16().into()),
+                )])),
+            )
+            .extension(
+                "connector",
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(connector.id.coordinate().into()),
+                )])),
+            )
+            .path(path)
+            .build()
+            .add_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
     };
 
     let body = &router::body::into_bytes(body)
@@ -883,7 +894,7 @@ mod tests {
                     path: None,
                     errors: [
                         Error {
-                            message: "HTTP fetch failed from 'test label': 200: OK",
+                            message: "Request failed",
                             locations: [],
                             path: Some(
                                 Path(
@@ -899,18 +910,20 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "code": String(
-                                    "SUBREQUEST_HTTP_ERROR",
-                                ),
                                 "service": String(
-                                    "test label",
-                                ),
-                                "reason": String(
-                                    "200: OK",
+                                    "subgraph_name",
                                 ),
                                 "http": Object({
                                     "status": Number(200),
                                 }),
+                                "connector": Object({
+                                    "coordinate": String(
+                                        "subgraph_name:Query.user@connect[0]",
+                                    ),
+                                }),
+                                "code": String(
+                                    "CONNECTOR_FETCH",
+                                ),
                                 "fetch_subgraph_name": String(
                                     "subgraph_name",
                                 ),
