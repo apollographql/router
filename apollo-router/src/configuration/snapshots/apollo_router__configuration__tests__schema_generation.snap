@@ -2542,6 +2542,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2574,6 +2579,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
@@ -4929,6 +4939,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
@@ -4966,6 +4981,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
@@ -5954,6 +5974,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph URI",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
@@ -5996,6 +6021,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph request id",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
@@ -6723,6 +6753,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
@@ -6760,6 +6795,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
         }
       },
       "type": "object"
