@@ -3141,8 +3141,7 @@ impl SelectionSet {
         defer_labels: &IndexSet<String>,
         named_fragments: &NamedFragments,
     ) -> Result<Self, FederationError> {
-        let mut reduce_defer =
-            SelectionSet::empty(self.schema.clone(), self.type_position.clone());
+        let mut reduce_defer = SelectionSet::empty(self.schema.clone(), self.type_position.clone());
         for selection in self.selections.values() {
             reduce_defer
                 .add_local_selection(&selection.reduce_defer(defer_labels, named_fragments)?)?;
