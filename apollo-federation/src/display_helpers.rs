@@ -1,8 +1,5 @@
 use std::fmt;
-use std::fmt::Debug;
 use std::fmt::Display;
-
-use serde::Serializer;
 
 pub(crate) struct State<'fmt, 'fmt2> {
     indent_level: usize,
@@ -97,31 +94,4 @@ impl<T: Display> Display for DisplayOption<T> {
             None => write!(f, "None"),
         }
     }
-}
-
-pub(crate) fn serialize_as_debug_string<T, S>(data: &T, ser: S) -> Result<S::Ok, S::Error>
-where
-    T: Debug,
-    S: Serializer,
-{
-    ser.serialize_str(&format!("{data:?}"))
-}
-
-pub(crate) fn serialize_as_string<T, S>(data: &T, ser: S) -> Result<S::Ok, S::Error>
-where
-    T: ToString,
-    S: Serializer,
-{
-    ser.serialize_str(&data.to_string())
-}
-
-pub(crate) fn serialize_optional_vec_as_string<T, S>(
-    data: &Option<Vec<T>>,
-    ser: S,
-) -> Result<S::Ok, S::Error>
-where
-    T: Display,
-    S: Serializer,
-{
-    serialize_as_string(&DisplayOption(data.as_deref().map(DisplaySlice)), ser)
 }

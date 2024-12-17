@@ -310,19 +310,15 @@ impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
         match value {
             next::FetchDataPathElement::Key(name, conditions) => Self::Key(
                 name.to_string(),
-                if conditions.is_empty() {
-                    None
-                } else {
-                    Some(conditions.iter().map(|c| c.to_string()).collect())
-                },
+                conditions
+                    .as_ref()
+                    .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
             ),
-            next::FetchDataPathElement::AnyIndex(conditions) => {
-                Self::Flatten(if conditions.is_empty() {
-                    None
-                } else {
-                    Some(conditions.iter().map(|c| c.to_string()).collect())
-                })
-            }
+            next::FetchDataPathElement::AnyIndex(conditions) => Self::Flatten(
+                conditions
+                    .as_ref()
+                    .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
+            ),
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
             next::FetchDataPathElement::Parent => Self::Key("..".to_owned(), None),
         }

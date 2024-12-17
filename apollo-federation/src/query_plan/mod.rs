@@ -18,6 +18,16 @@ pub(crate) mod query_planning_traversal;
 
 pub type QueryPlanCost = f64;
 
+// NOTE: This type implements `Serialize` for debugging purposes; however, it should not implement
+// `Deserialize` until two requires are met.
+// 1) `SelectionId`s and `OverrideId`s are only unique per lifetime of the application. To avoid
+//    problems when caching, this needs to be changes.
+// 2) There are several types transatively used in the query plan that are from `apollo-compiler`.
+//    They are serialized as strings and use the `serialize` methods provided by that crate. In
+//    order to implement `Deserialize`, care needs to be taken to deserialize these correctly.
+//    Moreover, how we serialize these types should also be revisited to make sure we can and want
+//    to support how they are serialized long term (e.g. how `DirectiveList` is serialized can be
+//    optimized).
 #[derive(Debug, Default, PartialEq, Serialize)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
@@ -68,15 +78,17 @@ pub struct FetchNode {
     /// `FragmentSpread`.
     // PORT_NOTE: This was its own type in the JS codebase, but it's likely simpler to just have the
     // constraint be implicit for router instead of creating a new type.
-    #[serde(serialize_with = "crate::display_helpers::serialize_optional_vec_as_string")]
+    #[serde(
+        serialize_with = "crate::utils::serde_bridge::serialize_optional_vec_of_exe_selection"
+    )]
     pub requires: Option<Vec<executable::Selection>>,
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.
-    #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
+    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_valid_executable_document")]
     pub operation_document: Valid<ExecutableDocument>,
     pub operation_name: Option<Name>,
-    #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
+    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_operation_type")]
     pub operation_kind: executable::OperationType,
     /// Optionally describe a number of "rewrites" that query plan executors should apply to the
     /// data that is sent as the input of this fetch. Note that such rewrites should only impact the
@@ -166,7 +178,7 @@ pub struct DeferredDeferBlock {
     pub query_path: Vec<QueryPathElement>,
     /// The part of the original query that "selects" the data to send in the deferred response
     /// (once the plan in `node` completes). Will be set _unless_ `node` is a `DeferNode` itself.
-    #[serde(serialize_with = "crate::display_helpers::serialize_as_debug_string")]
+    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_optional_exe_selection_set")]
     pub sub_selection: Option<executable::SelectionSet>,
     /// The plan to get all the data for this deferred block. Usually set, but can be `None` for a
     /// `@defer` application where everything has been fetched in the "primary block" (i.e. when
@@ -237,8 +249,8 @@ pub struct FetchDataKeyRenamer {
 /// elements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum FetchDataPathElement {
-    Key(Name, Conditions),
-    AnyIndex(Conditions),
+    Key(Name, Option<Conditions>),
+    AnyIndex(Option<Conditions>),
     TypenameEquals(Name),
     Parent,
 }
@@ -249,17 +261,8 @@ pub type Conditions = Vec<Name>;
 /// an inline fragment in a query.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum QueryPathElement {
-    #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
+    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_field")]
     Field(executable::Field),
-    #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
+    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_inline_fragment")]
     InlineFragment(executable::InlineFragment),
-}
-
-impl QueryPlan {
-    fn new(node: impl Into<TopLevelPlanNode>, statistics: QueryPlanningStatistics) -> Self {
-        Self {
-            node: Some(node.into()),
-            statistics,
-        }
-    }
 }

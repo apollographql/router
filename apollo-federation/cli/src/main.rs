@@ -23,12 +23,12 @@ struct QueryPlannerArgs {
     /// Enable @defer support.
     #[arg(long, default_value_t = false)]
     enable_defer: bool,
-    /// Reuse fragments to compress subgraph queries.
-    #[arg(long, default_value_t = false)]
-    reuse_fragments: bool,
     /// Generate fragments to compress subgraph queries.
     #[arg(long, default_value_t = false)]
     generate_fragments: bool,
+    /// Enable type conditioned fetching.
+    #[arg(long, default_value_t = false)]
+    type_conditioned_fetching: bool,
     /// Run GraphQL validation check on generated subgraph queries. (default: true)
     #[arg(long, default_missing_value = "true", require_equals = true, num_args = 0..=1)]
     subgraph_validation: Option<bool>,
@@ -38,10 +38,6 @@ struct QueryPlannerArgs {
     /// Set the `debug.paths_limit` option.
     #[arg(long)]
     paths_limit: Option<u32>,
-    /// If the supergraph only represents a single subgraph, pass through queries directly without
-    /// planning.
-    #[arg(long, default_value_t = false)]
-    single_subgraph_passthrough: bool,
 }
 
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
@@ -109,15 +105,13 @@ enum Command {
 impl QueryPlannerArgs {
     fn apply(&self, config: &mut QueryPlannerConfig) {
         config.incremental_delivery.enable_defer = self.enable_defer;
-        // --generate-fragments trumps --reuse-fragments
-        config.reuse_query_fragments = self.reuse_fragments && !self.generate_fragments;
         config.generate_query_fragments = self.generate_fragments;
+        config.type_conditioned_fetching = self.type_conditioned_fetching;
         config.subgraph_graphql_validation = self.subgraph_validation.unwrap_or(true);
         if let Some(max_evaluated_plans) = self.max_evaluated_plans {
             config.debug.max_evaluated_plans = max_evaluated_plans;
         }
         config.debug.paths_limit = self.paths_limit;
-        config.debug.bypass_planner_for_single_subgraph = self.single_subgraph_passthrough;
     }
 }
 

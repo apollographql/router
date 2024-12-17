@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -16,6 +17,7 @@ use super::instruments::Instrumented;
 use super::Selector;
 use super::Selectors;
 use super::Stage;
+use crate::graphql;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
@@ -59,6 +61,7 @@ impl Events {
                         selectors: event_cfg.attributes.clone().into(),
                         condition: event_cfg.condition.clone(),
                         attributes: Vec::new(),
+                        _phantom: PhantomData,
                     }),
                 }),
             })
@@ -88,6 +91,7 @@ impl Events {
                         selectors: event_cfg.attributes.clone().into(),
                         condition: event_cfg.condition.clone(),
                         attributes: Vec::new(),
+                        _phantom: PhantomData,
                     }),
                 }),
             })
@@ -117,6 +121,7 @@ impl Events {
                         selectors: event_cfg.attributes.clone().into(),
                         condition: event_cfg.condition.clone(),
                         attributes: Vec::new(),
+                        _phantom: PhantomData,
                     }),
                 }),
             })
@@ -180,31 +185,32 @@ impl Events {
 }
 
 pub(crate) type RouterEvents =
-    CustomEvents<router::Request, router::Response, RouterAttributes, RouterSelector>;
+    CustomEvents<router::Request, router::Response, (), RouterAttributes, RouterSelector>;
 
 pub(crate) type SupergraphEvents = CustomEvents<
     supergraph::Request,
     supergraph::Response,
+    graphql::Response,
     SupergraphAttributes,
     SupergraphSelector,
 >;
 
 pub(crate) type SubgraphEvents =
-    CustomEvents<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
+    CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes, SubgraphSelector>;
 
-pub(crate) struct CustomEvents<Request, Response, Attributes, Sel>
+pub(crate) struct CustomEvents<Request, Response, EventResponse, Attributes, Sel>
 where
-    Attributes: Selectors<Request = Request, Response = Response> + Default,
+    Attributes: Selectors<Request, Response, EventResponse> + Default,
     Sel: Selector<Request = Request, Response = Response> + Debug,
 {
     request: StandardEvent<Sel>,
     response: StandardEvent<Sel>,
     error: StandardEvent<Sel>,
-    custom: Vec<CustomEvent<Request, Response, Attributes, Sel>>,
+    custom: Vec<CustomEvent<Request, Response, EventResponse, Attributes, Sel>>,
 }
 
 impl Instrumented
-    for CustomEvents<router::Request, router::Response, RouterAttributes, RouterSelector>
+    for CustomEvents<router::Request, router::Response, (), RouterAttributes, RouterSelector>
 {
     type Request = router::Request;
     type Response = router::Response;
@@ -331,6 +337,7 @@ impl Instrumented
     for CustomEvents<
         supergraph::Request,
         supergraph::Response,
+        crate::graphql::Response,
         SupergraphAttributes,
         SupergraphSelector,
     >
@@ -438,7 +445,13 @@ impl Instrumented
 }
 
 impl Instrumented
-    for CustomEvents<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>
+    for CustomEvents<
+        subgraph::Request,
+        subgraph::Response,
+        (),
+        SubgraphAttributes,
+        SubgraphSelector,
+    >
 {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
@@ -628,9 +641,7 @@ where
 
 impl<A, E, Request, Response, EventResponse> Event<A, E>
 where
-    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse>
-        + Default
-        + Debug,
+    A: Selectors<Request, Response, EventResponse> + Default + Debug,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
 {
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -655,17 +666,17 @@ pub(crate) enum EventOn {
     Error,
 }
 
-pub(crate) struct CustomEvent<Request, Response, A, T>
+pub(crate) struct CustomEvent<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    inner: Mutex<CustomEventInner<Request, Response, A, T>>,
+    inner: Mutex<CustomEventInner<Request, Response, EventResponse, A, T>>,
 }
 
-struct CustomEventInner<Request, Response, A, T>
+struct CustomEventInner<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
     name: String,
@@ -675,11 +686,13 @@ where
     selectors: Option<Arc<Extendable<A, T>>>,
     condition: Condition<T>,
     attributes: Vec<opentelemetry_api::KeyValue>,
+    _phantom: PhantomData<EventResponse>,
 }
 
-impl<A, T, Request, Response, EventResponse> Instrumented for CustomEvent<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Instrumented
+    for CustomEvent<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
         + Debug
         + Debug,
@@ -765,9 +778,10 @@ where
     }
 }
 
-impl<A, T, Request, Response> CustomEventInner<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse>
+    CustomEventInner<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug + Debug,
 {
     #[inline]

@@ -32,6 +32,7 @@ use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
@@ -214,9 +215,10 @@ impl FetchIdGenerator {
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
     pub(crate) selection_set: Arc<SelectionSet>,
-    /// The conditions determining whether the fetch should be executed (which must be recomputed
-    /// from the selection set when it changes).
-    pub(crate) conditions: Conditions,
+    /// The conditions determining whether the fetch should be executed, derived from the selection
+    /// set.
+    #[serde(skip)]
+    conditions: OnceLock<Conditions>,
 }
 
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
@@ -507,15 +509,14 @@ impl FetchDependencyGraphNodePath {
         type_conditioned_fetching_enabled: bool,
         root_type: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
-        let root_possible_types = if type_conditioned_fetching_enabled {
+        let root_possible_types: IndexSet<Name> = if type_conditioned_fetching_enabled {
             schema.possible_runtime_types(root_type)?
         } else {
             Default::default()
         }
         .into_iter()
-        .map(|pos| Ok(pos.get(schema.schema())?.name.clone()))
-        .collect::<Result<IndexSet<Name>, _>>()
-        .map_err(|e: PositionLookupError| FederationError::from(e))?;
+        .map(|pos| Ok::<_, PositionLookupError>(pos.get(schema.schema())?.name.clone()))
+        .process_results(|c| c.sorted().collect())?;
 
         Ok(Self {
             schema,
@@ -575,12 +576,13 @@ impl FetchDependencyGraphNodePath {
                 None => self.possible_types.clone(),
                 Some(tcp) => {
                     let element_possible_types = self.schema.possible_runtime_types(tcp.clone())?;
-                    element_possible_types
+                    self.possible_types
                         .iter()
                         .filter(|&possible_type| {
-                            self.possible_types.contains(&possible_type.type_name)
+                            element_possible_types
+                                .contains(&ObjectTypeDefinitionPosition::new(possible_type.clone()))
                         })
-                        .map(|possible_type| possible_type.type_name.clone())
+                        .cloned()
                         .collect()
                 }
             },
@@ -590,15 +592,11 @@ impl FetchDependencyGraphNodePath {
     }
 
     fn advance_field_type(&self, element: &Field) -> Result<IndexSet<Name>, FederationError> {
-        if !element
-            .output_base_type()
-            .map(|base_type| base_type.is_composite_type())
-            .unwrap_or_default()
-        {
+        if !element.output_base_type()?.is_composite_type() {
             return Ok(Default::default());
         }
 
-        let mut res = self
+        let mut res: IndexSet<Name> = self
             .possible_types
             .clone()
             .into_iter()
@@ -614,17 +612,13 @@ impl FetchDependencyGraphNodePath {
                     .schema
                     .possible_runtime_types(typ)?
                     .into_iter()
-                    .map(|ctdp| ctdp.type_name)
-                    .collect::<Vec<_>>())
+                    .map(|ctdp| ctdp.type_name))
             })
-            .collect::<Result<Vec<Vec<Name>>, FederationError>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            .process_results::<_, _, FederationError, _>(|c| c.flatten().collect())?;
 
         res.sort();
 
-        Ok(res.into_iter().collect())
+        Ok(res)
     }
 
     fn updated_response_path(
@@ -647,17 +641,22 @@ impl FetchDependencyGraphNodePath {
 
                     match new_path.pop() {
                         Some(FetchDataPathElement::AnyIndex(_)) => {
-                            new_path.push(FetchDataPathElement::AnyIndex(
+                            new_path.push(FetchDataPathElement::AnyIndex(Some(
                                 conditions.iter().cloned().collect(),
-                            ));
+                            )));
                         }
                         Some(FetchDataPathElement::Key(name, _)) => {
                             new_path.push(FetchDataPathElement::Key(
                                 name,
-                                conditions.iter().cloned().collect(),
+                                Some(conditions.iter().cloned().collect()),
                             ));
                         }
                         Some(other) => new_path.push(other),
+                        // TODO: We should be emitting type conditions here on no element like the
+                        //       JS code, which requires a new FetchDataPathElement variant in Rust.
+                        //       This really has to do with a hack we did to avoid changing fetch
+                        //       data paths too much, in which type conditions ought to be their own
+                        //       variant entirely.
                         None => {}
                     }
                 }
@@ -1708,7 +1707,7 @@ impl FetchDependencyGraph {
                 children.push(child_index);
             } else {
                 let Some(child_defer_ref) = &child.defer_ref else {
-                    panic!(
+                    bail!(
                         "{} has defer_ref `{}`, so its child {} cannot have a top-level defer_ref.",
                         node.display(node_index),
                         DisplayOption(node.defer_ref.as_ref()),
@@ -1770,7 +1769,10 @@ impl FetchDependencyGraph {
             .graph
             .node_weight_mut(node_index)
             .ok_or_else(|| FederationError::internal("Node unexpectedly missing"))?;
-        let conditions = handled_conditions.update_with(&node.selection_set.conditions);
+        let conditions = node
+            .selection_set
+            .conditions()?
+            .update_with(&handled_conditions);
         let new_handled_conditions = conditions.clone().merge(handled_conditions);
 
         let processed = processor.on_node(
@@ -2660,15 +2662,13 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation =
-            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
+        let operation = operation_compression.compress(operation)?;
         let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError {
-                inner: SingleFederationError::InvalidGraphQL { diagnostics },
-                ..
-            } => FederationError::internal(format!(
+            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
+                diagnostics,
+            }) => internal_error!(
                 "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            )),
+            ),
             _ => err,
         })?;
 
@@ -3169,9 +3169,8 @@ impl FetchSelectionSet {
         type_position: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
         let selection_set = Arc::new(SelectionSet::empty(schema, type_position));
-        let conditions = selection_set.conditions()?;
         Ok(Self {
-            conditions,
+            conditions: OnceLock::new(),
             selection_set,
         })
     }
@@ -3182,18 +3181,34 @@ impl FetchSelectionSet {
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
-        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
-        // Or make it lazily-initialized and computed on demand?
-        self.conditions = self.selection_set.conditions()?;
+        self.conditions.take();
         Ok(())
     }
 
     fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
-        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
-        // Or make it lazily-initialized and computed on demand?
-        self.conditions = self.selection_set.conditions()?;
+        self.conditions.take();
         Ok(())
+    }
+
+    /// The conditions determining whether the fetch should be executed.
+    fn conditions(&self) -> Result<&Conditions, FederationError> {
+        // This is a bit inefficient, because `get_or_try_init` is unstable.
+        // https://github.com/rust-lang/rust/issues/109737
+        //
+        // Essentially we do `.get()` twice. This is still much better than eagerly recomputing the
+        // selection set all the time, though :)
+        if let Some(conditions) = self.conditions.get() {
+            return Ok(conditions);
+        }
+
+        // Separating this call and the `.get_or_init` call means we could, if called from multiple
+        // threads, do the same work twice.
+        // The query planner does not use multiple threads for a single plan at the moment, and
+        // even if it did, occasionally computing this twice would still be better than eagerly
+        // recomputing it after every change.
+        let conditions = self.selection_set.conditions()?;
+        Ok(self.conditions.get_or_init(|| conditions))
     }
 }
 
@@ -3374,7 +3389,7 @@ impl DeferTracking {
 
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             let Some(parent_info) = self.deferred.get_mut(parent_ref) else {
-                panic!("Cannot find info for parent {parent_ref} or {label}");
+                bail!("Cannot find info for parent {parent_ref} or {label}")
             };
 
             parent_info.deferred.insert(label.clone());
@@ -5267,11 +5282,10 @@ mod tests {
         )
     }
 
-    fn cond_to_string(conditions: &[Name]) -> String {
-        if conditions.is_empty() {
-            return Default::default();
+    fn cond_to_string(conditions: &Option<Vec<Name>>) -> String {
+        if let Some(conditions) = conditions {
+            return format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","));
         }
-
-        format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","))
+        Default::default()
     }
 }
