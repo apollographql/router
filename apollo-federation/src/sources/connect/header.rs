@@ -45,7 +45,7 @@ impl<'a> HeaderValue<'a> {
         Self { parts }
     }
 
-    fn parse(input: Span<'a>) -> IResult<Span, Self, HeaderValueError> {
+    fn parse(input: Span<'a>) -> IResult<Span<'a>, Self, HeaderValueError> {
         all_consuming(map(many1(HeaderValuePart::parse), Self::new))(input)
     }
 

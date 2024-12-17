@@ -8,18 +8,18 @@
 //! be using it.
 //! This algorithm is used in 2 places:
 //! * in the query planner cache: generating query plans can be expensive, so the
-//! router has a warm up feature, where upon receving a new schema, it will take
-//! the most used queries and plan them, before switching traffic to the new
-//! schema. Generating all of those plans takes a lot of time. By using this
-//! hashing algorithm, we can detect that the schema change does not affect the
-//! query, which means that we can reuse the old query plan directly and avoid
-//! the expensive planning task
+//!   router has a warm up feature, where upon receving a new schema, it will take
+//!   the most used queries and plan them, before switching traffic to the new
+//!   schema. Generating all of those plans takes a lot of time. By using this
+//!   hashing algorithm, we can detect that the schema change does not affect the
+//!   query, which means that we can reuse the old query plan directly and avoid
+//!   the expensive planning task
 //! * in entity caching: the responses returned by subgraphs can change depending
-//! on the schema (example: a field moving from String to Int), so we need to
-//! detect that. One way to do it was to add the schema hash to the cache key, but
-//! as a result it wipes the cache on every schema update, which will cause
-//! performance and reliability issues. With this hashing algorithm, cached entries
-//! can be kept across schema updates
+//!   on the schema (example: a field moving from String to Int), so we need to
+//!   detect that. One way to do it was to add the schema hash to the cache key, but
+//!   as a result it wipes the cache on every schema update, which will cause
+//!   performance and reliability issues. With this hashing algorithm, cached entries
+//!   can be kept across schema updates
 //!
 //! ## Technical details
 //!
@@ -665,7 +665,7 @@ impl<'a> QueryHashVisitor<'a> {
     }
 }
 
-impl<'a> Hasher for QueryHashVisitor<'a> {
+impl Hasher for QueryHashVisitor<'_> {
     fn finish(&self) -> u64 {
         unreachable!()
     }
@@ -677,7 +677,7 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
     }
 }
 
-impl<'a> Visitor for QueryHashVisitor<'a> {
+impl Visitor for QueryHashVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         "^VISIT_OPERATION".hash(self);
 

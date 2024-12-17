@@ -11,6 +11,7 @@ use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
 use displaydoc::Display;
 use futures::future::Either;
 use futures::stream;
@@ -123,6 +124,8 @@ pub(crate) enum DemandControlError {
     SubgraphOperationNotInitialized(crate::query_planner::fetch::SubgraphOperationNotInitialized),
     /// {0}
     ContextSerializationError(String),
+    /// {0}
+    FederationError(FederationError),
 }
 
 impl IntoGraphQLErrors for DemandControlError {
@@ -163,6 +166,10 @@ impl IntoGraphQLErrors for DemandControlError {
                 .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
+            DemandControlError::FederationError(_) => Ok(vec![graphql::Error::builder()
+                .extension_code(self.code())
+                .message(self.to_string())
+                .build()]),
         }
     }
 }
@@ -175,6 +182,7 @@ impl DemandControlError {
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
             DemandControlError::SubgraphOperationNotInitialized(e) => e.code(),
             DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
+            DemandControlError::FederationError(_) => "FEDERATION_ERROR",
         }
     }
 }
@@ -185,7 +193,7 @@ impl<T> From<WithErrors<T>> for DemandControlError {
     }
 }
 
-impl<'a> From<FieldLookupError<'a>> for DemandControlError {
+impl From<FieldLookupError<'_>> for DemandControlError {
     fn from(value: FieldLookupError) -> Self {
         match value {
             FieldLookupError::NoSuchType => DemandControlError::QueryParseFailure(
@@ -198,6 +206,12 @@ impl<'a> From<FieldLookupError<'a>> for DemandControlError {
                 ))
             }
         }
+    }
+}
+
+impl From<FederationError> for DemandControlError {
+    fn from(value: FederationError) -> Self {
+        DemandControlError::FederationError(value)
     }
 }
 

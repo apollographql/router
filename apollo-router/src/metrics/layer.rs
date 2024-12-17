@@ -169,7 +169,7 @@ pub(crate) struct MetricVisitor<'a> {
     attributes_ignored: bool,
 }
 
-impl<'a> MetricVisitor<'a> {
+impl MetricVisitor<'_> {
     fn set_metric(&mut self, name: &'static str, instrument_type: InstrumentType) {
         self.metric = Some((name, instrument_type));
         if self.attributes_ignored {
@@ -181,7 +181,7 @@ impl<'a> MetricVisitor<'a> {
     }
 }
 
-impl<'a> Visit for MetricVisitor<'a> {
+impl Visit for MetricVisitor<'_> {
     fn record_f64(&mut self, field: &Field, value: f64) {
         if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
             self.set_metric(metric_name, InstrumentType::CounterF64(value));
@@ -416,7 +416,7 @@ impl<'a> Visit for MetricVisitor<'a> {
     }
 }
 
-impl<'a> MetricVisitor<'a> {
+impl MetricVisitor<'_> {
     fn finish(self) {
         if let Some((metric_name, instrument_type)) = self.metric {
             self.instruments.update_metric(

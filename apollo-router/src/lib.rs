@@ -19,8 +19,6 @@
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
-// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
-#![allow(clippy::mutable_key_type)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
@@ -113,16 +111,10 @@ pub mod _private {
     // Reexports for macros
     pub use linkme;
     pub use once_cell;
-    pub use router_bridge;
     pub use serde_json;
 
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
-    // For comparison/fuzzing
-    pub use crate::query_planner::bridge_query_planner::QueryPlanResult;
-    pub use crate::query_planner::plan_compare::diff_plan;
-    pub use crate::query_planner::plan_compare::plan_matches;
-    pub use crate::query_planner::plan_compare::render_diff;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }

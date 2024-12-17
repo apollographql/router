@@ -193,9 +193,8 @@ impl PartialEq for TryIntoHeaderName {
 
 impl Hash for TryIntoHeaderName {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match &self.result {
-            Ok(value) => value.hash(state),
-            Err(_) => {}
+        if let Ok(value) = &self.result {
+            value.hash(state)
         }
     }
 }

@@ -280,20 +280,10 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlannerPool::new(
-            previous_supergraph
-                .as_ref()
-                .map(|router| router.js_planners())
-                .unwrap_or_default(),
-            schema.clone(),
-            configuration.clone(),
-            configuration
-                .supergraph
-                .query_planning
-                .experimental_query_planner_parallelism()?,
-        )
-        .instrument(query_planner_span)
-        .await?;
+        let bridge_query_planner =
+            BridgeQueryPlannerPool::new(schema.clone(), configuration.clone())
+                .instrument(query_planner_span)
+                .await?;
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
@@ -506,12 +496,9 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
+        r#"failed to initialize the query planner: An internal error has occurred, please report this bug to Apollo.
 
-Details:
-Error: Cannot find type "Review" in subgraph "products"
-caused by
-"#
+Details: Object field "Product.reviews"'s inner type "Review" does not refer to an existing output type."#
     );
 }
 
