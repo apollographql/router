@@ -249,6 +249,14 @@ impl LightSpanData {
     }
 }
 
+/// An externally updateable gauge for "apollo_router_span_lru_size".
+///
+/// When observed, it reports the most recently stored value (give or take atomicity looseness).
+///
+/// This *could* be generalised to any kind of gauge, but we should ideally have gauges that can just
+/// observe their accurate value whenever requested. The externally updateable approach is kind of
+/// a hack that happens to work here because we only have one place where the value can change, and
+/// otherwise we might have to use an inconvenient Mutex or RwLock around the entire LRU cache.
 #[derive(Debug)]
 struct SpanLruSizeInstrument {
     value: Arc<AtomicU64>,
@@ -1125,6 +1133,8 @@ impl SpanExporter for Exporter {
             }
         }
 
+        // Note this won't be correct anymore if there is any way outside of `.export()`
+        // to affect the size of the cache.
         self.span_lru_size_instrument
             .update(self.spans_by_parent_id.len() as u64);
 
