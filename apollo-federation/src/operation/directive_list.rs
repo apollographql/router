@@ -336,19 +336,11 @@ impl DirectiveList {
         Some(item)
     }
 
-    /// Removes @defer directive from the self it has a matching label.
-    pub(crate) fn remove_defer(
-        &mut self,
-        defer_labels: &IndexSet<String>,
-        schema: &apollo_compiler::Schema,
-    ) {
+    /// Removes @defer directive from self if it has a matching label.
+    pub(crate) fn remove_defer(&mut self, defer_labels: &IndexSet<String>) {
         let label = self
             .get(&DEFER_DIRECTIVE_NAME)
-            .and_then(|directive| {
-                directive
-                    .argument_by_name(&DEFER_LABEL_ARGUMENT_NAME, schema)
-                    .ok()
-            })
+            .and_then(|directive| directive.specified_argument_by_name(&DEFER_LABEL_ARGUMENT_NAME))
             .and_then(|arg| arg.as_str());
 
         if label.is_some_and(|label| defer_labels.contains(label)) {

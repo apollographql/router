@@ -2902,6 +2902,7 @@ impl Fragment {
         self.selection_set.has_defer()
     }
 
+    /// Create a new fragment without @defer directive applications that have a matching label.
     fn reduce_defer(
         &self,
         defer_labels: &IndexSet<String>,
@@ -2921,7 +2922,7 @@ impl Fragment {
 }
 
 impl NamedFragments {
-    /// Creates new fragment definitions with the @defer directive removed if it has a matching label.
+    /// Creates new fragment definitions by removing all @defer directives that had a matching label.
     fn reduce_defer(&self, defer_labels: &IndexSet<String>) -> Result<Self, FederationError> {
         let mut new_fragments = NamedFragments {
             fragments: Default::default(),
@@ -2954,11 +2955,10 @@ impl FragmentSpread {
         self.directives.has(&DEFER_DIRECTIVE_NAME)
     }
 
+    /// Create a new fragment spread without @defer directive applications that have a matching label.
     fn reduce_defer(&self, defer_labels: &IndexSet<String>) -> Result<Self, FederationError> {
         let mut reduce_defer = self.clone();
-        reduce_defer
-            .directives
-            .remove_defer(defer_labels, reduce_defer.schema.schema());
+        reduce_defer.directives.remove_defer(defer_labels);
         Ok(reduce_defer)
     }
 }
@@ -2975,11 +2975,10 @@ impl InlineFragment {
         self.directives.has(&DEFER_DIRECTIVE_NAME)
     }
 
+    /// Create a new inline fragment without @defer directive applications that have a matching label.
     fn reduce_defer(&self, defer_labels: &IndexSet<String>) -> Result<Self, FederationError> {
         let mut reduce_defer = self.clone();
-        reduce_defer
-            .directives
-            .remove_defer(defer_labels, reduce_defer.schema.schema());
+        reduce_defer.directives.remove_defer(defer_labels);
         Ok(reduce_defer)
     }
 }
@@ -3075,6 +3074,7 @@ impl Selection {
         }
     }
 
+    /// Create a new selection without @defer directive applications that have a matching label.
     fn reduce_defer(
         &self,
         defer_labels: &IndexSet<String>,
