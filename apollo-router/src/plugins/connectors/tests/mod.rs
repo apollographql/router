@@ -138,7 +138,10 @@ async fn max_requests() {
             1
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id}",
+            "service": "connectors",
+            "connector": {
+              "coordinate": "connectors:Query.user@connect[0]"
+            },
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -208,7 +211,10 @@ async fn source_max_requests() {
             1
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id}",
+            "service": "connectors",
+            "connector": {
+              "coordinate": "connectors:Query.user@connect[0]"
+            },
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -451,37 +457,41 @@ async fn basic_errors() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
+          "message": "Request failed",
           "path": [
             "users"
           ],
           "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors.json http: GET /users",
-            "reason": "404: Not Found",
+            "service": "connectors",
             "http": {
               "status": 404
-            }
+            },
+            "connector": {
+              "coordinate": "connectors:Query.users@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
           }
         },
         {
-          "message": "HTTP fetch failed from 'connectors.json http: GET /users/{$args.id}': 400: Bad Request",
+          "message": "Request failed",
           "path": [
             "posts",
             0,
             "user"
           ],
           "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors.json http: GET /users/{$args.id}",
-            "reason": "400: Bad Request",
+            "service": "connectors",
             "http": {
               "status": 400
-            }
+            },
+            "connector": {
+              "coordinate": "connectors:Query.user@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
           }
         },
         {
-          "message": "HTTP fetch failed from 'connectors.json http: GET /users/{$this.id}/nicknames': 400: Bad Request",
+          "message": "Request failed",
           "path": [
             "posts",
             0,
@@ -489,12 +499,14 @@ async fn basic_errors() {
             "nickname"
           ],
           "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors.json http: GET /users/{$this.id}/nicknames",
-            "reason": "400: Bad Request",
+            "service": "connectors",
             "http": {
               "status": 400
-            }
+            },
+            "connector": {
+              "coordinate": "connectors:User.nickname@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
           }
         }
       ]
@@ -1125,17 +1137,19 @@ async fn error_not_redacted() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
+          "message": "Request failed",
           "path": [
             "users"
           ],
           "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors.json http: GET /users",
-            "reason": "404: Not Found",
+            "service": "connectors",
             "http": {
               "status": 404
-            }
+            },
+            "connector": {
+              "coordinate": "connectors:Query.users@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
           }
         }
       ]
