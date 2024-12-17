@@ -617,7 +617,6 @@ macro_rules! f64_counter {
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
 ///
 /// New metrics should be added using these macros.
-
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {

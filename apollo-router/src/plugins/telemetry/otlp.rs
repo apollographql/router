@@ -1,11 +1,11 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
-use lazy_static::lazy_static;
 use opentelemetry::sdk::metrics::reader::TemporalitySelector;
 use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
@@ -26,10 +26,10 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-lazy_static! {
-    static ref DEFAULT_GRPC_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4317");
-    static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
-}
+static DEFAULT_GRPC_ENDPOINT: LazyLock<Uri> =
+    LazyLock::new(|| Uri::from_static("http://127.0.0.1:4317"));
+static DEFAULT_HTTP_ENDPOINT: LazyLock<Uri> =
+    LazyLock::new(|| Uri::from_static("http://127.0.0.1:4318"));
 
 const DEFAULT_HTTP_ENDPOINT_PATH: &str = "/v1/traces";
 

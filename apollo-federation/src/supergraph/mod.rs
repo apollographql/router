@@ -5,6 +5,7 @@ use std::fmt::Write;
 use std::ops::Deref;
 use std::ops::Not;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
@@ -35,7 +36,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use time::OffsetDateTime;
 
 pub(crate) use self::schema::new_empty_fed_2_subgraph_schema;
@@ -1553,8 +1553,8 @@ fn get_subgraph<'subgraph>(
     })
 }
 
-lazy_static! {
-    static ref EXECUTABLE_DIRECTIVE_LOCATIONS: IndexSet<DirectiveLocation> = {
+static EXECUTABLE_DIRECTIVE_LOCATIONS: LazyLock<IndexSet<DirectiveLocation>> =
+    LazyLock::new(|| {
         [
             DirectiveLocation::Query,
             DirectiveLocation::Mutation,
@@ -1567,8 +1567,7 @@ lazy_static! {
         ]
         .into_iter()
         .collect()
-    };
-}
+    });
 
 fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<(), FederationError> {
     // We now do an additional path on all types because we sometimes added types to subgraphs
@@ -2112,7 +2111,6 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @join__directive extraction
-
 static JOIN_DIRECTIVE: &str = "join__directive";
 
 /// Converts `@join__directive(graphs: [A], name: "foo")` to `@foo` in the A subgraph.

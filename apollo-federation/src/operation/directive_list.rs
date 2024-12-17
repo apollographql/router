@@ -304,9 +304,7 @@ impl DirectiveList {
             // Nothing to do on an empty list
             return None;
         };
-        let Some(index) = inner.directives.iter().position(|dir| dir.name == name) else {
-            return None;
-        };
+        let index = inner.directives.iter().position(|dir| dir.name == name)?;
 
         // The directive exists and is the only directive: switch to the empty representation
         if inner.len() == 1 {
