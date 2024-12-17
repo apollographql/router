@@ -2023,9 +2023,6 @@ pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Ve
     });
 }
 
-#[derive(Clone)]
-struct SubgraphMetricsAttributes(HashMap<String, AttributeValue>);
-
 struct EnableSubgraphFtv1;
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
