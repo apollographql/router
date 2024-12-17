@@ -286,6 +286,7 @@ dependencies = [
  "aws-types",
  "axum 0.7.9",
  "axum-extra",
+ "axum-server",
  "base64 0.22.1",
  "basic-toml",
  "bloomfilter",
@@ -1292,6 +1293,25 @@ dependencies = [
  "serde",
  "tower 0.5.1",
  "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-server"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56bac90848f6a9393ac03c63c640925c4b7c8ca21654de40d53f55964667c7d8"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http 1.2.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.5.1",
+ "hyper-util",
+ "pin-project-lite",
+ "tokio",
+ "tower 0.4.13",
  "tower-service",
 ]
 

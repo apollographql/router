@@ -55,6 +55,9 @@ telemetry_next = []
 # is set when ci builds take place. It allows us to disable some tests when CI is running on certain platforms.
 ci = []
 
+# Enables the HTTP snapshot server for testing
+snapshot = ["axum-server"]
+
 [package.metadata.docs.rs]
 features = ["docs_rs"]
 
@@ -74,6 +77,7 @@ async-compression = { version = "0.4.6", features = [
 async-trait.workspace = true
 axum = { version = "0.7.9", features = ["http2"] }
 axum-extra = { version = "0.9.6", features = [ "typed-header" ] }
+axum-server = {  version = "0.7.1", optional = true }
 base64 = "0.22.0"
 bloomfilter = "1.0.13"
 buildstructor = "0.5.4"
@@ -306,6 +310,7 @@ tikv-jemallocator = "0.6.0"
 
 [dev-dependencies]
 axum = { version = "0.7.9", features = ["http2", "ws"] }
+axum-server = "0.7.1"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "9.4.0", features = ["enable-rustls", "mocks", "i-cluster"] }
 futures-test = "0.3.30"
@@ -390,6 +395,12 @@ path = "tests/integration_tests.rs"
 name = "samples"
 path = "tests/samples_tests.rs"
 harness = false
+
+[[bin]]
+name = "snapshot"
+path = "src/test_harness/http_snapshot_main.rs"
+test = false
+required-features = ["snapshot"]
 
 [[bench]]
 name = "huge_requests"
