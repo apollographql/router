@@ -155,7 +155,7 @@ fn make_uri(
     Ok(url)
 }
 
-// Flatten map-of-maps to a map of dot-delimited keys and built-in JSON values.
+/// Flatten map-of-maps to a map of dot-delimited keys and built-in JSON values.
 fn flatten_keys(inputs: &IndexMap<String, Value>) -> Map<ByteString, Value> {
     let mut flat = serde_json_bytes::Map::with_capacity(inputs.len());
     let mut stack: Vec<_> = inputs
