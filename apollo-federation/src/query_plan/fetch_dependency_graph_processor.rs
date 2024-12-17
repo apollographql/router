@@ -53,7 +53,7 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     operation_directives: DirectiveList,
     operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<IndexSet<String>>,
+    assigned_defer_labels: IndexSet<String>,
     counter: u32,
 }
 
@@ -251,7 +251,7 @@ impl FetchDependencyGraphToQueryPlanProcessor {
         operation_directives: DirectiveList,
         operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<IndexSet<String>>,
+        assigned_defer_labels: IndexSet<String>,
     ) -> Self {
         Self {
             variable_definitions,
@@ -373,11 +373,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 .cloned()
                 .map(|id| DeferredDependency { id })
                 .collect(),
-            label: if self
-                .assigned_defer_labels
-                .as_ref()
-                .is_some_and(|set| set.contains(&defer_info.label))
-            {
+            label: if self.assigned_defer_labels.contains(&defer_info.label) {
                 None
             } else {
                 Some(defer_info.label.clone())

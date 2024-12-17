@@ -17,8 +17,6 @@ use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 
-mod defer;
-
 macro_rules! assert_normalized {
     ($schema_doc: expr, $query: expr, @$expected: literal) => {{
         let schema = parse_schema($schema_doc);
