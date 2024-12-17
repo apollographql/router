@@ -7,12 +7,15 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use serde::Serialize;
 
 use super::sort_arguments;
+use super::DEFER_DIRECTIVE_NAME;
+use super::DEFER_LABEL_ARGUMENT_NAME;
 
 /// Compare sorted input values, which means specifically establishing an order between the variants
 /// of input values, and comparing values for the same variants accordingly.
@@ -331,6 +334,26 @@ impl DirectiveList {
         }
         inner.rehash();
         Some(item)
+    }
+
+    /// Removes @defer directive from the self it has a matching label.
+    pub(crate) fn remove_defer(
+        &mut self,
+        defer_labels: &IndexSet<String>,
+        schema: &apollo_compiler::Schema,
+    ) {
+        let label = self
+            .get(&DEFER_DIRECTIVE_NAME)
+            .and_then(|directive| {
+                directive
+                    .argument_by_name(&DEFER_LABEL_ARGUMENT_NAME, schema)
+                    .ok()
+            })
+            .and_then(|arg| arg.as_str());
+
+        if label.is_some_and(|label| defer_labels.contains(label)) {
+            self.remove_one(&DEFER_DIRECTIVE_NAME);
+        }
     }
 }
 
