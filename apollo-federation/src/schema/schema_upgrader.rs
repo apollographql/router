@@ -115,46 +115,46 @@ impl SchemaUpgrader {
     }
     
     fn fix_federation_directives_arguments(&self) {
-        
+        todo!();
     }
     
     fn remove_external_on_interface(&self) {
-        
+        todo!();
     }
     
     fn remove_external_on_object_types(&self) {
-        
+        todo!();
     }
     
     fn remove_external_on_type_extensions(&self) {
-        
+        todo!();
     }
     
     fn fix_inactive_provides_and_requires(&self) {
-        
+        todo!();
     }
     
     fn remove_type_extensions(&self) {
-        
+        todo!();
     }
     
     fn remove_directives_on_interface(&self) {
-        
+        todo!();
     }
     
     fn remove_provides_on_non_composite(&self) {
-        
+        todo!();
     }
     
     fn remove_unused_externals(&self) {
-        
+        todo!();
     }
     
     fn add_shareable(&self) {
-        
+        todo!();
     }
     
     fn remove_tag_on_external(&self) {
-        
+        todo!();
     }
 }
