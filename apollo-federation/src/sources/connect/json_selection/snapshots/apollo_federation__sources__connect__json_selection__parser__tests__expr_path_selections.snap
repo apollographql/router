@@ -49,11 +49,18 @@ Named(
                                                             path: WithRange {
                                                                 node: Expr(
                                                                     WithRange {
-                                                                        node: Number(
-                                                                            Number(-1),
-                                                                        ),
+                                                                        node: [
+                                                                            WithRange {
+                                                                                node: Number(
+                                                                                    Number(-1),
+                                                                                ),
+                                                                                range: Some(
+                                                                                    32..35,
+                                                                                ),
+                                                                            },
+                                                                        ],
                                                                         range: Some(
-                                                                            32..35,
+                                                                            29..37,
                                                                         ),
                                                                     },
                                                                     WithRange {
