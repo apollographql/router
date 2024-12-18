@@ -300,13 +300,10 @@ where
         request: graphql::Request,
         heartbeat_interval: Option<tokio::time::Duration>,
     ) -> Result<SubscriptionStream<S>, graphql::Error> {
-        tracing::info!(
-            monotonic_counter
-                .apollo
-                .router
-                .operations
-                .subscriptions
-                .events = 1u64,
+        u64_counter!(
+            "apollo.router.operations.subscriptions.events",
+            "Number of subscription events",
+            1,
             subscriptions.mode = "passthrough"
         );
 
@@ -443,13 +440,10 @@ where
                 tracing::trace!("cannot shutdown sink: {err:?}");
             };
 
-            tracing::info!(
-                monotonic_counter
-                    .apollo
-                    .router
-                    .operations
-                    .subscriptions
-                    .events = 1u64,
+            u64_counter!(
+                "apollo.router.operations.subscriptions.events",
+                "Number of subscription events",
+                1,
                 subscriptions.mode = "passthrough",
                 subscriptions.complete = true
             );

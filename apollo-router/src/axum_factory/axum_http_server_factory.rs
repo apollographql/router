@@ -746,7 +746,7 @@ impl<'a> CancelHandler<'a> {
     }
 }
 
-impl<'a> Drop for CancelHandler<'a> {
+impl Drop for CancelHandler<'_> {
     fn drop(&mut self) {
         if !self.got_first_response {
             if self.experimental_log_on_broken_pipe {

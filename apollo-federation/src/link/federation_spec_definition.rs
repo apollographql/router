@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -7,15 +9,12 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
-use crate::link::cost_spec_definition::CostSpecDefinition;
-use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -469,15 +468,16 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn context_directive_arguments(
-        application: &Node<Directive>,
-    ) -> Result<ContextDirectiveArguments, FederationError> {
+    pub(crate) fn context_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ContextDirectiveArguments<'doc>, FederationError> {
         Ok(ContextDirectiveArguments {
             name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 
-    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive definition.
@@ -495,24 +495,7 @@ impl FederationSpecDefinition {
             })
     }
 
-    // The directive is named `@fromContex`. This is confusing for clippy, as
-    // `from` is a conventional prefix used in conversion methods, which do not
-    // take `self` as an argument. This function does **not** perform
-    // conversion, but extracts `@fromContext` directive arguments.
-    #[allow(clippy::wrong_self_convention)]
-    pub(crate) fn from_context_directive_arguments<'doc>(
-        &self,
-        application: &'doc Node<Directive>,
-    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
-        Ok(FromContextDirectiveArguments {
-            field: directive_required_string_argument(
-                application,
-                &FEDERATION_FIELD_ARGUMENT_NAME,
-            )?,
-        })
-    }
-
-    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive.
@@ -539,15 +522,21 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn get_cost_spec_definition(
+    // The directive is named `@fromContext`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive arguments.
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn from_context_directive_arguments<'doc>(
         &self,
-        schema: &FederationSchema,
-    ) -> Option<&'static CostSpecDefinition> {
-        schema
-            .metadata()
-            .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()))
-            .and_then(|link| COST_VERSIONS.find(&link.url.version))
-            .or_else(|| COST_VERSIONS.find_for_federation_version(self.version()))
+        application: &'doc Node<Directive>,
+    ) -> Result<FromContextDirectiveArguments<'doc>, FederationError> {
+        Ok(FromContextDirectiveArguments {
+            field: directive_required_string_argument(
+                application,
+                &FEDERATION_FIELD_ARGUMENT_NAME,
+            )?,
+        })
     }
 }
 
@@ -555,14 +544,10 @@ impl SpecDefinition for FederationSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        None
-    }
 }
 
-lazy_static! {
-    pub(crate) static ref FEDERATION_VERSIONS: SpecDefinitions<FederationSpecDefinition> = {
+pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::federation_identity());
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
@@ -605,8 +590,7 @@ lazy_static! {
             minor: 9,
         }));
         definitions
-    };
-}
+    });
 
 pub(crate) fn get_federation_spec_definition_from_subgraph(
     schema: &FederationSchema,

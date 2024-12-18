@@ -82,7 +82,11 @@ impl QueryPlan {
             )
             .await;
         if !deferred_fetches.is_empty() {
-            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1u64);
+            u64_counter!(
+                "apollo.router.operations.defer",
+                "Number of requests that request deferred data",
+                1
+            );
         }
 
         Response::builder().data(value).errors(errors).build()
@@ -118,7 +122,7 @@ impl PlanNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(Value, Vec<Error>)> {
+    ) -> future::BoxFuture<'a, (Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;

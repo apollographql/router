@@ -10,10 +10,6 @@ use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use router_bridge::planner::PlanOptions;
-use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
-use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -23,6 +19,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
@@ -36,11 +33,11 @@ use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::BridgeQueryPlannerPool;
-use crate::query_planner::QueryPlanResult;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
+use crate::services::query_planner::PlanOptions;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -53,14 +50,6 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
-
-#[derive(Debug, Clone, Hash)]
-pub(crate) enum ConfigMode {
-    Rust(Arc<apollo_federation::query_plan::query_planner::QueryPlannerConfig>),
-    Both(Arc<QueryPlannerConfig>),
-    BothBestEffort(Arc<QueryPlannerConfig>),
-    Js(Arc<QueryPlannerConfig>),
-}
 
 /// A query planner wrapper that caches results.
 ///
@@ -121,31 +110,7 @@ where
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
         let mut hasher = StructHasher::new();
-        match configuration.experimental_query_planner_mode {
-            crate::configuration::QueryPlannerMode::New => {
-                "PLANNER-NEW".hash(&mut hasher);
-                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
-                    .hash(&mut hasher);
-            }
-            crate::configuration::QueryPlannerMode::Legacy => {
-                "PLANNER-LEGACY".hash(&mut hasher);
-                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
-            }
-            crate::configuration::QueryPlannerMode::Both => {
-                "PLANNER-BOTH".hash(&mut hasher);
-                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
-                    .hash(&mut hasher);
-                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
-                    .hash(&mut hasher);
-            }
-            crate::configuration::QueryPlannerMode::BothBestEffort => {
-                "PLANNER-BOTH-BEST-EFFORT".hash(&mut hasher);
-                ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
-                    .hash(&mut hasher);
-                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
-                    .hash(&mut hasher);
-            }
-        };
+        configuration.rust_query_planner_config().hash(&mut hasher);
         let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
 
         Ok(Self {
@@ -372,10 +337,6 @@ where
 }
 
 impl CachingQueryPlanner<BridgeQueryPlannerPool> {
-    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.delegate.js_planners()
-    }
-
     pub(crate) fn subgraph_schemas(
         &self,
     ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
@@ -632,10 +593,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) config_mode: Arc<QueryHash>,
 }
 
-// Update this key every time the cache key or the query plan format has to change.
-// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 1;
-const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
+const ROUTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -654,8 +612,8 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
-            CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
+            "plan:router:{}:{}:opname:{}:metadata:{}",
+            ROUTER_VERSION, self.hash, operation, metadata,
         )
     }
 }
@@ -714,12 +672,11 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 mod tests {
     use mockall::mock;
     use mockall::predicate::*;
-    use router_bridge::planner::UsageReporting;
     use test_log::test;
     use tower::Service;
 
     use super::*;
-    use crate::error::PlanErrors;
+    use crate::apollo_studio_interop::UsageReporting;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
@@ -766,15 +723,10 @@ mod tests {
         let mut delegate = MockMyQueryPlanner::new();
         delegate.expect_clone().returning(|| {
             let mut planner = MockMyQueryPlanner::new();
-            planner.expect_sync_call().times(0..2).returning(|_| {
-                Err(QueryPlannerError::from(PlanErrors {
-                    errors: Default::default(),
-                    usage_reporting: UsageReporting {
-                        stats_report_key: "this is a test key".to_string(),
-                        referenced_fields_by_type: Default::default(),
-                    },
-                }))
-            });
+            planner
+                .expect_sync_call()
+                .times(0..2)
+                .returning(|_| Err(QueryPlannerError::UnhandledPlannerResult));
             planner
         });
 

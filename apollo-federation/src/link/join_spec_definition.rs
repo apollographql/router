@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -7,7 +9,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 
 use super::argument::directive_optional_list_argument;
 use crate::bail;
@@ -49,7 +50,7 @@ pub(crate) const JOIN_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("overrideLabel"
 pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
-pub(crate) const JOIN_MEMBER_CONTEXT_ARGUMENTS: Name = name!("contextArguments");
+pub(crate) const JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME: Name = name!("contextArguments");
 
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -81,7 +82,9 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
             value: &'a Value,
         ) -> Result<(), FederationError> {
             if let Some(first_value) = field {
-                bail!("Duplicate contextArgument for '{name}' field: {first_value} and {value}")
+                bail!(
+                    r#"Input field "{name}" in contextArguments is repeated with value "{value}" (previous value was "{first_value}")"#
+                )
             }
             let _ = field.insert(value);
             Ok(())
@@ -94,36 +97,36 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
             field
                 .ok_or_else(|| {
                     FederationError::internal(format!(
-                        "'{field_name}' field was missing from contextArgument"
+                        r#"Input field "{field_name}" is missing from contextArguments"#
                     ))
                 })?
                 .as_str()
                 .ok_or_else(|| {
                     FederationError::internal(format!(
-                        "'{field_name}' field of contextArgument was not a string"
+                        r#"Input field "{field_name}" in contextArguments is not a string"#
                     ))
                 })
         }
 
-        let Value::Object(names) = value else {
-            bail!("Item in contextArgument list is not an object {value}")
+        let Value::Object(input_object) = value else {
+            bail!(r#"Item "{value}" in contextArguments list is not an object"#)
         };
         let mut name = None;
         let mut type_ = None;
         let mut context = None;
         let mut selection = None;
-        for (arg_name, value) in names.as_slice() {
-            match arg_name.as_str() {
-                "name" => insert_value(arg_name, &mut name, value)?,
-                "type" => insert_value(arg_name, &mut type_, value)?,
-                "context" => insert_value(arg_name, &mut context, value)?,
-                "selection" => insert_value(arg_name, &mut selection, value)?,
-                _ => bail!("Found unknown contextArgument {arg_name}"),
+        for (input_field_name, value) in input_object {
+            match input_field_name.as_str() {
+                "name" => insert_value(input_field_name, &mut name, value)?,
+                "type" => insert_value(input_field_name, &mut type_, value)?,
+                "context" => insert_value(input_field_name, &mut context, value)?,
+                "selection" => insert_value(input_field_name, &mut selection, value)?,
+                _ => bail!(r#"Found unknown contextArguments input field "{input_field_name}""#),
             }
         }
 
         let name = field_or_else("name", name)?;
-        let type_ = field_or_else("type_", type_)?;
+        let type_ = field_or_else("type", type_)?;
         let context = field_or_else("context", context)?;
         let selection = field_or_else("selection", selection)?;
 
@@ -165,17 +168,15 @@ pub(crate) struct EnumValueDirectiveArguments {
 #[derive(Clone)]
 pub(crate) struct JoinSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
 }
 
 impl JoinSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::join_identity(),
                 version,
             },
-            minimum_federation_version,
         }
     }
 
@@ -308,7 +309,7 @@ impl JoinSpecDefinition {
             )?,
             context_arguments: directive_optional_list_argument(
                 application,
-                &JOIN_MEMBER_CONTEXT_ARGUMENTS,
+                &JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME,
             )?
             .map(|values| {
                 values
@@ -408,35 +409,15 @@ impl SpecDefinition for JoinSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
-    }
 }
 
-lazy_static! {
-    pub(crate) static ref JOIN_VERSIONS: SpecDefinitions<JoinSpecDefinition> = {
+pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-            None,
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 2 },
-            None,
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 3 },
-            Some(Version { major: 2, minor: 0 }),
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 4 },
-            Some(Version { major: 2, minor: 7 }),
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 5 },
-            Some(Version { major: 2, minor: 8 }),
-        ));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 1 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 2 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 3 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 4 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 5 }));
         definitions
-    };
-}
+    });

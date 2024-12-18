@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
@@ -23,7 +24,6 @@ use apollo_compiler::ty;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::link::spec::Identity;
@@ -51,6 +51,7 @@ pub const REQUIRES_DIRECTIVE_NAME: Name = name!("requires");
 pub const SHAREABLE_DIRECTIVE_NAME: Name = name!("shareable");
 pub const TAG_DIRECTIVE_NAME: Name = name!("tag");
 pub const FIELDSET_SCALAR_NAME: Name = name!("FieldSet");
+pub const CONTEXTFIELDVALUE_SCALAR_NAME: Name = name!("ContextFieldValue");
 
 // federated types
 pub const ANY_SCALAR_NAME: Name = name!("_Any");
@@ -104,8 +105,8 @@ enum FederationDirectiveName {
     Tag,
 }
 
-lazy_static! {
-    static ref FEDERATION_DIRECTIVE_NAMES_TO_ENUM: IndexMap<Name, FederationDirectiveName> = {
+static FEDERATION_DIRECTIVE_NAMES_TO_ENUM: LazyLock<IndexMap<Name, FederationDirectiveName>> =
+    LazyLock::new(|| {
         IndexMap::from_iter([
             (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
             (CONTEXT_DIRECTIVE_NAME, FederationDirectiveName::Context),
@@ -130,8 +131,7 @@ lazy_static! {
             (SHAREABLE_DIRECTIVE_NAME, FederationDirectiveName::Shareable),
             (TAG_DIRECTIVE_NAME, FederationDirectiveName::Tag),
         ])
-    };
-}
+    });
 
 const MIN_FEDERATION_VERSION: Version = Version { major: 2, minor: 0 };
 const MAX_FEDERATION_VERSION: Version = Version { major: 2, minor: 5 };
@@ -322,6 +322,15 @@ impl FederationSpecDefinitions {
         }
     }
 
+    /// scalar ContextFieldValue
+    pub fn contextfieldvalue_scalar_definition(&self, alias: &Option<Name>) -> ScalarType {
+        ScalarType {
+            description: None,
+            name: alias.clone().unwrap_or(CONTEXTFIELDVALUE_SCALAR_NAME),
+            directives: Default::default(),
+        }
+    }
+
     fn fields_argument_definition(&self) -> Result<InputValueDefinition, FederationSpecError> {
         Ok(InputValueDefinition {
             description: None,
@@ -427,7 +436,7 @@ impl FederationSpecDefinitions {
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive definition.
-    /// directive @fromContext(field: String!) on ARGUMENT_DEFINITION
+    /// directive @fromContext(field: ContextFieldValue) on ARGUMENT_DEFINITION
     #[allow(clippy::wrong_self_convention)]
     fn from_context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
@@ -436,7 +445,8 @@ impl FederationSpecDefinitions {
             arguments: vec![InputValueDefinition {
                 description: None,
                 name: name!("field"),
-                ty: ty!(String!).into(),
+                ty: Type::Named(self.namespaced_type_name(&CONTEXTFIELDVALUE_SCALAR_NAME, false))
+                    .into(),
                 default_value: None,
                 directives: Default::default(),
             }

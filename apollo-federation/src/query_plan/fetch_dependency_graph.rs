@@ -14,7 +14,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
-use apollo_compiler::schema;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
@@ -32,6 +31,7 @@ use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
@@ -77,6 +77,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
@@ -109,7 +110,7 @@ impl DeferredNodes {
     fn iter(&self) -> impl Iterator<Item = (&'_ DeferRef, NodeIndex<u32>)> {
         self.inner
             .iter()
-            .flat_map(|(defer_ref, nodes)| std::iter::repeat(defer_ref).zip(nodes.iter().copied()))
+            .flat_map(|(defer_ref, nodes)| iter::repeat(defer_ref).zip(nodes.iter().copied()))
     }
 
     /// Consume the map and yield each element. This is provided as a standalone method and not an
@@ -118,7 +119,7 @@ impl DeferredNodes {
         self.inner.into_iter().flat_map(|(defer_ref, nodes)| {
             // Cloning the key is a bit wasteful, but keys are typically very small,
             // and this map is also very small.
-            std::iter::repeat_with(move || defer_ref.clone()).zip(nodes)
+            iter::repeat_with(move || defer_ref.clone()).zip(nodes)
         })
     }
 }
@@ -507,15 +508,14 @@ impl FetchDependencyGraphNodePath {
         type_conditioned_fetching_enabled: bool,
         root_type: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
-        let root_possible_types = if type_conditioned_fetching_enabled {
+        let root_possible_types: IndexSet<Name> = if type_conditioned_fetching_enabled {
             schema.possible_runtime_types(root_type)?
         } else {
             Default::default()
         }
         .into_iter()
-        .map(|pos| Ok(pos.get(schema.schema())?.name.clone()))
-        .collect::<Result<IndexSet<Name>, _>>()
-        .map_err(|e: PositionLookupError| FederationError::from(e))?;
+        .map(|pos| Ok::<_, PositionLookupError>(pos.get(schema.schema())?.name.clone()))
+        .process_results(|c| c.sorted().collect())?;
 
         Ok(Self {
             schema,
@@ -575,12 +575,13 @@ impl FetchDependencyGraphNodePath {
                 None => self.possible_types.clone(),
                 Some(tcp) => {
                     let element_possible_types = self.schema.possible_runtime_types(tcp.clone())?;
-                    element_possible_types
+                    self.possible_types
                         .iter()
                         .filter(|&possible_type| {
-                            self.possible_types.contains(&possible_type.type_name)
+                            element_possible_types
+                                .contains(&ObjectTypeDefinitionPosition::new(possible_type.clone()))
                         })
-                        .map(|possible_type| possible_type.type_name.clone())
+                        .cloned()
                         .collect()
                 }
             },
@@ -590,15 +591,11 @@ impl FetchDependencyGraphNodePath {
     }
 
     fn advance_field_type(&self, element: &Field) -> Result<IndexSet<Name>, FederationError> {
-        if !element
-            .output_base_type()
-            .map(|base_type| base_type.is_composite_type())
-            .unwrap_or_default()
-        {
+        if !element.output_base_type()?.is_composite_type() {
             return Ok(Default::default());
         }
 
-        let mut res = self
+        let mut res: IndexSet<Name> = self
             .possible_types
             .clone()
             .into_iter()
@@ -614,17 +611,13 @@ impl FetchDependencyGraphNodePath {
                     .schema
                     .possible_runtime_types(typ)?
                     .into_iter()
-                    .map(|ctdp| ctdp.type_name)
-                    .collect::<Vec<_>>())
+                    .map(|ctdp| ctdp.type_name))
             })
-            .collect::<Result<Vec<Vec<Name>>, FederationError>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            .process_results::<_, _, FederationError, _>(|c| c.flatten().collect())?;
 
         res.sort();
 
-        Ok(res.into_iter().collect())
+        Ok(res)
     }
 
     fn updated_response_path(
@@ -647,17 +640,22 @@ impl FetchDependencyGraphNodePath {
 
                     match new_path.pop() {
                         Some(FetchDataPathElement::AnyIndex(_)) => {
-                            new_path.push(FetchDataPathElement::AnyIndex(
+                            new_path.push(FetchDataPathElement::AnyIndex(Some(
                                 conditions.iter().cloned().collect(),
-                            ));
+                            )));
                         }
                         Some(FetchDataPathElement::Key(name, _)) => {
                             new_path.push(FetchDataPathElement::Key(
                                 name,
-                                conditions.iter().cloned().collect(),
+                                Some(conditions.iter().cloned().collect()),
                             ));
                         }
                         Some(other) => new_path.push(other),
+                        // TODO: We should be emitting type conditions here on no element like the
+                        //       JS code, which requires a new FetchDataPathElement variant in Rust.
+                        //       This really has to do with a hack we did to avoid changing fetch
+                        //       data paths too much, in which type conditions ought to be their own
+                        //       variant entirely.
                         None => {}
                     }
                 }
@@ -671,8 +669,8 @@ impl FetchDependencyGraphNodePath {
                 let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
                 loop {
                     match type_ {
-                        schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
-                        schema::Type::List(inner) | schema::Type::NonNullList(inner) => {
+                        Type::Named(_) | Type::NonNullNamed(_) => break,
+                        Type::List(inner) | Type::NonNullList(inner) => {
                             new_path.push(FetchDataPathElement::AnyIndex(Default::default()));
                             type_ = inner
                         }
@@ -682,16 +680,6 @@ impl FetchDependencyGraphNodePath {
                 Ok(new_path)
             }
         }
-    }
-}
-
-/// If the `iter` yields a single element, return it. Else return `None`.
-fn iter_into_single_item<T>(mut iter: impl Iterator<Item = T>) -> Option<T> {
-    let item = iter.next()?;
-    if iter.next().is_none() {
-        Some(item)
-    } else {
-        None
     }
 }
 
@@ -1718,7 +1706,7 @@ impl FetchDependencyGraph {
                 children.push(child_index);
             } else {
                 let Some(child_defer_ref) = &child.defer_ref else {
-                    panic!(
+                    bail!(
                         "{} has defer_ref `{}`, so its child {} cannot have a top-level defer_ref.",
                         node.display(node_index),
                         DisplayOption(node.defer_ref.as_ref()),
@@ -1818,7 +1806,7 @@ impl FetchDependencyGraph {
             )?;
 
             let reduced_sequence =
-                processor.reduce_sequence(std::iter::once(processed).chain(main_sequence));
+                processor.reduce_sequence(iter::once(processed).chain(main_sequence));
             Ok((
                 processor.on_conditions(&conditions, reduced_sequence),
                 all_deferred_nodes,
@@ -2673,15 +2661,13 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation =
-            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
+        let operation = operation_compression.compress(operation)?;
         let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError {
-                inner: SingleFederationError::InvalidGraphQL { diagnostics },
-                ..
-            } => FederationError::internal(format!(
+            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
+                diagnostics,
+            }) => internal_error!(
                 "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            )),
+            ),
             _ => err,
         })?;
 
@@ -3048,7 +3034,7 @@ fn operation_for_entities_fetch(
     })?;
 
     let query_type = match subgraph_schema.get_type(query_type_name.clone())? {
-        crate::schema::position::TypeDefinitionPosition::Object(o) => o,
+        TypeDefinitionPosition::Object(o) => o,
         _ => {
             return Err(SingleFederationError::InvalidSubgraph {
                 message: "the root query type must be an object".to_string(),
@@ -3402,7 +3388,7 @@ impl DeferTracking {
 
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             let Some(parent_info) = self.deferred.get_mut(parent_ref) else {
-                panic!("Cannot find info for parent {parent_ref} or {label}");
+                bail!("Cannot find info for parent {parent_ref} or {label}")
             };
 
             parent_info.deferred.insert(label.clone());
@@ -3967,7 +3953,7 @@ fn compute_nodes_for_op_path_element<'a>(
             (stack_item.node_id, &stack_item.node_path),
             // If setting a context, add __typename to the site where we are retrieving context from
             // since the context rewrites path will start with a type condition.
-            if child.context_to_selection.is_some() {
+            if child.matching_context_ids.is_some() {
                 Some(edge_id)
             } else {
                 None
@@ -3976,12 +3962,12 @@ fn compute_nodes_for_op_path_element<'a>(
             created_nodes,
         )?;
 
-        if let Some(context_to_selection) = &child.context_to_selection {
+        if let Some(matching_context_ids) = &child.matching_context_ids {
             let mut condition_nodes = vec![conditions_node_data.conditions_merge_node_id];
             condition_nodes.extend(&conditions_node_data.created_node_ids);
             let mut context_to_condition_nodes =
                 stack_item.context_to_condition_nodes.deref().clone();
-            for context in context_to_selection {
+            for context in matching_context_ids {
                 context_to_condition_nodes.insert(context.clone(), condition_nodes.clone());
             }
             updated.context_to_condition_nodes = Arc::new(context_to_condition_nodes);
@@ -4006,17 +3992,17 @@ fn compute_nodes_for_op_path_element<'a>(
 
     // If the edge uses context variables, every context used must be set in a different parent
     // node or else we need to create a new one.
-    if let Some(parameter_to_context) = &child.parameter_to_context {
+    if let Some(arguments_to_context_usages) = &child.arguments_to_context_usages {
         let mut conditions_nodes: IndexSet<NodeIndex> = Default::default();
         let mut is_subgraph_jump_needed = false;
-        for context_entry in parameter_to_context.values() {
+        for context_usage in arguments_to_context_usages.values() {
             let Some(context_nodes) = updated
                 .context_to_condition_nodes
-                .get(&context_entry.context_id)
+                .get(&context_usage.context_id)
             else {
                 bail!(
                     "Could not find condition nodes for context {}",
-                    context_entry.context_id
+                    context_usage.context_id
                 );
             };
             conditions_nodes.extend(context_nodes);
@@ -4125,14 +4111,14 @@ fn compute_nodes_for_op_path_element<'a>(
             }
 
             // Add context renamers.
-            for context_entry in parameter_to_context.values() {
+            for context_entry in arguments_to_context_usages.values() {
                 let updated_node = FetchDependencyGraph::node_weight_mut(
                     &mut dependency_graph.graph,
                     updated.node_id,
                 )?;
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
-                    context_entry.subgraph_arg_type.clone(),
+                    context_entry.subgraph_argument_type.clone(),
                 )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),
@@ -4158,7 +4144,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 .iter()
                 .filter(|e| matches!((**e).deref(), OpPathElement::Field(_)))
                 .count();
-            for context_entry in parameter_to_context.values() {
+            for context_entry in arguments_to_context_usages.values() {
                 let new_relative_path = &context_entry.relative_path
                     [..(context_entry.relative_path.len() - num_fields)];
                 let updated_node = FetchDependencyGraph::node_weight_mut(
@@ -4167,7 +4153,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 )?;
                 updated_node.add_input_context(
                     context_entry.context_id.clone(),
-                    context_entry.subgraph_arg_type.clone(),
+                    context_entry.subgraph_argument_type.clone(),
                 )?;
                 updated_node.add_context_renamers_for_selection_set(
                     Some(&context_entry.selection_set),
@@ -5295,11 +5281,10 @@ mod tests {
         )
     }
 
-    fn cond_to_string(conditions: &[Name]) -> String {
-        if conditions.is_empty() {
-            return Default::default();
+    fn cond_to_string(conditions: &Option<Vec<Name>>) -> String {
+        if let Some(conditions) = conditions {
+            return format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","));
         }
-
-        format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","))
+        Default::default()
     }
 }

@@ -1,0 +1,8 @@
+description: the legacy query planner was removed, together with relevant configuration keys experimental_query_planner_mode and supergraph.query_planning.experimental_parallelism
+actions:
+  - type: delete
+    path: experimental_query_planner_mode
+  - type: delete
+    path: supergraph.experimental_reuse_query_fragments
+  - type: delete
+    path: supergraph.query_planning.experimental_parallelism

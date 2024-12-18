@@ -42,12 +42,15 @@ pub(crate) mod utils;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use itertools::Itertools;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
 
 pub use crate::api_schema::ApiSchemaOptions;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::link::context_spec_definition::ContextSpecDefinition;
+use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
@@ -59,18 +62,23 @@ use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;
 
-pub(crate) type SupergraphSpecs = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
+pub(crate) type SupergraphSpecs = (
+    &'static LinkSpecDefinition,
+    &'static JoinSpecDefinition,
+    Option<&'static ContextSpecDefinition>,
+);
 
 pub(crate) fn validate_supergraph_for_query_planning(
     supergraph_schema: &FederationSchema,
 ) -> Result<SupergraphSpecs, FederationError> {
-    validate_supergraph(supergraph_schema, &JOIN_VERSIONS)
+    validate_supergraph(supergraph_schema, &JOIN_VERSIONS, &CONTEXT_VERSIONS)
 }
 
 /// Checks that required supergraph directives are in the schema, and returns which ones were used.
 pub(crate) fn validate_supergraph(
     supergraph_schema: &FederationSchema,
     join_versions: &'static SpecDefinitions<JoinSpecDefinition>,
+    context_versions: &'static SpecDefinitions<ContextSpecDefinition>,
 ) -> Result<SupergraphSpecs, FederationError> {
     let Some(metadata) = supergraph_schema.metadata() else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
@@ -94,7 +102,22 @@ pub(crate) fn validate_supergraph(
             ),
         }.into());
     };
-    Ok((link_spec_definition, join_spec_definition))
+    let context_spec_definition = metadata.for_identity(&Identity::context_identity()).map(|context_link| {
+        context_versions.find(&context_link.url.version).ok_or_else(|| {
+            SingleFederationError::InvalidFederationSupergraph {
+                message: format!(
+                    "Invalid supergraph: uses unsupported context spec version {} (supported versions: {})",
+                    context_link.url.version,
+                    context_versions.versions().join(", "),
+                ),
+            }
+        })
+    }).transpose()?;
+    Ok((
+        link_spec_definition,
+        join_spec_definition,
+        context_spec_definition,
+    ))
 }
 
 pub struct Supergraph {

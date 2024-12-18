@@ -138,12 +138,12 @@ impl OwnedSelectionKey {
     }
 }
 
+#[cfg(test)]
 impl<'a> SelectionKey<'a> {
     /// Create a selection key for a specific field name.
     ///
     /// This is available for tests only as selection keys should not normally be created outside of
     /// `HasSelectionKey::key`.
-    #[cfg(test)]
     pub(crate) fn field_name(name: &'a Name) -> Self {
         static EMPTY_LIST: DirectiveList = DirectiveList::new();
         SelectionKey::Field {
@@ -246,11 +246,6 @@ impl SelectionMap {
     /// Returns true if there are no selections in the map.
     pub(crate) fn is_empty(&self) -> bool {
         self.selections.is_empty()
-    }
-
-    /// Returns the first selection in the map, or None if the map is empty.
-    pub(crate) fn first(&self) -> Option<&Selection> {
-        self.selections.first()
     }
 
     /// Computes the hash of a selection key.
