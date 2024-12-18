@@ -9,6 +9,7 @@ use mime::APPLICATION_JSON;
 use mockall::mock;
 use mockall::predicate::eq;
 use req_asserts::Matcher;
+use serde_json::Value;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 use tracing_core::span::Attributes;
@@ -526,26 +527,35 @@ async fn basic_connection_errors() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
-    {
-      "data": null,
-      "errors": [
-        {
-          "message": "HTTP fetch failed from 'connectors.json': tcp connect error: Connection refused (os error 61)",
-          "path": [
-            "users"
-          ],
-          "extensions": {
-            "service": "connectors",
-            "connector": {
-              "coordinate": "connectors:Query.users@connect[0]"
-            },
-            "code": "HTTP_CLIENT_ERROR"
-          }
-        }
-      ]
-    }
-    "###);
+    assert_eq!(response.get("data").unwrap(), &Value::Null);
+    assert_eq!(response.get("errors").unwrap().as_array().unwrap().len(), 1);
+    let err = response
+        .get("errors")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .first()
+        .unwrap();
+    // Different OSes have different codes at the end of the message so we have to assert on the parts separately
+    let msg = err.get("message").unwrap().as_str().unwrap();
+    assert!(
+        msg.starts_with(
+            "HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+        ),
+        "got message: {}",
+        msg
+    );
+    assert_eq!(err.get("path").unwrap(), &serde_json::json!(["users"]));
+    assert_eq!(
+        err.get("extensions").unwrap(),
+        &serde_json::json!({
+          "service": "connectors",
+          "connector": {
+            "coordinate": "connectors:Query.users@connect[0]"
+          },
+          "code": "HTTP_CLIENT_ERROR"
+        })
+    );
 }
 
 #[tokio::test]
