@@ -12,9 +12,10 @@ use serde_json::Value;
 use tower::BoxError;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
-use wiremock::{Mock, Times};
+use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::Times;
 
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Query;
@@ -453,17 +454,19 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     Ok(())
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling() -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling(
+) -> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
     let mock_server = mock_otlp_server(0..).await;
 
     if !graph_os_enabled() {
         return Ok(());
     }
-    let config = include_str!("fixtures/otlp_parent_sampler_very_small_no_parent_no_agent_sampling.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!(
+        "fixtures/otlp_parent_sampler_very_small_no_parent_no_agent_sampling.router.yaml"
+    )
+    .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
@@ -481,48 +484,71 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sam
         .services(["client"].into())
         .subgraph_sampled(false)
         .build()
-        .validate_otlp_trace(&mut router, &mock_server, Query::builder().traced(true).build())
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).build(),
+        )
         .await?;
 
     TraceSpec::builder()
         .services(["client"].into())
         .subgraph_sampled(false)
         .build()
-        .validate_otlp_trace(&mut router, &mock_server, Query::builder().psr("-1").traced(true).build())
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("-1").traced(true).build(),
+        )
         .await?;
     TraceSpec::builder()
         .services(["client"].into())
         .subgraph_sampled(false)
         .build()
-        .validate_otlp_trace(&mut router, &mock_server, Query::builder().psr("0").traced(true).build())
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("0").traced(true).build(),
+        )
         .await?;
 
     TraceSpec::builder()
         .services(["client"].into())
         .subgraph_sampled(false)
         .build()
-        .validate_otlp_trace(&mut router, &mock_server, Query::builder().psr("1").traced(true).build())
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("1").traced(true).build(),
+        )
         .await?;
 
     TraceSpec::builder()
         .services(["client"].into())
         .subgraph_sampled(false)
         .build()
-        .validate_otlp_trace(&mut router, &mock_server, Query::builder().psr("2").traced(true).build())
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("2").traced(true).build(),
+        )
         .await?;
 
     TraceSpec::builder()
         .services([].into())
         .subgraph_sampled(false)
         .build()
-        .validate_otlp_trace(&mut router, &mock_server, Query::builder().traced(false).build())
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(false).build(),
+        )
         .await?;
 
     router.graceful_shutdown().await;
 
     Ok(())
 }
-
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {

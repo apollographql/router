@@ -422,7 +422,8 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling() -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling(
+) -> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
 
     if !graph_os_enabled() {
@@ -479,9 +480,9 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sam
     Ok(())
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling() -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling(
+) -> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
 
     if !graph_os_enabled() {
