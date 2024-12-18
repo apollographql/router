@@ -881,10 +881,7 @@ where
         //            multiple maximum items.
         // Note: `position_max` returns the last of the equally maximum items. Thus, we use
         //       `position_min_by` by reversing the ordering.
-        let pos = self.items.iter().position_min_by(|a, b| b.cmp(a));
-        let Some(pos) = pos else {
-            return None;
-        };
+        let pos = self.items.iter().position_min_by(|a, b| b.cmp(a))?;
         Some(self.items.remove(pos))
     }
 }
@@ -924,7 +921,8 @@ pub(crate) enum GraphPathTriggerRef<'a> {
 #[derive(derive_more::From)]
 pub(crate) enum GraphPathTriggerRefMut<'a> {
     Op(&'a mut OpGraphPathTrigger),
-    Transition(&'a mut QueryGraphEdgeTransition),
+    // Unused:
+    // Transition(&'a mut QueryGraphEdgeTransition),
 }
 
 impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
@@ -941,7 +939,7 @@ impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
 /// the `GraphPathTrigger`. Rather than trying to cast into concrete types and cast back (and
 /// potentially raise errors), this trait provides ways to access the data needed within.
 pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
-    fn get_field_mut<'a>(&'a mut self) -> Option<&mut Field>
+    fn get_field_mut<'a>(&'a mut self) -> Option<&'a mut Field>
     where
         &'a mut Self: Into<GraphPathTriggerRefMut<'a>>,
     {
@@ -2760,10 +2758,10 @@ impl OpGraphPath {
         // So far, so good. Check that the rest of the paths are equal. Note that starts with
         // `diff_pos + 1` for `self`, but `diff_pos + 2` for `other` since we looked at two edges
         // there instead of one.
-        return Ok(self.edges[(diff_pos + 1)..]
+        Ok(self.edges[(diff_pos + 1)..]
             .iter()
             .zip(other.edges[(diff_pos + 2)..].iter())
-            .all(|(self_edge, other_edge)| self_edge == other_edge));
+            .all(|(self_edge, other_edge)| self_edge == other_edge))
     }
 
     /// This method is used to detect when using an interface field "directly" could fail (i.e. lead
@@ -4353,7 +4351,7 @@ fn is_useless_followup_element(
 
     // The followup is useless if it's a fragment (with no directives we would want to preserve) whose type
     // is already that of the first element (or a supertype).
-    return match followup {
+    match followup {
         OpPathElement::Field(_) => Ok(false),
         OpPathElement::InlineFragment(fragment) => {
             let Some(type_of_second) = fragment.type_condition_position.clone() else {
@@ -4369,7 +4367,7 @@ fn is_useless_followup_element(
                 .is_subtype(type_of_second.type_name(), type_of_first.type_name());
             Ok(are_useless_directives && (is_same_type || is_subtype))
         }
-    };
+    }
 }
 
 #[cfg(test)]

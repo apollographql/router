@@ -17,8 +17,6 @@ use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 
-mod defer;
-
 macro_rules! assert_normalized {
     ($schema_doc: expr, $query: expr, @$expected: literal) => {{
         let schema = parse_schema($schema_doc);
@@ -51,11 +49,7 @@ pub(super) fn parse_and_expand(
     schema: &ValidFederationSchema,
     query: &str,
 ) -> Result<Operation, FederationError> {
-    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
-        schema.schema(),
-        query,
-        "query.graphql",
-    )?;
+    let doc = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")?;
 
     let operation = doc
         .operations
@@ -1055,7 +1049,7 @@ scalar FieldSet
 /// https://github.com/apollographql/federation-next/pull/290#discussion_r1587200664
 #[test]
 fn converting_operation_types() {
-    let schema = apollo_compiler::Schema::parse_and_validate(
+    let schema = Schema::parse_and_validate(
         r#"
         interface Intf {
             intfField: Int
@@ -1389,9 +1383,7 @@ const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
 
 #[test]
 fn add_at_path_merge_scalar_fields() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1418,9 +1410,7 @@ fn add_at_path_merge_scalar_fields() {
 
 #[test]
 fn add_at_path_merge_subselections() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1468,9 +1458,7 @@ fn add_at_path_merge_subselections() {
 
 #[test]
 fn add_at_path_collapses_unnecessary_fragments() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(

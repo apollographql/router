@@ -85,7 +85,7 @@ impl SubscriptionNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: tokio::sync::mpsc::Sender<Response>,
-    ) -> future::BoxFuture<Vec<Error>> {
+    ) -> future::BoxFuture<'a, Vec<Error>> {
         if parameters.subscription_handle.is_none() {
             tracing::error!("No subscription handle provided for a subscription");
             return Box::pin(async {
