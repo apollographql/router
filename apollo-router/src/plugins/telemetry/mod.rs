@@ -1056,7 +1056,7 @@ impl Telemetry {
         // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
-        if propagation.jaeger || tracing.jaeger.enabled() {
+        if propagation.jaeger {
             propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
         }
         if propagation.baggage {
@@ -1107,14 +1107,12 @@ impl Telemetry {
         let mut builder =
             opentelemetry_sdk::trace::TracerProvider::builder().with_config((&common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, &common, spans_config)?;
         builder = setup_tracing(builder, &config.apollo, &common, spans_config)?;
 
-        if !tracing_config.jaeger.enabled()
-            && !tracing_config.zipkin.enabled()
+        if !tracing_config.zipkin.enabled()
             && !tracing_config.datadog.enabled()
             && !TracingConfigurator::enabled(&tracing_config.otlp)
             && !TracingConfigurator::enabled(&config.apollo)
@@ -1664,9 +1662,6 @@ impl Telemetry {
         }
         if config.exporters.tracing.datadog.enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
-        }
-        if config.exporters.tracing.jaeger.enabled() {
-            attributes.push(KeyValue::new("telemetry.tracing.jaeger", true));
         }
         if config.exporters.tracing.zipkin.enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));

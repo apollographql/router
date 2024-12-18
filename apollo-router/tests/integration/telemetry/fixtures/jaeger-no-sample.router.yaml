@@ -3,7 +3,6 @@ telemetry:
     field_level_instrumentation_sampler: always_off
   exporters:
     tracing:
-
       experimental_response_trace_id:
         enabled: true
         header_name: apollo-custom-trace-id
@@ -12,12 +11,11 @@ telemetry:
       common:
         service_name: router
         sampler: always_off
-      jaeger:
+      otlp:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        collector:
-          endpoint: http://127.0.0.1:14268/api/traces
+        endpoint: http://127.0.0.1:14268/api/traces
 override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:

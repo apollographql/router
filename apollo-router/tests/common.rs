@@ -27,12 +27,12 @@ use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::testing::trace::NoopSpanExporter;
-use opentelemetry::trace::TraceContextExt;
-use opentelemetry::KeyValue;
 use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry::Context;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
@@ -201,7 +201,6 @@ impl Respond for TracedResponder {
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub enum Telemetry {
-    Jaeger,
     Otlp {
         endpoint: Option<String>,
     },
@@ -219,20 +218,6 @@ impl Telemetry {
         )]));
 
         match self {
-            Telemetry::Jaeger => TracerProvider::builder()
-                .with_config(config)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_jaeger::new_agent_pipeline()
-                            .with_service_name(service_name)
-                            .build_sync_agent_exporter()
-                            .expect("jaeger pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
-                    )
-                    .with_scheduled_delay(Duration::from_millis(10))
-                    .build(),
-                )
-                .build(),
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
             } => TracerProvider::builder()
@@ -291,13 +276,6 @@ impl Telemetry {
         let ctx = tracing::span::Span::current().context();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.inject_context(
-                    &ctx,
-                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
-                )
-            }
             Telemetry::Datadog => {
                 // Get the existing PSR header if it exists. This is because the existing telemetry propagator doesn't support PSR properly yet.
                 // In testing we are manually setting the PSR header, and we don't want to override it.
@@ -347,10 +325,6 @@ impl Telemetry {
             .collect();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.extract_with_context(context, &headers)
-            }
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();

@@ -16,7 +16,6 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::Context;
 use opentelemetry::KeyValue;
 use regex::Regex;
 
@@ -50,7 +49,7 @@ impl MeterProvider {
         }
     }
 
-    fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
+    fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
             MeterProvider::Global(_provider) => Ok(()),
@@ -120,8 +119,8 @@ impl FilterMeterProvider {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
-        self.delegate.force_flush(cx)
+    pub(crate) fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+        self.delegate.force_flush()
     }
 }
 
@@ -201,8 +200,6 @@ impl InstrumentProvider for FilteredInstrumentProvider {
 
     filter_instrument_fn!(u64_histogram, u64, Histogram);
     filter_instrument_fn!(f64_histogram, f64, Histogram);
-    // TODO: Find a replacement for i64_histogram
-    // filter_instrument_fn!(i64_histogram, i64, Histogram);
 
     filter_instrument_fn!(i64_up_down_counter, i64, UpDownCounter);
     filter_instrument_fn!(f64_up_down_counter, f64, UpDownCounter);
@@ -296,7 +293,7 @@ mod test {
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
             .init();
-        meter_provider.force_flush(&cx).unwrap();
+        meter_provider.force_flush().unwrap();
 
         let metrics: Vec<_> = exporter
             .get_finished_metrics()
@@ -347,7 +344,7 @@ mod test {
             .with_unit("ms")
             .init()
             .add(1, &[]);
-        meter_provider.force_flush(&cx).unwrap();
+        meter_provider.force_flush().unwrap();
 
         let metrics: Vec<_> = exporter
             .get_finished_metrics()
@@ -418,7 +415,7 @@ mod test {
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
             .init();
-        meter_provider.force_flush(&cx).unwrap();
+        meter_provider.force_flush().unwrap();
 
         let metrics: Vec<_> = exporter
             .get_finished_metrics()

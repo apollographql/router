@@ -216,8 +216,6 @@ pub(crate) struct Tracing {
     pub(crate) common: TracingCommon,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
-    /// Jaeger exporter configuration
-    pub(crate) jaeger: tracing::jaeger::Config,
     /// Zipkin exporter configuration
     pub(crate) zipkin: tracing::zipkin::Config,
     /// Datadog exporter configuration

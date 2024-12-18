@@ -423,8 +423,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
     aggregate_instrument_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
     aggregate_instrument_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
-    // TODO: Replace i64_histogram
-    //aggregate_instrument_fn!(i64_histogram, i64, Histogram, AggregateHistogram);
 
     aggregate_instrument_fn!(
         i64_up_down_counter,
@@ -528,16 +526,12 @@ mod test {
             self.0.register_pipeline(pipeline)
         }
 
-        fn register_producer(&self, producer: Box<dyn MetricProducer>) {
-            self.0.register_producer(producer)
-        }
-
         fn collect(&self, rm: &mut ResourceMetrics) -> Result<()> {
             self.0.collect(rm)
         }
 
-        fn force_flush(&self, cx: &Context) -> Result<()> {
-            self.0.force_flush(cx)
+        fn force_flush(&self) -> Result<()> {
+            self.0.force_flush()
         }
 
         fn shutdown(&self) -> Result<()> {

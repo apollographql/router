@@ -19,7 +19,7 @@ use crate::integration::ValueExt;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .telemetry(Telemetry::Jaeger)
+        .telemetry(Telemetry::Otlp { endpoint: None })
         .config(include_str!("fixtures/jaeger.router.yaml"))
         .build()
         .await;

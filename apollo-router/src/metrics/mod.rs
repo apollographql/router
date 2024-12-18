@@ -29,7 +29,6 @@ pub(crate) mod test_utils {
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
     use opentelemetry::Array;
-    use opentelemetry::Context;
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
     use opentelemetry_sdk::metrics::data::DataPoint;
@@ -208,14 +207,16 @@ pub(crate) mod test_utils {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
                         return gauge.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == attributes && datapoint.value == value
+                            datapoint.value == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
                         });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
                         return sum.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == attributes && datapoint.value == value
+                            datapoint.value == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
                         });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
@@ -223,12 +224,13 @@ pub(crate) mod test_utils {
                     if matches!(ty, MetricType::Histogram) {
                         if count {
                             return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.attributes == *attributes
-                                    && datapoint.count == value.to_u64().unwrap()
+                                datapoint.count == value.to_u64().unwrap()
+                                    && Self::equal_attributes(attributes, &datapoint.attributes)
                             });
                         } else {
                             return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.attributes == *attributes && datapoint.sum == value
+                                datapoint.sum == value
+                                    && Self::equal_attributes(attributes, &datapoint.attributes)
                             });
                         }
                     }
@@ -249,26 +251,23 @@ pub(crate) mod test_utils {
                 if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
-                        return gauge
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return gauge.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return sum.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
                 {
                     if matches!(ty, MetricType::Histogram) {
-                        return histogram
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return histogram.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 }
             }
@@ -307,6 +306,13 @@ pub(crate) mod test_utils {
                     })
                 })
                 .collect()
+        }
+
+        fn equal_attributes(attrs1: &AttributeSet, attrs2: &Vec<KeyValue>) -> bool {
+            attrs1
+                .iter()
+                .zip(attrs2.iter())
+                .all(|((k, v), kv)| kv.key == *k && kv.value == *v)
         }
     }
 
@@ -775,47 +781,6 @@ macro_rules! u64_histogram {
 
     ($name:literal, $description:literal, $value: expr) => {
         metric!(u64, histogram, record, $name, $description, $value, []);
-    };
-}
-
-/// Get or create an i64 histogram metric and add a value to it
-///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
-#[allow(unused_macros)]
-macro_rules! i64_histogram {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, $attrs);
-    };
-
-    ($name:literal, $description:literal, $value: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, []);
     };
 }
 
@@ -1362,16 +1327,6 @@ mod test {
     async fn test_u64_histogram() {
         async {
             u64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram_sum!("test", 1, "attr" = "val");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_i64_histogram() {
-        async {
-            i64_histogram!("test", "test description", 1, "attr" = "val");
             assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
