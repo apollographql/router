@@ -515,6 +515,40 @@ async fn basic_errors() {
 }
 
 #[tokio::test]
+async fn basic_connection_errors() {
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        "http://localhost:9999",
+        "{ users { id } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "HTTP fetch failed from 'connectors.json': tcp connect error: Connection refused (os error 61)",
+          "path": [
+            "users"
+          ],
+          "extensions": {
+            "service": "connectors",
+            "connector": {
+              "coordinate": "connectors:Query.users@connect[0]"
+            },
+            "code": "HTTP_CLIENT_ERROR"
+          }
+        }
+      ]
+    }
+    "###);
+}
+
+#[tokio::test]
 async fn test_headers() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
