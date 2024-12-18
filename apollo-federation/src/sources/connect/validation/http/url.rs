@@ -2,20 +2,19 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Node;
+use shape::Shape;
+use shape::ShapeCase;
 use url::Url;
 
 use crate::sources::connect::string_template;
+use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::selection::validate_selection_variables;
-use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::variable::ConnectorsContext;
-use crate::sources::connect::variable::Phase;
-use crate::sources::connect::variable::Target;
 use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
@@ -32,27 +31,75 @@ pub(crate) fn validate_template(
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
 
-    let expression_context =
-        ConnectorsContext::new(coordinate.connect.into(), Phase::Request, Target::Url);
-    let variable_resolver = VariableResolver::new(expression_context, schema);
+    let mut named_var_shapes = IndexMap::default();
+    // TODO: don't set $this for root types
+    named_var_shapes.insert(
+        "$this",
+        Shape::from(coordinate.connect.field_coordinate.object.as_ref()),
+    );
+    let args = Shape::record(
+        coordinate
+            .connect
+            .field_coordinate
+            .field
+            .arguments
+            .iter()
+            .map(|arg| (arg.name.to_string(), Shape::from(arg.ty.as_ref())))
+            .collect(),
+    );
+    named_var_shapes.insert("$args", args);
+    // TODO: should `any` be different than `none`?
+    named_var_shapes.insert("$config", Shape::name("$config"));
+
     for expression in template.expressions() {
+        // TODO: make sure this fails when missing vars and such
+        let shape = expression
+            .expression
+            .compute_output_shape(Shape::none(), &named_var_shapes);
         messages.extend(
-            validate_selection_variables(
-                &variable_resolver,
-                coordinate,
-                &expression.expression,
-                str_value,
-                expression.location.start,
-            )
-            .err(),
+            validate_shape(&shape, &str_value, &expression, schema)
+                .err()
+                .into_iter(),
         );
-        // TODO: type check the expression. It can't resolve to a list or object.
     }
 
     if messages.is_empty() {
         Ok(template)
     } else {
         Err(messages)
+    }
+}
+
+fn validate_shape(
+    shape: &Shape,
+    str_value: &GraphQLString,
+    expression: &Expression,
+    schema: &SchemaInfo,
+) -> Result<(), Message> {
+    match shape.case() {
+        ShapeCase::Array { .. } => Err(Message {
+            code: Code::InvalidUrl,
+            message: "URIs can't contain arrays".to_string(),
+            locations: str_value
+                .line_col_for_subslice(expression.location.clone(), schema)
+                .into_iter()
+                .collect(),
+        }),
+        ShapeCase::Object { .. } => Err(Message {
+            code: Code::InvalidUrl,
+            message: "URIs can't contain objects".to_string(),
+            locations: str_value
+                .line_col_for_subslice(expression.location.clone(), schema)
+                .into_iter()
+                .collect(),
+        }),
+        ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
+            for shape in shapes {
+                validate_shape(shape, str_value, expression, schema)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 

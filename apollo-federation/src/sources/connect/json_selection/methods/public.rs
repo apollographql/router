@@ -362,6 +362,15 @@ fn first_shape(
                 Shape::one([tail.clone(), Shape::none()])
             }
         }
+        ShapeCase::One(shapes) => Shape::one(shapes.iter().map(|shape| {
+            first_shape(
+                method_name,
+                method_args,
+                shape.clone(),
+                Shape::none(), // $ is not used in `->first`
+                _named_var_shapes,
+            )
+        })),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.
         _ => input_shape.clone(),
