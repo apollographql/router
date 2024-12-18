@@ -500,9 +500,8 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        let request = result
-            .ok()
-            .expect("pq layer returned response instead of putting the query on the request");
+        let request =
+            result.expect("pq layer returned response instead of putting the query on the request");
         assert_eq!(request.supergraph_request.body().query, Some(body));
     }
 
@@ -556,7 +555,6 @@ mod tests {
 
             pq_layer
                 .supergraph_request(incoming_request)
-                .ok()
                 .expect("pq layer returned response instead of putting the query on the request")
                 .supergraph_request
                 .body()
@@ -611,9 +609,8 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        let request = result
-            .ok()
-            .expect("pq layer returned response instead of continuing to APQ layer");
+        let request =
+            result.expect("pq layer returned response instead of continuing to APQ layer");
         assert!(request.supergraph_request.body().query.is_none());
     }
 
@@ -755,12 +752,10 @@ mod tests {
         // the operation.
         let updated_request = pq_layer
             .supergraph_request(incoming_request)
-            .ok()
             .expect("pq layer returned error response instead of returning a request");
         query_analysis_layer
             .supergraph_request(updated_request)
             .await
-            .ok()
             .expect("QA layer returned error response instead of returning a request")
     }
 
@@ -820,7 +815,6 @@ mod tests {
         pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
             .await
-            .ok()
             .expect("pq layer second hook returned error response instead of returning a request");
 
         let mut metric_attributes = vec![];
