@@ -6,28 +6,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
 [
     Message {
         code: UndefinedField,
-        message: "`@connect(http: {body:})` on `Query.scalar` contains an invalid variable reference `$args.scalar.blah` - `String` does not have a field named `blah`.",
+        message: "In `@connect(http: {body:})` on `Query.scalar`: `String` does not have a field named `blah`.",
         locations: [
             12:34..12:38,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`@connect(http: {body:})` on `Query.object` contains an invalid variable reference `$args.input.fieldThatDoesntExist` - `InputObject` does not have a field named `fieldThatDoesntExist`.",
+        message: "In `@connect(http: {body:})` on `Query.object`: `InputObject` does not have a field named `fieldThatDoesntExist`.",
         locations: [
             20:33..20:53,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`@connect(http: {body:})` on `Query.enum` contains an invalid variable reference `$args.enum.cantHaveFields` - `Enum` does not have a field named `cantHaveFields`.",
+        message: "In `@connect(http: {body:})` on `Query.enum`: `Enum` does not have a field named `cantHaveFields`.",
         locations: [
             28:30..28:44,
         ],
     },
     Message {
         code: UndefinedField,
-        message: "`@connect(http: {body:})` on `Object.newField` contains an invalid variable reference `$this.fieldThatDoesntExist` - `Object` does not have a field named `fieldThatDoesntExist`",
+        message: "In `@connect(http: {body:})` on `Object.newField`: `Object` does not have a field named `fieldThatDoesntExist`",
         locations: [
             40:27..40:47,
         ],

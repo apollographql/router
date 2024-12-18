@@ -6,51 +6,113 @@ Ok(
     URLTemplate {
         base: None,
         path: [
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "location",
+                    Constant(
+                        Constant {
+                            value: "location",
+                            location: 1..9,
+                        },
                     ),
                 ],
             },
-            Component {
+            StringTemplate {
                 parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $this,
-                                location: 11..16,
-                            },
-                            path: [
-                                VariablePathPart {
-                                    part: "lat",
-                                    location: 17..20,
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "lat",
+                                                        ),
+                                                        range: Some(
+                                                            6..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            9..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..9,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..9,
+                                        ),
+                                    },
                                 },
-                            ],
+                            ),
                             location: 11..20,
                         },
                     ),
-                    Text(
-                        ",",
+                    Constant(
+                        Constant {
+                            value: ",",
+                            location: 21..22,
+                        },
                     ),
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $this,
-                                location: 23..28,
-                            },
-                            path: [
-                                VariablePathPart {
-                                    part: "lon",
-                                    location: 29..32,
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "lon",
+                                                        ),
+                                                        range: Some(
+                                                            6..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            9..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..9,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..9,
+                                        ),
+                                    },
                                 },
-                            ],
+                            ),
                             location: 23..32,
                         },
                     ),
                 ],
             },
         ],
-        query: {},
+        query: [],
     },
 )

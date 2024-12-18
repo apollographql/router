@@ -38,15 +38,18 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Text(
-                                "t",
+                            Constant(
+                                Constant {
+                                    value: "t",
+                                    location: 1..2,
+                                },
                             ),
                         ],
                     },
                 ],
-                query: {},
+                query: [],
             },
             method: Get,
             headers: {},
@@ -198,34 +201,65 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Text(
-                                "t",
+                            Constant(
+                                Constant {
+                                    value: "t",
+                                    location: 1..2,
+                                },
                             ),
                         ],
                     },
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Var(
-                                VariableReference {
-                                    namespace: VariableNamespace {
-                                        namespace: $args,
-                                        location: 4..9,
-                                    },
-                                    path: [
-                                        VariablePathPart {
-                                            part: "id",
-                                            location: 10..12,
+                            Expression(
+                                Expression {
+                                    expression: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
                                         },
-                                    ],
+                                    ),
                                     location: 4..12,
                                 },
                             ),
                         ],
                     },
                 ],
-                query: {},
+                query: [],
             },
             method: Get,
             headers: {},
@@ -381,41 +415,75 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Text(
-                                "t",
+                            Constant(
+                                Constant {
+                                    value: "t",
+                                    location: 1..2,
+                                },
                             ),
                         ],
                     },
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Var(
-                                VariableReference {
-                                    namespace: VariableNamespace {
-                                        namespace: $this,
-                                        location: 4..9,
-                                    },
-                                    path: [
-                                        VariablePathPart {
-                                            part: "id",
-                                            location: 10..12,
+                            Expression(
+                                Expression {
+                                    expression: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
                                         },
-                                    ],
+                                    ),
                                     location: 4..12,
                                 },
                             ),
                         ],
                     },
-                    Component {
+                    StringTemplate {
                         parts: [
-                            Text(
-                                "r",
+                            Constant(
+                                Constant {
+                                    value: "r",
+                                    location: 14..15,
+                                },
                             ),
                         ],
                     },
                 ],
-                query: {},
+                query: [],
             },
             method: Get,
             headers: {},

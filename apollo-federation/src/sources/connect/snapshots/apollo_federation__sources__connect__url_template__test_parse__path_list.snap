@@ -6,14 +6,17 @@ Ok(
     URLTemplate {
         base: None,
         path: [
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "abc",
+                    Constant(
+                        Constant {
+                            value: "abc",
+                            location: 1..4,
+                        },
                     ),
                 ],
             },
         ],
-        query: {},
+        query: [],
     },
 )
