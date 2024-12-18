@@ -2,4 +2,4 @@
 source: apollo-router/tests/integration/traffic_shaping.rs
 expression: response
 ---
-"{\"data\":null,\"errors\":[{\"message\":\"Your request has been rate limited\",\"path\":[],\"extensions\":{\"code\":\"REQUEST_RATE_LIMITED\",\"service\":\"products\"}}]}"
+"{\"data\":null,\"errors\":[{\"message\":\"HTTP fetch failed from 'products': your request has been rate limited\",\"path\":[],\"extensions\":{\"code\":\"SUBREQUEST_HTTP_ERROR\",\"service\":\"products\",\"reason\":\"your request has been rate limited\"}}]}"

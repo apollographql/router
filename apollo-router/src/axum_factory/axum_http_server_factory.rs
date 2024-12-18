@@ -1,5 +1,4 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -30,6 +29,7 @@ use serde_json::json;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::load_shed::error::Overloaded;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -638,23 +638,32 @@ async fn handle_graphql<RF: RouterFactory>(
 
 fn internal_server_error<T>(err: T) -> Response
 where
-    T: Display,
+    T: Into<BoxError>,
 {
+    let err: BoxError = err.into();
+
+    let code = if err.is::<Overloaded>() {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+
     tracing::error!(
-        code = "INTERNAL_SERVER_ERROR",
+        code = code.to_string(),
         %err,
     );
 
     // This intentionally doesn't include an error message as this could represent leakage of internal information.
     // The error message is logged above.
     let error = graphql::Error::builder()
-        .message("internal server error")
+        .message(code.to_string())
+        // Note: Decide exactly what this extension_code should be for SERVICE_UNAVAILABLE
         .extension_code("INTERNAL_SERVER_ERROR")
         .build();
 
     let response = graphql::Response::builder().error(error).build();
 
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!(response))).into_response()
+    (code, Json(json!(response))).into_response()
 }
 
 struct CancelHandler<'a> {

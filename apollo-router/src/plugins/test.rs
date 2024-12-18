@@ -8,6 +8,7 @@ use apollo_compiler::validation::Valid;
 use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::introspection::IntrospectionCache;
@@ -141,7 +142,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 .service_fn(move |req: router::Request| async move { (response_fn)(req).await }),
         );
 
-        self.plugin.router_service(service).call(request).await
+        self.plugin.router_service(service).oneshot(request).await
     }
 
     pub(crate) async fn call_supergraph(
@@ -154,7 +155,10 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 .service_fn(move |req: supergraph::Request| async move { Ok((response_fn)(req)) }),
         );
 
-        self.plugin.supergraph_service(service).call(request).await
+        self.plugin
+            .supergraph_service(service)
+            .oneshot(request)
+            .await
     }
 
     #[allow(dead_code)]
@@ -168,7 +172,10 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 .service_fn(move |req: execution::Request| async move { Ok((response_fn)(req)) }),
         );
 
-        self.plugin.execution_service(service).call(request).await
+        self.plugin
+            .execution_service(service)
+            .oneshot(request)
+            .await
     }
 
     #[allow(dead_code)]

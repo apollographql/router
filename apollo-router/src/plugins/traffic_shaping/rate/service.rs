@@ -7,7 +7,6 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use futures::ready;
 use tower::Service;
 
 use super::future::ResponseFuture;
@@ -74,7 +73,7 @@ where
 
         self.current_nb_requests.fetch_add(1, Ordering::SeqCst);
 
-        Poll::Ready(ready!(self.inner.poll_ready(cx)).map_err(Into::into))
+        self.inner.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {

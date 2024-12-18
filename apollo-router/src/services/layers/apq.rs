@@ -219,6 +219,7 @@ mod apq_tests {
     use http::StatusCode;
     use serde_json_bytes::json;
     use tower::Service;
+    use tower::ServiceExt;
 
     use super::*;
     use crate::error::Error;
@@ -281,7 +282,13 @@ mod apq_tests {
             .expect("expecting valid request")
             .try_into()
             .unwrap();
-        let apq_response = router_service.call(hash_only).await.unwrap();
+        let apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(hash_only)
+            .await
+            .unwrap();
 
         // make sure clients won't cache apq missed response
         assert_eq!(
@@ -308,7 +315,13 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let full_response = router_service.call(with_query).await.unwrap();
+        let full_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(with_query)
+            .await
+            .unwrap();
 
         // the cache control header shouldn't have been tampered with
         assert!(full_response
@@ -329,7 +342,13 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let apq_response = router_service.call(second_hash_only).await.unwrap();
+        let apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(second_hash_only)
+            .await
+            .unwrap();
 
         // the cache control header shouldn't have been tampered with
         assert!(apq_response.response.headers().get(CACHE_CONTROL).is_none());
@@ -406,6 +425,9 @@ mod apq_tests {
 
         // This apq call will miss the APQ cache
         let apq_error = router_service
+            .ready()
+            .await
+            .expect("readied")
             .call(hash_only)
             .await
             .unwrap()
@@ -419,7 +441,13 @@ mod apq_tests {
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
         // sha256 is wrong, apq insert won't happen
-        let insert_failed_response = router_service.call(with_query).await.unwrap();
+        let insert_failed_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(with_query)
+            .await
+            .unwrap();
 
         assert_eq!(
             StatusCode::BAD_REQUEST,
@@ -446,6 +474,9 @@ mod apq_tests {
 
         // apq insert failed, this call will miss
         let second_apq_error = router_service
+            .ready()
+            .await
+            .expect("readied")
             .call(second_hash_only)
             .await
             .unwrap()
@@ -497,7 +528,13 @@ mod apq_tests {
             .expect("expecting valid request")
             .try_into()
             .unwrap();
-        let apq_response = router_service.call(hash_only).await.unwrap();
+        let apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(hash_only)
+            .await
+            .unwrap();
 
         let apq_error = apq_response
             .into_graphql_response_stream()
@@ -518,7 +555,13 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let with_query_response = router_service.call(with_query).await.unwrap();
+        let with_query_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(with_query)
+            .await
+            .unwrap();
 
         let apq_error = with_query_response
             .into_graphql_response_stream()
@@ -538,7 +581,13 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let without_apq_response = router_service.call(without_apq).await.unwrap();
+        let without_apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(without_apq)
+            .await
+            .unwrap();
 
         let without_apq_graphql_response = without_apq_response
             .into_graphql_response_stream()
