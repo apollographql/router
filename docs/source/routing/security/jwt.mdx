@@ -111,6 +111,7 @@ The following configuration options are supported:
 - `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
 - `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
+- `timeout`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the call for the JWKS will timeout. If not specified, the JWKS call will timeout after 15 seconds.
 - `headers`: **optional** a list of headers sent when downloading from the JWKS URL
 
 </td>
