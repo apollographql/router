@@ -653,7 +653,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         )
                     };
 
-                    Shape::array(&mapped_prefix, mapped_rest)
+                    Shape::array(mapped_prefix, mapped_rest)
                 } else {
                     rest.compute_output_shape(
                         input_shape.field(key.as_str()),
@@ -792,7 +792,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                         named_var_shapes,
                     ));
                 }
-                Shape::array(&shapes, Shape::none())
+                Shape::array(shapes, Shape::none())
             }
 
             LitExpr::Path(path) => {
@@ -893,7 +893,7 @@ impl ApplyToInternal for SubSelection {
                 self.compute_output_shape(tail.clone(), tail.clone(), named_var_shapes)
             };
 
-            return Shape::array(&new_prefix, new_tail);
+            return Shape::array(new_prefix, new_tail);
         }
 
         // If the input shape is a named shape, it might end up being an array,

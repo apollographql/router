@@ -119,8 +119,6 @@ pub(super) fn validate_body_selection(
         });
     }
 
-    // TODO: validate JSONSelection
-
     validate_selection_variables(
         &VariableResolver::new(
             ConnectorsContext::new(connect_coordinate.into(), Phase::Request, Target::Body),
