@@ -1,34 +1,38 @@
 ---
 title: Supergraph Routing with GraphOS Router
-subtitle: Learn the basics about router features and deployment types 
+subtitle: Learn the basics about router features and deployment types
 description: Apollo provides cloud and self-hosted GraphOS Router options. The router acts as an entry point to your GraphQL APIs and provides a unified interface for clients to interact with.
 redirectFrom:
-    - /graphos/routing
+  - /graphos/routing
 ---
 
 ## What is GraphOS Router?
 
 GraphOS Router is the runtime of the GraphOS platform. It executes client operations by planning and executing subgraph queries, then merging them into client responses. It's also the single entry point and gateway to your federated GraphQL API.
 
-<img src='../images/get-started/super-routing-1.svg' class="dark:hidden"/>
-<img src='../images/get-started/super-routing-1-dark.svg' class="hidden dark:block"/>
+<img src="../images/get-started/super-routing-1.svg" class="dark:hidden" />
+<img
+  src="../images/get-started/super-routing-1-dark.svg"
+  class="hidden dark:block"
+/>
 
-### Runtime of GraphOS platform 
+### Runtime of GraphOS platform
 
 As the runtime of the [GraphOS platform](/graphos/get-started/concepts/graphos), a GraphOS Router gets the supergraph schema—the blueprint of the federated graphs—from the GraphOS control plane. It then executes incoming clients operations based on that schema.
 
 Unlike API gateways that offer capabilities to manage API endpoints, the router isn't based on URLs or REST endpoints. Rather, the router is a GraphQL-native solution for handling client APIs.
 
-### Subgraph query planner 
+### Subgraph query planner
 
 Whenever your router receives an incoming GraphQL operation, it needs to figure out how to use your subgraphs to populate data for each of that operation's fields. To do this, the router generates a _query plan_:
 
-<img src='../images/get-started/qp.svg' class="dark:hidden"/>
-<img src='../images/get-started/qp-dark.svg' class="hidden dark:block"/>
+<img src="../images/get-started/qp.svg" class="dark:hidden" />
+<img src="../images/get-started/qp-dark.svg" class="hidden dark:block" />
 
 A query plan is a blueprint for dividing a single incoming operation into one or more operations that are each resolvable by a single subgraph. Some of these operations depend on the results of other operations, so the query plan also defines any required ordering for their execution. The router's query planner determines the optimal set of subgraph queries for each client operation, then it merges the subgraph responses into a single response for the client.
 
 You can use the following tools for inspecting query plans:
+
 - Use the [Explorer IDE](/graphos/platform/explorer/) to view dynamically calculated example query plans for your operations in its right-hand panel.
 - Use the [Apollo Solutions command line utility](https://github.com/apollosolutions/generate-query-plan) for generating a query plan locally.
 
@@ -46,8 +50,11 @@ As the entry point to your supergraph, a GraphOS Router must be able to process 
 
 You can choose for Apollo to provision and manage the runtime infrastructure for your routers. Apollo hosts and deploys each instance of router in the cloud. Each _cloud-hosted router_ instance is fully integrated and configurable within GraphOS.
 
-<img src='../images/get-started/super-routing-2.svg' class="dark:hidden"/>
-<img src='../images/get-started/super-routing-2-dark.svg' class="hidden dark:block"/>
+<img src="../images/get-started/super-routing-2.svg" class="dark:hidden" />
+<img
+  src="../images/get-started/super-routing-2-dark.svg"
+  class="hidden dark:block"
+/>
 
 <Note>
 
@@ -59,8 +66,11 @@ While cloud routers are hosted in the cloud, GraphQL subgraph servers are still 
 
 You can choose to manage the runtime infrastructure for your routers by yourself. Using container images of router, you can host and deploy your router instances from your own infrastructure. These _self-hosted router_ instances allow you full control over their deployment.
 
-<img src='../images/get-started/super-routing-3.svg' class="dark:hidden"/>
-<img src='../images/get-started/super-routing-3-dark.svg' class="hidden dark:block"/>
+<img src="../images/get-started/super-routing-3.svg" class="dark:hidden" />
+<img
+  src="../images/get-started/super-routing-3-dark.svg"
+  class="hidden dark:block"
+/>
 
 ### Common router core
 
@@ -110,11 +120,12 @@ Apollo offers the following router options, in increasing order of configurabili
       <td>You host and manage the router on your own infrastructure.</td>
       <td>
         Highly configurable and customizable, including all options for Cloud
-        Dedicated routers and additional [customization options](/graphos/routing/customization/overview).
+        Dedicated routers and additional [customization
+        options](/graphos/routing/customization/overview).
       </td>
       <td>
-        The Apollo Router Core is available as a free and source-available router.
-        Connecting your self-hosted router to GraphOS requires an{' '}
+        The Apollo Router Core is available as a free and source-available
+        router. Connecting your self-hosted router to GraphOS requires an{" "}
         <a href="https://apollographql.com/pricing">Enterprise</a> plan.
       </td>
     </tr>
@@ -123,7 +134,11 @@ Apollo offers the following router options, in increasing order of configurabili
 
 <Note>
 
-<sup>**</sup>We've paused new sign-ups for Serverless and Dedicated plans while we improve our offerings based on user feedback. This means cloud routing is temporarily unavailable to new users. In the meantime, you can explore other GraphOS features with a [free trial](https://studio.apollographql.com/signup?referrer=docs-content).
+<sup>**</sup>We've paused new sign-ups for Serverless and Dedicated plans while
+we improve our offerings based on user feedback. This means cloud routing is
+temporarily unavailable to new users. In the meantime, you can explore other
+GraphOS features with a [free
+trial](https://studio.apollographql.com/signup?referrer=docs-content).
 
 </Note>
 
@@ -132,7 +147,6 @@ Apollo offers the following router options, in increasing order of configurabili
 Although powered by the source-available Apollo Router Core binary, GraphOS Routers offer an expanded feature set that isn't available when running the Apollo Router Core without connecting it to GraphOS.
 
 Cloud-hosted routers automatically have access to additional GraphOS Router features, while self-hosted routers must be authenticated with a GraphOS Enterprise license to gain access to these features. Refer to the [pricing page](https://www.apollographql.com/pricing#graphos-router) to compare GraphOS Router features across plan types.
-
 
 ## Next steps
 
@@ -145,3 +159,4 @@ Cloud-hosted routers automatically have access to additional GraphOS Router feat
 - For all available configuration options, go to [Router configuration](/graphos/reference/router/configuration) reference docs
 
 - To learn more about the intricacies of query plans, see the [example graph](/graphos/reference/federation/query-plans#example-graph) and [query plan](/graphos/reference/federation/query-plans#example-graph) in reference docs
+
