@@ -80,7 +80,7 @@ impl<'schema> EntityKeyChecker<'schema> {
     }
 }
 
-impl std::fmt::Debug for EntityKeyChecker<'_> {
+impl fmt::Debug for EntityKeyChecker<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("EntityKeyChecker")
             .field(

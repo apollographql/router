@@ -57,6 +57,16 @@ impl ConnectId {
             self.directive.directive_index
         )
     }
+
+    pub fn coordinate(&self) -> String {
+        format!(
+            "{}:{}.{}@connect[{}]",
+            self.subgraph_name,
+            self.directive.field.type_name(),
+            self.directive.field.field_name(),
+            self.directive.directive_index
+        )
+    }
 }
 
 impl PartialEq for ConnectId {

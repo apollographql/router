@@ -22,10 +22,19 @@ impl Error {
         connector: &Connector,
         path: Option<Path>,
     ) -> crate::error::Error {
+        use serde_json_bytes::*;
+
         let builder = graphql::Error::builder()
             .message(self.to_string())
             .extension_code(self.extension_code())
-            .extension("service", connector.id.label.clone());
+            .extension("service", connector.id.subgraph_name.clone())
+            .extension(
+                "connector",
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(connector.id.coordinate().into()),
+                )])),
+            );
         if let Some(path) = path {
             builder.path(path).build()
         } else {

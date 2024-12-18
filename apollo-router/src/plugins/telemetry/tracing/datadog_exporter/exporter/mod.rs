@@ -167,26 +167,7 @@ impl Default for DatadogPipelineBuilder {
             mapping: Mapping::empty(),
             api_version: ApiVersion::Version05,
             unified_tags: UnifiedTags::new(),
-            #[cfg(all(
-                not(feature = "reqwest-client"),
-                not(feature = "reqwest-blocking-client"),
-                not(feature = "surf-client"),
-            ))]
             client: None,
-            #[cfg(all(
-                not(feature = "reqwest-client"),
-                not(feature = "reqwest-blocking-client"),
-                feature = "surf-client"
-            ))]
-            client: Some(Arc::new(surf::Client::new())),
-            #[cfg(all(
-                not(feature = "surf-client"),
-                not(feature = "reqwest-blocking-client"),
-                feature = "reqwest-client"
-            ))]
-            client: Some(Arc::new(reqwest::Client::new())),
-            #[cfg(feature = "reqwest-blocking-client")]
-            client: Some(Arc::new(reqwest::blocking::Client::new())),
         }
     }
 }

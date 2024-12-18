@@ -371,7 +371,7 @@ impl<'a> Header<'a> {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_headers_arg(
         node: &'a Node<ast::Value>,
-    ) -> Vec<Result<Self, HeaderParseError>> {
+    ) -> Vec<Result<Self, HeaderParseError<'a>>> {
         if let Some(values) = node.as_list() {
             values.iter().map(Self::from_single).collect()
         } else if node.as_object().is_some() {
@@ -385,7 +385,7 @@ impl<'a> Header<'a> {
     }
 
     /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError> {
+    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError<'a>> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
             node,

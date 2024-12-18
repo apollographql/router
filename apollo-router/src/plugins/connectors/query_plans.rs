@@ -102,7 +102,7 @@ pub(crate) fn replace_connector_service_names(
             }
             PlanNode::Subscription { primary: _, rest } => {
                 // ignoring subscriptions because connectors are not supported
-                for node in rest {
+                if let Some(node) = rest {
                     recurse(node, replacements);
                 }
             }

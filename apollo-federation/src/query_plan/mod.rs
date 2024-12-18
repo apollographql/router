@@ -249,8 +249,8 @@ pub struct FetchDataKeyRenamer {
 /// elements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum FetchDataPathElement {
-    Key(Name, Conditions),
-    AnyIndex(Conditions),
+    Key(Name, Option<Conditions>),
+    AnyIndex(Option<Conditions>),
     TypenameEquals(Name),
     Parent,
 }

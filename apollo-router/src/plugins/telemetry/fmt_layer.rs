@@ -196,7 +196,7 @@ pub(crate) struct FieldsVisitor<'a, 'b> {
     excluded_attributes: &'b HashSet<&'static str>,
 }
 
-impl<'a, 'b> FieldsVisitor<'a, 'b> {
+impl<'b> FieldsVisitor<'_, 'b> {
     fn new(excluded_attributes: &'b HashSet<&'static str>) -> Self {
         Self {
             values: HashMap::with_capacity(0),
@@ -205,7 +205,7 @@ impl<'a, 'b> FieldsVisitor<'a, 'b> {
     }
 }
 
-impl<'a, 'b> field::Visit for FieldsVisitor<'a, 'b> {
+impl field::Visit for FieldsVisitor<'_, '_> {
     /// Visit a double precision floating point value.
     fn record_f64(&mut self, field: &Field, value: f64) {
         self.values
@@ -416,7 +416,7 @@ connector:
     }
 
     struct Guard<'a>(MutexGuard<'a, Vec<u8>>);
-    impl<'a> std::io::Write for Guard<'a> {
+    impl std::io::Write for Guard<'_> {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             self.0.write(buf)
         }

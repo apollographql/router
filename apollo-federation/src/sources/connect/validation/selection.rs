@@ -314,7 +314,7 @@ enum PathPart<'a> {
     },
 }
 
-impl<'a> PathPart<'a> {
+impl PathPart<'_> {
     fn ty(&self) -> &Node<ObjectType> {
         match self {
             PathPart::Root(ty) => ty,
@@ -455,7 +455,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
     }
 }
 
-impl<'schema, 'a> SelectionValidator<'schema, 'a> {
+impl SelectionValidator<'_, '_> {
     fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
         once(self.root).chain(self.path.iter().copied())
     }

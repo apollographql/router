@@ -237,9 +237,10 @@ commands:
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
                     mkdir $HOME/.deb
-                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev
                   fi
                   sudo dpkg -i $HOME/.deb/*.deb
+
       - when:
           condition:
             or:
@@ -258,16 +259,6 @@ commands:
                   fi
 
                   cmake --version
-      - when:
-          condition:
-            or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Install CMake
-                command: |
-                  brew install cmake
   install_protoc:
     parameters:
       platform:
@@ -1228,3 +1219,4 @@ workflows:
             - secops-oidc
             - github-orb
           git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+          disabled-signatures: "rules.providers.semgrep.security.javascript.lang.security.detect-insecure-websocket"

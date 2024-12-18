@@ -24,7 +24,7 @@ impl<'a> ThisResolver<'a> {
     }
 }
 
-impl<'a> NamespaceResolver for ThisResolver<'a> {
+impl NamespaceResolver for ThisResolver<'_> {
     fn resolve(
         &self,
         reference: &VariableReference<Namespace>,
