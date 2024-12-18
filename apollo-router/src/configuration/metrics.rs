@@ -299,9 +299,7 @@ impl InstrumentData {
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
-            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]",
-            opt.subgraph.retry,
-            "$[?(@.all.experimental_retry || @.subgraphs..experimental_retry)]"
+            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
 
         populate_config_instrument!(
