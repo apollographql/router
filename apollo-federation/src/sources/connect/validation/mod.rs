@@ -82,9 +82,6 @@ pub struct ValidationResult {
     /// Whether or not the validated subgraph contained connector directives
     pub has_connectors: bool,
 
-    /// The original subgraph name
-    pub subgraph_name: String,
-
     /// The parsed (and potentially invalid) schema of the subgraph
     pub schema: Schema,
 }
@@ -104,7 +101,6 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
         return ValidationResult {
             errors: Vec::new(),
             has_connectors: false,
-            subgraph_name: file_name.to_string(),
             schema,
         };
     };
@@ -206,7 +202,6 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
     ValidationResult {
         errors: messages,
         has_connectors: true,
-        subgraph_name: file_name.to_string(),
         schema,
     }
 }
