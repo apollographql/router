@@ -65,8 +65,6 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
-use self::config::Sampler;
-use self::config::SamplerOption;
 use self::config::TraceIdFormat;
 use self::config_new::events::RouterEvents;
 use self::config_new::events::SubgraphEvents;
@@ -201,7 +199,6 @@ pub(crate) struct Telemetry {
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
-    sampling_filter_ratio: SamplerOption,
     pub(crate) graphql_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
@@ -297,8 +294,7 @@ impl PluginPrivate for Telemetry {
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
         let metrics_builder = Self::create_metrics_builder(&config)?;
-
-        let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
+        let tracer_provider = Self::create_tracer_provider(&config)?;
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
@@ -335,7 +331,6 @@ impl PluginPrivate for Telemetry {
             supergraph_custom_instruments: RwLock::new(supergraph_custom_instruments),
             subgraph_custom_instruments: RwLock::new(subgraph_custom_instruments),
             cache_custom_instruments: RwLock::new(cache_custom_instruments),
-            sampling_filter_ratio,
             config: Arc::new(config),
         })
     }
@@ -862,8 +857,6 @@ impl PluginPrivate for Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            otel::layer::configure(&self.sampling_filter_ratio);
-
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
@@ -950,35 +943,22 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
+    ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
-        let mut common = tracing_config.common.clone();
-        let mut sampler = common.sampler.clone();
-        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
-        // should be accepted
-        common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+        let common = &tracing_config.common;
 
         let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
+            opentelemetry::sdk::trace::TracerProvider::builder().with_config((common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, &common, spans_config)?;
-        builder = setup_tracing(builder, &config.apollo, &common, spans_config)?;
-
-        if !tracing_config.jaeger.enabled()
-            && !tracing_config.zipkin.enabled()
-            && !tracing_config.datadog.enabled()
-            && !TracingConfigurator::enabled(&tracing_config.otlp)
-            && !TracingConfigurator::enabled(&config.apollo)
-        {
-            sampler = SamplerOption::Always(Sampler::AlwaysOff);
-        }
+        builder = setup_tracing(builder, &tracing_config.jaeger, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, common, spans_config)?;
+        builder = setup_tracing(builder, &config.apollo, common, spans_config)?;
 
         let tracer_provider = builder.build();
-        Ok((sampler, tracer_provider))
+        Ok(tracer_provider)
     }
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
