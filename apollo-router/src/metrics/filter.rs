@@ -5,6 +5,7 @@ use std::sync::Arc;
 use buildstructor::buildstructor;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::metrics::Callback;
+use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
@@ -13,17 +14,15 @@ use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Unit;
+use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry_api::metrics::CallbackRegistration;
-use opentelemetry_api::metrics::Observer;
-use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
 use regex::Regex;
 
 #[derive(Clone)]
 pub(crate) enum MeterProvider {
-    Regular(opentelemetry::sdk::metrics::MeterProvider),
+    Regular(opentelemetry_sdk::metrics::SdkMeterProvider),
     Global(opentelemetry::global::GlobalMeterProvider),
 }
 
@@ -53,14 +52,14 @@ impl MeterProvider {
 
     fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
         match self {
-            MeterProvider::Regular(provider) => provider.force_flush(cx),
+            MeterProvider::Regular(provider) => provider.force_flush(),
             MeterProvider::Global(_provider) => Ok(()),
         }
     }
 }
 
-impl From<opentelemetry::sdk::metrics::MeterProvider> for MeterProvider {
-    fn from(provider: opentelemetry::sdk::metrics::MeterProvider) -> Self {
+impl From<opentelemetry_sdk::metrics::SdkMeterProvider> for MeterProvider {
+    fn from(provider: opentelemetry_sdk::metrics::SdkMeterProvider) -> Self {
         MeterProvider::Regular(provider)
     }
 }
@@ -139,7 +138,7 @@ macro_rules! filter_instrument_fn {
             &self,
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
-            unit: Option<Unit>,
+            unit: Option<Cow<'static, str>>,
         ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
             let mut builder = match (&self.deny, &self.allow) {
                 (Some(deny), Some(allow)) if deny.is_match(&name) && !allow.is_match(&name) => {
@@ -166,7 +165,7 @@ macro_rules! filter_observable_instrument_fn {
             &self,
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
-            unit: Option<Unit>,
+            unit: Option<Cow<'static, str>>,
             callback: Vec<Callback<$ty>>,
         ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
             let mut builder = match (&self.deny, &self.allow) {
@@ -202,7 +201,8 @@ impl InstrumentProvider for FilteredInstrumentProvider {
 
     filter_instrument_fn!(u64_histogram, u64, Histogram);
     filter_instrument_fn!(f64_histogram, f64, Histogram);
-    filter_instrument_fn!(i64_histogram, i64, Histogram);
+    // TODO: Find a replacement for i64_histogram
+    // filter_instrument_fn!(i64_histogram, i64, Histogram);
 
     filter_instrument_fn!(i64_up_down_counter, i64, UpDownCounter);
     filter_instrument_fn!(f64_up_down_counter, f64, UpDownCounter);
@@ -244,14 +244,13 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 
 #[cfg(test)]
 mod test {
+    use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::metrics::Unit;
-    use opentelemetry::runtime;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::PeriodicReader;
-    use opentelemetry::testing::metrics::InMemoryMetricsExporter;
-    use opentelemetry_api::global::GlobalMeterProvider;
-    use opentelemetry_api::Context;
+    use opentelemetry::Context;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::runtime;
+    use opentelemetry_sdk::testing::metrics::InMemoryMetricsExporter;
 
     use crate::metrics::filter::FilterMeterProvider;
 
@@ -345,7 +344,7 @@ mod test {
         filtered
             .u64_counter("apollo.router.operations")
             .with_description("desc")
-            .with_unit(Unit::new("ms"))
+            .with_unit("ms")
             .init()
             .add(1, &[]);
         meter_provider.force_flush(&cx).unwrap();
@@ -359,7 +358,7 @@ mod test {
             .collect();
         assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"
             && m.description == "desc"
-            && m.unit == Unit::new("ms")));
+            && m.unit == "ms"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

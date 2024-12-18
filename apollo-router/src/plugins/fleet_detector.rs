@@ -9,9 +9,8 @@ use std::time::Instant;
 use futures::StreamExt;
 use http_body_util::BodyExt;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::metrics::Unit;
-use opentelemetry_api::KeyValue;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
@@ -117,7 +116,7 @@ impl GaugeStore {
                     .with_description(
                         "The CPU frequency of the underlying instance the router is deployed to",
                     )
-                    .with_unit(Unit::new("Mhz"))
+                    .with_unit("Mhz")
                     .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock().unwrap();
@@ -167,7 +166,7 @@ impl GaugeStore {
                             &[KeyValue::new("host.arch", get_otel_arch())],
                         )
                     })
-                    .with_unit(Unit::new("bytes"))
+                    .with_unit("bytes")
                     .init(),
             );
         }

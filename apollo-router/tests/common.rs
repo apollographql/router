@@ -29,10 +29,10 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::KeyValue;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_api::Context;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::TraceId;
+use opentelemetry::trace::TracerProvider as OtherTracerProvider;
+use opentelemetry::Context;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
@@ -381,7 +381,7 @@ impl Telemetry {
                 context
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.extract_with_context(context, &headers)
             }
             Telemetry::Zipkin => {

@@ -1,6 +1,7 @@
 use std::time::SystemTime;
 
 use opentelemetry::trace::Status;
+use opentelemetry::KeyValue;
 use opentelemetry_sdk::export::trace::SpanData;
 
 use super::unified_tags::UnifiedTagField;
@@ -192,7 +193,7 @@ where
                 .unwrap_or(0);
 
             let mut span_type = interner.intern("");
-            for (key, value) in &span.attributes {
+            for KeyValue { key, value } in &span.attributes {
                 if key.as_str() == "span.type" {
                     span_type = interner.intern_value(value);
                     break;
@@ -234,18 +235,14 @@ where
 
             rmp::encode::write_map_len(
                 &mut encoded,
-                (span.attributes.len() + span.resource.len()) as u32
+                span.attributes.len() as u32
                     + unified_tags.compute_attribute_size()
                     + GIT_META_TAGS_COUNT,
             )?;
-            for (key, value) in span.resource.iter() {
-                rmp::encode::write_u32(&mut encoded, interner.intern(key.as_str()))?;
-                rmp::encode::write_u32(&mut encoded, interner.intern_value(value))?;
-            }
 
             write_unified_tags(&mut encoded, interner, unified_tags)?;
 
-            for (key, value) in span.attributes.iter() {
+            for KeyValue { key, value } in span.attributes.iter() {
                 rmp::encode::write_u32(&mut encoded, interner.intern(key.as_str()))?;
                 rmp::encode::write_u32(&mut encoded, interner.intern_value(value))?;
             }

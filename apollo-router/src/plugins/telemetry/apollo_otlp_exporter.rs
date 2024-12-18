@@ -1,15 +1,9 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use derivative::Derivative;
 use futures::future;
 use futures::future::BoxFuture;
 use futures::TryFutureExt;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedQueue;
-use opentelemetry::sdk::Resource;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
@@ -18,12 +12,16 @@ use opentelemetry::InstrumentationLibrary;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::SpanEvents;
+use opentelemetry_sdk::trace::SpanLinks;
+use opentelemetry_sdk::Resource;
 use parking_lot::Mutex;
 use sys_info::hostname;
-use tonic::codec::CompressionEncoding;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
-use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 
@@ -85,22 +83,6 @@ impl ApolloOtlpExporter {
                         .with_compression(opentelemetry_otlp::Compression::Gzip),
                 )
                 .build_span_exporter()?;
-
-                // This is a hack and won't be needed anymore once opentelemetry_otlp will be upgraded
-                span_exporter = if let opentelemetry_otlp::SpanExporter::Tonic {
-                    trace_exporter,
-                    metadata,
-                    timeout,
-                } = span_exporter
-                {
-                    opentelemetry_otlp::SpanExporter::Tonic {
-                        timeout,
-                        metadata,
-                        trace_exporter: trace_exporter.accept_compressed(CompressionEncoding::Gzip),
-                    }
-                } else {
-                    span_exporter
-                };
 
                 Arc::new(Mutex::new(span_exporter))
             }
@@ -200,15 +182,16 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: span.attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            attributes: span
+                .attributes
+                .iter()
+                .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
+                .collect(),
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status: span.status,
-            // If the underlying exporter supported it, we could
-            // group by resource attributes here and significantly reduce the
-            // duplicate resource / scope data that will get sent on every span.
-            resource: Cow::Owned(self.resource_template.to_owned()),
             instrumentation_lib: self.intrumentation_library.clone(),
+            dropped_attributes_count: 0, // TODO: LightSpanData to track this
         }
     }
 
@@ -235,8 +218,7 @@ impl ApolloOtlpExporter {
                     status = Status::error("ftv1")
                 }
                 let encoded = encode_ftv1_trace(&trace_result);
-                span.attributes
-                    .insert(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
+                span.attributes.insert(APOLLO_PRIVATE_FTV1, encoded.into());
             }
         }
 
@@ -253,12 +235,16 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: span.attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            attributes: span
+                .attributes
+                .drain()
+                .map(|(k, v)| KeyValue::new(k, v))
+                .collect(),
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status,
-            resource: Cow::Owned(self.resource_template.to_owned()),
             instrumentation_lib: self.intrumentation_library.clone(),
+            dropped_attributes_count: 0, // TODO: LightSpanData to track this
         }
     }
 

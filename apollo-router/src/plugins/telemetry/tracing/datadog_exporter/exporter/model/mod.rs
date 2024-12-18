@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
+use http;
 use http::uri;
-use http_0_2 as http;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::{self};
 use opentelemetry_sdk::export::ExportError;
@@ -205,8 +205,8 @@ pub(crate) mod tests {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use opentelemetry::KeyValue;
-    use opentelemetry_sdk::trace::EvictedHashMap;
-    use opentelemetry_sdk::trace::EvictedQueue;
+    use opentelemetry_sdk::trace::SpanEvents;
+    use opentelemetry_sdk::trace::SpanLinks;
     use opentelemetry_sdk::InstrumentationLibrary;
     use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{self};
@@ -229,8 +229,9 @@ pub(crate) mod tests {
         let start_time = SystemTime::UNIX_EPOCH;
         let end_time = start_time.checked_add(Duration::from_secs(1)).unwrap();
 
-        let mut attributes: EvictedHashMap = EvictedHashMap::new(1, 1);
-        attributes.insert(KeyValue::new("span.type", "web"));
+        let mut attributes = Vec::with_capacity(1);
+        attributes.push(KeyValue::new("span.type", "web"));
+        // TODO: Should the resource be pushed onto attributes?
         let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
         let instrumentation_lib = InstrumentationLibrary::new(
             "component",
@@ -247,11 +248,13 @@ pub(crate) mod tests {
             start_time,
             end_time,
             attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status: Status::Ok,
-            resource: Cow::Owned(resource),
+            // TODO: Where was this used?
+            // resource: Cow::Owned(resource),
             instrumentation_lib,
+            dropped_attributes_count: 0,
         }
     }
 

@@ -3,15 +3,15 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use http;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
-use http_0_2 as http;
-use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+use opentelemetry_sdk::metrics::InstrumentKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -20,7 +20,6 @@ use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
-use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 
@@ -80,7 +79,7 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = self.endpoint.to_uri_0_2(&DEFAULT_GRPC_ENDPOINT);
+                let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
                 let grpc = self.grpc.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
@@ -99,7 +98,7 @@ impl Config {
                 let endpoint = add_missing_path(
                     kind,
                     self.endpoint
-                        .to_uri_0_2(&DEFAULT_HTTP_ENDPOINT)
+                        .to_uri(&DEFAULT_HTTP_ENDPOINT)
                         .map(|e| e.into_parts()),
                 )?;
                 let http = self.http.clone();
@@ -181,7 +180,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) key: Option<String>,
 
     /// gRPC metadata
-    #[serde(with = "http_serde_1_1::header_map")]
+    #[serde(with = "http_serde::header_map")]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: http::HeaderMap,
 }
@@ -259,11 +258,11 @@ pub(crate) enum Temporality {
 }
 
 pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry::sdk::metrics::data::Temporality,
+    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
 );
 
 impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry::sdk::metrics::data::Temporality {
+    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
         self.0
     }
 }
@@ -271,11 +270,11 @@ impl TemporalitySelector for CustomTemporalitySelector {
 impl From<&Temporality> for Box<dyn TemporalitySelector> {
     fn from(value: &Temporality) -> Self {
         Box::new(match value {
-            Temporality::Cumulative => CustomTemporalitySelector(
-                opentelemetry::sdk::metrics::data::Temporality::Cumulative,
-            ),
+            Temporality::Cumulative => {
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
+            }
             Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry::sdk::metrics::data::Temporality::Delta)
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
             }
         })
     }

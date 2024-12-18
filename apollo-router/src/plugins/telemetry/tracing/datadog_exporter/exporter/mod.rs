@@ -8,24 +8,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http_0_2 as http;
+use http;
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
 use opentelemetry::global;
-use opentelemetry::sdk;
 use opentelemetry::trace::TraceError;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
-use opentelemetry_api::trace::TracerProvider;
 use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;
+use opentelemetry_sdk;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::resource::SdkProvidedResourceDetector;
 use opentelemetry_sdk::runtime::RuntimeChannel;
-use opentelemetry_sdk::trace::BatchMessage;
 use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::Tracer;
 use opentelemetry_sdk::Resource;
@@ -72,7 +71,7 @@ impl Mapping {
 /// Datadog span exporter
 pub struct DatadogExporter {
     client: Arc<dyn HttpClient>,
-    request_url: http_0_2::Uri,
+    request_url: http::Uri,
     model_config: ModelConfig,
     api_version: ApiVersion,
     mapping: Mapping,
@@ -204,29 +203,23 @@ impl DatadogPipelineBuilder {
                 cfg.resource = Cow::Owned(Resource::new(
                     cfg.resource
                         .iter()
-                        .filter(|(k, _v)| *k != &semcov::resource::SERVICE_NAME)
+                        .filter(|(k, _v)| k.as_str() != semcov::resource::SERVICE_NAME)
                         .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
                 ));
                 cfg
             } else {
-                Config {
-                    resource: Cow::Owned(Resource::empty()),
-                    ..Default::default()
-                }
+                Config::default().with_resource(Resource::empty())
             };
             (config, service_name)
         } else {
             let service_name = SdkProvidedResourceDetector
                 .detect(Duration::from_secs(0))
-                .get(semcov::resource::SERVICE_NAME)
+                .get(semcov::resource::SERVICE_NAME.into())
                 .unwrap()
                 .to_string();
             (
-                Config {
-                    // use a empty resource to prevent TracerProvider to assign a service name.
-                    resource: Cow::Owned(Resource::empty()),
-                    ..Default::default()
-                },
+                // use a empty resource to prevent TracerProvider to assign a service name.
+                Config::default().with_resource(Resource::empty()),
                 service_name,
             )
         }
@@ -234,7 +227,7 @@ impl DatadogPipelineBuilder {
 
     // parse the endpoint and append the path based on versions.
     // keep the query and host the same.
-    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<http_0_2::Uri, TraceError> {
+    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<http::Uri, TraceError> {
         // build agent endpoint based on version
         let mut endpoint = agent_endpoint
             .parse::<Url>()
@@ -277,7 +270,7 @@ impl DatadogPipelineBuilder {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
+            opentelemetry_sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
         let tracer = provider.versioned_tracer(
@@ -292,14 +285,11 @@ impl DatadogPipelineBuilder {
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
-    pub fn install_batch<R: RuntimeChannel<BatchMessage>>(
-        mut self,
-        runtime: R,
-    ) -> Result<Tracer, TraceError> {
+    pub fn install_batch<R: RuntimeChannel>(mut self, runtime: R) -> Result<Tracer, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_batch_exporter(exporter, runtime);
+        let mut provider_builder = opentelemetry_sdk::trace::TracerProvider::builder()
+            .with_batch_exporter(exporter, runtime);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
         let tracer = provider.versioned_tracer(

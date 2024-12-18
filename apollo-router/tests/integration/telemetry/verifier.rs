@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 

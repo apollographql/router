@@ -1,6 +1,7 @@
 use std::time::SystemTime;
 
 use opentelemetry::trace::Status;
+use opentelemetry::KeyValue;
 use opentelemetry_sdk::export::trace::SpanData;
 
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::SAMPLING_PRIORITY_KEY;
@@ -40,12 +41,12 @@ where
                 .unwrap_or(0);
 
             let mut span_type_found = false;
-            for (key, value) in &span.attributes {
-                if key.as_str() == "span.type" {
+            for kv in &span.attributes {
+                if kv.key.as_str() == "span.type" {
                     span_type_found = true;
                     rmp::encode::write_map_len(&mut encoded, 12)?;
                     rmp::encode::write_str(&mut encoded, "type")?;
-                    rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
+                    rmp::encode::write_str(&mut encoded, kv.value.as_str().as_ref())?;
                     break;
                 }
             }
@@ -98,15 +99,8 @@ where
             )?;
 
             rmp::encode::write_str(&mut encoded, "meta")?;
-            rmp::encode::write_map_len(
-                &mut encoded,
-                (span.attributes.len() + span.resource.len()) as u32,
-            )?;
-            for (key, value) in span.resource.iter() {
-                rmp::encode::write_str(&mut encoded, key.as_str())?;
-                rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
-            }
-            for (key, value) in span.attributes.iter() {
+            rmp::encode::write_map_len(&mut encoded, span.attributes.len() as u32)?;
+            for KeyValue { key, value } in span.attributes.iter() {
                 rmp::encode::write_str(&mut encoded, key.as_str())?;
                 rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
             }
