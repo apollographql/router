@@ -79,6 +79,82 @@ impl SchemaUpgrader {
     }
     
     fn upgrade(&self) -> Result<ValidFederationSubgraph, FederationError> {
+        self.pre_upgrade_validations();
+
+        self.fix_federation_directives_arguments();
+
+        self.remove_external_on_interface();
+
+        self.remove_external_on_object_types();
+
+        // Note that we remove all external on type extensions first, so we don't have to care about it later in @key, @provides and @requires.
+        self.remove_external_on_type_extensions();
+
+        self.fix_inactive_provides_and_requires();
+
+        self.remove_type_extensions();
+
+        self.remove_directives_on_interface();
+
+        // Note that this rule rely on being after `removeDirectivesOnInterface` in practice (in that it doesn't check interfaces).
+        self.remove_provides_on_non_composite();
+
+        // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
+        // externals. Which is why this is toward  the end.
+        self.remove_unused_externals();
+
+        self.add_shareable();
+
+        self.remove_tag_on_external();
+
         todo!();
+    }
+    
+    fn pre_upgrade_validations(&self) {
+        todo!();
+    }
+    
+    fn fix_federation_directives_arguments(&self) {
+        
+    }
+    
+    fn remove_external_on_interface(&self) {
+        
+    }
+    
+    fn remove_external_on_object_types(&self) {
+        
+    }
+    
+    fn remove_external_on_type_extensions(&self) {
+        
+    }
+    
+    fn fix_inactive_provides_and_requires(&self) {
+        
+    }
+    
+    fn remove_type_extensions(&self) {
+        
+    }
+    
+    fn remove_directives_on_interface(&self) {
+        
+    }
+    
+    fn remove_provides_on_non_composite(&self) {
+        
+    }
+    
+    fn remove_unused_externals(&self) {
+        
+    }
+    
+    fn add_shareable(&self) {
+        
+    }
+    
+    fn remove_tag_on_external(&self) {
+        
     }
 }
