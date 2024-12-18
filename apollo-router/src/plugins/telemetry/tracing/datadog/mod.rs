@@ -153,7 +153,6 @@ impl TracingConfigurator for Config {
                         .attributes
                         .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
                     {
-                        println!("original: {:?}", original);
                         original.as_str()
                     } else {
                         span.name.clone()

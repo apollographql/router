@@ -6,10 +6,10 @@ use std::time::Instant;
 use std::time::SystemTime;
 
 use once_cell::unsync;
+use opentelemetry::trace as otel;
 use opentelemetry::trace::noop;
 use opentelemetry::trace::OrderMap;
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry::trace::{self as otel};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -724,32 +724,16 @@ where
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
         let mut extensions = span.extensions_mut();
-
-        if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
-            extensions.insert(Timings::new());
-        }
-
         let parent_cx = self.parent_context(attrs, &ctx);
-        let mut builder = self
-            .tracer
-            .span_builder(attrs.metadata().name())
-            .with_start_time(SystemTime::now())
-            // Eagerly assign span id so children have stable parent id
-            .with_span_id(self.tracer.new_span_id());
 
         // Record new trace id if there is no active parent span
-        if !parent_cx.has_active_span() {
-            builder.trace_id = Some(self.tracer.new_trace_id());
-        }
-        builder = builder.with_trace_id(
-            if parent_cx.span().span_context().trace_id() != opentelemetry::trace::TraceId::INVALID
-            {
-                parent_cx.span().span_context().trace_id()
-            } else {
-                self.tracer.new_trace_id()
-            },
-        );
-        let trace_id = &builder.trace_id.expect("trace id was just set, qed");
+        let trace_id = if parent_cx.span().span_context().trace_id()
+            != opentelemetry::trace::TraceId::INVALID
+        {
+            parent_cx.span().span_context().trace_id()
+        } else {
+            self.tracer.new_trace_id()
+        };
         let span_id = self.tracer.new_span_id();
         let sampled = if self.enabled(attrs.metadata(), &ctx) {
             SampledSpan::Sampled(trace_id.to_bytes().into(), span_id)
@@ -759,10 +743,23 @@ where
         let is_sampled = matches!(sampled, SampledSpan::Sampled(_, _));
         extensions.insert(sampled);
 
+        // Inactivity may still be tracked even if the span isn't sampled.
+        if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
+            extensions.insert(Timings::new());
+        }
+
         if !is_sampled {
             // Nothing more to do as it's not sampled
             return;
         }
+
+        let mut builder = self
+            .tracer
+            .span_builder(attrs.metadata().name())
+            .with_start_time(SystemTime::now())
+            // Eagerly assign span id so children have stable parent id
+            .with_span_id(self.tracer.new_span_id())
+            .with_trace_id(trace_id);
 
         let builder_attrs = builder.attributes.get_or_insert(OrderMap::with_capacity(
             attrs.fields().len() + self.extra_span_attrs(),

@@ -294,8 +294,7 @@ impl PluginPrivate for Telemetry {
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
         let metrics_builder = Self::create_metrics_builder(&config)?;
-
-        let tracer_provider = Self::create_tracer_provider(&mut config)?;
+        let tracer_provider = Self::create_tracer_provider(&config)?;
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
@@ -956,11 +955,11 @@ impl Telemetry {
         let mut builder =
             opentelemetry::sdk::trace::TracerProvider::builder().with_config((common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, &common, spans_config)?;
-        builder = setup_tracing(builder, &config.apollo, &common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.jaeger, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, common, spans_config)?;
+        builder = setup_tracing(builder, &config.apollo, common, spans_config)?;
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)
