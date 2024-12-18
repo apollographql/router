@@ -1,15 +1,20 @@
-use apollo_compiler::{collections::HashMap, Name};
-
-use crate::{
-    error::FederationError, schema::SubgraphMetadata, ValidFederationSchema, ValidFederationSubgraph, ValidFederationSubgraphs
-};
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::Name;
 
 use super::TypeDefinitionPosition;
+use crate::error::FederationError;
+use crate::schema::SubgraphMetadata;
+use crate::ValidFederationSchema;
+use crate::ValidFederationSubgraph;
+use crate::ValidFederationSubgraphs;
 
 #[derive(Clone, Debug)]
-struct SchemaUpgrader {
+struct SchemaUpgrader<'a> {
     schema: ValidFederationSchema,
-    subgraph: ValidFederationSubgraph,
+    name: String,
+    url: String,
+    subgraphs: &'a ValidFederationSubgraphs,
+    object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
 }
 
 #[derive(Clone, Debug)]
@@ -41,7 +46,13 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
                         object_type_map
                             .entry(pos.type_name().clone())
                             .or_insert_with(HashMap::default)
-                            .insert(subgraph.name.clone(), TypeInfo { pos: pos.clone(), metadata: subgraph_metadata.clone() });
+                            .insert(
+                                subgraph.name.clone(),
+                                TypeInfo {
+                                    pos: pos.clone(),
+                                    metadata: subgraph_metadata.clone(),
+                                },
+                            );
                     }
                     _ => {
                         // ignore
@@ -66,18 +77,21 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     todo!();
 }
 
-impl SchemaUpgrader {
+impl<'a> SchemaUpgrader<'a> {
     fn new(
         original_subgraph: &ValidFederationSubgraph,
-        _subgraphs: &ValidFederationSubgraphs,
-        _object_type_map: &HashMap<Name, HashMap<String, TypeInfo>>,
+        subgraphs: &'a ValidFederationSubgraphs,
+        object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Self {
         SchemaUpgrader {
             schema: original_subgraph.schema.clone(),
-            subgraph: original_subgraph.clone(),
+            name: original_subgraph.name.clone(),
+            url: original_subgraph.url.clone(),
+            subgraphs,
+            object_type_map,
         }
     }
-    
+
     fn upgrade(&self) -> Result<ValidFederationSubgraph, FederationError> {
         self.pre_upgrade_validations();
 
@@ -109,51 +123,51 @@ impl SchemaUpgrader {
 
         todo!();
     }
-    
+
     fn pre_upgrade_validations(&self) {
         todo!();
     }
-    
+
     fn fix_federation_directives_arguments(&self) {
         todo!();
     }
-    
+
     fn remove_external_on_interface(&self) {
         todo!();
     }
-    
+
     fn remove_external_on_object_types(&self) {
         todo!();
     }
-    
+
     fn remove_external_on_type_extensions(&self) {
         todo!();
     }
-    
+
     fn fix_inactive_provides_and_requires(&self) {
         todo!();
     }
-    
+
     fn remove_type_extensions(&self) {
         todo!();
     }
-    
+
     fn remove_directives_on_interface(&self) {
         todo!();
     }
-    
+
     fn remove_provides_on_non_composite(&self) {
         todo!();
     }
-    
+
     fn remove_unused_externals(&self) {
         todo!();
     }
-    
+
     fn add_shareable(&self) {
         todo!();
     }
-    
+
     fn remove_tag_on_external(&self) {
         todo!();
     }
