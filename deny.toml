@@ -30,6 +30,7 @@ git-fetch-with-cli = true
 ignore = [
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0376", # we do not use tonic::transport::Server
+    "RUSTSEC-2024-0421" # we only resolve trusted subgraphs
 ]
 
 # This section is considered when running `cargo deny check licenses`
@@ -53,7 +54,9 @@ allow = [
     "MIT",
     "MPL-2.0",
     "Elastic-2.0",
-    "Unicode-DFS-2016"
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib"
 ]
 copyleft = "warn"
 allow-osi-fsf-free = "neither"

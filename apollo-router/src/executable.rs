@@ -1,6 +1,5 @@
 //! Main entry point for CLI command to start server.
 
-use std::cell::Cell;
 use std::env;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -62,6 +61,7 @@ pub(crate) static mut DHAT_HEAP_PROFILER: OnceCell<dhat::Profiler> = OnceCell::n
 pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
 
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
+pub(crate) const APOLLO_TELEMETRY_DISABLED: &str = "APOLLO_TELEMETRY_DISABLED";
 
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
@@ -240,7 +240,7 @@ pub struct Opt {
     apollo_uplink_poll_interval: Duration,
 
     /// Disable sending anonymous usage information to Apollo.
-    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
+    #[clap(long, env = APOLLO_TELEMETRY_DISABLED, value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
@@ -750,18 +750,11 @@ fn setup_panic_handler() {
         } else {
             tracing::error!("{}", e)
         }
-        if !USING_CATCH_UNWIND.get() {
-            // Once we've panic'ed the behaviour of the router is non-deterministic
-            // We've logged out the panic details. Terminate with an error code
-            std::process::exit(1);
-        }
-    }));
-}
 
-// TODO: once the Rust query planner does not use `todo!()` anymore,
-// remove this and the use of `catch_unwind` to call it.
-thread_local! {
-    pub(crate) static USING_CATCH_UNWIND: Cell<bool> = const { Cell::new(false) };
+        // Once we've panic'ed the behaviour of the router is non-deterministic
+        // We've logged out the panic details. Terminate with an error code
+        std::process::exit(1);
+    }));
 }
 
 static COPIED: AtomicBool = AtomicBool::new(false);

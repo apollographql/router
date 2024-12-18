@@ -47,7 +47,6 @@ use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
-use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -84,6 +83,7 @@ use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -93,8 +93,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -131,9 +131,8 @@ use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
-use crate::register_plugin;
+use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -172,7 +171,7 @@ pub(crate) mod tracing;
 pub(crate) mod utils;
 
 // Tracing consts
-const CLIENT_NAME: &str = "apollo_telemetry::client_name";
+pub(crate) const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
@@ -280,7 +279,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 }
 
 #[async_trait::async_trait]
-impl Plugin for Telemetry {
+impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -853,10 +852,8 @@ impl Plugin for Telemetry {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
     }
-}
 
-impl Telemetry {
-    pub(crate) fn activate(&self) {
+    fn activate(&self) {
         let mut activation = self.activation.lock();
         if activation.is_active {
             return;
@@ -865,7 +862,21 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            otel::layer::configure(&self.sampling_filter_ratio);
+            // If the datadog agent sampling is enabled, then we cannot presample the spans
+            // Therefore we set presampling to always on and let the regular sampler do the work.
+            // Effectively, we are disabling the presampling.
+            if self
+                .config
+                .exporters
+                .tracing
+                .common
+                .preview_datadog_agent_sampling
+                .unwrap_or_default()
+            {
+                otel::layer::configure(&SamplerOption::Always(Sampler::AlwaysOn));
+            } else {
+                otel::layer::configure(&self.sampling_filter_ratio);
+            }
 
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
@@ -888,7 +899,8 @@ impl Telemetry {
 
             Self::checked_global_tracer_shutdown(last_provider);
 
-            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+            let propagator = Self::create_propagator(&self.config);
+            opentelemetry::global::set_text_map_propagator(propagator);
         }
 
         activation.reload_metrics();
@@ -910,7 +922,9 @@ impl Telemetry {
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;
     }
+}
 
+impl Telemetry {
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
         let propagation = &config.exporters.tracing.propagation;
 
@@ -939,6 +953,9 @@ impl Telemetry {
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
         }
+
+        // This propagator MUST come last because the user is trying to override the default behavior of the
+        // other propagators.
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
@@ -956,9 +973,14 @@ impl Telemetry {
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
         let mut sampler = common.sampler.clone();
-        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
-        // should be accepted
-        common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+
+        // To enable pre-sampling to work we need to disable regular sampling.
+        // This is because the pre-sampler will sample the spans before they sent to the regular sampler
+        // If the datadog agent sampling is enabled, then we cannot pre-sample the spans because even if the sampling decision is made to drop
+        // DatadogAgentSampler will modify the decision to RecordAndSample and instead use the sampling.priority attribute to decide if the span should be sampled or not.
+        if !common.preview_datadog_agent_sampling.unwrap_or_default() {
+            common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+        }
 
         let mut builder =
             opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
@@ -1747,28 +1769,32 @@ impl Telemetry {
     }
 
     fn plugin_metrics(config: &Arc<Conf>) {
-        let metrics_prom_used = config.exporters.metrics.prometheus.enabled;
-        let metrics_otlp_used = MetricsConfigurator::enabled(&config.exporters.metrics.otlp);
-        let tracing_otlp_used = TracingConfigurator::enabled(&config.exporters.tracing.otlp);
-        let tracing_datadog_used = config.exporters.tracing.datadog.enabled();
-        let tracing_jaeger_used = config.exporters.tracing.jaeger.enabled();
-        let tracing_zipkin_used = config.exporters.tracing.zipkin.enabled();
+        let mut attributes = Vec::new();
+        if MetricsConfigurator::enabled(&config.exporters.metrics.otlp) {
+            attributes.push(KeyValue::new("telemetry.metrics.otlp", true));
+        }
+        if config.exporters.metrics.prometheus.enabled {
+            attributes.push(KeyValue::new("telemetry.metrics.prometheus", true));
+        }
+        if TracingConfigurator::enabled(&config.exporters.tracing.otlp) {
+            attributes.push(KeyValue::new("telemetry.tracing.otlp", true));
+        }
+        if config.exporters.tracing.datadog.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
+        }
+        if config.exporters.tracing.jaeger.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.jaeger", true));
+        }
+        if config.exporters.tracing.zipkin.enabled() {
+            attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
+        }
 
-        if metrics_prom_used
-            || metrics_otlp_used
-            || tracing_jaeger_used
-            || tracing_otlp_used
-            || tracing_zipkin_used
-            || tracing_datadog_used
-        {
-            ::tracing::info!(
-                monotonic_counter.apollo.router.operations.telemetry = 1u64,
-                telemetry.metrics.otlp = metrics_otlp_used.or_empty(),
-                telemetry.metrics.prometheus = metrics_prom_used.or_empty(),
-                telemetry.tracing.otlp = tracing_otlp_used.or_empty(),
-                telemetry.tracing.datadog = tracing_datadog_used.or_empty(),
-                telemetry.tracing.jaeger = tracing_jaeger_used.or_empty(),
-                telemetry.tracing.zipkin = tracing_zipkin_used.or_empty(),
+        if !attributes.is_empty() {
+            u64_counter!(
+                "apollo.router.operations.telemetry",
+                "Telemetry exporters enabled",
+                1,
+                attributes
             );
         }
     }
@@ -1896,7 +1922,7 @@ fn licensed_operation_count(stats_report_key: &str) -> u64 {
 }
 
 fn convert(
-    referenced_fields: router_bridge::planner::ReferencedFieldsForType,
+    referenced_fields: crate::apollo_studio_interop::ReferencedFieldsForType,
 ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType {
     crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
@@ -1979,7 +2005,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
     }
 }
 
-register_plugin!("apollo", "telemetry", Telemetry);
+register_private_plugin!("apollo", "telemetry", Telemetry);
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     if req
@@ -2129,6 +2155,8 @@ mod tests {
     use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2186,6 +2214,7 @@ mod tests {
     use crate::plugins::demand_control::COST_STRATEGY_KEY;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
+    use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -2829,6 +2858,63 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/config.field_instrumentation_sampler.router.yaml"
+        ))
+        .await;
+
+        let ftv1_counter = Arc::new(AtomicUsize::new(0));
+        let ftv1_counter_cloned = ftv1_counter.clone();
+
+        let mut mock_request_service = MockSupergraphService::new();
+        mock_request_service
+            .expect_call()
+            .times(10)
+            .returning(move |req: SupergraphRequest| {
+                if req
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
+                {
+                    ftv1_counter_cloned.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .status_code(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .data(json!({"errors": [{"message": "nope"}]}))
+                    .build()
+                    .unwrap())
+            });
+        let mut request_supergraph_service =
+            plugin.supergraph_service(BoxService::new(mock_request_service));
+
+        for _ in 0..10 {
+            let supergraph_req = SupergraphRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .query("Query test { me {name} }")
+                .operation_name("test".to_string());
+            let _router_response = request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(supergraph_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+        }
+        // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
+        assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 
     #[tokio::test]

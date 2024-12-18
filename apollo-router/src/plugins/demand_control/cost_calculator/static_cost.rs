@@ -22,8 +22,6 @@ use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
-use crate::json_ext::ValueExt;
-use crate::plugins::demand_control::cost_calculator::directives::CostDirective;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::DeferredNode;
@@ -50,8 +48,6 @@ fn score_argument(
     schema: &DemandControlledSchema,
     variables: &Object,
 ) -> Result<f64, DemandControlError> {
-    let cost_directive =
-        CostDirective::from_argument(schema.directive_name_map(), argument_definition);
     let ty = schema
         .types
         .get(argument_definition.ty.inner_named_type())
@@ -62,6 +58,7 @@ fn score_argument(
                 argument_definition.ty.inner_named_type()
             ))
         })?;
+    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
 
     match (argument, ty) {
         (_, ExtendedType::Interface(_))
@@ -99,12 +96,66 @@ fn score_argument(
             // We make a best effort attempt to score the variable, but some of these may not exist in the variables
             // sent on the supergraph request, such as `$representations`.
             if let Some(variable) = variables.get(name.as_str()) {
-                score_argument(&variable.to_ast(), argument_definition, schema, variables)
+                score_variable(variable, argument_definition, schema)
             } else {
                 Ok(0.0)
             }
         }
         (ast::Value::Null, _) => Ok(0.0),
+        _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
+    }
+}
+
+fn score_variable(
+    variable: &Value,
+    argument_definition: &Node<InputValueDefinition>,
+    schema: &DemandControlledSchema,
+) -> Result<f64, DemandControlError> {
+    let ty = schema
+        .types
+        .get(argument_definition.ty.inner_named_type())
+        .ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Argument {} was found in query, but its type ({}) was not found in the schema",
+                argument_definition.name,
+                argument_definition.ty.inner_named_type()
+            ))
+        })?;
+    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
+
+    match (variable, ty) {
+        (_, ExtendedType::Interface(_))
+        | (_, ExtendedType::Object(_))
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+            format!(
+                "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
+                argument_definition.name,
+                argument_definition.ty.inner_named_type()
+            )
+        )),
+
+        (Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
+            let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
+            for (arg_name, arg_val) in inner_args {
+                let arg_def = inner_arg_defs.fields.get(arg_name.as_str()).ok_or_else(|| {
+                    DemandControlError::QueryParseFailure(format!(
+                        "Argument {} was found in query, but its type ({}) was not found in the schema",
+                        argument_definition.name,
+                        argument_definition.ty.inner_named_type()
+                    ))
+                })?;
+                cost += score_variable(arg_val, arg_def, schema)?;
+            }
+            Ok(cost)
+        }
+        (Value::Array(inner_args), _) => {
+            let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
+            for arg_val in inner_args {
+                cost += score_variable(arg_val, argument_definition, schema)?;
+            }
+            Ok(cost)
+        }
+        (Value::Null, _) => Ok(0.0),
         _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
     }
 }
@@ -165,7 +216,7 @@ impl StaticCostCalculator {
             .schema
             .type_field_list_size_directive(parent_type, &field.name)
         {
-            Some(dir) => dir.with_field_and_variables(field, ctx.variables).map(Some),
+            Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
             None => Ok(None),
         }?;
         let instance_count = if !field.ty().is_list() {
@@ -510,7 +561,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
     }
 }
 
-impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
+impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
@@ -583,8 +634,10 @@ mod tests {
 
     use super::*;
     use crate::introspection::IntrospectionCache;
+    use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::query_planner::PlanOptions;
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::spec;
@@ -672,8 +725,6 @@ mod tests {
         let mut planner = BridgeQueryPlanner::new(
             schema.into(),
             config.clone(),
-            None,
-            None,
             Arc::new(IntrospectionCache::new(&config)),
         )
         .await
@@ -681,10 +732,16 @@ mod tests {
 
         let ctx = Context::new();
         ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query));
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query.clone()));
 
         let planner_res = planner
-            .call(QueryPlannerRequest::new(query_str.to_string(), None, ctx))
+            .call(QueryPlannerRequest::new(
+                query_str.to_string(),
+                None,
+                query,
+                CacheKeyMetadata::default(),
+                PlanOptions::default(),
+            ))
             .await
             .unwrap();
         let query_plan = match planner_res.content.unwrap() {
@@ -1064,5 +1121,26 @@ mod tests {
         assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
+    }
+
+    #[test]
+    fn arbitrary_json_as_custom_scalar_in_variables() {
+        let schema = include_str!("./fixtures/arbitrary_json_schema.graphql");
+        let query = r#"
+            query FetchData($myJsonValue: ArbitraryJson) {
+                fetch(args: {
+                    json: $myJsonValue
+                })
+            }
+        "#;
+        let variables = r#"
+            {
+                "myJsonValue": {
+                    "field.with.dots": 1
+                }
+            }
+        "#;
+
+        assert_eq!(estimated_cost(schema, query, variables), 1.0);
     }
 }

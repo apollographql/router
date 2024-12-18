@@ -12,10 +12,9 @@ use tower_service::Service;
 
 use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::query_planner::BridgeQueryPlanner;
-use crate::query_planner::PlannerMode;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
@@ -65,12 +64,12 @@ use crate::Notify;
 /// You can pass in a configuration and a schema to the test harness. If you pass in a schema, the test harness will create a query planner and use the schema to extract subgraph schemas.
 ///
 ///
-pub(crate) struct PluginTestHarness<T: Plugin> {
+pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
     plugin: Box<dyn DynPlugin>,
     phantom: std::marker::PhantomData<T>,
 }
 #[buildstructor::buildstructor]
-impl<T: Plugin> PluginTestHarness<T> {
+impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
     pub(crate) async fn new<'a, 'b>(config: Option<&'a str>, schema: Option<&'b str>) -> Self {
         let factory = crate::plugin::plugins()
@@ -95,17 +94,10 @@ impl<T: Plugin> PluginTestHarness<T> {
             let schema = Schema::parse(schema, &config).unwrap();
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
-            let rust_planner = PlannerMode::maybe_rust(&schema, &config).unwrap();
             let introspection = Arc::new(IntrospectionCache::new(&config));
-            let planner = BridgeQueryPlanner::new(
-                schema.into(),
-                Arc::new(config),
-                None,
-                rust_planner,
-                introspection,
-            )
-            .await
-            .unwrap();
+            let planner = BridgeQueryPlanner::new(schema.into(), Arc::new(config), introspection)
+                .await
+                .unwrap();
             (sdl, supergraph, planner.subgraph_schemas())
         } else {
             (
@@ -217,7 +209,7 @@ impl<T: Plugin> PluginTestHarness<T> {
 
 impl<T> Deref for PluginTestHarness<T>
 where
-    T: Plugin,
+    T: PluginPrivate,
 {
     type Target = T;
 

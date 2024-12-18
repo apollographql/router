@@ -413,6 +413,11 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
+                #[cfg(not(feature = "hyper_header_limits"))]
+                if yaml.contains("http1_max_request_headers") {
+                    continue;
+                }
+
                 if let Err(e) = validate_yaml_configuration(
                     &yaml,
                     Expansion::default().unwrap(),
@@ -1090,20 +1095,4 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
-}
-
-#[test]
-fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
-    let conf = Configuration::builder()
-        .supergraph(
-            Supergraph::builder()
-                .generate_query_fragments(true)
-                .reuse_query_fragments(true)
-                .build(),
-        )
-        .build()
-        .unwrap();
-
-    assert!(conf.supergraph.generate_query_fragments);
-    assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
 }

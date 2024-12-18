@@ -1,6 +1,5 @@
 // The redis cache keys in this file have to change whenever the following change:
 // * the supergraph schema
-// * experimental_query_planner_mode
 // * federation version
 //
 // How to get the new cache key:
@@ -42,6 +41,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -51,7 +51,10 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     }
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
-    let known_cache_key = "plan:cache:1:federation:v2.9.3:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0ade8e18db172d9d51b36a2112513c15032d103100644df418a50596de3adfba";
+    let known_cache_key = &format!(
+        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d9f7a00bc249cb51cfc8599f86b6dc5272967b37b1409dc4717f105b6939fe43",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -420,6 +423,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }))
         .unwrap()
@@ -444,14 +451,15 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
+    // if this is failing due to a cache key change, hook up redis-cli with the MONITOR command to see the keys being set
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:5e8ac155fe1fb5b3b69292f89b7df818a39d88a3bf77031a6bd60c22eeb4b242:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:50354623eb0a347d47a62f002fae74c0f579ee693af1fdb9a1e4744b4723dd2c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -534,6 +542,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }))
         .unwrap()
@@ -559,7 +571,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:50354623eb0a347d47a62f002fae74c0f579ee693af1fdb9a1e4744b4723dd2c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -750,6 +762,10 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
             }
         }))
         .unwrap()
@@ -784,7 +800,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:5e8ac155fe1fb5b3b69292f89b7df818a39d88a3bf77031a6bd60c22eeb4b242:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -805,7 +821,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:50354623eb0a347d47a62f002fae74c0f579ee693af1fdb9a1e4744b4723dd2c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -849,7 +865,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:f7d6d3af2706afe346e3d5fd353e61bd186d2fc64cb7b3c13a62162189519b5f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:2253830e3b366dcfdfa4e1acf6afa9e05d3c80ff50171243768a3e416536c89b:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -961,19 +977,24 @@ async fn connection_failure_blocks_startup() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_query_fragments() {
+    // If this test fails and the cache key format changed you'll need to update
+    // the key here.  Look at the top of the file for instructions on getting
+    // the new cache key.
+    //
+    // You first need to follow the process and update the key in
+    // `test_redis_query_plan_config_update`, and then update the key in this
+    // test.
+    //
+    // This test requires graphos license, so make sure you have
+    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
+    // test just passes locally.
     test_redis_query_plan_config_update(
+        // This configuration turns the fragment generation option *off*.
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1cfc840090ac76a98f8bd51442f41fd6ca4c8d918b3f8d87894170745acf0734",
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "the cache key for different query planner modes is currently different"]
-async fn query_planner_redis_update_planner_mode() {
-    test_redis_query_plan_config_update(
-        include_str!("fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"),
-        "",
+        &format!(
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fb1a8e6e454ad6a1d0d48b24dc9c7c4dd6d9bf58b6fdaf43cd24eb77fbbb3a17",
+            env!("CARGO_PKG_VERSION")
+        ),
     )
     .await;
 }
@@ -993,7 +1014,10 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:2f7fb939d2a8fc978e5a4e9d17998074fc30366dcc673236237a885819084fc0",
+        &format!(
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:dc062fcc9cfd9582402d1e8b1fa3ee336ea1804d833443869e0b3744996716a2",
+            env!("CARGO_PKG_VERSION")
+        ),
     )
     .await;
 }
@@ -1015,29 +1039,10 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0fd0a376f59f0565768ea5ad8eadfbbf60d64c593c807457a0776d2f39773a25",
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn query_planner_redis_update_reuse_query_fragments() {
-    // If this test fails and the cache key format changed you'll need to update
-    // the key here.  Look at the top of the file for instructions on getting
-    // the new cache key.
-    //
-    // You first need to follow the process and update the key in
-    // `test_redis_query_plan_config_update`, and then update the key in this
-    // test.
-    //
-    // This test requires graphos license, so make sure you have
-    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
-    // test just passes locally.
-    test_redis_query_plan_config_update(
-        include_str!(
-            "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
+        &format!(
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:bdc09980aa6ef28a67f5aeb8759763d8ac5a4fc43afa8c5a89f58cc998c48db3",
+            env!("CARGO_PKG_VERSION")
         ),
-        "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:3f30f0e2d149d00c9370c8046e4dd5f23d6ceb6f05a6cf06d5eb021510564248",
     )
     .await;
 }
@@ -1062,14 +1067,21 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.clear_redis_cache().await;
 
     // If the tests above are failing, this is the key that needs to be changed first.
-    let starting_key = "plan:cache:1:federation:v2.9.3:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:0ade8e18db172d9d51b36a2112513c15032d103100644df418a50596de3adfba";
+    let starting_key = &format!(
+        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d9f7a00bc249cb51cfc8599f86b6dc5272967b37b1409dc4717f105b6939fe43",
+        env!("CARGO_PKG_VERSION")
+    );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
-    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_anonymous())
+        .await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
     router.assert_reloaded().await;
-    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_anonymous())
+        .await;
     router
         .assert_redis_cache_contains(new_cache_key, Some(starting_key))
         .await;

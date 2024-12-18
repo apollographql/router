@@ -1,0 +1,106 @@
+---
+title: Connecting OpenTelemetry Traces to Prometheus
+id: TN0003
+subtitle: Convert operation traces into aggregated metrics for a broader view of your graph's performance
+description: Convert operation traces into aggregated metrics using OpenTelemetry Collector and Prometheus for a broader view of your graph's performance.
+published: 2022-06-03
+tags: [server, observability]
+redirectFrom:
+  - /technotes/TN0003-opentelemetry-traces-to-prometheus/
+---
+
+<EnterpriseFeature>
+
+Self-hosting the GraphOS Router is limited to [GraphOS Enterprise plans](https://www.apollographql.com/pricing). Other plan types use [managed cloud routing with GraphOS](/graphos/cloud-routing). Check out the [pricing page](https://www.apollographql.com/pricing#graphos-router) to learn more.
+
+</EnterpriseFeature>
+
+<Tip>
+
+If you're an enterprise customer looking for more material on this topic, try the [Enterprise best practices: Supergraph observability](https://www.apollographql.com/tutorials/supergraph-observability) course on Odyssey.
+
+Not an enterprise customer? [Learn about GraphOS for Enterprise.](https://www.apollographql.com/pricing)
+
+</Tip>
+
+Operation traces provide insight into performance issues that are occurring at various execution points in your graph. However, individual traces don't provide a view of your graph's broader performance.
+
+Helpfully, you can convert your operation traces into aggregated metrics without requiring manual instrumentation. To accomplish this, we'll use `spanmetricsprocessor` in an OpenTelemetry Collector instance to automatically generate metrics from our existing trace spans.
+
+## OpenTelemetry Collector configuration
+
+OpenTelemetry provides two different repositories for their OpenTelemetry Collector:
+
+- The [core library](https://github.com/open-telemetry/opentelemetry-collector)
+- The [contributor library](https://github.com/open-telemetry/opentelemetry-collector-contrib)
+
+These repositories are similar in scope, but the contributor library includes extended features that aren't suitable for the core library. To derive performance metrics from our existing spans, we'll use the contributor library to take advantage of the `spanmetricsprocessor` via the associated Docker image.
+
+<Tip>
+
+We also recommend checking out the [Collector Builder](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder) to build binaries that are tailored to your environment instead of relying on prebuilt images.
+
+</Tip>
+
+When your OpenTelemetry Collector is ready to run, you can start configuring it with this barebones example:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+        cors:
+          allowed_origins:
+            - http://*
+            - https://*
+  otlp/spanmetrics:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:12346
+
+exporters:
+  prometheus:
+    endpoint: '0.0.0.0:9464'
+
+processors:
+  batch:
+  spanmetrics:
+    metrics_exporter: prometheus
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [spanmetrics, batch]
+    metrics:
+      receivers: [otlp/spanmetrics]
+      exporters: [prometheus]
+      processors: [batch]
+```
+
+## Apollo Server setup
+
+Add the OTLP Exporter (`@opentelemetry/exporter-trace-otlp-http` Node package) following the same instructions [as shown in the documentation for Apollo Server and OpenTelemetry.](/federation/opentelemetry/)
+
+## GraphOS Router setup
+
+To send traces from the GraphOS Router to OpenTelemetry Collector, see [this article](/router/configuration/telemetry/exporters/tracing/otlp).
+
+## Prometheus setup
+
+Lastly, we need to add the OpenTelemetry Collector as a target within Prometheus. It'll use the standard port for Prometheus metrics (`9464`).
+
+That's it- you should have access to span metrics using the same operation name!
+
+## Example queries
+
+Here are a few sample queries to help explore the data structure being reported:
+
+- P95 by service: `histogram_quantile(.95, sum(rate(latency_bucket[5m])) by (le, service_name))`
+- Average latency by service and operation (for example `router` / `graphql.validate`): `sum by (operation, service_name)(rate(latency_sum{}[1m])) / sum by (operation, service_name)(rate(latency_count{}[1m]))`
+- RPM by service: `sum(rate(calls_total{operation="HTTP POST"}[1m])) by (service_name)`
+
+## Full demo
+
+To see this in action, check out the [Supergraph Demo](https://github.com/apollographql/supergraph-demo-fed2#tracing-with-open-telemetry) repository using the OpenTelemetry-Collector-specific Docker Compose image.

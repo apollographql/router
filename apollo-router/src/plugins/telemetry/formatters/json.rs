@@ -60,7 +60,7 @@ impl Default for Json {
 
 struct SerializableResources<'a>(&'a Vec<(String, serde_json::Value)>);
 
-impl<'a> serde::ser::Serialize for SerializableResources<'a> {
+impl serde::ser::Serialize for SerializableResources<'_> {
     fn serialize<Ser>(&self, serializer_o: Ser) -> Result<Ser::Ok, Ser::Error>
     where
         Ser: serde::ser::Serializer,
@@ -79,7 +79,7 @@ struct SerializableContext<'a, 'b, Span>(Option<SpanRef<'a, Span>>, &'b HashSet<
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
-impl<'a, 'b, Span> serde::ser::Serialize for SerializableContext<'a, 'b, Span>
+impl<Span> serde::ser::Serialize for SerializableContext<'_, '_, Span>
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
@@ -108,7 +108,7 @@ struct SerializableSpan<'a, 'b, Span>(
 where
     Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
-impl<'a, 'b, Span> serde::ser::Serialize for SerializableSpan<'a, 'b, Span>
+impl<Span> serde::ser::Serialize for SerializableSpan<'_, '_, Span>
 where
     Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
@@ -449,7 +449,7 @@ impl<'a> WriteAdaptor<'a> {
     }
 }
 
-impl<'a> io::Write for WriteAdaptor<'a> {
+impl io::Write for WriteAdaptor<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let s =
             std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -466,7 +466,7 @@ impl<'a> io::Write for WriteAdaptor<'a> {
     }
 }
 
-impl<'a> fmt::Debug for WriteAdaptor<'a> {
+impl fmt::Debug for WriteAdaptor<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("WriteAdaptor { .. }")
     }
@@ -500,7 +500,7 @@ mod test {
                 .or_else(|| ctx.lookup_current())
                 .expect("current span expected");
             let extracted = extract_dd_trace_id(&current_span);
-            assert_eq!(extracted, Some("1234".to_string()));
+            assert_eq!(extracted, Some("1234".to_string()), "should have trace id");
         }
     }
 
@@ -535,7 +535,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "should have trace id")]
     fn test_missing_dd_attribute() {
         subscriber::with_default(
             Registry::default()

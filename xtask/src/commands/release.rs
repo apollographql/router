@@ -281,12 +281,12 @@ impl Prepare {
     fn update_docs(&self, version: &str) -> Result<()> {
         println!("updating docs");
         replace_in_file!(
-            "./docs/source/containerization/docker.mdx",
+            "./docs/source/routing/self-hosted/containerization/docker.mdx",
             "with your chosen version. e.g.: `v[^`]+`",
             format!("with your chosen version. e.g.: `v{version}`")
         );
         replace_in_file!(
-            "./docs/source/containerization/kubernetes.mdx",
+            "./docs/source/routing/self-hosted/containerization/kubernetes.mdx",
             "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
             format!("https://github.com/apollographql/router/tree/v{version}/helm/chart/router")
         );
@@ -309,7 +309,7 @@ impl Prepare {
         )?;
 
         replace_in_file!(
-            "./docs/source/containerization/kubernetes.mdx",
+            "./docs/source/routing/self-hosted/containerization/kubernetes.mdx",
             "^```yaml\n---\n# Source: router/templates/serviceaccount.yaml(.|\n)+?```",
             format!("```yaml\n{}\n```", helm_chart.trim())
         );

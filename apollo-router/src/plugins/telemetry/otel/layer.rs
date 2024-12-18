@@ -31,6 +31,7 @@ use tracing_subscriber::Layer;
 
 use super::OtelData;
 use super::PreSampledTracer;
+use crate::plugins::cache::invalidation_endpoint::INVALIDATION_ENDPOINT_SPAN_NAME;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
@@ -156,7 +157,7 @@ struct SpanEventVisitor<'a, 'b> {
     custom_event: bool,
 }
 
-impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
+impl field::Visit for SpanEventVisitor<'_, '_> {
     /// Record events on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
@@ -317,7 +318,7 @@ struct SpanAttributeVisitor<'a> {
     exception_config: ExceptionFieldConfig,
 }
 
-impl<'a> SpanAttributeVisitor<'a> {
+impl SpanAttributeVisitor<'_> {
     fn record(&mut self, attribute: KeyValue) {
         debug_assert!(self.span_builder.attributes.is_some());
         if let Some(v) = self.span_builder.attributes.as_mut() {
@@ -326,7 +327,7 @@ impl<'a> SpanAttributeVisitor<'a> {
     }
 }
 
-impl<'a> field::Visit for SpanAttributeVisitor<'a> {
+impl field::Visit for SpanAttributeVisitor<'_> {
     /// Set attributes on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
@@ -677,13 +678,13 @@ pub(crate) fn configure(sampler: &SamplerOption) {
         },
     };
 
-    SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::Relaxed);
+    SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::SeqCst);
 }
 
 impl<S, T> OpenTelemetryLayer<S, T> {
     fn sample(&self) -> bool {
         let s: f64 = thread_rng().gen_range(0.0..=1.0);
-        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
+        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::SeqCst))
     }
 }
 
@@ -733,6 +734,7 @@ where
         if meta.name() != REQUEST_SPAN_NAME
             && meta.name() != ROUTER_SPAN_NAME
             && meta.name() != SUBSCRIPTION_EVENT_SPAN_NAME
+            && meta.name() != INVALIDATION_ENDPOINT_SPAN_NAME
         {
             return false;
         }

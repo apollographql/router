@@ -533,16 +533,15 @@ async fn errors_from_primary_on_deferred_responses() {
           computer(id: ID!): Computer
         }"#;
 
-    let subgraphs = MockedSubgraphs([
-        ("computers", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{__typename id}}"}},
-                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0" }}}}
-            )
-            .with_json(
-                serde_json::json!{{
-                    "query":"{computer(id:\"Computer1\"){id errorField}}",
-                }},
-                serde_json::json!{{
+    let subgraphs = MockedSubgraphs(
+        [(
+            "computers",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query":"{computer(id:\"Computer1\"){id errorField}}",
+                    }},
+                    serde_json::json! {{
                     "data": {
                         "computer": {
                             "id": "Computer1"
@@ -560,9 +559,126 @@ async fn errors_from_primary_on_deferred_responses() {
                             "path": ["computer","errorField"],
                         }
                     ]
-                    }}
-            ).build()),
-        ].into_iter().collect());
+                    }},
+                )
+                .build(),
+        )]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(defer_context())
+        .query(
+            r#"query {
+                computer(id: "Computer1") {
+                  id
+                  ...ComputerErrorField @defer
+                }
+              }
+              fragment ComputerErrorField on Computer {
+                errorField
+              }"#,
+        )
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+
+    insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+    insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+}
+
+#[tokio::test]
+async fn errors_with_invalid_paths_on_query_with_defer() {
+    let schema = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+          query: Query
+        }
+
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+        directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        scalar link__Import
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
+        type Computer
+          @join__type(graph: COMPUTERS)
+        {
+          id: ID!
+          errorField: String
+          nonNullErrorField: String!
+        }
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+          COMPUTERS @join__graph(name: "computers", url: "http://localhost:4001/")
+        }
+
+
+        type Query
+          @join__type(graph: COMPUTERS)
+        {
+          computer(id: ID!): Computer
+        }"#;
+
+    let subgraphs = MockedSubgraphs(
+        [(
+            "computers",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query":"{computer(id:\"Computer1\"){id errorField}}",
+                    }},
+                    serde_json::json! {{
+                    "data": {
+                        "computer": {
+                            "id": "Computer1"
+                        }
+                    },
+                    "errors": [
+                        {
+                            "message": "Subgraph error with invalid path",
+                            "path": ["invalid","path"],
+                        },
+                        {
+                            "message": "Subgraph error with partially valid path",
+                            "path": ["currentUser", "invalidSubpath"],
+                        },
+                        {
+                            "message": "Error field",
+                            "path": ["computer","errorField", "errorFieldSubpath"],
+                        }
+                    ]
+                    }},
+                )
+                .build(),
+        )]
+        .into_iter()
+        .collect(),
+    );
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -655,7 +771,13 @@ async fn deferred_fragment_bounds_nullability() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -737,7 +859,13 @@ async fn errors_on_incremental_responses() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -809,7 +937,13 @@ async fn root_typename_with_defer() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -867,7 +1001,18 @@ async fn subscription_with_callback() {
             ).build())
         ].into_iter().collect());
 
-    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
+    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "subscription": {
+            "enabled": true,
+            "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}
+        },
+        "supergraph": {
+            // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            "generate_query_fragments": false,
+        }
+    }))
+    .unwrap();
     configuration.notify = notify.clone();
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -942,7 +1087,23 @@ async fn subscription_callback_schema_reload() {
             ("orga", orga_subgraph)
         ].into_iter().collect());
 
-    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "headers": {"all": {"request": [{"propagate": {"named": "x-test"}}]}}, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
+    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "headers": {
+            "all": {
+                "request": [{"propagate": {"named": "x-test"}}]
+            }
+        },
+        "subscription": {
+            "enabled": true,
+            "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}
+        },
+        "supergraph": {
+            // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            "generate_query_fragments": false,
+        }
+    }))
+    .unwrap();
     configuration.notify = notify.clone();
     let configuration = Arc::new(configuration);
     let service = TestHarness::builder()
@@ -1011,7 +1172,19 @@ async fn subscription_with_callback_with_limit() {
             ).build())
         ].into_iter().collect());
 
-    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "max_opened_subscriptions": 1, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
+    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "subscription": {
+            "enabled": true,
+            "max_opened_subscriptions": 1,
+            "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}
+        },
+        "supergraph": {
+            // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            "generate_query_fragments": false,
+        }
+    }))
+    .unwrap();
     configuration.notify = notify.clone();
     let mut service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -1103,12 +1276,29 @@ async fn subscription_without_header() {
 async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{... on Query{currentUser{activeOrganization{__typename id}}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
-            ).build()),
+            serde_json::json!{{
+                "query": "
+                    { ..._generated_onQuery1_0 }
+
+                    fragment _generated_onQuery1_0 on Query {
+                      currentUser { activeOrganization { __typename id} }
+                    }
+                ",
+            }},
+            serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+        ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
+                "query": "
+                    query($representations: [_Any!]!) {
+                      _entities(representations: $representations) {
+                        ..._generated_onOrganization1_0
+                      }
+                    }
+                    fragment _generated_onOrganization1_0 on Organization {
+                      suborga { id name }
+                    }
+                ",
                 "variables": {
                     "representations":[{"__typename": "Organization", "id":"0"}]
                 }
@@ -1216,7 +1406,14 @@ async fn root_typename_with_defer_in_defer() {
             ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id name}}}}",
+                "query":"
+                    query($representations:[_Any!]!){
+                        _entities(representations:$representations) { ..._generated_onOrganization1_0 }
+                    }
+                    fragment _generated_onOrganization1_0 on Organization {
+                        suborga {__typename id name}
+                    }
+                ",
                 "variables": {
                     "representations":[{"__typename": "Organization", "id":"0"}]
                 }
@@ -1453,7 +1650,13 @@ async fn filter_nullified_deferred_responses() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(subgraphs)
@@ -1606,7 +1809,13 @@ async fn reconstruct_deferred_query_under_interface() {
     ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1775,7 +1984,13 @@ async fn interface_object_typename_rewrites() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -1913,7 +2128,13 @@ async fn interface_object_response_processing() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -2182,7 +2403,13 @@ async fn aliased_subgraph_data_rewrites_on_root_fetch() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -2322,7 +2549,13 @@ async fn aliased_subgraph_data_rewrites_on_non_root_fetch() {
         ].into_iter().collect());
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
         .unwrap()
         .schema(schema)
         .extra_plugin(subgraphs)
@@ -3223,113 +3456,6 @@ async fn interface_object_typename() {
 
     let mut stream = service.oneshot(request).await.unwrap();
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
-}
-
-#[tokio::test]
-async fn fragment_reuse() {
-    const SCHEMA: &str = r#"schema
-      @link(url: "https://specs.apollo.dev/link/v1.0")
-      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-    {
-      query: Query
-    }
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    directive @join__implements( graph: join__Graph!  interface: String!) repeatable on OBJECT | INTERFACE
-
-    scalar link__Import
-
-    enum link__Purpose {
-      SECURITY
-      EXECUTION
-    }
-    scalar join__FieldSet
-
-    enum join__Graph {
-      USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-      ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-    }
-
-    type Query
-      @join__type(graph: ORGA)
-      @join__type(graph: USER)
-    {
-      me: User @join__field(graph: USER)
-    }
-
-    type User
-      @join__type(graph: ORGA, key: "id")
-      @join__type(graph: USER, key: "id")
-    {
-      id: ID!
-      name: String
-      organizations: [Organization] @join__field(graph: ORGA)
-    }
-    type Organization
-      @join__type(graph: ORGA, key: "id")
-    {
-      id: ID
-      name: String @join__field(graph: ORGA)
-   }"#;
-
-    let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{
-                  "query":"query Query__user__0($a:Boolean!=true$b:Boolean!=true){me{name ...on User@include(if:$a){__typename id}...on User@include(if:$b){__typename id}}}",
-                  "operationName": "Query__user__0"
-                }},
-                serde_json::json!{{"data": {"me": { "name": "Ada", "__typename": "User", "id": "1" }}}}
-            ).build()),
-        ("orga", MockSubgraph::builder().with_json(
-          serde_json::json!{{
-            "query":"query Query__orga__1($representations:[_Any!]!$a:Boolean!=true$b:Boolean!=true){_entities(representations:$representations){...F@include(if:$a)...F@include(if:$b)}}fragment F on User{organizations{id name}}",
-            "operationName": "Query__orga__1",
-            "variables":{"representations":[{"__typename":"User","id":"1"}]}
-          }},
-          serde_json::json!{{"data": {"_entities": [{ "organizations": [{"id": "2", "name": "Apollo"}] }]}}}
-      ).build())
-    ].into_iter().collect());
-
-    let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
-        .unwrap()
-        .schema(SCHEMA)
-        .extra_plugin(subgraphs)
-        .build_supergraph()
-        .await
-        .unwrap();
-
-    let request = supergraph::Request::fake_builder()
-        .query(
-            r#"query Query($a: Boolean! = true, $b: Boolean! = true) {
-            me {
-              name
-              ...F @include(if: $a)
-              ...F @include(if: $b)
-            }
-          }
-          fragment F on User {
-            organizations {
-              id
-              name
-            }
-          }"#,
-        )
-        .build()
-        .unwrap();
-    let response = service
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
-    insta::assert_json_snapshot!(response);
 }
 
 #[tokio::test]

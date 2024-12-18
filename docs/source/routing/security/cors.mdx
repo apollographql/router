@@ -1,0 +1,142 @@
+---
+title: Configuring CORS
+subtitle: Control browser access to your router
+description: Manage browser access to your Apollo GraphOS Router or Apollo Router Core with CORS configuration options, including origin whitelisting, wildcard origins, and credential passing.
+---
+
+<Note> 
+
+**This article describes CORS configuration that's specific to the GraphOS Router and Apollo Router Core**. For a more general introduction to CORS and common considerations, see the following sections:
+
+* [Why use CORS?](/apollo-server/security/cors#why-use-cors)
+* [Choosing CORS options for your project](/apollo-server/security/cors#choosing-cors-options-for-your-project)
+
+</Note>
+
+By default, the router enables _only_ GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
+
+* Add the origins of those web applications to the router's list of allowed `origins`.
+    * Use this option if there is a known, finite list of web applications that consume your supergraph.
+* Add a regex that matches the origins of those web applications to the router's list of allowed `origins`.
+    * This option comes in handy if you want to match origins against a pattern, see the example below that matches subdomains of a specific namespace.
+* Enable the `allow_any_origin` option.
+    * Use this option if your supergraph is a public API with arbitrarily many web app consumers.
+    * With this option enabled, the router sends the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the `Access-Control-Allow-Origin` header. This enables _any_ website to initiate browser connections to it (but they can't provide cookies or other credentials).
+
+* If clients need to [authenticate their requests with cookies](#passing-credentials), you _must_ use either `origins`, `match_origins`, or the combination of both options. When using both options, note that `origins` is evaluated before `match_origins`.
+
+The following snippet includes an example of each option (use either `allow_any_origin`, or `origins` and/or `match_origins`):
+
+```yaml title="router.yaml"
+cors:
+
+  # Set to true to allow any origin
+  # (Defaults to false)
+  allow_any_origin: true
+
+  # List of accepted origins
+  # (Ignored if allow_any_origin is true)
+  # (Defaults to the GraphOS Studio url: `https://studio.apollographql.com`)
+  #
+  # An origin is a combination of scheme, hostname and port.
+  # It does not have any path section, so no trailing slash.
+  origins:
+    - https://www.your-app.example.com
+    - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
+  match_origins:
+    - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # any host that uses https and ends with .api.example.com
+```
+
+You can also disable CORS entirely by setting `origins` to an empty list:
+
+```yml title="router.yaml"
+cors:
+  origins: []
+```
+
+If your router serves exclusively _non_-browser-based clients, you probably don't need to modify the default CORS configuration.
+
+## Passing credentials
+
+If your router requires requests to [include a user's credentials](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#requests_with_credentials) (e.g., via cookies), you need to modify your CORS configuration to tell the browser those credentials are allowed.
+
+You can enable credentials with CORS by setting the [`Access-Control-Allow-Credentials`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Credentials) HTTP header to `true`.
+
+To allow browsers to pass credentials to the router, set `allow_credentials` to `true`, like so:
+
+```yaml {6} title="router.yaml"
+cors:
+  origins:
+    - https://www.your-app.example.com
+    - https://studio.apollographql.com
+  allow_credentials: true
+```
+
+<Tip> 
+
+**To support credentialed requests, your router's config file must specify individual `origins`**. If your router enables `allow_any_origin`, your browser will refuse to send credentials.
+
+</Tip>
+
+Additionally, you'll need to configure the router to forward the [`Cookie`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cookie) header to some (or all) of your subgraphs:
+
+```yaml title="router.yaml"
+headers:
+  all:
+    request:
+      - propagate:
+          named: cookie
+```
+
+For examples of sending cookies and authorization headers from Apollo Client, see [Authentication](/react/networking/authentication/).
+
+
+## All `cors` options
+
+The following snippet shows all CORS configuration defaults for the router:
+
+```yaml title="router.yaml"
+#
+# CORS (Cross Origin Resource Sharing)
+#
+cors:
+
+  # Set to true to allow any origin
+  allow_any_origin: false
+
+  # List of accepted origins
+  # (Ignored if allow_any_origin is set to true)
+  #
+  # An origin is a combination of scheme, hostname and port.
+  # It does not have any path section, so no trailing slash.
+  origins:
+    - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
+
+  # Set to true to add the `Access-Control-Allow-Credentials` header
+  allow_credentials: false
+
+  # The headers to allow.
+  # Not setting this mirrors a client's received `access-control-request-headers`
+  # This is equivalent to allowing any headers,
+  # except it will also work if allow_credentials is set to true
+  allow_headers: []
+
+  # Allowed request methods
+  methods:
+    - GET
+    - POST
+    - OPTIONS
+
+  # Which response headers are available to scripts running in the
+  # browser in response to a cross-origin request.
+  expose_headers: []
+
+  # Adds the Access-Control-Max-Age header
+  # Can be set to a duration in time units 
+  # If not set, the header is not included
+  max_age: 2h
+```
+
+## Response `Vary` header
+
+A plugin may set a response `Vary` header. If, after all plugins are processed, there is no response `Vary` header, then the router will add one with a value of "origin".

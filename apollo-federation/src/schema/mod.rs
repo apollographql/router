@@ -165,6 +165,7 @@ impl FederationSchema {
 
     /// Similar to `Self::validate` but returns `self` as part of the error should it be needed by
     /// the caller
+    #[allow(clippy::result_large_err)] // lint is accurate but this is not in a hot path
     pub(crate) fn validate_or_return_self(
         mut self,
     ) -> Result<ValidFederationSchema, (Self, FederationError)> {
@@ -229,6 +230,7 @@ impl ValidFederationSchema {
     }
 
     /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
+    #[allow(clippy::result_large_err)] // lint is accurate but this is not in a hot path
     fn new_assume_valid(
         mut schema: FederationSchema,
     ) -> Result<ValidFederationSchema, (FederationSchema, FederationError)> {
