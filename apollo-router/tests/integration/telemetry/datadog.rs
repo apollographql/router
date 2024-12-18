@@ -1038,7 +1038,7 @@ impl Verifier for DatadogTraceSpec {
             .collect::<HashSet<_>>();
         if actual_services != expected_services {
             return Err(BoxError::from(format!(
-                "incomplete traces, got {actual_services:?} expected {expected_services:?}"
+                "unexpected traces, got {actual_services:?} expected {expected_services:?}"
             )));
         }
         Ok(())
