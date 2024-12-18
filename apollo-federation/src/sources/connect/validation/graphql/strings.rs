@@ -133,18 +133,6 @@ impl<'schema> GraphQLString<'schema> {
         Some(start..end)
     }
 
-    pub(crate) fn slice(mut self, range: Range<usize>) -> Self {
-        let data = match &mut self {
-            Self::Standard { data, .. } => data,
-            Self::Block { data, .. } => data,
-        };
-        data.raw_offset += range.start;
-        if let Some(new_slice) = data.raw_string.get(range) {
-            data.raw_string = new_slice;
-        }
-        self
-    }
-
     /// Given an offset into the compiled string, compute the true offset in the raw source string.
     /// See: https://spec.graphql.org/October2021/#sec-String-Value
     fn true_offset(&self, input_offset: usize) -> Option<usize> {

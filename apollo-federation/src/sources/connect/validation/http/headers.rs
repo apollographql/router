@@ -146,7 +146,8 @@ fn validate_value(
             variable_resolver,
             coordinate,
             expression,
-            source_string.slice(location.clone()),
+            source_string,
+            location.start,
         )?;
     }
 

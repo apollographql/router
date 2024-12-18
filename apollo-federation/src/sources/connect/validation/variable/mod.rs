@@ -46,6 +46,7 @@ impl<'a> VariableResolver<'a> {
         &self,
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
+        location_offset: usize,
     ) -> Result<(), Message> {
         if !self
             .expression_context
@@ -59,11 +60,14 @@ impl<'a> VariableResolver<'a> {
                     namespace = reference.namespace.namespace.as_str(),
                     available = self.expression_context.namespaces_joined(),
                 ),
-                locations: expression.line_col_for_subslice(reference.namespace.location.start..reference.namespace.location.end, self.schema).into_iter().collect(),
+                locations: expression.line_col_for_subslice(
+                    reference.namespace.location.start + location_offset..reference.namespace.location.end + location_offset,
+                    self.schema
+                ).into_iter().collect(),
             });
         }
         if let Some(resolver) = self.resolvers.get(&reference.namespace.namespace) {
-            resolver.resolve(reference, expression, self.schema)?;
+            resolver.resolve(reference, expression, self.schema, location_offset)?;
         }
         Ok(())
     }

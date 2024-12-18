@@ -41,7 +41,8 @@ pub(crate) fn validate_template(
                 &variable_resolver,
                 coordinate,
                 &expression.expression,
-                str_value.slice(expression.location.clone()),
+                str_value,
+                expression.location.start,
             )
             .err(),
         );

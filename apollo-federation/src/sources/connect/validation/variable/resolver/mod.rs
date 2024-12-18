@@ -22,6 +22,7 @@ pub(crate) trait NamespaceResolver {
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
         schema: &SchemaInfo,
+        location_offset: usize,
     ) -> Result<(), Message>;
 }
 
@@ -51,6 +52,7 @@ fn resolve_path(
     expression: GraphQLString,
     field_type: &Type,
     field: &Component<FieldDefinition>,
+    location_offset: usize,
 ) -> Result<(), Message> {
     let mut variable_type = field_type.clone();
     for nested_field_name in reference.path.clone().iter().skip(1) {
@@ -83,7 +85,10 @@ fn resolve_path(
                         message: format!(
                             "`{variable_type}` does not have a field named `{nested_field_name}`."
                         ),
-                        locations: expression.line_col_for_subslice(path_component_range.start..path_component_range.end, schema).into_iter().collect(),
+                        locations: expression.line_col_for_subslice(
+                            path_component_range.start+location_offset..path_component_range.end+location_offset,
+                            schema
+                        ).into_iter().collect(),
                     })
             })?.clone();
         if parent_is_nullable && variable_type.is_non_null() {

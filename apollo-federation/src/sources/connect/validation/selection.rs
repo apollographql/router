@@ -49,6 +49,7 @@ pub(super) fn validate_selection(
         selection_arg.coordinate,
         &json_selection,
         selection_arg.value,
+        0,
     )?;
 
     let field = coordinate.field_coordinate.field;
@@ -129,6 +130,7 @@ pub(super) fn validate_body_selection(
         coordinate,
         &selection,
         selection_str,
+        0,
     )
 }
 
@@ -138,6 +140,7 @@ pub(super) fn validate_selection_variables(
     coordinate: impl Display,
     selection: &JSONSelection,
     selection_str: GraphQLString,
+    location_offset: usize,
 ) -> Result<(), Message> {
     for reference in selection
         .external_var_paths()
@@ -145,7 +148,7 @@ pub(super) fn validate_selection_variables(
         .flat_map(|var_path| var_path.variable_reference())
     {
         variable_resolver
-            .resolve(&reference, selection_str)
+            .resolve(&reference, selection_str, location_offset)
             .map_err(|mut err| {
                 err.message = format!("In {coordinate}: {message}", message = err.message);
                 err
