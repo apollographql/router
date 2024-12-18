@@ -42,8 +42,8 @@ telemetry:
             request_header: "x-my-header"
             condition:
               eq:
-                - request_header: "head"
-                - "test"
+                - request_header: "x-my-header-condition"
+                - "condition"
           studio.operation.id:
             studio_operation_id: true
       supergraph:
