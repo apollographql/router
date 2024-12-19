@@ -123,7 +123,7 @@ impl ResourceDetector for ConfigResourceDetector {
             // Yaml resources
             if let Some(AttributeValue::String(name)) = self
                 .resources
-                .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.to_string())
+                .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
             {
                 Some(name.clone())
             } else {

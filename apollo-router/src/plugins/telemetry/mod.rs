@@ -1007,12 +1007,10 @@ impl PluginPrivate for Telemetry {
                 .take()
                 .expect("must have new tracer_provider");
 
-            let tracer = tracer_provider.versioned_tracer(
-                GLOBAL_TRACER_NAME,
-                Some(env!("CARGO_PKG_VERSION")),
-                None::<String>,
-                None,
-            );
+            let tracer = tracer_provider
+                .tracer_builder(GLOBAL_TRACER_NAME)
+                .with_version(env!("CARGO_PKG_VERSION"))
+                .build();
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);

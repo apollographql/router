@@ -243,7 +243,6 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 mod test {
     use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::Context;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
     use opentelemetry_sdk::runtime;
@@ -259,7 +258,6 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
-        let cx = Context::default();
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations")
@@ -336,7 +334,6 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
-        let cx = Context::default();
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations")
@@ -389,7 +386,6 @@ mod test {
         meter_provider: T,
     ) {
         let meter_provider = FilterMeterProvider::public(meter_provider);
-        let cx = Context::default();
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.config")

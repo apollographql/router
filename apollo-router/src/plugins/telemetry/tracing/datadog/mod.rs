@@ -17,7 +17,6 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
-use opentelemetry_sdk;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;

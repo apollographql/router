@@ -62,12 +62,9 @@ pub(crate) fn metrics_layer() -> &'static MetricsLayer {
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::TracerProvider::default().versioned_tracer(
-            "noop",
-            None::<String>,
-            None::<String>,
-            None,
-        ),
+        opentelemetry_sdk::trace::TracerProvider::default()
+            .tracer_builder("noop")
+            .build(),
     );
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 

@@ -660,7 +660,7 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
 
 impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
     fn from(config: &TracingCommon) -> Self {
-        let mut common = opentelemetry_sdk::trace::config();
+        let mut common = opentelemetry_sdk::trace::Config::default();
 
         let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {

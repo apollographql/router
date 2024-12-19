@@ -488,12 +488,10 @@ mod test {
     use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::metrics::Result;
-    use opentelemetry::Context;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::data::Temporality;
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
-    use opentelemetry_sdk::metrics::reader::MetricProducer;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use opentelemetry_sdk::metrics::Aggregation;

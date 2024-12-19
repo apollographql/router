@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http;
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
@@ -18,7 +17,6 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;
-use opentelemetry_sdk;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
@@ -273,12 +271,11 @@ impl DatadogPipelineBuilder {
             opentelemetry_sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
-        let tracer = provider.versioned_tracer(
-            "opentelemetry-datadog",
-            Some(env!("CARGO_PKG_VERSION")),
-            Some(semcov::SCHEMA_URL),
-            None,
-        );
+        let tracer = provider
+            .tracer_builder("opentelemetry-datadog")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .with_schema_url(semcov::SCHEMA_URL)
+            .build();
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
@@ -292,12 +289,11 @@ impl DatadogPipelineBuilder {
             .with_batch_exporter(exporter, runtime);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
-        let tracer = provider.versioned_tracer(
-            "opentelemetry-datadog",
-            Some(env!("CARGO_PKG_VERSION")),
-            Some(semcov::SCHEMA_URL),
-            None,
-        );
+        let tracer = provider
+            .tracer_builder("opentelemetry-datadog")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .with_schema_url(semcov::SCHEMA_URL)
+            .build();
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }

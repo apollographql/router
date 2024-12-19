@@ -40,7 +40,6 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::metrics::data::Sum;
     use opentelemetry_sdk::metrics::data::Temporality;
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
-    use opentelemetry_sdk::metrics::reader::MetricProducer;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use opentelemetry_sdk::metrics::Aggregation;
@@ -308,7 +307,7 @@ pub(crate) mod test_utils {
                 .collect()
         }
 
-        fn equal_attributes(attrs1: &AttributeSet, attrs2: &Vec<KeyValue>) -> bool {
+        fn equal_attributes(attrs1: &AttributeSet, attrs2: &[KeyValue]) -> bool {
             attrs1
                 .iter()
                 .zip(attrs2.iter())

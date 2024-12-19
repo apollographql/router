@@ -2,7 +2,6 @@
 use std::sync::LazyLock;
 
 use http::Uri;
-use opentelemetry_sdk;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;

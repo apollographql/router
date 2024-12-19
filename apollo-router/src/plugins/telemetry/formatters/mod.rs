@@ -257,21 +257,17 @@ pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
                     }
                     opentelemetry::Value::Array(value) => match value {
                         opentelemetry::Array::Bool(array) => serde_json::Value::Array(
-                            array
-                                .into_iter()
-                                .copied()
-                                .map(serde_json::Value::Bool)
-                                .collect(),
+                            array.iter().copied().map(serde_json::Value::Bool).collect(),
                         ),
                         opentelemetry::Array::I64(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
+                                .iter()
                                 .map(|value| serde_json::Value::Number(Number::from(*value)))
                                 .collect(),
                         ),
                         opentelemetry::Array::F64(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
+                                .iter()
                                 .map(|value| {
                                     serde_json::Value::Number(
                                         Number::from_f64(*value).unwrap_or(Number::from(0)),
@@ -281,7 +277,7 @@ pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
                         ),
                         opentelemetry::Array::String(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
+                                .iter()
                                 .map(|s| serde_json::Value::String(s.to_string()))
                                 .collect(),
                         ),

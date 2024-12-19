@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use http;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;

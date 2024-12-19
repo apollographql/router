@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 
-use http;
 use http::uri;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::{self};
@@ -192,7 +191,6 @@ impl ApiVersion {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::borrow::Cow;
     use std::time::Duration;
     use std::time::SystemTime;
 
@@ -208,7 +206,6 @@ pub(crate) mod tests {
     use opentelemetry_sdk::trace::SpanEvents;
     use opentelemetry_sdk::trace::SpanLinks;
     use opentelemetry_sdk::InstrumentationLibrary;
-    use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{self};
 
     use super::*;
@@ -229,16 +226,11 @@ pub(crate) mod tests {
         let start_time = SystemTime::UNIX_EPOCH;
         let end_time = start_time.checked_add(Duration::from_secs(1)).unwrap();
 
-        let mut attributes = Vec::with_capacity(1);
-        attributes.push(KeyValue::new("span.type", "web"));
-        // TODO: Should the resource be pushed onto attributes?
-        let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
-        let instrumentation_lib = InstrumentationLibrary::new(
-            "component",
-            None::<&'static str>,
-            None::<&'static str>,
-            None,
-        );
+        let attributes = vec![
+            KeyValue::new("span.type", "web"),
+            KeyValue::new("host.name", "test"),
+        ];
+        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
 
         trace::SpanData {
             span_context,
@@ -251,8 +243,6 @@ pub(crate) mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Status::Ok,
-            // TODO: Where was this used?
-            // resource: Cow::Owned(resource),
             instrumentation_lib,
             dropped_attributes_count: 0,
         }
@@ -275,8 +265,8 @@ pub(crate) mod tests {
 
         assert_eq!(encoded.as_str(), "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
         50qHJlc291cmNlqHJlc291cmNlqHRyYWNlX2lkzwAAAAAAAAAHp3NwYW5faWTPAAAAAAAAAGOpcGFyZW50X2lkzwAAAA\
-        AAAAABpXN0YXJ00wAAAAAAAAAAqGR1cmF0aW9u0wAAAAA7msoApWVycm9y0gAAAACkbWV0YYGpc3Bhbi50eXBlo3dlYq\
-        dtZXRyaWNzgbVfc2FtcGxpbmdfcHJpb3JpdHlfdjHLAAAAAAAAAAA=");
+        AAAAABpXN0YXJ00wAAAAAAAAAAqGR1cmF0aW9u0wAAAAA7msoApWVycm9y0gAAAACkbWV0YYKpc3Bhbi50eXBlo3dlYq\
+        lob3N0Lm5hbWWkdGVzdKdtZXRyaWNzgbVfc2FtcGxpbmdfcHJpb3JpdHlfdjHLAAAAAAAAAAA=");
 
         Ok(())
     }

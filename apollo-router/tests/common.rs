@@ -37,9 +37,9 @@ use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
-use opentelemetry_sdk::trace::config;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::TracerProvider;
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
@@ -213,7 +213,7 @@ pub enum Telemetry {
 
 impl Telemetry {
     fn tracer_provider(&self, service_name: &str) -> TracerProvider {
-        let config = config().with_resource(Resource::new(vec![KeyValue::new(
+        let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
             SERVICE_NAME,
             service_name.to_string(),
         )]));

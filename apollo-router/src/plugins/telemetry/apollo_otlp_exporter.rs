@@ -117,16 +117,13 @@ impl ApolloOtlpExporter {
                 KeyValue::new("apollo.client.host", hostname()?),
                 KeyValue::new("apollo.client.uname", get_uname()?),
             ]),
-            intrumentation_library: InstrumentationLibrary::new(
-                GLOBAL_TRACER_NAME,
-                Some(format!(
+            intrumentation_library: InstrumentationLibrary::builder(GLOBAL_TRACER_NAME)
+                .with_version(format!(
                     "{}@{}",
                     std::env!("CARGO_PKG_NAME"),
                     std::env!("CARGO_PKG_VERSION")
-                )),
-                Option::<String>::None,
-                None,
-            ),
+                ))
+                .build(),
             otlp_exporter,
             errors_configuration: errors_configuration.clone(),
         })
@@ -145,8 +142,7 @@ impl ApolloOtlpExporter {
                 SUPERGRAPH_SPAN_NAME => {
                     if span
                         .attributes
-                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
-                        .is_some()
+                        .contains_key(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
                     {
                         export_spans.push(self.base_prepare_span(span));
                         // Mirrors the existing implementation in apollo_telemetry
@@ -246,7 +242,7 @@ impl ApolloOtlpExporter {
             links: SpanLinks::default(),
             status,
             instrumentation_lib: self.intrumentation_library.clone(),
-            dropped_attributes_count: 0, // TODO: LightSpanData to track this
+            dropped_attributes_count: span.droppped_attribute_count,
         }
     }
 

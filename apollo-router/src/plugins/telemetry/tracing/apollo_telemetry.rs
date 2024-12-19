@@ -665,7 +665,7 @@ impl Exporter {
                         .collect()
                 }
             }
-            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => {
+            _ if span.attributes.contains_key(&APOLLO_PRIVATE_REQUEST) => {
                 if !self.use_legacy_request_span {
                     child_nodes.push(TreeData::Router {
                         http: Box::new(extract_http_data(span)),
@@ -1050,8 +1050,7 @@ impl SpanExporter for Exporter {
                 || span
                     .attributes
                     .iter()
-                    .find(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
-                    .is_some()
+                    .any(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
             {
                 let root_span: LightSpanData =
                     LightSpanData::from_span_data(span, &self.include_attr_names);
