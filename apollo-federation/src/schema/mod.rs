@@ -14,6 +14,8 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::spec::Identity;
+use crate::link::spec::Version;
 use crate::link::LinksMetadata;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -31,6 +33,7 @@ pub(crate) mod definitions;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
+pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
 
 fn compute_subgraph_metadata(
@@ -213,6 +216,17 @@ impl FederationSchema {
             ))),
             None => Ok(None),
         }
+    }
+
+    pub(crate) fn is_fed_2(&self) -> bool {
+        self.metadata()
+            .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
+            .is_some_and(|federation| {
+                federation
+                    .url
+                    .version
+                    .satisfies(&Version { major: 2, minor: 0 })
+            })
     }
 }
 
