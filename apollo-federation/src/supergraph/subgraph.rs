@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::mem;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
