@@ -31,21 +31,21 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .subgraphs
-        .iter()
-        .all(|(_name, subgraph)| subgraph.schema.is_fed_2())
+        .values()
+        .all(|subgraph| subgraph.schema.is_fed_2())
     {
         return Ok(());
     }
 
     let mut object_type_map: HashMap<Name, HashMap<String, TypeInfo>> = Default::default();
-    for (_, subgraph) in subgraphs.subgraphs.iter() {
+    for subgraph in subgraphs.subgraphs.values() {
         if let Some(subgraph_metadata) = subgraph.schema.subgraph_metadata() {
             for pos in subgraph.schema.get_types() {
                 match pos {
                     TypeDefinitionPosition::Object(_) | TypeDefinitionPosition::Interface(_) => {
                         object_type_map
                             .entry(pos.type_name().clone())
-                            .or_insert_with(HashMap::default)
+                            .or_default()
                             .insert(
                                 subgraph.name.clone(),
                                 TypeInfo {

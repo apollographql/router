@@ -221,7 +221,7 @@ impl FederationSchema {
     pub(crate) fn is_fed_2(&self) -> bool {
         self.metadata()
             .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
-            .map_or(false, |federation| {
+            .is_some_and(|federation| {
                 federation
                     .url
                     .version
