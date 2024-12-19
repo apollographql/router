@@ -26,7 +26,6 @@ use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
@@ -37,7 +36,9 @@ use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::config;
+use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_sdk::trace::TracerProvider;
 use opentelemetry_sdk::Resource;
@@ -233,7 +234,11 @@ impl Telemetry {
                         .expect("otlp pipeline failed"),
                         opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -247,7 +252,11 @@ impl Telemetry {
                             .expect("datadog pipeline failed"),
                         opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -261,7 +270,11 @@ impl Telemetry {
                             .expect("zipkin pipeline failed"),
                         opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),

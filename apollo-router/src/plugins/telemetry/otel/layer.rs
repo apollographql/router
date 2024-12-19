@@ -1405,7 +1405,7 @@ mod tests {
         let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
         let keys = attributes
             .iter()
-            .map(|(key, _)| key.as_str())
+            .map(|kv| kv.key.as_str())
             .collect::<Vec<&str>>();
         assert!(keys.contains(&"idle_ns"));
         assert!(keys.contains(&"busy_ns"));
