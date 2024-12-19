@@ -73,6 +73,7 @@ Ok(
                                                                         range: Some(
                                                                             10..15,
                                                                         ),
+                                                                        output_shape: None,
                                                                     },
                                                                 ),
                                                             ),
@@ -80,6 +81,7 @@ Ok(
                                                         range: Some(
                                                             6..17,
                                                         ),
+                                                        output_shape: None,
                                                     },
                                                 ),
                                                 range: Some(

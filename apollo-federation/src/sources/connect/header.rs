@@ -273,6 +273,7 @@ mod test_header_value_parse {
                                                                                     range: Some(
                                                                                         18..27,
                                                                                     ),
+                                                                                    output_shape: None,
                                                                                 },
                                                                             ),
                                                                         ),
@@ -280,6 +281,7 @@ mod test_header_value_parse {
                                                                     range: Some(
                                                                         12..29,
                                                                     ),
+                                                                    output_shape: None,
                                                                 },
                                                             ),
                                                             range: Some(

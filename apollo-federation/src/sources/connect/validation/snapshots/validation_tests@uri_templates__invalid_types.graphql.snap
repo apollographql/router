@@ -5,8 +5,31 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
 ---
 [
     Message {
-        code: GraphQLError,
-        message: "Variables used in connector (`$this.anObject`) for `This` cannot be used to create a valid `@key` directive.",
-        locations: [],
+        code: InvalidUrl,
+        message: "URIs can't contain arrays",
+        locations: [
+            10:41..10:50,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "URI expressions can't resolve to objects, found `Input`",
+        locations: [
+            16:41..16:50,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "URIs can't contain arrays",
+        locations: [
+            25:41..25:54,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "URI expressions can't resolve to objects, found `Object`",
+        locations: [
+            31:45..31:59,
+        ],
     },
 ]

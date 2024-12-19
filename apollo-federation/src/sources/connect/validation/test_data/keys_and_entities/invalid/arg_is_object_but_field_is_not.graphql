@@ -5,7 +5,7 @@ extend schema
 type Query {
   product(id: ProductInput!): Product
     @connect(
-      http: { GET: "http://myapi/products/{$args.id}" }
+      http: { GET: "http://myapi/products/{$args.id.id}" }
       selection: "id name"
       entity: true
     )

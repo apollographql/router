@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/string_template.rs
-expression: "StringTemplate::<String>::parse(\"const{$config.one { two { three } }}another-const\",\n        0).unwrap()"
+expression: "StringTemplate::<String>::parse(\"const{$config.one { two { three } }}another-const\",\n0).unwrap()"
 ---
 StringTemplate {
     parts: [
@@ -65,6 +65,7 @@ StringTemplate {
                                                                     range: Some(
                                                                         18..27,
                                                                     ),
+                                                                    output_shape: None,
                                                                 },
                                                             ),
                                                         ),
@@ -72,6 +73,7 @@ StringTemplate {
                                                     range: Some(
                                                         12..29,
                                                     ),
+                                                    output_shape: None,
                                                 },
                                             ),
                                             range: Some(
