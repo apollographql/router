@@ -110,14 +110,16 @@ impl BatchQuery {
             .await
             .as_ref()
             .ok_or(SubgraphBatchingError::SenderUnavailable)?
-            .send(BatchHandlerMessage::Progress {
-                index: self.index,
-                client_factory,
-                request,
-                gql_request,
-                response_sender: tx,
-                span_context: Span::current().context(),
-            })
+            .send(BatchHandlerMessage::Progress(Box::new(
+                BatchHandlerMessageProgress {
+                    index: self.index,
+                    client_factory,
+                    request,
+                    gql_request,
+                    response_sender: tx,
+                    span_context: Span::current().context(),
+                },
+            )))
             .await?;
 
         if !self.finished() {
@@ -163,17 +165,12 @@ impl BatchQuery {
 // #[derive(Debug)]
 enum BatchHandlerMessage {
     /// Cancel one of the batch items
-    Cancel { index: usize, reason: String },
-
-    /// A query has reached the subgraph service and we should update its state
-    Progress {
+    Cancel {
         index: usize,
-        client_factory: HttpClientServiceFactory,
-        request: SubgraphRequest,
-        gql_request: graphql::Request,
-        response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
-        span_context: otelContext,
+        reason: String,
     },
+
+    Progress(Box<BatchHandlerMessageProgress>),
 
     /// A query has passed query planning and knows how many fetches are needed
     /// to complete.
@@ -181,6 +178,16 @@ enum BatchHandlerMessage {
         index: usize,
         query_hashes: Vec<Arc<QueryHash>>,
     },
+}
+
+/// A query has reached the subgraph service and we should update its state
+struct BatchHandlerMessageProgress {
+    index: usize,
+    client_factory: HttpClientServiceFactory,
+    request: SubgraphRequest,
+    gql_request: graphql::Request,
+    response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+    span_context: otelContext,
 }
 
 /// Collection of info needed to resolve a batch query
@@ -306,15 +313,16 @@ impl Batch {
                         );
                     }
 
-                    BatchHandlerMessage::Progress {
-                        index,
-                        client_factory,
-                        request,
-                        gql_request,
-                        response_sender,
-                        span_context,
-                    } => {
+                    BatchHandlerMessage::Progress(progress) => {
                         // Progress the index
+                        let BatchHandlerMessageProgress {
+                            index,
+                            client_factory,
+                            request,
+                            gql_request,
+                            response_sender,
+                            span_context,
+                        } = *progress;
 
                         tracing::debug!("Progress index: {index}");
 
@@ -741,7 +749,7 @@ mod tests {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -757,7 +765,7 @@ mod tests {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    "query op{index}__{}__0 {{ entry{}(count: {count}) {{ index }} }}",
                     subgraph.to_lowercase(),
                     subgraph
                 ))

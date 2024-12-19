@@ -921,17 +921,6 @@ impl FragmentSpreadSelection {
         })
     }
 
-    pub(crate) fn from_fragment(
-        fragment: &Node<Fragment>,
-        directives: &executable::DirectiveList,
-    ) -> Self {
-        let spread = FragmentSpread::from_fragment(fragment, directives);
-        Self {
-            spread,
-            selection_set: fragment.selection_set.clone(),
-        }
-    }
-
     /// Creates a fragment spread selection (in an optimized operation).
     /// - `named_fragments`: Named fragment definitions that are rebased for the element's schema.
     pub(crate) fn new(
@@ -1667,7 +1656,7 @@ impl SelectionSet {
     /// This tries to be smart about including or excluding the whole selection set.
     /// - If all selections have the same condition, returns that condition.
     /// - If selections in the set have different conditions, the selection set must always be
-    /// included, so the individual selections can be evaluated.
+    ///   included, so the individual selections can be evaluated.
     ///
     /// # Errors
     /// Returns an error if the selection set contains a fragment spread, or if any of the
@@ -1870,9 +1859,9 @@ impl SelectionSet {
     ///
     /// __typename is added to the sub selection set of a given selection in following conditions
     /// * if a given selection is a field, we add a __typename sub selection if its selection set type
-    /// position is an abstract type
+    ///   position is an abstract type
     /// * if a given selection is a fragment, we only add __typename sub selection if fragment specifies
-    /// type condition and that type condition is an abstract type.
+    ///   type condition and that type condition is an abstract type.
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractTypeDefinitionPosition>,
@@ -2171,15 +2160,6 @@ impl SelectionSet {
         })
     }
 
-    /// In a normalized selection set containing only fields and inline fragments,
-    /// iterate over all the fields that may be selected.
-    ///
-    /// # Preconditions
-    /// The selection set must not contain named fragment spreads.
-    pub(crate) fn field_selections(&self) -> FieldSelectionsIter<'_> {
-        FieldSelectionsIter::new(self.selections.values())
-    }
-
     /// # Preconditions
     /// The selection set must not contain named fragment spreads.
     fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
@@ -2317,36 +2297,6 @@ impl<'a> IntoIterator for &'a SelectionSet {
 
     fn into_iter(self) -> Self::IntoIter {
         self.selections.values()
-    }
-}
-
-pub(crate) struct FieldSelectionsIter<'sel> {
-    stack: Vec<selection_map::Values<'sel>>,
-}
-
-impl<'sel> FieldSelectionsIter<'sel> {
-    fn new(iter: selection_map::Values<'sel>) -> Self {
-        Self { stack: vec![iter] }
-    }
-}
-
-impl<'sel> Iterator for FieldSelectionsIter<'sel> {
-    type Item = &'sel Arc<FieldSelection>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.stack.last_mut()?.next() {
-            None if self.stack.len() == 1 => None,
-            None => {
-                self.stack.pop();
-                self.next()
-            }
-            Some(Selection::Field(field)) => Some(field),
-            Some(Selection::InlineFragment(frag)) => {
-                self.stack.push(frag.selection_set.selections.values());
-                self.next()
-            }
-            Some(Selection::FragmentSpread(_frag)) => unreachable!(),
-        }
     }
 }
 
@@ -2625,16 +2575,6 @@ impl Field {
     pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
         self.field_position.parent()
     }
-
-    pub(crate) fn types_can_be_merged(&self, other: &Self) -> Result<bool, FederationError> {
-        let self_definition = self.field_position.get(self.schema().schema())?;
-        let other_definition = other.field_position.get(self.schema().schema())?;
-        types_can_be_merged(
-            &self_definition.ty,
-            &other_definition.ty,
-            self.schema().schema(),
-        )
-    }
 }
 
 impl InlineFragmentSelection {
@@ -2732,23 +2672,6 @@ impl InlineFragmentSelection {
         ))
     }
 
-    /// Construct a new InlineFragmentSelection out of a selection set.
-    /// - The new type condition will be the same as the selection set's type.
-    pub(crate) fn from_selection_set(
-        parent_type_position: CompositeTypeDefinitionPosition,
-        selection_set: SelectionSet,
-        directives: DirectiveList,
-    ) -> Self {
-        let inline_fragment_data = InlineFragment {
-            schema: selection_set.schema.clone(),
-            parent_type_position,
-            type_condition_position: selection_set.type_position.clone().into(),
-            directives,
-            selection_id: SelectionId::new(),
-        };
-        InlineFragmentSelection::new(inline_fragment_data, selection_set)
-    }
-
     pub(crate) fn casted_type(&self) -> &CompositeTypeDefinitionPosition {
         self.inline_fragment
             .type_condition_position
@@ -2811,29 +2734,8 @@ impl NamedFragments {
         NamedFragments::initialize_in_dependency_order(fragments, schema)
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.fragments.len() == 0
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.fragments.len()
-    }
-
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Node<Fragment>> {
         self.fragments.values()
-    }
-
-    pub(crate) fn iter_rev(&self) -> impl Iterator<Item = &Node<Fragment>> {
-        self.fragments.values().rev()
-    }
-
-    pub(crate) fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, Name, Node<Fragment>> {
-        Arc::make_mut(&mut self.fragments).iter_mut()
-    }
-
-    // Calls `retain` on the underlying `IndexMap`.
-    pub(crate) fn retain(&mut self, mut predicate: impl FnMut(&Name, &Node<Fragment>) -> bool) {
-        Arc::make_mut(&mut self.fragments).retain(|name, fragment| predicate(name, fragment));
     }
 
     fn insert(&mut self, fragment: Fragment) {
@@ -2929,32 +2831,6 @@ impl NamedFragments {
             }
         })
     }
-
-    /// When we rebase named fragments on a subgraph schema, only a subset of what the fragment handles may belong
-    /// to that particular subgraph. And there are a few sub-cases where that subset is such that we basically need or
-    /// want to consider to ignore the fragment for that subgraph, and that is when:
-    /// 1. the subset that apply is actually empty. The fragment wouldn't be valid in this case anyway.
-    /// 2. the subset is a single leaf field: in that case, using the one field directly is just shorter than using
-    ///    the fragment, so we consider the fragment don't really apply to that subgraph. Technically, using the
-    ///    fragment could still be of value if the fragment name is a lot smaller than the one field name, but it's
-    ///    enough of a niche case that we ignore it. Note in particular that one sub-case of this rule that is likely
-    ///    to be common is when the subset ends up being just `__typename`: this would basically mean the fragment
-    ///    don't really apply to the subgraph, and that this will ensure this is the case.
-    pub(crate) fn is_selection_set_worth_using(selection_set: &SelectionSet) -> bool {
-        if selection_set.selections.len() == 0 {
-            return false;
-        }
-        if selection_set.selections.len() == 1 {
-            // true if NOT field selection OR non-leaf field
-            return if let Some(Selection::Field(field_selection)) = selection_set.selections.first()
-            {
-                field_selection.selection_set.is_some()
-            } else {
-                true
-            };
-        }
-        true
-    }
 }
 
 // @defer handling: removing and normalization
@@ -3020,47 +2896,21 @@ impl DeferNormalizer {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum DeferFilter<'a> {
-    All,
-    Labels(&'a IndexSet<String>),
-}
-
-impl DeferFilter<'_> {
-    fn remove_defer(&self, directive_list: &mut DirectiveList, schema: &apollo_compiler::Schema) {
-        match self {
-            Self::All => {
-                directive_list.remove_one(&DEFER_DIRECTIVE_NAME);
-            }
-            Self::Labels(set) => {
-                let label = directive_list
-                    .get(&DEFER_DIRECTIVE_NAME)
-                    .and_then(|directive| {
-                        directive
-                            .argument_by_name(&DEFER_LABEL_ARGUMENT_NAME, schema)
-                            .ok()
-                    })
-                    .and_then(|arg| arg.as_str());
-                if label.is_some_and(|label| set.contains(label)) {
-                    directive_list.remove_one(&DEFER_DIRECTIVE_NAME);
-                }
-            }
-        }
-    }
-}
-
 impl Fragment {
     /// Returns true if the fragment's selection set contains the @defer directive.
     fn has_defer(&self) -> bool {
         self.selection_set.has_defer()
     }
 
-    fn without_defer(
+    /// Create a new fragment without @defer directive applications that have a matching label.
+    fn reduce_defer(
         &self,
-        filter: DeferFilter<'_>,
+        defer_labels: &IndexSet<String>,
         named_fragments: &NamedFragments,
     ) -> Result<Self, FederationError> {
-        let selection_set = self.selection_set.without_defer(filter, named_fragments)?;
+        let selection_set = self
+            .selection_set
+            .reduce_defer(defer_labels, named_fragments)?;
         Ok(Fragment {
             schema: self.schema.clone(),
             name: self.name.clone(),
@@ -3072,8 +2922,8 @@ impl Fragment {
 }
 
 impl NamedFragments {
-    /// Creates new fragment definitions with the @defer directive removed.
-    fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
+    /// Creates new fragment definitions by removing all @defer directives that had a matching label.
+    fn reduce_defer(&self, defer_labels: &IndexSet<String>) -> Result<Self, FederationError> {
         let mut new_fragments = NamedFragments {
             fragments: Default::default(),
         };
@@ -3084,7 +2934,7 @@ impl NamedFragments {
         // if a fragment doesn't actually use @defer itself, to make sure that the `.selection_set`
         // values on each selection are up to date.
         for fragment in self.iter() {
-            let fragment = fragment.without_defer(filter, &new_fragments)?;
+            let fragment = fragment.reduce_defer(defer_labels, &new_fragments)?;
             new_fragments.insert(fragment);
         }
         Ok(new_fragments)
@@ -3105,10 +2955,11 @@ impl FragmentSpread {
         self.directives.has(&DEFER_DIRECTIVE_NAME)
     }
 
-    fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
-        let mut without_defer = self.clone();
-        filter.remove_defer(&mut without_defer.directives, without_defer.schema.schema());
-        Ok(without_defer)
+    /// Create a new fragment spread without @defer directive applications that have a matching label.
+    fn reduce_defer(&self, defer_labels: &IndexSet<String>) -> Result<Self, FederationError> {
+        let mut reduce_defer = self.clone();
+        reduce_defer.directives.remove_defer(defer_labels);
+        Ok(reduce_defer)
     }
 }
 
@@ -3124,10 +2975,11 @@ impl InlineFragment {
         self.directives.has(&DEFER_DIRECTIVE_NAME)
     }
 
-    fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
-        let mut without_defer = self.clone();
-        filter.remove_defer(&mut without_defer.directives, without_defer.schema.schema());
-        Ok(without_defer)
+    /// Create a new inline fragment without @defer directive applications that have a matching label.
+    fn reduce_defer(&self, defer_labels: &IndexSet<String>) -> Result<Self, FederationError> {
+        let mut reduce_defer = self.clone();
+        reduce_defer.directives.remove_defer(defer_labels);
+        Ok(reduce_defer)
     }
 }
 
@@ -3222,9 +3074,10 @@ impl Selection {
         }
     }
 
-    fn without_defer(
+    /// Create a new selection without @defer directive applications that have a matching label.
+    fn reduce_defer(
         &self,
-        filter: DeferFilter<'_>,
+        defer_labels: &IndexSet<String>,
         named_fragments: &NamedFragments,
     ) -> Result<Self, FederationError> {
         match self {
@@ -3239,17 +3092,19 @@ impl Selection {
 
                 Ok(field
                     .with_updated_selection_set(Some(
-                        selection_set.without_defer(filter, named_fragments)?,
+                        selection_set.reduce_defer(defer_labels, named_fragments)?,
                     ))
                     .into())
             }
             Selection::FragmentSpread(frag) => {
-                let spread = frag.spread.without_defer(filter)?;
+                let spread = frag.spread.reduce_defer(defer_labels)?;
                 Ok(FragmentSpreadSelection::new(spread, named_fragments)?.into())
             }
             Selection::InlineFragment(frag) => {
-                let inline_fragment = frag.inline_fragment.without_defer(filter)?;
-                let selection_set = frag.selection_set.without_defer(filter, named_fragments)?;
+                let inline_fragment = frag.inline_fragment.reduce_defer(defer_labels)?;
+                let selection_set = frag
+                    .selection_set
+                    .reduce_defer(defer_labels, named_fragments)?;
                 Ok(InlineFragmentSelection::new(inline_fragment, selection_set).into())
             }
         }
@@ -3280,19 +3135,18 @@ impl Selection {
 }
 
 impl SelectionSet {
-    /// Create a new selection set without @defer directive applications.
-    fn without_defer(
+    /// Create a new selection set without @defer directive applications that have a matching label.
+    fn reduce_defer(
         &self,
-        filter: DeferFilter<'_>,
+        defer_labels: &IndexSet<String>,
         named_fragments: &NamedFragments,
     ) -> Result<Self, FederationError> {
-        let mut without_defer =
-            SelectionSet::empty(self.schema.clone(), self.type_position.clone());
+        let mut reduce_defer = SelectionSet::empty(self.schema.clone(), self.type_position.clone());
         for selection in self.selections.values() {
-            without_defer
-                .add_local_selection(&selection.without_defer(filter, named_fragments)?)?;
+            reduce_defer
+                .add_local_selection(&selection.reduce_defer(defer_labels, named_fragments)?)?;
         }
-        Ok(without_defer)
+        Ok(reduce_defer)
     }
 
     fn has_defer(&self) -> bool {
@@ -3327,31 +3181,14 @@ impl Operation {
                 .any(|f| f.has_defer())
     }
 
-    /// Create a new operation without @defer directive applications.
-    pub(crate) fn without_defer(mut self) -> Result<Self, FederationError> {
-        if self.has_defer() {
-            let named_fragments = self.named_fragments.without_defer(DeferFilter::All)?;
-            self.selection_set = self
-                .selection_set
-                .without_defer(DeferFilter::All, &named_fragments)?;
-            self.named_fragments = named_fragments;
-        }
-        debug_assert!(!self.has_defer());
-        Ok(self)
-    }
-
     /// Create a new operation without specific @defer(label:) directive applications.
     pub(crate) fn reduce_defer(
         mut self,
         labels: &IndexSet<String>,
     ) -> Result<Self, FederationError> {
         if self.has_defer() {
-            let named_fragments = self
-                .named_fragments
-                .without_defer(DeferFilter::Labels(labels))?;
-            self.selection_set = self
-                .selection_set
-                .without_defer(DeferFilter::Labels(labels), &named_fragments)?;
+            let named_fragments = self.named_fragments.reduce_defer(labels)?;
+            self.selection_set = self.selection_set.reduce_defer(labels, &named_fragments)?;
             self.named_fragments = named_fragments;
         }
         Ok(self)
@@ -3390,49 +3227,6 @@ impl Operation {
                 defer_conditions: IndexMap::default(),
             })
         }
-    }
-}
-
-// Collect fragment usages from operation types.
-
-impl Selection {
-    fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        match self {
-            Selection::Field(field_selection) => {
-                if let Some(s) = &field_selection.selection_set {
-                    s.collect_used_fragment_names(aggregator)
-                }
-            }
-            Selection::InlineFragment(inline) => {
-                inline.selection_set.collect_used_fragment_names(aggregator);
-            }
-            Selection::FragmentSpread(fragment) => {
-                let current_count = aggregator
-                    .entry(fragment.spread.fragment_name.clone())
-                    .or_default();
-                *current_count += 1;
-            }
-        }
-    }
-}
-
-impl SelectionSet {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        for s in self.selections.values() {
-            s.collect_used_fragment_names(aggregator);
-        }
-    }
-
-    pub(crate) fn used_fragments(&self) -> IndexMap<Name, u32> {
-        let mut usages = IndexMap::default();
-        self.collect_used_fragment_names(&mut usages);
-        usages
-    }
-}
-
-impl Fragment {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
-        self.selection_set.collect_used_fragment_names(aggregator)
     }
 }
 
@@ -3530,16 +3324,6 @@ impl<'s> VariableCollector<'s> {
     /// Consume the collector and return the collected names.
     pub(crate) fn into_inner(self) -> IndexSet<&'s Name> {
         self.variables
-    }
-}
-
-impl Fragment {
-    /// Returns the variable names that are used by this fragment.
-    pub(crate) fn used_variables(&self) -> IndexSet<&'_ Name> {
-        let mut collector = VariableCollector::new();
-        collector.visit_directive_list(&self.directives);
-        collector.visit_selection_set(&self.selection_set);
-        collector.into_inner()
     }
 }
 
@@ -3905,7 +3689,9 @@ pub(crate) fn normalize_operation(
         variables: Arc::new(operation.variables.clone()),
         directives: operation.directives.clone().into(),
         selection_set: normalized_selection_set,
-        named_fragments,
+        // fragments were already expanded into selection sets
+        // new ones will be generated when optimizing the final subgraph fetch operations
+        named_fragments: Default::default(),
     };
     Ok(normalized_operation)
 }

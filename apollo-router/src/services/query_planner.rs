@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use derivative::Derivative;
-use router_bridge::planner::PlanOptions;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
@@ -14,6 +13,14 @@ use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
 use crate::Context;
+
+/// Options for planning a query
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlanOptions {
+    /// Which labels to override during query planning
+    pub(crate) override_conditions: Vec<String>,
+}
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.

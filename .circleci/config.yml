@@ -1,12 +1,12 @@
 version: 2.1
 
-# Cache key bump: 2
+# Cache key bump: 3
 
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
   gh: circleci/github-cli@2.6.0
-  slack: circleci/slack@4.15.0
+  slack: circleci/slack@5.1.1
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
@@ -26,7 +26,7 @@ executors:
       - image: cimg/base:stable
       - image: cimg/redis:7.4.1
       - image: jaegertracing/all-in-one:1.54.0
-      - image: openzipkin/zipkin:3.4.2
+      - image: openzipkin/zipkin:3.4.3
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
     resource_class: xlarge
     environment:
@@ -82,10 +82,6 @@ parameters:
   protoc_version:
     type: string
     default: "21.8"
-  # note the cmake version is only used for manual installs, not for installs from a package manager like apt or homebrew
-  cmake_version:
-    type: string
-    default: "3.31.1"
   nightly:
     type: boolean
     default: false
@@ -237,37 +233,9 @@ commands:
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
                     mkdir $HOME/.deb
-                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev
                   fi
                   sudo dpkg -i $HOME/.deb/*.deb
-      - when:
-          condition:
-            or:
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Install CMake
-                command: |
-                  mkdir -p "$HOME/.local"
-                  if [[ ! -f "$HOME/.local/bin/cmake" ]]; then
-                    curl -L https://github.com/Kitware/CMake/releases/download/v<< pipeline.parameters.cmake_version >>/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64.zip  --output cmake.zip
-                    # The zip file has a root directory, so we put it somewhere else first before placing the files in .local
-                    unzip cmake.zip -d /tmp > /dev/null
-                    cp /tmp/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64/* -R "$HOME/.local"
-                  fi
-
-                  cmake --version
-      - when:
-          condition:
-            or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Install CMake
-                command: |
-                  brew install cmake
   install_protoc:
     parameters:
       platform:
@@ -376,9 +344,12 @@ commands:
       - run:
           name: Install cargo deny, about, edit
           command: |
+            # Until we are able to update rustc to at least 1.81.0,
+            # we need special handling of the cargo-about command.
+            rustup install 1.83.0
+            cargo +1.83.0 install --locked --version 0.6.6 cargo-about
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
               cargo install --locked --version 0.14.21 cargo-deny
-              cargo install --locked --version 0.6.1 cargo-about
               cargo install --locked --version 0.12.2 cargo-edit
               cargo install --locked --version 0.12.0 cargo-fuzz
             fi

@@ -1,22 +1,6 @@
 use std::time::Duration;
 use std::time::Instant;
 
-use tracing_core::field::Value;
-
-pub(crate) trait TracingUtils {
-    fn or_empty(&self) -> &dyn Value;
-}
-
-impl TracingUtils for bool {
-    fn or_empty(&self) -> &dyn Value {
-        if *self {
-            self as &dyn Value
-        } else {
-            &::tracing::field::Empty
-        }
-    }
-}
-
 /// Timer implementing Drop to automatically compute the duration between the moment it has been created until it's dropped
 ///```ignore
 /// Timer::new(|duration| {

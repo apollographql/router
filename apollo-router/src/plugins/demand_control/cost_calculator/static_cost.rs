@@ -22,7 +22,6 @@ use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
-use crate::plugins::demand_control::cost_calculator::directives::CostDirective;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::DeferredNode;
@@ -59,9 +58,7 @@ fn score_argument(
                 argument_definition.ty.inner_named_type()
             ))
         })?;
-    let cost_directive =
-        CostDirective::from_argument(schema.directive_name_map(), argument_definition)
-            .or(CostDirective::from_type(schema.directive_name_map(), ty));
+    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
 
     match (argument, ty) {
         (_, ExtendedType::Interface(_))
@@ -124,9 +121,7 @@ fn score_variable(
                 argument_definition.ty.inner_named_type()
             ))
         })?;
-    let cost_directive =
-        CostDirective::from_argument(schema.directive_name_map(), argument_definition)
-            .or(CostDirective::from_type(schema.directive_name_map(), ty));
+    let cost_directive = schema.argument_cost_directive(argument_definition, ty);
 
     match (variable, ty) {
         (_, ExtendedType::Interface(_))
@@ -221,7 +216,7 @@ impl StaticCostCalculator {
             .schema
             .type_field_list_size_directive(parent_type, &field.name)
         {
-            Some(dir) => dir.with_field_and_variables(field, ctx.variables).map(Some),
+            Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
             None => Ok(None),
         }?;
         let instance_count = if !field.ty().is_list() {
@@ -566,7 +561,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
     }
 }
 
-impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
+impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
@@ -634,7 +629,6 @@ mod tests {
     use ahash::HashMapExt;
     use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
-    use router_bridge::planner::PlanOptions;
     use test_log::test;
     use tower::Service;
 
@@ -643,6 +637,7 @@ mod tests {
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::query_planner::PlanOptions;
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::spec;
@@ -730,8 +725,6 @@ mod tests {
         let mut planner = BridgeQueryPlanner::new(
             schema.into(),
             config.clone(),
-            None,
-            None,
             Arc::new(IntrospectionCache::new(&config)),
         )
         .await

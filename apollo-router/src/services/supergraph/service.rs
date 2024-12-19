@@ -12,8 +12,6 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use router_bridge::planner::Planner;
-use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
@@ -26,6 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
@@ -49,7 +48,6 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
-use crate::query_planner::QueryPlanResult;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;
@@ -175,11 +173,15 @@ async fn service_call(
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
+        // We cannot assume that the query is present as it may have been modified by coprocessors or plugins.
+        // There is a deeper issue here in that query analysis is doing a bunch of stuff that it should not and
+        // places the results in context. Therefore plugins that have modified the query won't actually take effect.
+        // However, this can't be resolved before looking at the pipeline again.
         req.supergraph_request
             .body()
             .query
             .clone()
-            .expect("query presence was checked before"),
+            .unwrap_or_default(),
     )
     .await
     {
@@ -922,10 +924,6 @@ impl SupergraphCreator {
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
         self.query_planner_service.previous_cache()
-    }
-
-    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.query_planner_service.js_planners()
     }
 
     pub(crate) async fn warm_up_query_planner(

@@ -525,9 +525,10 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 ///     frobbles.color = "blue"
 /// );
 /// // Count a thing with dynamic attributes:
-/// let attributes = [
-///     opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()),
-/// ];
+/// let attributes = vec![];
+/// if (frobbled) {
+///     attributes.push(opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()));
+/// }
 /// u64_counter!(
 ///     "apollo.router.operations.frobbles",
 ///     "The amount of frobbles we've operated on",
@@ -616,7 +617,6 @@ macro_rules! f64_counter {
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
 ///
 /// New metrics should be added using these macros.
-
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
@@ -939,6 +939,11 @@ macro_rules! assert_counter {
         assert_metric!(result, $name, Some($value.into()), None, &attributes);
     };
 
+    ($name:literal, $value: expr, $attributes: expr) => {
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, $attributes);
+        assert_metric!(result, $name, Some($value.into()), None, &$attributes);
+    };
+
     ($name:literal, $value: expr) => {
         let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &[]);
         assert_metric!(result, $name, Some($value.into()), None, &[]);
@@ -1209,6 +1214,7 @@ mod test {
         let attributes = vec![KeyValue::new("attr", "val")];
         u64_counter!("test", "test description", 1, attributes);
         assert_counter!("test", 1, "attr" = "val");
+        assert_counter!("test", 1, &attributes);
     }
 
     #[test]
