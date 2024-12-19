@@ -10,6 +10,7 @@ use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::Builder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
+use opentelemetry_sdk::Resource;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -78,6 +79,10 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
 
     fn shutdown(&self) -> TraceResult<()> {
         self.delegate.shutdown()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.delegate.set_resource(resource)
     }
 }
 
