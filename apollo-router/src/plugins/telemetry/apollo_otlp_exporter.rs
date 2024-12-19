@@ -178,10 +178,9 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: self
-                .resource_template
+            attributes: span
+                .attributes
                 .iter()
-                .chain(span.attributes.iter())
                 .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
             events: SpanEvents::default(),
@@ -232,10 +231,9 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: self
-                .resource_template
+            attributes: span
+                .attributes
                 .iter()
-                .chain(span.attributes.iter())
                 .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
             events: SpanEvents::default(),
@@ -248,6 +246,7 @@ impl ApolloOtlpExporter {
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         let mut exporter = self.otlp_exporter.lock();
+        exporter.set_resource(&self.resource_template);
         let fut = exporter.export(spans);
         drop(exporter);
         Box::pin(fut.and_then(|_| {
