@@ -4674,36 +4674,6 @@ expression: "&schema"
         }
       ]
     },
-    "RetryConfig": {
-      "additionalProperties": false,
-      "description": "Retry configuration",
-      "properties": {
-        "min_per_sec": {
-          "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "retry_mutations": {
-          "description": "allows request retries on mutations. This should only be activated if mutations are idempotent. Disabled by default",
-          "nullable": true,
-          "type": "boolean"
-        },
-        "retry_percent": {
-          "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
-          "format": "float",
-          "nullable": true,
-          "type": "number"
-        },
-        "ttl": {
-          "default": null,
-          "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "Router": {
       "additionalProperties": false,
       "description": "Router level (APQ) configuration",
@@ -6446,11 +6416,6 @@ expression: "&schema"
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
-          "nullable": true
-        },
-        "experimental_retry": {
-          "$ref": "#/definitions/RetryConfig",
-          "description": "#/definitions/RetryConfig",
           "nullable": true
         },
         "global_rate_limit": {

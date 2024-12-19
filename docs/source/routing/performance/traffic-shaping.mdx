@@ -28,11 +28,6 @@ traffic_shaping:
         capacity: 10
         interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
-      experimental_retry:
-        min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
-        ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
-        retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
-        retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
       experimental_http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
 ```
 
@@ -148,22 +143,6 @@ traffic_shaping:
     global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
       capacity: 10
       interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
-```
-
-### Experimental request retry
-
-On failure, subgraph requests can be retried automatically. This is deactivated by default for mutations. This uses [Finagle's *RetryBudget* algorithm](https://finagle.github.io/blog/2016/02/08/retry-budgets/), in which every successful request adds an expirable token to a bucket, and every retry consumes a number of those tokens. On top of that, a minimal number of retries per second is available, to test regularly when the retry budget was entirely consumed or on startup when very few requests have been sent. The tokens expire so the budget has a large number of available retries if a lot of recent requests were successful but reduces quickly on frequent failures to avoid sending too much traffic to the subgraph.
-
-It is configurable as follows:
-
-```yaml title="router.yaml"
-traffic_shaping:
-  all:
-    experimental_retry:
-      min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
-      ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
-      retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
-      retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
 ```
 
 ### Variable deduplication

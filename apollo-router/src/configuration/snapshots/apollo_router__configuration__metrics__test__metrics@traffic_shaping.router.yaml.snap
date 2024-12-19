@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.non_zero()"
+expression: "& metrics.non_zero()"
 ---
 - name: apollo.router.config.traffic_shaping
   data:
@@ -13,5 +13,4 @@ expression: "&metrics.non_zero()"
           opt.subgraph.deduplicate_query: true
           opt.subgraph.http2: true
           opt.subgraph.rate_limit: true
-          opt.subgraph.retry: true
           opt.subgraph.timeout: true
