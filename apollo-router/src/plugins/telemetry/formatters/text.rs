@@ -1,12 +1,10 @@
-#[cfg(test)]
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry::sdk::Resource;
-use opentelemetry::OrderMap;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Field;
@@ -234,8 +232,8 @@ impl Text {
         {
             let mut attrs = otel_attributes
                 .iter()
-                .filter(|(key, _value)| {
-                    let key_name = key.as_str();
+                .filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
                 })
@@ -245,9 +243,8 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
-            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
-            for (key, value) in attrs {
-                write!(writer, "{key}={value},")?;
+            for kv in attrs {
+                write!(writer, "{}={},", kv.key, kv.value)?;
             }
         }
 
@@ -390,18 +387,11 @@ where
                 Some(attrs) => Some(attrs),
                 None => {
                     let event_attributes = extensions.get_mut::<EventAttributes>();
-                    event_attributes.map(|event_attributes| {
-                        OrderMap::from_iter(
-                            event_attributes
-                                .take()
-                                .into_iter()
-                                .map(|kv| (kv.key, kv.value)),
-                        )
-                    })
+                    event_attributes.map(|event_attributes| event_attributes.take())
                 }
             };
             if let Some(event_attributes) = event_attributes {
-                for (key, value) in event_attributes {
+                for KeyValue { key, value } in event_attributes {
                     default_visitor.log_debug_attrs(key.as_str(), &value);
                 }
             }
