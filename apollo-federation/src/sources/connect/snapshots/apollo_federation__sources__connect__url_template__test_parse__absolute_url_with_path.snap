@@ -22,21 +22,27 @@ Ok(
             },
         ),
         path: [
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "abc",
+                    Constant(
+                        Constant {
+                            value: "abc",
+                            location: 19..22,
+                        },
                     ),
                 ],
             },
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "def",
+                    Constant(
+                        Constant {
+                            value: "def",
+                            location: 23..26,
+                        },
                     ),
                 ],
             },
         ],
-        query: {},
+        query: [],
     },
 )

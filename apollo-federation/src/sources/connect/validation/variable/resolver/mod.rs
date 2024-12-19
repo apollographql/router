@@ -22,7 +22,8 @@ pub(crate) trait NamespaceResolver {
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
         schema: &SchemaInfo,
-    ) -> Result<Option<Type>, Message>;
+        location_offset: usize,
+    ) -> Result<(), Message>;
 }
 
 pub(super) fn resolve_type<'schema>(
@@ -51,7 +52,8 @@ fn resolve_path(
     expression: GraphQLString,
     field_type: &Type,
     field: &Component<FieldDefinition>,
-) -> Result<Option<Type>, Message> {
+    location_offset: usize,
+) -> Result<(), Message> {
     let mut variable_type = field_type.clone();
     for nested_field_name in reference.path.clone().iter().skip(1) {
         let path_component_range = nested_field_name.location.clone();
@@ -83,31 +85,20 @@ fn resolve_path(
                         message: format!(
                             "`{variable_type}` does not have a field named `{nested_field_name}`."
                         ),
-                        locations: expression.line_col_for_subslice(path_component_range.start..path_component_range.end, schema).into_iter().collect(),
+                        locations: expression.line_col_for_subslice(
+                            path_component_range.start+location_offset..path_component_range.end+location_offset,
+                            schema
+                        ).into_iter().collect(),
                     })
             })?.clone();
         if parent_is_nullable && variable_type.is_non_null() {
             variable_type = variable_type.nullable();
         }
     }
-    Ok(Some(variable_type))
+    Ok(())
 }
 
 /// Require a variable reference to have a path
-fn get_root<'a>(
-    reference: &'a VariableReference<'a, Namespace>,
-    expression: GraphQLString<'a>,
-    schema: &'a SchemaInfo<'a>,
-) -> Result<VariablePathPart<'a>, Message> {
-    reference.path.first().cloned().ok_or(Message {
-        code: Code::GraphQLError,
-        message: format!(
-            "The variable `{}` must be followed by a path",
-            reference.namespace.namespace
-        ),
-        locations: expression
-            .line_col_for_subslice(reference.location.clone(), schema)
-            .into_iter()
-            .collect(),
-    })
+fn get_root<'a>(reference: &'a VariableReference<'a, Namespace>) -> Option<VariablePathPart<'a>> {
+    reference.path.first().cloned()
 }

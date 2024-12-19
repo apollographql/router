@@ -5,19 +5,20 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use crate::sources::connect::header::HeaderValue;
-use crate::sources::connect::header::HeaderValueError;
 use crate::sources::connect::models::Header;
 use crate::sources::connect::models::HeaderParseError;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
+use crate::sources::connect::string_template;
+use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::selection::validate_selection_variables;
 use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::variable::ConnectorsContext;
 use crate::sources::connect::variable::Directive;
-use crate::sources::connect::variable::ExpressionContext;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::HeaderSource;
@@ -72,34 +73,19 @@ pub(crate) fn validate_arg<'a>(
                             .flat_map(|span| span.line_column_range(&schema.sources))
                             .collect(),
                     ),
-                    HeaderParseError::ValueError { err, node } => {
-                        let (message, location) = match err {
-                            HeaderValueError::ParseError { message, location }
-                            | HeaderValueError::InvalidHeaderValue { message, location } => {
-                                (message, location)
-                            }
-                            HeaderValueError::InvalidVariableNamespace {
-                                namespace,
-                                location,
-                            } => (
-                                format!(
-                                    "invalid variable `{namespace}`, must be one of {available}",
-                                    available = expression_context.namespaces_joined(),
-                                ),
-                                location,
-                            ),
-                        };
-                        (
-                            message,
-                            GraphQLString::new(node, &schema.sources)
-                                .ok()
-                                .and_then(|expression| {
-                                    expression.line_col_for_subslice(location, schema)
-                                })
-                                .into_iter()
-                                .collect(),
-                        )
-                    }
+                    HeaderParseError::ValueError {
+                        err: string_template::Error { message, location },
+                        node,
+                    } => (
+                        message,
+                        GraphQLString::new(node, &schema.sources)
+                            .ok()
+                            .and_then(|expression| {
+                                expression.line_col_for_subslice(location, schema)
+                            })
+                            .into_iter()
+                            .collect(),
+                    ),
                 };
                 messages.push(Message {
                     code: Code::InvalidHeader,
@@ -129,13 +115,16 @@ pub(crate) fn validate_arg<'a>(
                 // This should never fail in practice, we convert to GraphQLString only to hack in location data
                 continue;
             };
-            messages.extend(validate_value(
-                header_value,
-                expression,
-                &variable_resolver,
-                schema,
-                coordinate,
-            ));
+            messages.extend(
+                validate_value(
+                    header_value,
+                    expression,
+                    &variable_resolver,
+                    schema,
+                    coordinate,
+                )
+                .err(),
+            );
         }
     }
     messages
@@ -143,40 +132,26 @@ pub(crate) fn validate_arg<'a>(
 
 fn validate_value(
     header_value: HeaderValue,
-    expression: GraphQLString,
+    source_string: GraphQLString,
     variable_resolver: &VariableResolver,
-    schema: &SchemaInfo,
+    _schema: &SchemaInfo, // TODO: type checking with Shape
     coordinate: HttpHeadersCoordinate,
-) -> Option<Message> {
-    for reference in header_value.variable_references() {
-        match variable_resolver.resolve(reference, expression) {
-            Err(message) => {
-                return Some(Message {
-                    code: message.code,
-                    message: format!("{coordinate} contains an invalid variable reference `{{{reference}}}` - {message}", message = message.message),
-                    locations: message.locations,
-                })
-            },
-            Ok(Some(ty)) => {
-                if !ty.is_non_null() {
-                    return Some(Message {
-                        code: Code::NullabilityMismatch,
-                        message: format!(
-                            "Variables in headers should be non-null, but {coordinate} contains `{{{reference}}}` which is nullable. \
-                            If a null value is provided at runtime, the header will be incorrect.",
-                        ),
-                        locations: expression
-                            .line_col_for_subslice(reference.location.clone(), schema)
-                            .into_iter()
-                            .collect(),
-                    });
-                }
-            }
-            Ok(_) => {} // Type cannot be resolved
-        }
+) -> Result<(), Message> {
+    for Expression {
+        expression,
+        location,
+    } in header_value.expressions()
+    {
+        validate_selection_variables(
+            variable_resolver,
+            coordinate,
+            expression,
+            source_string,
+            location.start,
+        )?;
     }
 
-    None
+    Ok(())
 }
 
 fn get_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&Node<Value>> {
