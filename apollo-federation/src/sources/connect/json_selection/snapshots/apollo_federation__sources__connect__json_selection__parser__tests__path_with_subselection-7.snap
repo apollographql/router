@@ -85,11 +85,18 @@ Ok(
                                                         path: WithRange {
                                                             node: Expr(
                                                                 WithRange {
-                                                                    node: String(
-                                                                        "Args",
-                                                                    ),
+                                                                    node: [
+                                                                        WithRange {
+                                                                            node: String(
+                                                                                "Args",
+                                                                            ),
+                                                                            range: Some(
+                                                                                118..124,
+                                                                            ),
+                                                                        },
+                                                                    ],
                                                                     range: Some(
-                                                                        118..124,
+                                                                        116..125,
                                                                     ),
                                                                 },
                                                                 WithRange {

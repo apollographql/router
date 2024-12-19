@@ -415,7 +415,7 @@ impl ExternalVarPaths for NamedSelection {
 // VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 // KeyPath              ::= Key PathStep+
 // AtPath               ::= "@" PathStep*
-// ExprPath             ::= "$(" LitExpr ")" PathStep*
+// ExprPath             ::= "$(" LitExpr ("," LitExpr)* ","? ")" PathStep*
 // PathStep             ::= "." Key | "->" Identifier MethodArgs?
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -532,9 +532,10 @@ pub(super) enum PathList {
     // middle/tail of a PathList.
     Key(WithRange<Key>, WithRange<PathList>),
 
-    // An ExprPath, which begins with a LitExpr enclosed by $(...). Must appear
-    // only at the beginning of a PathSelection, like PathList::Var.
-    Expr(WithRange<LitExpr>, WithRange<PathList>),
+    // An ExprPath, which begins with one or more LitExpr items enclosed by
+    // $(...) and separated by commas. Must appear only at the beginning of a
+    // PathSelection, like PathList::Var.
+    Expr(ExprSequence, WithRange<PathList>),
 
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection.
@@ -549,6 +550,11 @@ pub(super) enum PathList {
     // PathList::Empty. PathList::Empty by itself is not a valid PathList.
     Empty,
 }
+
+// PathList::Expr uses ExprSequence to represent the range of the whole $(...)
+// expression (possibly containing multiple expressions), along with a vector of
+// candidate expressions, each with its own range.
+type ExprSequence = WithRange<Vec<WithRange<LitExpr>>>;
 
 impl PathList {
     pub(super) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
@@ -595,20 +601,37 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) = tuple((
-                spaces_or_comments,
-                ranged_span("$("),
-                LitExpr::parse,
-                spaces_or_comments,
-                ranged_span(")"),
-            ))(input)
+            if let Ok((suffix, (dollar_open_paren, first_expr, rest_exprs, close_paren))) =
+                tuple((
+                    preceded(spaces_or_comments, ranged_span("$(")),
+                    LitExpr::parse,
+                    many0(preceded(
+                        tuple((spaces_or_comments, char(','))),
+                        LitExpr::parse,
+                    )),
+                    preceded(
+                        tuple((
+                            opt(tuple((spaces_or_comments, char(',')))),
+                            spaces_or_comments,
+                        )),
+                        ranged_span(")"),
+                    ),
+                ))(input)
             {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
-                let full_range = merge_ranges(expr_range, rest.range());
+
+                let mut exprs = vec![first_expr];
+                exprs.extend(rest_exprs);
+                let dollar_expr_seq = WithRange::new(
+                    exprs,
+                    merge_ranges(dollar_open_paren.range(), close_paren.range()),
+                );
+
+                let full_range = merge_ranges(dollar_open_paren.range(), rest.range());
+
                 return Ok((
                     remainder,
-                    WithRange::new(Self::Expr(expr, rest), full_range),
+                    WithRange::new(Self::Expr(dollar_expr_seq, rest), full_range),
                 ));
             }
 
@@ -852,8 +875,10 @@ impl ExternalVarPaths for PathList {
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
                 paths.extend(rest.external_var_paths());
             }
-            PathList::Expr(expr, rest) => {
-                paths.extend(expr.external_var_paths());
+            PathList::Expr(expr_seq, rest) => {
+                for expr in expr_seq.as_ref() {
+                    paths.extend(expr.external_var_paths());
+                }
                 paths.extend(rest.external_var_paths());
             }
             PathList::Method(_, opt_args, rest) => {
@@ -2329,7 +2354,7 @@ mod tests {
                 input,
                 PathSelection {
                     path: PathList::Expr(
-                        expected.into_with_range(),
+                        WithRange::new(vec![expected.into_with_range()], None),
                         PathList::Empty.into_with_range(),
                     )
                     .into_with_range(),
