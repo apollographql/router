@@ -138,8 +138,10 @@ where
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         let _timer = Timer::new(|duration| {
-            ::tracing::info!(
-                histogram.apollo.router.query.planning.warmup.duration = duration.as_secs_f64()
+            f64_histogram!(
+                "apollo.router.query_planning.warmup.duration",
+                "Time spent warming up the query planner queries in seconds",
+                duration.as_secs_f64()
             );
         });
 
