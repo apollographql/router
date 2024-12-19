@@ -266,4 +266,9 @@ impl ApolloOtlpExporter {
         let mut exporter = self.otlp_exporter.lock();
         exporter.shutdown()
     }
+
+    pub(crate) fn set_resource(&self, resource: &Resource) {
+        let mut exporter = self.otlp_exporter.lock();
+        exporter.set_resource(resource);
+    }
 }

@@ -21,6 +21,7 @@ use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
 use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -302,5 +303,8 @@ impl SpanExporter for ExporterWrapper {
     }
     fn force_flush(&mut self) -> BoxFuture<'static, ExportResult> {
         self.delegate.force_flush()
+    }
+    fn set_resource(&mut self, resource: &Resource) {
+        self.delegate.set_resource(resource);
     }
 }

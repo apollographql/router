@@ -27,6 +27,7 @@ use opentelemetry::Value;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::Resource;
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
@@ -1147,6 +1148,12 @@ impl SpanExporter for Exporter {
         if let Some(exporter) = &self.otlp_exporter {
             exporter.shutdown()
         };
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        if let Some(exporter) = &self.otlp_exporter {
+            exporter.set_resource(resource);
+        }
     }
 }
 
