@@ -27,7 +27,7 @@ async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 500);
     assert_yaml_snapshot!(response.text().await?);
-    router.assert_log_contains("INTERNAL_SERVER_ERROR").await;
+    router.assert_log_contains("Internal Server Error").await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -74,6 +74,17 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     // This query is small and should make it to the coprocessor
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_body_limit.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
 
     // This query is huge and will be rejected because it is too large before hitting the coprocessor
     let (_trace_id, response) = router
