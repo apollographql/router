@@ -74,7 +74,7 @@ impl ApolloOtlpExporter {
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let otlp_exporter = match protocol {
             Protocol::Grpc => {
-                let mut span_exporter = SpanExporterBuilder::from(
+                let span_exporter = SpanExporterBuilder::from(
                     opentelemetry_otlp::new_exporter()
                         .tonic()
                         .with_timeout(batch_config.max_export_timeout)
@@ -182,16 +182,17 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: span
-                .attributes
+            attributes: self
+                .resource_template
                 .iter()
+                .chain(span.attributes.iter())
                 .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: span.status,
             instrumentation_lib: self.intrumentation_library.clone(),
-            dropped_attributes_count: 0, // TODO: LightSpanData to track this
+            dropped_attributes_count: span.droppped_attribute_count,
         }
     }
 
@@ -235,10 +236,11 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: span
-                .attributes
-                .drain()
-                .map(|(k, v)| KeyValue::new(k, v))
+            attributes: self
+                .resource_template
+                .iter()
+                .chain(span.attributes.iter())
+                .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
             events: SpanEvents::default(),
             links: SpanLinks::default(),

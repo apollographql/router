@@ -221,7 +221,7 @@ pub(crate) struct LightSpanData {
     pub(crate) end_time: SystemTime,
     pub(crate) attributes: HashMap<Key, Value>,
     pub(crate) status: Status,
-    // TODO: Track dropped attribute count?
+    pub(crate) droppped_attribute_count: u32,
 }
 
 impl LightSpanData {
@@ -261,6 +261,7 @@ impl LightSpanData {
             end_time: value.end_time,
             attributes: filtered_attributes,
             status: value.status,
+            droppped_attribute_count: value.dropped_attributes_count,
         }
     }
 }
@@ -1603,6 +1604,7 @@ mod test {
             end_time: SystemTime::now(),
             attributes: HashMap::with_capacity(10),
             status: Default::default(),
+            droppped_attribute_count: 0,
         };
 
         span.attributes
