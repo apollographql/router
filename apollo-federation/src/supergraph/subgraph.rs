@@ -99,14 +99,6 @@ impl ValidFederationSubgraphs {
     pub fn get(&self, name: &str) -> Option<&ValidFederationSubgraph> {
         self.subgraphs.get(name)
     }
-
-    pub(crate) fn upgrade_subgraphs_if_necessary(
-        mut self,
-    ) -> Result<ValidFederationSubgraphs, FederationError> {
-        Ok(ValidFederationSubgraphs {
-            subgraphs: mem::take(&mut self.subgraphs),
-        })
-    }
 }
 
 impl IntoIterator for ValidFederationSubgraphs {
