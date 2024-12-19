@@ -1,10 +1,10 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
 use super::immutable::InputPath;
 use super::location::WithRange;
 use super::ApplyToError;
+use super::Lookup;
 use super::MethodArgs;
 use super::PathList;
 use super::VarsWithPathsMap;
@@ -78,7 +78,7 @@ macro_rules! impl_arrow_method {
                 method_args: Option<&MethodArgs>,
                 input_shape: Shape,
                 dollar_shape: Shape,
-                named_var_shapes: &IndexMap<&str, Shape>,
+                named_var_shapes: &$crate::sources::connect::json_selection::Lookup,
             ) -> Shape {
                 // TODO
                 $shape_fn_name(
@@ -124,7 +124,7 @@ pub(super) trait ArrowMethodImpl {
         // Other variable shapes may also be provided here, though in general
         // variables and their subproperties can be represented abstractly using
         // $var.nested.property ShapeCase::Name shapes.
-        named_var_shapes: &IndexMap<&str, Shape>,
+        lookup: &Lookup,
     ) -> Shape;
 }
 

@@ -24,6 +24,9 @@ use super::parser::*;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
 
+// TODO: modify this to differentiate between GraphQL names, namespaces, and other sources
+pub(crate) type Lookup<'a> = IndexMap<&'a str, Shape>;
+
 impl JSONSelection {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
@@ -74,40 +77,15 @@ impl JSONSelection {
         (value, errors.into_iter().collect())
     }
 
-    pub fn shape(&self) -> Shape {
-        self.compute_output_shape(
-            // If we don't know anything about the shape of the input data, we
-            // can represent the data symbolically using the $root variable
-            // shape. Subproperties needed from this shape will show up as
-            // subpaths like $root.books.4.isbn in the output shape.
-            //
-            // While we do not currently have a $root variable available as a
-            // KnownVariable during apply_to_path execution, we might consider
-            // adding it, since it would align with the way we process other
-            // variable shapes. For now, $root exists only as a shape name that
-            // we are inventing right here.
-            Shape::name("$root"),
-            // If we wanted to specify anything about the shape of the $root
-            // variable, we could define a shape for "$root" in this map.
-            &IndexMap::default(),
-        )
-    }
-
-    pub fn compute_output_shape(
-        &self,
-        input_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
-    ) -> Shape {
+    pub fn compute_output_shape(&self, input_shape: Shape, lookup: &Lookup) -> Shape {
         match self {
-            Self::Named(selection) => selection.compute_output_shape(
-                input_shape.clone(),
-                input_shape.clone(),
-                named_var_shapes,
-            ),
+            Self::Named(selection) => {
+                selection.compute_output_shape(input_shape.clone(), input_shape, lookup)
+            }
             Self::Path(path_selection) => path_selection.compute_output_shape(
                 input_shape.clone(),
                 input_shape.clone(),
-                named_var_shapes,
+                lookup,
             ),
         }
     }
@@ -163,7 +141,7 @@ pub(super) trait ApplyToInternal {
         // including the initial `$` character. This map typically does not
         // change during the compute_output_shape recursion, and so can be
         // passed down by immutable reference.
-        named_var_shapes: &IndexMap<&str, Shape>,
+        lookup: &Lookup,
     ) -> Shape;
 }
 
@@ -280,14 +258,14 @@ impl ApplyToInternal for JSONSelection {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        lookup: &Lookup,
     ) -> Shape {
         match self {
             Self::Named(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape, lookup)
             }
             Self::Path(path_selection) => {
-                path_selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
+                path_selection.compute_output_shape(input_shape, dollar_shape, lookup)
             }
         }
     }
@@ -392,7 +370,7 @@ impl ApplyToInternal for NamedSelection {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        lookup: &Lookup,
     ) -> Shape {
         let mut output = Shape::empty_map();
 
@@ -405,15 +383,14 @@ impl ApplyToInternal for NamedSelection {
                 output.insert(
                     output_key.to_string(),
                     if let Some(selection) = selection {
-                        selection.compute_output_shape(field_shape, dollar_shape, named_var_shapes)
+                        selection.compute_output_shape(field_shape, dollar_shape, lookup)
                     } else {
                         field_shape
                     },
                 );
             }
             Self::Path { alias, path, .. } => {
-                let path_shape =
-                    path.compute_output_shape(input_shape, dollar_shape, named_var_shapes);
+                let path_shape = path.compute_output_shape(input_shape, dollar_shape, lookup);
                 if let Some(alias) = alias {
                     output.insert(alias.name().to_string(), path_shape);
                 } else {
@@ -423,7 +400,7 @@ impl ApplyToInternal for NamedSelection {
             Self::Group(alias, sub_selection) => {
                 output.insert(
                     alias.name().to_string(),
-                    sub_selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes),
+                    sub_selection.compute_output_shape(input_shape, dollar_shape, lookup),
                 );
             }
         };
@@ -461,24 +438,21 @@ impl ApplyToInternal for PathSelection {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        lookup: &Lookup,
     ) -> Shape {
         match self.path.as_ref() {
             PathList::Key(_, _) => {
                 // If this is a KeyPath, we need to evaluate the path starting
                 // from the current $ shape, so we pass dollar_shape as the data
                 // *and* dollar_shape to self.path.compute_output_shape.
-                self.path.compute_output_shape(
-                    dollar_shape.clone(),
-                    dollar_shape.clone(),
-                    named_var_shapes,
-                )
+                self.path
+                    .compute_output_shape(dollar_shape.clone(), dollar_shape.clone(), lookup)
             }
             // If this is not a KeyPath, keep evaluating against input_shape.
             // This logic parallels PathSelection::apply_to_path (above).
             _ => self
                 .path
-                .compute_output_shape(input_shape, dollar_shape, named_var_shapes),
+                .compute_output_shape(input_shape, dollar_shape, lookup),
         }
     }
 }
@@ -594,21 +568,24 @@ impl ApplyToInternal for WithRange<PathList> {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        lookup: &Lookup,
     ) -> Shape {
         match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
-                let var_shape = if var_name == &KnownVariable::AtSign {
-                    input_shape
-                } else if var_name == &KnownVariable::Dollar {
-                    dollar_shape.clone()
-                } else if let Some(shape) = named_var_shapes.get(var_name.as_str()) {
-                    shape.clone()
-                } else {
-                    Shape::name(var_name.as_str())
+                let var_shape = match var_name {
+                    KnownVariable::AtSign => input_shape,
+                    KnownVariable::Dollar => dollar_shape.clone(),
+                    KnownVariable::External(namespace) => {
+                        lookup.get(namespace.as_str()).cloned().unwrap_or_else(|| {
+                            Shape::error_with_range(
+                                format!("Variable {} not found", var_name.as_str()).as_str(),
+                                ranged_var_name.range(),
+                            )
+                        })
+                    }
                 };
-                tail.compute_output_shape(var_shape, dollar_shape, named_var_shapes)
+                tail.compute_output_shape(var_shape, dollar_shape, lookup)
             }
 
             PathList::Key(key, rest) => {
@@ -616,57 +593,72 @@ impl ApplyToInternal for WithRange<PathList> {
                 // PathSelection::compute_output_shape will have set our
                 // input_shape equal to its dollar_shape, thereby ensuring that
                 // some.nested.path is equivalent to $.some.nested.path.
-                if input_shape.is_none() {
-                    // Following WithRange<PathList>::apply_to_path, we do not
-                    // want to call rest.compute_output_shape recursively with
-                    // an input data shape corresponding to missing data, though
-                    // it might do the right thing.
-                    return input_shape;
-                }
+                match input_shape.case() {
+                    ShapeCase::None | ShapeCase::Any | ShapeCase::Null | ShapeCase::Error(_) => {
+                        input_shape
+                    }
+                    ShapeCase::Name(name, _key) => {
+                        // TODO: could there possibly be a _key here? Or should that be removed for now?
+                        if let Some(input_shape) = lookup.get(name.as_str()) {
+                            self.compute_output_shape(input_shape.clone(), dollar_shape, lookup)
+                        } else {
+                            Shape::error_with_range(format!("{name} not found"), key.range())
+                        }
+                    }
+                    ShapeCase::Array { prefix, tail } => {
+                        // Map rest.compute_output_shape over the prefix and rest
+                        // elements of the array shape, so we don't have to map
+                        // array shapes for the other PathList variants.
+                        let mapped_prefix = prefix
+                            .iter()
+                            .map(|shape| {
+                                if shape.is_none() {
+                                    shape.clone()
+                                } else {
+                                    rest.compute_output_shape(
+                                        shape.field(key.as_str()),
+                                        dollar_shape.clone(),
+                                        lookup,
+                                    )
+                                }
+                            })
+                            .collect::<Vec<_>>();
 
-                if let ShapeCase::Array { prefix, tail } = input_shape.case() {
-                    // Map rest.compute_output_shape over the prefix and rest
-                    // elements of the array shape, so we don't have to map
-                    // array shapes for the other PathList variants.
-                    let mapped_prefix = prefix
-                        .iter()
-                        .map(|shape| {
-                            if shape.is_none() {
-                                shape.clone()
-                            } else {
-                                rest.compute_output_shape(
-                                    shape.field(key.as_str()),
-                                    dollar_shape.clone(),
-                                    named_var_shapes,
-                                )
-                            }
-                        })
-                        .collect::<Vec<_>>();
+                        let mapped_rest = if tail.is_none() {
+                            tail.clone()
+                        } else {
+                            rest.compute_output_shape(
+                                tail.field(key.as_str()),
+                                dollar_shape.clone(),
+                                lookup,
+                            )
+                        };
 
-                    let mapped_rest = if tail.is_none() {
-                        tail.clone()
-                    } else {
+                        Shape::array(mapped_prefix, mapped_rest)
+                    }
+                    ShapeCase::Object { .. }
+                    | ShapeCase::Bool(_)
+                    | ShapeCase::String(_)
+                    | ShapeCase::Int(_)
+                    | ShapeCase::Float
+                    | ShapeCase::One(_)
+                    | ShapeCase::All(_) => {
+                        // Some of these are known to fail, like Int, but `Shape::field` will catch that
+                        // TODO: we can short circuit rather than continuing to calculate when we _know_
+                        //   there's an error
                         rest.compute_output_shape(
-                            tail.field(key.as_str()),
+                            input_shape.field(key.as_str()).clone(),
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            lookup,
                         )
-                    };
-
-                    Shape::array(mapped_prefix, mapped_rest)
-                } else {
-                    rest.compute_output_shape(
-                        input_shape.field(key.as_str()),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                    )
+                    }
                 }
             }
 
             PathList::Expr(expr, tail) => tail.compute_output_shape(
-                expr.compute_output_shape(input_shape, dollar_shape.clone(), named_var_shapes),
+                expr.compute_output_shape(input_shape, dollar_shape.clone(), lookup),
                 dollar_shape.clone(),
-                named_var_shapes,
+                lookup,
             ),
 
             PathList::Method(method_name, method_args, tail) => {
@@ -682,17 +674,13 @@ impl ApplyToInternal for WithRange<PathList> {
                         method_args.as_ref(),
                         input_shape,
                         dollar_shape.clone(),
-                        named_var_shapes,
+                        lookup,
                     );
 
                     if method_result_shape.is_none() {
                         method_result_shape.clone()
                     } else {
-                        tail.compute_output_shape(
-                            method_result_shape,
-                            dollar_shape.clone(),
-                            named_var_shapes,
-                        )
+                        tail.compute_output_shape(method_result_shape, dollar_shape.clone(), lookup)
                     }
                 } else {
                     let message = format!("Method ->{} not found", method_name.as_str());
@@ -701,7 +689,7 @@ impl ApplyToInternal for WithRange<PathList> {
             }
 
             PathList::Selection(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape, lookup)
             }
 
             PathList::Empty => input_shape,
@@ -751,7 +739,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        lookup: &Lookup,
     ) -> Shape {
         match self.as_ref() {
             LitExpr::Null => Shape::null(),
@@ -776,7 +764,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                         value.compute_output_shape(
                             input_shape.clone(),
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            lookup,
                         ),
                     );
                 }
@@ -789,15 +777,13 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     shapes.push(value.compute_output_shape(
                         input_shape.clone(),
                         dollar_shape.clone(),
-                        named_var_shapes,
+                        lookup,
                     ));
                 }
                 Shape::array(shapes, Shape::none())
             }
 
-            LitExpr::Path(path) => {
-                path.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
-            }
+            LitExpr::Path(path) => path.compute_output_shape(input_shape, dollar_shape, lookup),
         }
     }
 }
@@ -873,24 +859,30 @@ impl ApplyToInternal for SubSelection {
     fn compute_output_shape(
         &self,
         input_shape: Shape,
-        _previous_dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        previous_dollar_shape: Shape,
+        lookup: &Lookup,
     ) -> Shape {
+        if let ShapeCase::Name(name, _) = input_shape.case() {
+            // TODO: do we need the second part of Name?
+            return if let Some(input_shape) = lookup.get(name.as_str()).cloned() {
+                return self.compute_output_shape(input_shape, previous_dollar_shape, lookup);
+            } else {
+                Shape::error(format!("{name} not found"))
+            };
+        }
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
         // shapes of each array element shape.
         if let ShapeCase::Array { prefix, tail } = input_shape.case() {
             let new_prefix = prefix
                 .iter()
-                .map(|shape| {
-                    self.compute_output_shape(shape.clone(), shape.clone(), named_var_shapes)
-                })
+                .map(|shape| self.compute_output_shape(shape.clone(), shape.clone(), lookup))
                 .collect::<Vec<_>>();
 
             let new_tail = if tail.is_none() {
                 tail.clone()
             } else {
-                self.compute_output_shape(tail.clone(), tail.clone(), named_var_shapes)
+                self.compute_output_shape(tail.clone(), tail.clone(), lookup)
             };
 
             return Shape::array(new_prefix, new_tail);
@@ -931,7 +923,7 @@ impl ApplyToInternal for SubSelection {
                 named_selection.compute_output_shape(
                     input_shape.clone(),
                     dollar_shape.clone(),
-                    named_var_shapes,
+                    lookup,
                 ),
             ]);
 
@@ -2500,118 +2492,17 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_output_shape() {
-        assert_eq!(selection!("").shape().pretty_print(), "{}");
-
-        assert_eq!(
-            selection!("id name").shape().pretty_print(),
-            "{ id: $root.*.id, name: $root.*.name }",
-        );
-
-        // // On hold until variadic $(...) is merged (PR #6456).
-        // assert_eq!(
-        //     selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
-        //         .shape()
-        //         .pretty_print(),
-        //     // Technically $.data could be an array, so this should be a union
-        //     // of this shape and a list of this shape, except with
-        //     // $root.data.0.maybe.{this,that} shape references.
-        //     //
-        //     // We could try to say that any { ... } shape represents either an
-        //     // object or a list of objects, by policy, to avoid having to write
-        //     // One<{...}, List<{...}>> everywhere a SubSelection appears.
-        //     //
-        //     // But then we don't know where the array indexes should go...
-        //     "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
-        // );
-
-        assert_eq!(
-            selection!(r#"
-                id
-                name
-                friends: friend_ids { id: @ }
-                alias: arrayOfArrays { x y }
-                ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).shape().pretty_print(),
-
-            // This output shape is wrong if $root.friend_ids turns out to be an
-            // array, and it's tricky to see how to transform the shape to what
-            // it would have been if we knew that, where friends: List<{ id:
-            // $root.friend_ids.* }> (note the * meaning any array index),
-            // because who's to say it's not the id field that should become the
-            // List, rather than the friends field?
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        );
-
-        assert_eq!(
-            selection!(r#"
-                id
-                name
-                friends: friend_ids->map({ id: @ })
-                alias: arrayOfArrays { x y }
-                ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).shape().pretty_print(),
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        );
-
-        assert_eq!(
-            selection!(r#"
-                upc
-                ... kind->match(
-                    ["book", ${ author title }],
-                    ["movie", ${ director title }],
-                )
-                price
-            "#).shape().pretty_print(),
-            "One<{ author: $root.*.author, price: $root.*.price, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: $root.*.price, title: $root.*.title, upc: $root.*.upc }, { price: $root.*.price, upc: $root.*.upc }>",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })")
-                .shape()
-                .pretty_print(),
-            "{ thrice: [$root, $root, $root] }",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries")
-                .shape()
-                .pretty_print(),
-            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-                .shape()
-                .pretty_print(),
-            "[\"thrice\"]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-                .shape()
-                .pretty_print(),
-            "[[$root, $root, $root]]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-                .shape()
-                .pretty_print(),
-            "[{ k: \"wrapped\", v: $root }]",
-        );
-    }
-
-    #[test]
     fn test_match_output_shape() {
         assert_eq!(
-            selection!("<Product>").shape().pretty_print(),
+            selection!("<Product>")
+                .compute_output_shape(Shape::any(), &Default::default())
+                .pretty_print(),
             "{ __typename: \"Product\" }",
         );
 
         assert_eq!(
             selection!("__typename: $('Product')")
-                .shape()
+                .compute_output_shape(Shape::any(), &Default::default())
                 .pretty_print(),
             "{ __typename: \"Product\" }",
         );
@@ -2625,7 +2516,7 @@ mod tests {
                     ["album", ${ artist title }],
                 )
                 price: cost
-            "#).shape().pretty_print(),
+            "#).compute_output_shape(Shape::any(), &Default::default()).pretty_print(),
             "One<{ author: $root.*.author, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { artist: $root.*.artist, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { price: $root.*.cost, upc: $root.*.upc }>"
         );
 
@@ -2637,7 +2528,7 @@ mod tests {
                     ["album", ${ <Album> artist }],
                     [@, ${ <Unknown> }],
                 )
-            "#).shape().pretty_print(),
+            "#).compute_output_shape(Shape::any(), &Default::default()).pretty_print(),
             "One<{ __typename: \"Book\", title: $root.*.title, upc: $root.*.upc }, { __typename: \"Film\", director: $root.*.director, upc: $root.*.upc }, { __typename: \"Album\", artist: $root.*.artist, upc: $root.*.upc }, { __typename: \"Unknown\", upc: $root.*.upc }>",
         );
 
@@ -2651,7 +2542,7 @@ mod tests {
                     ["movie", ${ <Film> director }],
                 )
                 price: cost
-            "#).shape().pretty_print(),
+            "#).compute_output_shape(Shape::any(), &Default::default()).pretty_print(),
             // Note All<Book, Product> would theoretically simplify down to just
             // Book if the shape system knows Book is a subtype of Product.
             "One<{ __typename: All<\"Book\", \"Product\">, price: $root.*.cost, title: $root.*.title, upc: $root.*.upc }, { __typename: All<\"Film\", \"Product\">, director: $root.*.director, price: $root.*.cost, upc: $root.*.upc }, { __typename: \"Product\", price: $root.*.cost, upc: $root.*.upc }>",
@@ -2979,6 +2870,210 @@ mod tests {
                 })),
                 vec![],
             ),
+        );
+    }
+}
+
+#[cfg(test)]
+mod test_compute_output_shape {
+    use indexmap::indexmap;
+    use insta::assert_snapshot;
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::selection;
+
+    #[test]
+    fn empty_selection() {
+        assert_eq!(
+            selection!("")
+                .compute_output_shape(Shape::any(), &Default::default())
+                .pretty_print(),
+            "{}"
+        );
+    }
+
+    #[test]
+    fn subselection_unknown_input() {
+        assert_eq!(
+            selection!("id name")
+                .compute_output_shape(Shape::any(), &Default::default())
+                .pretty_print(),
+            "{ id: Any, name: Any }",
+        );
+    }
+
+    #[test]
+    fn subselection_with_known_input() {
+        assert_eq!(
+            selection!("id name")
+                .compute_output_shape(
+                    Shape::record(indexmap!{"id".to_string() => Shape::int(), "name".to_string() => Shape::string() }),
+                    &Default::default()
+                )
+                .pretty_print(),
+            "{ id: Int, name: String }",
+        );
+    }
+
+    #[test]
+    fn subselection_with_invalid_field() {
+        assert_snapshot!(
+            selection!("id name")
+                .compute_output_shape(
+                    Shape::record(indexmap! {"id".to_string() => Shape::int() }),
+                    &Default::default()
+                )
+                .pretty_print(),
+            @r###"{ id: Int, name: Error<"field `name` not found"> }"###,  // TODO: this should have a location
+        );
+    }
+
+    #[test]
+    fn subselection_resolve_names() {
+        let names = [(
+            "User",
+            Shape::record(indexmap! {
+                "id".to_string() => Shape::int(),
+                "name".to_string() => Shape::string(),
+                "friends".to_string() => Shape::list(Shape::name("User")),
+            }),
+        )]
+        .into_iter()
+        .collect();
+
+        // Resolution goes as deep as necessary for the selection. Any `Name` left over could be a
+        // scalar or could be a red flag signaling incomplete selection / circular types.
+        assert_snapshot!(
+            selection!("id name friends { id name friends }")
+                .compute_output_shape(Shape::name("User"), &names)
+                .pretty_print(),
+            @"{ friends: List<{ friends: List<User>, id: Int, name: String }>, id: Int, name: String }",
+        );
+    }
+
+    #[test]
+    fn path_selection() {
+        let lookup = [
+            (
+                "$this",
+                Shape::record(indexmap! {
+                    "something".to_string() => Shape::name("Something")
+                }),
+            ),
+            (
+                "Something",
+                Shape::record(indexmap! {
+                    "id".to_string() => Shape::int(),
+                }),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_snapshot!(
+            selection!("$this.something.id")
+                .compute_output_shape(Shape::any(), &lookup)
+                .pretty_print(),
+            @"Int"
+        )
+    }
+
+    #[test]
+    fn invalid_variable_references() {
+        assert_snapshot!(
+            selection!("$this")
+                .compute_output_shape(Shape::any(), &Default::default())
+                .pretty_print(),
+            @r#"Error<"Variable $this not found">"#
+        )
+    }
+
+    #[test]
+    fn invalid_name_reference() {
+        assert_snapshot!(
+            selection!("blah")
+                .compute_output_shape(Shape::name("DoesntExist"), &Default::default())
+                .pretty_print(),
+            @r#"Error<"DoesntExist not found">"#
+        )
+    }
+
+    #[test]
+    fn complex_selections() {
+        assert_snapshot!(
+            selection!(r#"
+                id
+                name
+                friends: friend_ids { id: @ }
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
+            "#).compute_output_shape(Shape::any(), &Default::default()).pretty_print(),
+
+            // This output shape is wrong if friend_ids turns out to be an
+            // array, and it's tricky to see how to transform the shape to what
+            // it would have been if we knew that, where friends: List<{ id:
+            // friend_ids.* }> (note the * meaning any array index),
+            // because who's to say it's not the id field that should become the
+            // List, rather than the friends field?
+            @"{ alias: { x: Any, y: Any }, friends: { id: Any }, id: Any, name: Any, xs: Any, ys: Any }",
+        );
+    }
+
+    #[test]
+    fn map() {
+        assert_snapshot!(
+            selection!(r#"
+                upc
+                ... kind->match(
+                    ["book", ${ author title }],
+                    ["movie", ${ director title }],
+                )
+                price
+            "#).compute_output_shape(Shape::any(), &Default::default()).pretty_print(),
+            @"One<{ author: $root.*.author, price: $root.*.price, title: $root.*.title, upc: $root.*.upc }, { director: $root.*.director, price: $root.*.price, title: $root.*.title, upc: $root.*.upc }, { price: $root.*.price, upc: $root.*.upc }>",
+        );
+    }
+
+    // TODO: move these method tests near their methods
+    #[test]
+    fn echo() {
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })")
+                .compute_output_shape(Shape::int(), &Default::default())
+                .pretty_print(),
+            "{ thrice: [Int, Int, Int] }",
+        );
+    }
+
+    #[test]
+    fn entries() {
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries")
+                .compute_output_shape(Shape::int(), &Default::default())
+                .pretty_print(),
+            "[{ key: \"thrice\", value: [Int, Int, Int] }]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.key")
+                .compute_output_shape(Shape::any(), &Default::default())
+                .pretty_print(),
+            "[\"thrice\"]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.value")
+                .compute_output_shape(Shape::int(), &Default::default())
+                .pretty_print(),
+            "[[Int, Int, Int]]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
+                .compute_output_shape(Shape::name("$root"), &Default::default())
+                .pretty_print(),
+            "[{ k: \"wrapped\", v: $root }]",
         );
     }
 }

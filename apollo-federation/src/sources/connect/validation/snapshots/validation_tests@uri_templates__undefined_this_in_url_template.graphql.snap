@@ -5,17 +5,17 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
 ---
 [
     Message {
-        code: UndefinedField,
-        message: "In `GET` in `@connect(http:)` on `Query.resources`: `Query` does not have a field named `blah`",
+        code: InvalidUrl,
+        message: "field `blah` not found",
         locations: [
-            10:45..10:49,
+            10:39..10:49,
         ],
     },
     Message {
-        code: UndefinedField,
-        message: "In `GET` in `@connect(http:)` on `Query.resources`: `Query` does not have a field named `something`",
+        code: InvalidUrl,
+        message: "field `something` not found",
         locations: [
-            10:68..10:77,
+            10:62..10:77,
         ],
     },
 ]

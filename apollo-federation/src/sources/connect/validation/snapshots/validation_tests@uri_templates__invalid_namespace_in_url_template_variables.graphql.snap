@@ -13,9 +13,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.invalid`: variable `$status` is not valid at this location, must be one of $args, $config, $context, $this",
+        message: "Variable $status not found",
         locations: [
-            18:33..18:40,
+            18:15..18:22,
         ],
     },
 ]

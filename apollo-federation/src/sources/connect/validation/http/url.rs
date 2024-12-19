@@ -2,8 +2,8 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Node;
+use shape::graphql;
 use shape::Shape;
 use shape::ShapeCase;
 use url::Url;
@@ -15,6 +15,7 @@ use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
@@ -31,10 +32,11 @@ pub(crate) fn validate_template(
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
 
-    let mut named_var_shapes = IndexMap::default();
+    // TODO: Compute this once for the whole subgraph
+    let mut shape_lookup = graphql::shapes_for_schema(schema);
     // TODO: don't set $this for root types
-    named_var_shapes.insert(
-        "$this",
+    shape_lookup.insert(
+        Namespace::This.as_str(),
         Shape::from(coordinate.connect.field_coordinate.object.as_ref()),
     );
     let args = Shape::record(
@@ -47,17 +49,28 @@ pub(crate) fn validate_template(
             .map(|arg| (arg.name.to_string(), Shape::from(arg.ty.as_ref())))
             .collect(),
     );
-    named_var_shapes.insert("$args", args);
-    // TODO: should `any` be different than `none`?
-    named_var_shapes.insert("$config", Shape::name("$config"));
+    shape_lookup.insert(Namespace::Args.as_str(), args);
+    shape_lookup.insert(Namespace::Config.as_str(), Shape::any());
 
     for expression in template.expressions() {
-        // TODO: make sure this fails when missing vars and such
         let shape = expression
             .expression
-            .compute_output_shape(Shape::none(), &named_var_shapes);
+            .compute_output_shape(Shape::none(), &shape_lookup);
+        messages.extend(shape.errors().map(|error| {
+            Message {
+                code: Code::InvalidUrl,
+                message: error.message.clone(),
+                locations: str_value
+                    .line_col_for_subslice(
+                        error.range.as_ref().unwrap_or(&expression.location).clone(),
+                        schema,
+                    )
+                    .into_iter()
+                    .collect(),
+            }
+        }));
         messages.extend(
-            validate_shape(&shape, &str_value, &expression, schema)
+            validate_shape(&shape, &str_value, expression, schema)
                 .err()
                 .into_iter(),
         );
@@ -98,6 +111,20 @@ fn validate_shape(
                 validate_shape(shape, str_value, expression, schema)?;
             }
             Ok(())
+        }
+        ShapeCase::Name(name, _) => {
+            if schema.get_scalar(name).is_none() && schema.get_enum(name).is_none() {
+                Err(Message {
+                    code: Code::InvalidUrl,
+                    message: format!("URI expressions can't resolve to objects, found `{name}`"),
+                    locations: str_value
+                        .line_col_for_subslice(expression.location.clone(), schema)
+                        .into_iter()
+                        .collect(),
+                })
+            } else {
+                Ok(())
+            }
         }
         _ => Ok(()),
     }
