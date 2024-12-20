@@ -267,7 +267,7 @@ pub(super) fn match_shape(
 
         if result_union.is_empty() {
             Shape::error_with_range(
-                &format!(
+                format!(
                     "Method ->{} requires at least one [candidate, value] pair",
                     method_name.as_ref(),
                 ),
