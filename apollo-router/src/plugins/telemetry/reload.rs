@@ -21,16 +21,11 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
-use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::DynAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
-use crate::metrics::layer::MetricsLayer;
-use crate::metrics::meter_provider;
-use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::PreSampledTracer;
@@ -52,11 +47,6 @@ static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
-pub(super) static METRICS_LAYER: OnceCell<MetricsLayer> = OnceCell::new();
-pub(crate) fn metrics_layer() -> &'static MetricsLayer {
-    METRICS_LAYER.get_or_init(|| MetricsLayer::new(meter_provider().clone()))
-}
-
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer(
@@ -70,22 +60,12 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
-        FmtLayer::new(
-            FilteringFormatter::new(Text::default(), filter_metric_events, &RateLimit::default()),
-            std::io::stdout,
-        )
-        .boxed()
+        FmtLayer::new(Text::default(), std::io::stdout).boxed()
     } else {
-        FmtLayer::new(
-            FilteringFormatter::new(Json::default(), filter_metric_events, &RateLimit::default()),
-            std::io::stdout,
-        )
-        .boxed()
+        FmtLayer::new(Json::default(), std::io::stdout).boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
-
-    let metrics_layer = metrics_layer();
 
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
@@ -100,7 +80,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
                 .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
-                .with(metrics_layer.clone())
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
 

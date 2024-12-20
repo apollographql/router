@@ -126,7 +126,6 @@ use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::metrics_layer;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
@@ -1697,8 +1696,6 @@ impl TelemetryActivation {
 
         old_meter_providers[2] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        metrics_layer().clear();
 
         Self::checked_meter_shutdown(old_meter_providers);
     }

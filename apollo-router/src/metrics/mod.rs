@@ -11,7 +11,6 @@ use crate::metrics::aggregation::AggregateMeterProvider;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
-pub(crate) mod layer;
 
 // During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 

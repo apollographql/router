@@ -25,10 +25,6 @@ use tracing_subscriber::registry::SpanRef;
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use super::reload::SampledSpan;
-use crate::metrics::layer::METRIC_PREFIX_COUNTER;
-use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
-use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
-use crate::metrics::layer::METRIC_PREFIX_VALUE;
 use crate::plugins::telemetry::otel::OtelData;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
@@ -63,14 +59,15 @@ pub(crate) struct FilteringFormatter<T, F> {
     config: RateLimit,
 }
 
-impl<T, F> FilteringFormatter<T, F>
-where
-    F: Fn(&tracing::Event<'_>) -> bool,
-{
-    pub(crate) fn new(inner: T, filter_fn: F, rate_limit: &RateLimit) -> Self {
+fn always_true(_event: &tracing::Event<'_>) -> bool {
+    true
+}
+
+impl<T> FilteringFormatter<T, fn(&tracing::Event<'_>) -> bool> {
+    pub(crate) fn new(inner: T, rate_limit: &RateLimit) -> Self {
         Self {
             inner,
-            filter_fn,
+            filter_fn: always_true,
             rate_limiter: Mutex::new(HashMap::new()),
             config: rate_limit.clone(),
         }
@@ -226,16 +223,6 @@ impl<T, F> FilteringFormatter<T, F> {
 struct RateCounter {
     last: Instant,
     count: u32,
-}
-
-// Function to filter metric event for the filter formatter
-pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
-    !event.metadata().fields().iter().any(|f| {
-        f.name().starts_with(METRIC_PREFIX_COUNTER)
-            || f.name().starts_with(METRIC_PREFIX_HISTOGRAM)
-            || f.name().starts_with(METRIC_PREFIX_MONOTONIC_COUNTER)
-            || f.name().starts_with(METRIC_PREFIX_VALUE)
-    })
 }
 
 pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
