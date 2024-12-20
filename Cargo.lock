@@ -26,7 +26,7 @@ dependencies = [
 
 [[package]]
 name = "add-timestamp-header"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.58.1"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation-cli"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.58.1"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "access-json",
  "ahash",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.58.1"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.58.1"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold-test"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "async-allow-client-id"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "cache-control"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -1693,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "context-data"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -1730,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "cookies-to-headers"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -2462,7 +2462,7 @@ dependencies = [
 
 [[package]]
 name = "everything-subgraph"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
@@ -2474,7 +2474,7 @@ dependencies = [
 
 [[package]]
 name = "external-subgraph"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -2587,7 +2587,7 @@ checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
 
 [[package]]
 name = "forbid-anonymous-operations"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -2601,7 +2601,7 @@ dependencies = [
 
 [[package]]
 name = "forbid_anonymous_operations_rhai"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -3152,7 +3152,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-world"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -3753,7 +3753,7 @@ dependencies = [
 
 [[package]]
 name = "jwt-claims"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -4347,7 +4347,7 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 
 [[package]]
 name = "op-name-to-header"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -5037,7 +5037,7 @@ dependencies = [
 
 [[package]]
 name = "propagate-status-code"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -5447,7 +5447,7 @@ dependencies = [
 
 [[package]]
 name = "rhai-data-response-mutate"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -5459,7 +5459,7 @@ dependencies = [
 
 [[package]]
 name = "rhai-error-response-mutate"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -5471,7 +5471,7 @@ dependencies = [
 
 [[package]]
 name = "rhai-logging"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -5483,7 +5483,7 @@ dependencies = [
 
 [[package]]
 name = "rhai-subgraph-request-log"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -5495,7 +5495,7 @@ dependencies = [
 
 [[package]]
 name = "rhai-surrogate-cache-key"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",
@@ -5580,7 +5580,7 @@ dependencies = [
 
 [[package]]
 name = "router-fuzz"
-version = "0.0.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-parser",
@@ -6326,7 +6326,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "supergraph_sdl"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-compiler",
@@ -6528,7 +6528,7 @@ dependencies = [
 
 [[package]]
 name = "throw-error"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 dependencies = [
  "anyhow",
  "apollo-router",

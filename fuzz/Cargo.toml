@@ -1,7 +1,7 @@
 
 [package]
 name = "router-fuzz"
-version = "0.0.0"
+version = "1.58.1+telemetry-fix"
 authors = ["Automatically generated"]
 publish = false
 edition = "2018"

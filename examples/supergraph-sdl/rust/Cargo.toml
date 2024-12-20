@@ -1,6 +1,6 @@
 [package]
 name = "supergraph_sdl"
-version = "0.1.0"
+version = "1.58.1+telemetry-fix"
 edition = "2021"
 
 [dependencies]
