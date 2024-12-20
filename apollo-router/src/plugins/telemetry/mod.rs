@@ -64,8 +64,6 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
-use self::config::Sampler;
-use self::config::SamplerOption;
 use self::config::TraceIdFormat;
 use self::config_new::events::RouterEvents;
 use self::config_new::events::SubgraphEvents;
@@ -201,7 +199,6 @@ pub(crate) struct Telemetry {
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
-    sampling_filter_ratio: SamplerOption,
     pub(crate) graphql_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
@@ -297,8 +294,7 @@ impl PluginPrivate for Telemetry {
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
         let metrics_builder = Self::create_metrics_builder(&config)?;
-
-        let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
+        let tracer_provider = Self::create_tracer_provider(&config)?;
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
@@ -335,7 +331,6 @@ impl PluginPrivate for Telemetry {
             supergraph_custom_instruments: RwLock::new(supergraph_custom_instruments),
             subgraph_custom_instruments: RwLock::new(subgraph_custom_instruments),
             cache_custom_instruments: RwLock::new(cache_custom_instruments),
-            sampling_filter_ratio,
             config: Arc::new(config),
         })
     }
@@ -862,8 +857,6 @@ impl PluginPrivate for Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            otel::layer::configure(&self.sampling_filter_ratio);
-
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
@@ -885,7 +878,8 @@ impl PluginPrivate for Telemetry {
 
             Self::checked_global_tracer_shutdown(last_provider);
 
-            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+            let propagator = Self::create_propagator(&self.config);
+            opentelemetry::global::set_text_map_propagator(propagator);
         }
 
         activation.reload_metrics();
@@ -938,6 +932,9 @@ impl Telemetry {
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
         }
+
+        // This propagator MUST come last because the user is trying to override the default behavior of the
+        // other propagators.
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
@@ -950,35 +947,22 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
+    ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
-        let mut common = tracing_config.common.clone();
-        let mut sampler = common.sampler.clone();
-        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
-        // should be accepted
-        common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+        let common = &tracing_config.common;
 
         let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
+            opentelemetry::sdk::trace::TracerProvider::builder().with_config((common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, &common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, &common, spans_config)?;
-        builder = setup_tracing(builder, &config.apollo, &common, spans_config)?;
-
-        if !tracing_config.jaeger.enabled()
-            && !tracing_config.zipkin.enabled()
-            && !tracing_config.datadog.enabled()
-            && !TracingConfigurator::enabled(&tracing_config.otlp)
-            && !TracingConfigurator::enabled(&config.apollo)
-        {
-            sampler = SamplerOption::Always(Sampler::AlwaysOff);
-        }
+        builder = setup_tracing(builder, &tracing_config.jaeger, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, common, spans_config)?;
+        builder = setup_tracing(builder, &config.apollo, common, spans_config)?;
 
         let tracer_provider = builder.build();
-        Ok((sampler, tracer_provider))
+        Ok(tracer_provider)
     }
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
@@ -2132,6 +2116,8 @@ mod tests {
     use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2189,6 +2175,7 @@ mod tests {
     use crate::plugins::demand_control::COST_STRATEGY_KEY;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
+    use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -2832,6 +2819,63 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/config.field_instrumentation_sampler.router.yaml"
+        ))
+        .await;
+
+        let ftv1_counter = Arc::new(AtomicUsize::new(0));
+        let ftv1_counter_cloned = ftv1_counter.clone();
+
+        let mut mock_request_service = MockSupergraphService::new();
+        mock_request_service
+            .expect_call()
+            .times(10)
+            .returning(move |req: SupergraphRequest| {
+                if req
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
+                {
+                    ftv1_counter_cloned.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .status_code(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .data(json!({"errors": [{"message": "nope"}]}))
+                    .build()
+                    .unwrap())
+            });
+        let mut request_supergraph_service =
+            plugin.supergraph_service(BoxService::new(mock_request_service));
+
+        for _ in 0..10 {
+            let supergraph_req = SupergraphRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .query("Query test { me {name} }")
+                .operation_name("test".to_string());
+            let _router_response = request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(supergraph_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+        }
+        // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
+        assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 
     #[tokio::test]

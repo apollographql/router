@@ -1,15 +1,18 @@
 //! Configuration for datadog tracing.
 
+mod agent_sampling;
+mod span_processor;
+
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::time::Duration;
 
+pub(crate) use agent_sampling::DatadogAgentSampling;
 use ahash::HashMap;
 use ahash::HashMapExt;
 use futures::future::BoxFuture;
 use http::Uri;
 use opentelemetry::sdk;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
 use opentelemetry_api::trace::SpanContext;
@@ -23,6 +26,7 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
 use serde::Deserialize;
+pub(crate) use span_processor::DatadogSpanProcessor;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
@@ -210,18 +214,24 @@ impl TracingConfigurator for Config {
         let mut span_metrics = default_span_metrics();
         span_metrics.extend(self.span_metrics.clone());
 
-        Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(
-                ExporterWrapper {
-                    delegate: exporter,
-                    span_metrics,
-                },
-                opentelemetry::runtime::Tokio,
-            )
-            .with_batch_config(self.batch_processor.clone().into())
-            .build()
-            .filtered(),
-        ))
+        let batch_processor = opentelemetry::sdk::trace::BatchSpanProcessor::builder(
+            ExporterWrapper {
+                delegate: exporter,
+                span_metrics,
+            },
+            opentelemetry::runtime::Tokio,
+        )
+        .with_batch_config(self.batch_processor.clone().into())
+        .build()
+        .filtered();
+
+        Ok(
+            if trace.preview_datadog_agent_sampling.unwrap_or_default() {
+                builder.with_span_processor(batch_processor.always_sampled())
+            } else {
+                builder.with_span_processor(batch_processor)
+            },
+        )
     }
 }
 
