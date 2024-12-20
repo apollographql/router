@@ -1,6 +1,5 @@
 //! Variables used in connector directives `@connect` and `@source`.
 
-use std::borrow::Cow;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Range;
@@ -201,7 +200,7 @@ pub(crate) struct VariableNamespace<N: FromStr + ToString> {
 /// Part of a variable path, like `a` in `$this.a.b.c`
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub(crate) struct VariablePathPart<'a> {
-    pub(crate) part: Cow<'a, str>,
+    pub(crate) part: &'a str,
     pub(crate) location: Range<usize>,
 }
 

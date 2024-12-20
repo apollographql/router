@@ -773,32 +773,4 @@ mod tests {
         let body = body::into_string(req.0.into_body()).await.unwrap();
         insta::assert_snapshot!(body, @r#"a=42"#);
     }
-
-    #[test]
-    #[ignore] // Enable this to test performance of flatten_keys
-    fn flatten_keys_perf() {
-        let mut inputs = IndexMap::with_capacity_and_hasher(10, Default::default());
-        for i in 0..10 {
-            let mut children_i = IndexMap::with_capacity_and_hasher(10, Default::default());
-            for j in 0..10 {
-                let mut children_j = IndexMap::with_capacity_and_hasher(10, Default::default());
-                for k in 0..10 {
-                    let mut children_k = IndexMap::with_capacity_and_hasher(10, Default::default());
-                    for l in 0..10 {
-                        children_k.insert(l.to_string(), json!(l));
-                    }
-                    children_j.insert(k.to_string(), json!(children_k));
-                }
-                children_i.insert(j.to_string(), json!(children_j));
-            }
-            inputs.insert(i.to_string(), json!(children_i));
-        }
-
-        let start = std::time::Instant::now();
-        for _ in 0..1000 {
-            flatten_keys(&inputs);
-        }
-        let elapsed = start.elapsed();
-        println!("Total time: {}ms", elapsed.as_millis());
-    }
 }
