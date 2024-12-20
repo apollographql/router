@@ -19,7 +19,6 @@ use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
-use crate::sources::connect::variable;
 
 /// The location of a field within an object.
 #[derive(Clone, Copy)]
@@ -46,15 +45,6 @@ pub(super) struct ConnectDirectiveCoordinate<'a> {
     pub(super) directive: &'a Node<Directive>,
     pub(super) connect_directive_name: &'a Name,
     pub(super) field_coordinate: FieldCoordinate<'a>,
-}
-
-impl<'a> From<ConnectDirectiveCoordinate<'a>> for variable::Directive<'a> {
-    fn from(value: ConnectDirectiveCoordinate<'a>) -> Self {
-        variable::Directive::Connect {
-            field: value.field_coordinate.field,
-            object: value.field_coordinate.object,
-        }
-    }
 }
 
 impl Display for ConnectDirectiveCoordinate<'_> {

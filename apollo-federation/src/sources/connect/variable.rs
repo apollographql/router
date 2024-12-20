@@ -30,15 +30,25 @@ pub(crate) trait ExpressionContext<N: FromStr + ToString> {
 /// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
 #[derive(Clone, PartialEq)]
 pub(crate) struct ConnectorsContext<'schema> {
-    pub(super) directive: Directive<'schema>,
+    /// The object type containing the field the directive is on
+    pub(crate) object: &'schema Node<ObjectType>,
+
+    /// The field definition of the field the directive is on
+    pub(crate) field: &'schema Component<FieldDefinition>,
     pub(super) phase: Phase,
     pub(super) target: Target,
 }
 
 impl<'schema> ConnectorsContext<'schema> {
-    pub(crate) fn new(directive: Directive<'schema>, phase: Phase, target: Target) -> Self {
+    pub(crate) fn new(
+        object: &'schema Node<ObjectType>,
+        field: &'schema Component<FieldDefinition>,
+        phase: Phase,
+        target: Target,
+    ) -> Self {
         Self {
-            directive,
+            object,
+            field,
             phase,
             target,
         }
@@ -47,12 +57,8 @@ impl<'schema> ConnectorsContext<'schema> {
 
 impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
     fn available_namespaces(&self) -> impl Iterator<Item = Namespace> {
-        match (&self.directive, &self.phase, &self.target) {
-            (Directive::Source, Phase::Response, _) => {
-                vec![Namespace::Config, Namespace::Context, Namespace::Status]
-            }
-            (Directive::Source, _, _) => vec![Namespace::Config, Namespace::Context],
-            (Directive::Connect { .. }, Phase::Response, _) => {
+        match &self.phase {
+            Phase::Response => {
                 vec![
                     Namespace::Args,
                     Namespace::Config,
@@ -61,7 +67,7 @@ impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
                     Namespace::This,
                 ]
             }
-            (Directive::Connect { .. }, _, _) => {
+            Phase::Request => {
                 vec![
                     Namespace::Config,
                     Namespace::Context,
@@ -72,22 +78,6 @@ impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
         }
         .into_iter()
     }
-}
-
-/// An Apollo Connectors directive in a schema
-#[derive(Clone, PartialEq)]
-pub(crate) enum Directive<'schema> {
-    /// A `@source` directive
-    Source,
-
-    /// A `@connect` directive
-    Connect {
-        /// The object type containing the field the directive is on
-        object: &'schema Node<ObjectType>,
-
-        /// The field definition of the field the directive is on
-        field: &'schema Component<FieldDefinition>,
-    },
 }
 
 /// The phase an expression is associated with
@@ -214,38 +204,5 @@ impl Display for VariablePathPart<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.part.to_string().as_str())?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_available_namespaces() {
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Url)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context,]
-        );
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Header)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context,]
-        );
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Body)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context,]
-        );
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Response, Target::Header)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context, Namespace::Status,]
-        );
     }
 }

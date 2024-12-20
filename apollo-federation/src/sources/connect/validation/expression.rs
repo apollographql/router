@@ -14,12 +14,15 @@ use crate::sources::connect::Namespace;
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
 pub(super) struct Context<'schema> {
-    schema: &'schema SchemaInfo<'schema>,
+    pub(crate) schema: &'schema SchemaInfo<'schema>,
     var_lookup: IndexMap<Namespace, Shape>,
 }
 
 impl<'schema> Context<'schema> {
-    pub(super) fn new(schema: &'schema SchemaInfo, coordinate: ConnectDirectiveCoordinate) -> Self {
+    pub(super) fn for_connect_request(
+        schema: &'schema SchemaInfo,
+        coordinate: ConnectDirectiveCoordinate,
+    ) -> Self {
         let object_type = coordinate.field_coordinate.object;
         let is_root_type = schema
             .schema_definition
@@ -53,6 +56,17 @@ impl<'schema> Context<'schema> {
             var_lookup.insert(Namespace::This, Shape::from(object_type.as_ref()));
         }
 
+        Self { schema, var_lookup }
+    }
+
+    /// Create a context valid for expressions within the `@source` directive
+    pub(super) fn for_source(schema: &'schema SchemaInfo) -> Self {
+        let var_lookup: IndexMap<Namespace, Shape> = [
+            (Namespace::Config, Shape::none()),
+            (Namespace::Context, Shape::none()),
+        ]
+        .into_iter()
+        .collect();
         Self { schema, var_lookup }
     }
 }
@@ -95,8 +109,8 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
 /// TODO: Some day, whether objects or arrays are allowed will be dependent on &self (i.e., is the * modifier used)
 fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
     match shape.case() {
-        ShapeCase::Array { .. } => Err("URIs can't contain arrays".to_string()),
-        ShapeCase::Object { .. } => Err("URIs can't contain objects".to_string()),
+        ShapeCase::Array { .. } => Err("array values aren't valid here".to_string()),
+        ShapeCase::Object { .. } => Err("object values aren't valid here".to_string()),
         ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
             for shape in shapes {
                 validate_shape(shape, context)?;
@@ -121,7 +135,7 @@ fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
                     .get(&namespace)
                     .ok_or_else(|| {
                         format!(
-                            "{namespace} is not allowed here, must be one of {namespaces}",
+                            "{namespace} is not valid here, must be one of {namespaces}",
                             namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                         )
                     })?

@@ -13,7 +13,6 @@ use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::variable::ConnectorsContext;
-use crate::sources::connect::variable::Directive;
 use crate::sources::connect::variable::ExpressionContext;
 use crate::sources::connect::variable::Namespace;
 use crate::sources::connect::variable::Target;
@@ -31,10 +30,17 @@ impl<'a> VariableResolver<'a> {
         schema: &'a SchemaInfo<'a>,
     ) -> Self {
         let mut resolvers = HashMap::<Namespace, Box<dyn NamespaceResolver + 'a>>::new();
-        if let Directive::Connect { object, field } = expression_context.directive {
-            resolvers.insert(Namespace::This, Box::new(ThisResolver::new(object, field)));
-            resolvers.insert(Namespace::Args, Box::new(ArgsResolver::new(field)));
-        }
+        resolvers.insert(
+            Namespace::This,
+            Box::new(ThisResolver::new(
+                expression_context.object,
+                expression_context.field,
+            )),
+        );
+        resolvers.insert(
+            Namespace::Args,
+            Box::new(ArgsResolver::new(expression_context.field)),
+        );
         Self {
             expression_context,
             schema,
@@ -46,7 +52,6 @@ impl<'a> VariableResolver<'a> {
         &self,
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
-        location_offset: usize,
     ) -> Result<(), Message> {
         if !self
             .expression_context
@@ -61,13 +66,13 @@ impl<'a> VariableResolver<'a> {
                     available = self.expression_context.namespaces_joined(),
                 ),
                 locations: expression.line_col_for_subslice(
-                    reference.namespace.location.start + location_offset..reference.namespace.location.end + location_offset,
+                    reference.namespace.location.start..reference.namespace.location.end,
                     self.schema
                 ).into_iter().collect(),
             });
         }
         if let Some(resolver) = self.resolvers.get(&reference.namespace.namespace) {
-            resolver.resolve(reference, expression, self.schema, location_offset)?;
+            resolver.resolve(reference, expression, self.schema)?;
         }
         Ok(())
     }
