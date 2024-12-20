@@ -16,6 +16,7 @@
 
 mod coordinates;
 mod entity;
+mod expression;
 mod extended_type;
 mod graphql;
 mod http;

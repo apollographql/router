@@ -2,18 +2,16 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Node;
-use shape::Shape;
 use url::Url;
 
 use crate::sources::connect::string_template;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
+use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::Namespace;
 use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
@@ -29,45 +27,11 @@ pub(crate) fn validate_template(
         messages
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
-
-    let object_type = coordinate.connect.field_coordinate.object;
-    let is_root_type = schema
-        .schema_definition
-        .query
-        .as_ref()
-        .is_some_and(|query| query.name == object_type.name)
-        || schema
-            .schema_definition
-            .mutation
-            .as_ref()
-            .is_some_and(|mutation| mutation.name == object_type.name);
-    let mut var_lookup: IndexMap<Namespace, Shape> = [
-        (
-            Namespace::Args,
-            Shape::record(
-                coordinate
-                    .connect
-                    .field_coordinate
-                    .field
-                    .arguments
-                    .iter()
-                    .map(|arg| (arg.name.to_string(), Shape::from(arg.ty.as_ref())))
-                    .collect(),
-            ),
-        ),
-        (Namespace::Config, Shape::none()),
-        (Namespace::Context, Shape::none()),
-    ]
-    .into_iter()
-    .collect();
-    if !is_root_type {
-        var_lookup.insert(Namespace::This, Shape::from(object_type.as_ref()));
-    }
+    let expression_context = expression::Context::new(schema, coordinate.connect);
 
     for expression in template.expressions() {
         messages.extend(
-            expression
-                .validate(&schema.shape_lookup, &var_lookup)
+            expression::validate(expression, &expression_context)
                 .err()
                 .into_iter()
                 .flatten()
