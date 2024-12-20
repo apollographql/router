@@ -4,14 +4,12 @@ use std::str::FromStr;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Node;
-use itertools::Itertools;
 use shape::graphql;
 use shape::Shape;
 use shape::ShapeCase;
 use url::Url;
 
 use crate::sources::connect::string_template;
-use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -35,27 +33,7 @@ pub(crate) fn validate_template(
     }
 
     // TODO: Compute this once for the whole subgraph
-    let mut shape_lookup = graphql::shapes_for_schema(schema);
-    // TODO: don't set $this for root types
-    shape_lookup.insert(
-        Namespace::This.as_str(),
-        Shape::from(coordinate.connect.field_coordinate.object.as_ref()),
-    );
-    let args = Shape::record(
-        coordinate
-            .connect
-            .field_coordinate
-            .field
-            .arguments
-            .iter()
-            .map(|arg| (arg.name.to_string(), Shape::from(arg.ty.as_ref())))
-            .collect(),
-    );
-    shape_lookup.insert(Namespace::Args.as_str(), args);
-    shape_lookup.insert(
-        Namespace::Config.as_str(),
-        Shape::object(Default::default(), Shape::any()),
-    );
+    let shape_lookup = graphql::shapes_for_schema(schema);
 
     for expression in template.expressions() {
         let shape = expression
@@ -75,7 +53,7 @@ pub(crate) fn validate_template(
             }
         }));
         messages.extend(
-            validate_shape(&shape, &str_value, expression, schema, &shape_lookup)
+            validate_shape(&shape, &shape_lookup, coordinate)
                 .err()
                 .map(|message| Message {
                     code: Code::InvalidUrl,
@@ -97,42 +75,71 @@ pub(crate) fn validate_template(
 
 fn validate_shape(
     shape: &Shape,
-    str_value: &GraphQLString,
-    expression: &Expression,
-    schema: &SchemaInfo,
     shape_lookup: &IndexMap<&str, Shape>,
+    coordinate: HttpMethodCoordinate,
 ) -> Result<(), String> {
+    // TODO: don't include $this for root types
+    let namespaces = [
+        Namespace::Args,
+        Namespace::Config,
+        Namespace::Context,
+        Namespace::This,
+    ];
     match shape.case() {
         ShapeCase::Array { .. } => Err("URIs can't contain arrays".to_string()),
         ShapeCase::Object { .. } => Err("URIs can't contain objects".to_string()),
         ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
             for shape in shapes {
-                validate_shape(shape, str_value, expression, schema, shape_lookup)?;
+                validate_shape(shape, shape_lookup, coordinate)?;
             }
             Ok(())
         }
         ShapeCase::Name(name, key) => {
-            let Some(mut shape) = shape_lookup.get(name.as_str()).cloned() else {
-                return Err(if name.starts_with('$') {
+            let mut shape = if name.starts_with('$') {
+                let namespace = Namespace::from_str(name).map_err(|_| {
                     format!(
                         "unknown variable `{name}`, must be one of {namespaces}",
-                        namespaces = shape_lookup
-                            .keys()
-                            .filter(|key| key.starts_with('$'))
-                            .join(", ")
+                        namespaces = namespaces.map(|ns| ns.as_str()).join(", ")
                     )
-                } else {
-                    format!("unknown type `{name}`")
-                });
+                })?;
+                match namespace {
+                    Namespace::Args => Shape::record(
+                        coordinate
+                            .connect
+                            .field_coordinate
+                            .field
+                            .arguments
+                            .iter()
+                            .map(|arg| (arg.name.to_string(), Shape::from(arg.ty.as_ref())))
+                            .collect(),
+                    ),
+                    Namespace::Context | Namespace::Config => Shape::null(), // Can't use none because that messes up the child check later
+                    Namespace::This => {
+                        Shape::from(coordinate.connect.field_coordinate.object.as_ref())
+                    } // TODO: not for root types
+                    Namespace::Status => {
+                        return Err(format!(
+                            "{namespace} is not allowed here, must be one of {namespaces}",
+                            namespaces = namespaces.map(|ns| ns.as_str()).join(", "),
+                        ))
+                    }
+                }
+            } else {
+                shape_lookup
+                    .get(name.as_str())
+                    .cloned()
+                    .ok_or_else(|| format!("unknown type `{name}`"))?
             };
+            let mut path = name.clone();
             for key in key {
                 let child = shape.child(key);
                 if child.is_none() {
-                    return Err(format!("`{name}` doesn't have a field named `{key}`"));
+                    return Err(format!("`{path}` doesn't have a field named `{key}`"));
                 }
                 shape = child;
+                path = format!("{path}.{key}");
             }
-            validate_shape(&shape, str_value, expression, schema, shape_lookup)
+            validate_shape(&shape, shape_lookup, coordinate)
         }
         _ => Ok(()),
     }
