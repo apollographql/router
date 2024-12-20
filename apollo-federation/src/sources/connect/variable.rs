@@ -206,7 +206,7 @@ pub(crate) struct VariablePathPart<'a> {
 
 impl VariablePathPart<'_> {
     pub(crate) fn as_str(&self) -> &str {
-        self.part.as_ref()
+        self.part
     }
 }
 
