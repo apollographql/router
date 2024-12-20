@@ -8,8 +8,11 @@ use std::str::FromStr;
 use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
 use serde_json_bytes::Value;
+use shape::Shape;
+use shape::ShapeCase;
 
 use crate::sources::connect::JSONSelection;
+use crate::sources::connect::Namespace;
 
 /// A parsed string template, containing a series of [`Part`]s.
 #[derive(Clone, Debug)]
@@ -195,6 +198,103 @@ pub(crate) struct Constant<T> {
 pub(crate) struct Expression {
     pub(crate) expression: JSONSelection,
     pub(crate) location: Range<usize>,
+}
+
+impl Expression {
+    pub(crate) fn validate(
+        &self,
+        shape_lookup: &IndexMap<&str, Shape>,
+        var_lookup: &IndexMap<Namespace, Shape>,
+    ) -> Result<(), Vec<Error>> {
+        let shape = self.expression.shape();
+        let errors: Vec<Error> = shape
+            .errors()
+            .map(|err| Error {
+                message: err.message.clone(),
+                location: err
+                    .range
+                    .as_ref()
+                    .map(|range| range.start + self.location.start..range.end + self.location.start)
+                    .unwrap_or(self.location.clone()),
+            })
+            .collect();
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+
+        Self::validate_shape(&shape, shape_lookup, var_lookup).map_err(|message| {
+            vec![Error {
+                message,
+                location: self.location.clone(),
+            }]
+        })
+    }
+
+    /// Validate that the shape is an acceptable output shape for an Expression.
+    ///
+    /// TODO: Some day, whether objects or arrays are allowed will be dependent on &self (i.e., is the * modifier used)
+    fn validate_shape(
+        shape: &Shape,
+        shape_lookup: &IndexMap<&str, Shape>,
+        var_lookup: &IndexMap<Namespace, Shape>,
+    ) -> Result<(), String> {
+        match shape.case() {
+            ShapeCase::Array { .. } => Err("URIs can't contain arrays".to_string()),
+            ShapeCase::Object { .. } => Err("URIs can't contain objects".to_string()),
+            ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
+                for shape in shapes {
+                    Self::validate_shape(shape, shape_lookup, var_lookup)?;
+                }
+                Ok(())
+            }
+            ShapeCase::Name(name, key) => {
+                let mut shape = if name == "$root" {
+                    return Err(format!(
+                        "`{key}` must start with an argument name, like `$this` or `$args`",
+                        key = key.iter().map(|key| key.to_string()).join(".")
+                    ));
+                } else if name.starts_with('$') {
+                    let namespace = Namespace::from_str(name).map_err(|_| {
+                        format!(
+                            "unknown variable `{name}`, must be one of {namespaces}",
+                            namespaces = var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                        )
+                    })?;
+                    var_lookup
+                        .get(&namespace)
+                        .ok_or_else(|| {
+                            format!(
+                                "{namespace} is not allowed here, must be one of {namespaces}",
+                                namespaces = var_lookup.keys().map(|ns| ns.as_str()).join(", "),
+                            )
+                        })?
+                        .clone()
+                } else {
+                    shape_lookup
+                        .get(name.as_str())
+                        .cloned()
+                        .ok_or_else(|| format!("unknown type `{name}`"))?
+                };
+                let mut path = name.clone();
+                for key in key {
+                    let child = shape.child(key);
+                    if child.is_none() {
+                        return Err(format!("`{path}` doesn't have a field named `{key}`"));
+                    }
+                    shape = child;
+                    path = format!("{path}.{key}");
+                }
+                Self::validate_shape(&shape, shape_lookup, var_lookup)
+            }
+            ShapeCase::Error(shape::Error { message, .. }) => Err(message.clone()),
+            ShapeCase::None
+            | ShapeCase::Bool(_)
+            | ShapeCase::String(_)
+            | ShapeCase::Int(_)
+            | ShapeCase::Float
+            | ShapeCase::Null => Ok(()), // We use null as any/unknown right now, so don't say anything about it
+        }
+    }
 }
 
 #[cfg(test)]
