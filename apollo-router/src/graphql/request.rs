@@ -197,10 +197,10 @@ impl Request {
         let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
-            f64_histogram!(
+            u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
-                result.len() as f64,
+                result.len() as u64,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
@@ -228,10 +228,10 @@ impl Request {
         let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
-            f64_histogram!(
+            u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
-                result.len() as f64,
+                result.len() as u64,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
