@@ -88,16 +88,16 @@ fn session_count_instrument() -> ObservableGauge<u64> {
         .init()
 }
 
-struct SessionCountGuard;
+struct ActiveSessionCountGuard;
 
-impl SessionCountGuard {
+impl ActiveSessionCountGuard {
     fn start() -> Self {
         ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
         Self
     }
 }
 
-impl Drop for SessionCountGuard {
+impl Drop for ActiveSessionCountGuard {
     fn drop(&mut self) {
         ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
     }
@@ -655,7 +655,7 @@ async fn handle_graphql(
     experimental_log_on_broken_pipe: bool,
     http_request: Request<DecompressionBody<Body>>,
 ) -> impl IntoResponse {
-    let _guard = SessionCountGuard::start();
+    let _guard = ActiveSessionCountGuard::start();
 
     let (parts, body) = http_request.into_parts();
 
