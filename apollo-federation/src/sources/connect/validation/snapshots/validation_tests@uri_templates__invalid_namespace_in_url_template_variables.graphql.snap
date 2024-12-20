@@ -8,14 +8,21 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.unknown`: Unknown variable",
         locations: [
-            11:33..11:41,
+            11:31..11:39,
         ],
     },
     Message {
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.invalid`: $status is not allowed here, must be one of $args, $config, $context, $this",
         locations: [
-            18:33..18:44,
+            18:31..18:42,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.nodollar`: `config.bar` must start with an argument name, like `$this` or `$args`",
+        locations: [
+            25:31..25:41,
         ],
     },
 ]
