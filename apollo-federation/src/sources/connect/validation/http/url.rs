@@ -4,7 +4,6 @@ use std::str::FromStr;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Node;
-use shape::graphql;
 use shape::Shape;
 use url::Url;
 
@@ -31,8 +30,6 @@ pub(crate) fn validate_template(
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
 
-    // TODO: Compute this once for the whole subgraph
-    let shape_lookup = graphql::shapes_for_schema(schema);
     let object_type = coordinate.connect.field_coordinate.object;
     let is_root_type = schema
         .schema_definition
@@ -70,7 +67,7 @@ pub(crate) fn validate_template(
     for expression in template.expressions() {
         messages.extend(
             expression
-                .validate(&shape_lookup, &var_lookup)
+                .validate(&schema.shape_lookup, &var_lookup)
                 .err()
                 .into_iter()
                 .flatten()

@@ -1,9 +1,11 @@
 //! Helper structs & functions for dealing with GraphQL schemas
 use std::ops::Deref;
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use line_col::LineColLookup;
+use shape::Shape;
 
 mod strings;
 
@@ -15,6 +17,8 @@ pub(super) struct SchemaInfo<'schema> {
     lookup: LineColLookup<'schema>,
     pub(crate) connect_directive_name: &'schema Name,
     pub(crate) source_directive_name: &'schema Name,
+    /// A lookup map for the Shapes computed from GraphQL types.
+    pub(crate) shape_lookup: IndexMap<&'schema str, Shape>,
 }
 
 impl<'schema> SchemaInfo<'schema> {
@@ -30,6 +34,7 @@ impl<'schema> SchemaInfo<'schema> {
             lookup: LineColLookup::new(src),
             connect_directive_name,
             source_directive_name,
+            shape_lookup: shape::graphql::shapes_for_schema(schema),
         }
     }
 
