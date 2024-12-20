@@ -243,6 +243,9 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
+            let mut attrs: Vec<_> = attrs.collect();
+            #[cfg(test)]
+            attrs.sort_by_key(|kv| kv.key.clone());
             for kv in attrs {
                 write!(writer, "{}={},", kv.key, kv.value)?;
             }
