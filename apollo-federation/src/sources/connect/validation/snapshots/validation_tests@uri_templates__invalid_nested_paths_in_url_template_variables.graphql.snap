@@ -6,6 +6,13 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
 [
     Message {
         code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.scalar`: `$args.scalar` doesn't have a field named `blah`",
+        locations: [
+            10:49..10:66,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
             15:49..15:81,
