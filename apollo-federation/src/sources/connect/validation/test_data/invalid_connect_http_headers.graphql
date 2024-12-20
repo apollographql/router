@@ -22,6 +22,8 @@ type Query {
           }
           { name: "Content-Length", value: "Is a reserved header" }
           { name: "Content-Type", from: "Cant-Be-Dynamic" }
+          { name: "accept", from: "Is a reserved header" }
+          { name: "accept", value: "application/json; version=v4.0" } # ok
         ]
       }
       selection: "$"

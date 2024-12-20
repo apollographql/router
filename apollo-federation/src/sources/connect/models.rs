@@ -494,7 +494,6 @@ impl<'a> Header<'a> {
                 | header::CONTENT_LENGTH
                 | header::CONTENT_ENCODING
                 | header::HOST
-                | header::ACCEPT
                 | header::ACCEPT_ENCODING
         ) || header_name == KEEP_ALIVE
     }
@@ -502,7 +501,7 @@ impl<'a> Header<'a> {
     /// These headers can be defined as static values in connect directives, but can't be
     /// forwarded by the user.
     fn is_static(header_name: &HeaderName) -> bool {
-        header::CONTENT_TYPE == *header_name
+        matches!(*header_name, header::CONTENT_TYPE | header::ACCEPT,)
     }
 }
 
