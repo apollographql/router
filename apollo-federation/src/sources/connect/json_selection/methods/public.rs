@@ -57,7 +57,7 @@ fn echo_shape(
         return first_arg.compute_output_shape(input_shape, dollar_shape, named_var_shapes);
     }
     Shape::error_with_range(
-        format!("Method ->{} requires one argument", method_name.as_ref()),
+        &format!("Method ->{} requires one argument", method_name.as_ref()),
         method_name.range(),
     )
 }
@@ -167,7 +167,7 @@ fn map_shape(
         }
     } else {
         Shape::error_with_range(
-            format!("Method ->{} requires one argument", method_name.as_ref()),
+            &format!("Method ->{} requires one argument", method_name.as_ref()),
             method_name.range(),
         )
     }
@@ -267,7 +267,7 @@ pub(super) fn match_shape(
 
         if result_union.is_empty() {
             Shape::error_with_range(
-                format!(
+                &format!(
                     "Method ->{} requires at least one [candidate, value] pair",
                     method_name.as_ref(),
                 ),
@@ -281,7 +281,7 @@ pub(super) fn match_shape(
         }
     } else {
         Shape::error_with_range(
-            format!(
+            &format!(
                 "Method ->{} requires at least one [candidate, value] pair",
                 method_name.as_ref(),
             ),
@@ -342,7 +342,7 @@ fn first_shape(
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
-            format!(
+            &format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
@@ -362,15 +362,6 @@ fn first_shape(
                 Shape::one([tail.clone(), Shape::none()])
             }
         }
-        ShapeCase::One(shapes) => Shape::one(shapes.iter().map(|shape| {
-            first_shape(
-                method_name,
-                method_args,
-                shape.clone(),
-                Shape::none(), // $ is not used in `->first`
-                _named_var_shapes,
-            )
-        })),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.
         _ => input_shape.clone(),
@@ -429,7 +420,7 @@ fn last_shape(
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
-            format!(
+            &format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
@@ -577,7 +568,7 @@ fn slice_shape(
         }
         ShapeCase::String(_) => Shape::string(),
         _ => Shape::error_with_range(
-            format!(
+            &format!(
                 "Method ->{} requires an array or string input",
                 method_name.as_ref()
             ),
@@ -647,7 +638,7 @@ fn size_shape(
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
-            format!(
+            &format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
@@ -673,7 +664,7 @@ fn size_shape(
             }
         }
         _ => Shape::error_with_range(
-            format!(
+            &format!(
                 "Method ->{} requires an array, string, or object input",
                 method_name.as_ref()
             ),
@@ -741,7 +732,7 @@ fn entries_shape(
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
-            format!(
+            &format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
@@ -774,7 +765,7 @@ fn entries_shape(
             }
         }
         _ => Shape::error_with_range(
-            format!("Method ->{} requires an object input", method_name.as_ref()),
+            &format!("Method ->{} requires an object input", method_name.as_ref()),
             method_name.range(),
         ),
     }

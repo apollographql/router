@@ -2,7 +2,9 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Node;
+use itertools::Itertools;
 use shape::graphql;
 use shape::Shape;
 use shape::ShapeCase;
@@ -50,12 +52,15 @@ pub(crate) fn validate_template(
             .collect(),
     );
     shape_lookup.insert(Namespace::Args.as_str(), args);
-    shape_lookup.insert(Namespace::Config.as_str(), Shape::any());
+    shape_lookup.insert(
+        Namespace::Config.as_str(),
+        Shape::object(Default::default(), Shape::any()),
+    );
 
     for expression in template.expressions() {
         let shape = expression
             .expression
-            .compute_output_shape(Shape::none(), &shape_lookup);
+            .compute_output_shape(Shape::none(), &Default::default());
         messages.extend(shape.errors().map(|error| {
             Message {
                 code: Code::InvalidUrl,
@@ -70,9 +75,16 @@ pub(crate) fn validate_template(
             }
         }));
         messages.extend(
-            validate_shape(&shape, &str_value, expression, schema)
+            validate_shape(&shape, &str_value, expression, schema, &shape_lookup)
                 .err()
-                .into_iter(),
+                .map(|message| Message {
+                    code: Code::InvalidUrl,
+                    message: format!("In {coordinate}: {message}"),
+                    locations: str_value
+                        .line_col_for_subslice(expression.location.clone(), schema)
+                        .into_iter()
+                        .collect(),
+                }),
         );
     }
 
@@ -88,43 +100,39 @@ fn validate_shape(
     str_value: &GraphQLString,
     expression: &Expression,
     schema: &SchemaInfo,
-) -> Result<(), Message> {
+    shape_lookup: &IndexMap<&str, Shape>,
+) -> Result<(), String> {
     match shape.case() {
-        ShapeCase::Array { .. } => Err(Message {
-            code: Code::InvalidUrl,
-            message: "URIs can't contain arrays".to_string(),
-            locations: str_value
-                .line_col_for_subslice(expression.location.clone(), schema)
-                .into_iter()
-                .collect(),
-        }),
-        ShapeCase::Object { .. } => Err(Message {
-            code: Code::InvalidUrl,
-            message: "URIs can't contain objects".to_string(),
-            locations: str_value
-                .line_col_for_subslice(expression.location.clone(), schema)
-                .into_iter()
-                .collect(),
-        }),
+        ShapeCase::Array { .. } => Err("URIs can't contain arrays".to_string()),
+        ShapeCase::Object { .. } => Err("URIs can't contain objects".to_string()),
         ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
             for shape in shapes {
-                validate_shape(shape, str_value, expression, schema)?;
+                validate_shape(shape, str_value, expression, schema, shape_lookup)?;
             }
             Ok(())
         }
-        ShapeCase::Name(name, _) => {
-            if schema.get_scalar(name).is_none() && schema.get_enum(name).is_none() {
-                Err(Message {
-                    code: Code::InvalidUrl,
-                    message: format!("URI expressions can't resolve to objects, found `{name}`"),
-                    locations: str_value
-                        .line_col_for_subslice(expression.location.clone(), schema)
-                        .into_iter()
-                        .collect(),
-                })
-            } else {
-                Ok(())
+        ShapeCase::Name(name, key) => {
+            let Some(mut shape) = shape_lookup.get(name.as_str()).cloned() else {
+                return Err(if name.starts_with('$') {
+                    format!(
+                        "unknown variable `{name}`, must be one of {namespaces}",
+                        namespaces = shape_lookup
+                            .keys()
+                            .filter(|key| key.starts_with('$'))
+                            .join(", ")
+                    )
+                } else {
+                    format!("unknown type `{name}`")
+                });
+            };
+            for key in key {
+                let child = shape.child(key);
+                if child.is_none() {
+                    return Err(format!("`{name}` doesn't have a field named `{key}`"));
+                }
+                shape = child;
             }
+            validate_shape(&shape, str_value, expression, schema, shape_lookup)
         }
         _ => Ok(()),
     }
