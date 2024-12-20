@@ -347,7 +347,7 @@ where
                 None => {
                     f64_histogram!(
                         "apollo_router_uplink_fetch_duration_seconds",
-                        "",
+                        "Duration of Apollo Uplink fetches.",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -362,7 +362,7 @@ where
                 }) => {
                     f64_histogram!(
                         "apollo_router_uplink_fetch_duration_seconds",
-                        "",
+                        "Duration of Apollo Uplink fetches.",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -385,7 +385,7 @@ where
                 Some(UplinkResponse::Unchanged { id, delay }) => {
                     f64_histogram!(
                         "apollo_router_uplink_fetch_duration_seconds",
-                        "",
+                        "Duration of Apollo Uplink fetches.",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -400,7 +400,7 @@ where
                 }) => {
                     f64_histogram!(
                         "apollo_router_uplink_fetch_duration_seconds",
-                        "",
+                        "Duration of Apollo Uplink fetches.",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -418,7 +418,7 @@ where
             Err(err) => {
                 f64_histogram!(
                     "apollo_router_uplink_fetch_duration_seconds",
-                    "",
+                    "Duration of Apollo Uplink fetches.",
                     now.elapsed().as_secs_f64(),
                     query = query,
                     url = url.to_string(),
