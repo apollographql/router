@@ -6,19 +6,19 @@ extend schema
 
 type Query {
   unknown(bar: String): String
-    @connect(
-      http: {
-        GET: "http://127.0.0.1/{$foo.bar}"
-      }
-      selection: "$"
-    )
+  @connect(
+    http: {
+      GET: "http://127.0.0.1/{$foo.bar}"
+    }
+    selection: "$"
+  )
   invalid(bar: String): String
-    @connect(
-      http: {
-        GET: "http://127.0.0.1/{$status.bar}"
-      }
-      selection: "$"
-    )
+  @connect(
+    http: {
+      GET: "http://127.0.0.1/{$status.bar}"
+    }
+    selection: "$"
+  )
   nodollar(bar: String): String
   @connect(
     http: {
@@ -26,3 +26,4 @@ type Query {
     }
     selection: "$"
   )
+}

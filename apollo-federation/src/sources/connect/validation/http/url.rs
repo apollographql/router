@@ -4,6 +4,7 @@ use std::str::FromStr;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Node;
+use itertools::Itertools;
 use shape::graphql;
 use shape::Shape;
 use shape::ShapeCase;
@@ -36,9 +37,7 @@ pub(crate) fn validate_template(
     let shape_lookup = graphql::shapes_for_schema(schema);
 
     for expression in template.expressions() {
-        let shape = expression
-            .expression
-            .compute_output_shape(Shape::none(), &Default::default());
+        let shape = expression.expression.shape();
         messages.extend(shape.errors().map(|error| {
             Message {
                 code: Code::InvalidUrl,
@@ -95,7 +94,12 @@ fn validate_shape(
             Ok(())
         }
         ShapeCase::Name(name, key) => {
-            let mut shape = if name.starts_with('$') {
+            let mut shape = if name == "$root" {
+                return Err(format!(
+                    "`{key}` must start with an argument name, like `$this` or `$args`",
+                    key = key.iter().map(|key| key.to_string()).join(".")
+                ));
+            } else if name.starts_with('$') {
                 let namespace = Namespace::from_str(name).map_err(|_| {
                     format!(
                         "unknown variable `{name}`, must be one of {namespaces}",
@@ -141,7 +145,14 @@ fn validate_shape(
             }
             validate_shape(&shape, shape_lookup, coordinate)
         }
-        _ => Ok(()),
+        ShapeCase::Error(shape::Error { message, .. }) => Err(message.clone()),
+        // TODO: are there other cases that can produce a `none` right now? We should differentiate `$`
+        ShapeCase::None
+        | ShapeCase::Bool(_)
+        | ShapeCase::String(_)
+        | ShapeCase::Int(_)
+        | ShapeCase::Float
+        | ShapeCase::Null => Ok(()), // We use null as any/unknown right now, so don't say anything about it
     }
 }
 
