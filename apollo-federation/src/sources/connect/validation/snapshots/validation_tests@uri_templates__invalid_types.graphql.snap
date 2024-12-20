@@ -6,28 +6,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
 [
     Message {
         code: InvalidUrl,
-        message: "URIs can't contain arrays",
+        message: "In `GET` in `@connect(http:)` on `Query.argIsArray`: URIs can't contain arrays",
         locations: [
             10:41..10:50,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "URI expressions can't resolve to objects, found `Input`",
+        message: "In `GET` in `@connect(http:)` on `Query.argIsObject`: URIs can't contain objects",
         locations: [
             16:41..16:50,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "URIs can't contain arrays",
+        message: "In `GET` in `@connect(http:)` on `This.thisIsArray`: URIs can't contain arrays",
         locations: [
             25:41..25:54,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "URI expressions can't resolve to objects, found `Object`",
+        message: "In `GET` in `@connect(http:)` on `This.requiresAnObject`: URIs can't contain objects",
         locations: [
             31:45..31:59,
         ],
