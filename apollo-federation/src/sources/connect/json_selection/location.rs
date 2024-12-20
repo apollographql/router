@@ -133,7 +133,7 @@ pub(super) fn merge_ranges(left: OffsetRange, right: OffsetRange) -> OffsetRange
 // matched string and the range of the match.
 pub(super) fn ranged_span<'a, 'b>(
     s: &'a str,
-) -> impl FnMut(Span<'b>) -> ParseResult<WithRange<&'b str>> + 'a
+) -> impl FnMut(Span<'b>) -> ParseResult<'b, WithRange<&'b str>> + 'a
 where
     'b: 'a,
 {
