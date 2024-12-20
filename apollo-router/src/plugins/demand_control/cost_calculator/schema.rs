@@ -1,8 +1,7 @@
+use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use ahash::HashMap;
-use ahash::HashMapExt;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
@@ -68,7 +67,7 @@ pub(in crate::plugins::demand_control) struct FieldDefinition {
     cost_directive: Option<CostDirective>,
     list_size_directive: Option<ListSizeDirective>,
     requires_directive: Option<RequiresDirective>,
-    arguments: HashMap<Name, InputDefinition>,
+    arguments: BTreeMap<Name, InputDefinition>,
 }
 
 impl FieldDefinition {
@@ -92,7 +91,7 @@ impl FieldDefinition {
             cost_directive: None,
             list_size_directive: None,
             requires_directive: None,
-            arguments: HashMap::new(),
+            arguments: BTreeMap::new(),
         };
 
         processed_field_definition.cost_directive =
@@ -148,17 +147,17 @@ impl FieldDefinition {
 
 pub(crate) struct DemandControlledSchema {
     inner: ValidFederationSchema,
-    input_field_definitions: HashMap<Name, HashMap<Name, InputDefinition>>,
-    output_field_definitions: HashMap<Name, HashMap<Name, FieldDefinition>>,
+    input_field_definitions: BTreeMap<Name, BTreeMap<Name, InputDefinition>>,
+    output_field_definitions: BTreeMap<Name, BTreeMap<Name, FieldDefinition>>,
 }
 
 impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
         let fed_schema = ValidFederationSchema::new((*schema).clone())?;
-        let mut input_field_definitions: HashMap<Name, HashMap<Name, InputDefinition>> =
-            HashMap::new();
-        let mut output_field_definitions: HashMap<Name, HashMap<Name, FieldDefinition>> =
-            HashMap::new();
+        let mut input_field_definitions: BTreeMap<Name, BTreeMap<Name, InputDefinition>> =
+            BTreeMap::new();
+        let mut output_field_definitions: BTreeMap<Name, BTreeMap<Name, FieldDefinition>> =
+            BTreeMap::new();
 
         for (type_name, type_) in &schema.types {
             match type_ {
