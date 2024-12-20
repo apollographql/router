@@ -52,7 +52,7 @@ pub(crate) fn validate_template(
             }
         }));
         messages.extend(
-            validate_shape(&shape, &shape_lookup, coordinate)
+            validate_shape(&shape, &shape_lookup, coordinate, schema)
                 .err()
                 .map(|message| Message {
                     code: Code::InvalidUrl,
@@ -76,20 +76,36 @@ fn validate_shape(
     shape: &Shape,
     shape_lookup: &IndexMap<&str, Shape>,
     coordinate: HttpMethodCoordinate,
+    schema_info: &SchemaInfo,
 ) -> Result<(), String> {
     // TODO: don't include $this for root types
-    let namespaces = [
-        Namespace::Args,
-        Namespace::Config,
-        Namespace::Context,
-        Namespace::This,
-    ];
+    let object_type = coordinate.connect.field_coordinate.object;
+    let is_root_type = schema_info
+        .schema_definition
+        .query
+        .as_ref()
+        .is_some_and(|query| query.name == object_type.name)
+        || schema_info
+            .schema_definition
+            .mutation
+            .as_ref()
+            .is_some_and(|mutation| mutation.name == object_type.name);
+    let namespaces = if is_root_type {
+        vec![Namespace::Args, Namespace::Config, Namespace::Context]
+    } else {
+        vec![
+            Namespace::Args,
+            Namespace::Config,
+            Namespace::Context,
+            Namespace::This,
+        ]
+    };
     match shape.case() {
         ShapeCase::Array { .. } => Err("URIs can't contain arrays".to_string()),
         ShapeCase::Object { .. } => Err("URIs can't contain objects".to_string()),
         ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
             for shape in shapes {
-                validate_shape(shape, shape_lookup, coordinate)?;
+                validate_shape(shape, shape_lookup, coordinate, schema_info)?;
             }
             Ok(())
         }
@@ -103,7 +119,7 @@ fn validate_shape(
                 let namespace = Namespace::from_str(name).map_err(|_| {
                     format!(
                         "unknown variable `{name}`, must be one of {namespaces}",
-                        namespaces = namespaces.map(|ns| ns.as_str()).join(", ")
+                        namespaces = namespaces.iter().map(|ns| ns.as_str()).join(", ")
                     )
                 })?;
                 match namespace {
@@ -118,13 +134,11 @@ fn validate_shape(
                             .collect(),
                     ),
                     Namespace::Context | Namespace::Config => Shape::null(), // Can't use none because that messes up the child check later
-                    Namespace::This => {
-                        Shape::from(coordinate.connect.field_coordinate.object.as_ref())
-                    } // TODO: not for root types
-                    Namespace::Status => {
+                    Namespace::This if !is_root_type => Shape::from(object_type.as_ref()), // TODO: not for root types
+                    Namespace::Status | Namespace::This => {
                         return Err(format!(
                             "{namespace} is not allowed here, must be one of {namespaces}",
-                            namespaces = namespaces.map(|ns| ns.as_str()).join(", "),
+                            namespaces = namespaces.iter().map(|ns| ns.as_str()).join(", "),
                         ))
                     }
                 }
@@ -143,7 +157,7 @@ fn validate_shape(
                 shape = child;
                 path = format!("{path}.{key}");
             }
-            validate_shape(&shape, shape_lookup, coordinate)
+            validate_shape(&shape, shape_lookup, coordinate, schema_info)
         }
         ShapeCase::Error(shape::Error { message, .. }) => Err(message.clone()),
         // TODO: are there other cases that can produce a `none` right now? We should differentiate `$`
