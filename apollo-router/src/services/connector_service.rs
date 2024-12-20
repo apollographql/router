@@ -254,24 +254,22 @@ async fn execute(
                         http_request: req,
                         context: context.clone(),
                     };
-                    let res = client.oneshot(req).await.map_err(|e| {
-                        match e.downcast::<FetchError>() {
-                            // Replace the internal subgraph name with the connector label
-                            Ok(inner) => match *inner {
-                                FetchError::SubrequestHttpError {
-                                    status_code,
-                                    service: _,
-                                    reason,
-                                } => Box::new(FetchError::SubrequestHttpError {
-                                    status_code,
-                                    service: connector.id.label.clone(),
-                                    reason,
-                                }),
-                                _ => inner,
-                            },
-                            Err(e) => e,
-                        }
-                    });
+                    let res = match client.oneshot(req).await {
+                        Ok(res) => ConnectorResponse {
+                            result: ConnectorResult::HttpResponse(res.http_response),
+                            key,
+                            debug_request,
+                        },
+                        Err(e) => ConnectorResponse {
+                            result: ConnectorResult::<RouterBody>::Err(
+                                ConnectorError::HTTPClientError(handle_subrequest_http_error(
+                                    e, connector,
+                                )),
+                            ),
+                            key,
+                            debug_request,
+                        },
+                    };
 
                     u64_counter!(
                         "apollo.router.operations.connectors",
@@ -281,11 +279,7 @@ async fn execute(
                         "subgraph.name" = original_subgraph_name
                     );
 
-                    ConnectorResponse {
-                        result: ConnectorResult::HttpResponse(res?.http_response),
-                        key,
-                        debug_request,
-                    }
+                    res
                 };
 
                 Ok::<_, BoxError>(process_response(res, connector, &context, debug).await)
@@ -294,6 +288,25 @@ async fn execute(
     );
 
     aggregate_responses(futures::future::try_join_all(tasks).await?).map_err(BoxError::from)
+}
+
+fn handle_subrequest_http_error(err: BoxError, connector: &Connector) -> BoxError {
+    match err.downcast::<FetchError>() {
+        // Replace the internal subgraph name with the connector label
+        Ok(inner) => match *inner {
+            FetchError::SubrequestHttpError {
+                status_code,
+                service: _,
+                reason,
+            } => Box::new(FetchError::SubrequestHttpError {
+                status_code,
+                service: connector.id.subgraph_source(),
+                reason,
+            }),
+            _ => inner,
+        },
+        Err(e) => e,
+    }
 }
 
 #[derive(Clone)]

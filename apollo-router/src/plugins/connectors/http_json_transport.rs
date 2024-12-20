@@ -155,26 +155,28 @@ fn make_uri(
     Ok(url)
 }
 
-// URLTemplate expects a map with flat dot-delimited keys.
+/// Flatten map-of-maps to a map of dot-delimited keys and built-in JSON values.
 fn flatten_keys(inputs: &IndexMap<String, Value>) -> Map<ByteString, Value> {
     let mut flat = serde_json_bytes::Map::with_capacity(inputs.len());
-    for (key, value) in inputs {
-        flatten_keys_recursive(value, &mut flat, key.clone());
-    }
-    flat
-}
+    let mut stack: Vec<_> = inputs
+        .iter()
+        .rev()
+        .map(|(key, value)| (value, key.clone()))
+        .collect();
 
-fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, prefix: String) {
-    match inputs {
-        Value::Object(map) => {
-            for (key, value) in map {
-                flatten_keys_recursive(value, flat, [prefix.as_str(), ".", key.as_str()].concat());
+    while let Some((value, prefix)) = stack.pop() {
+        match value {
+            Value::Object(map) => {
+                for (key, val) in map.iter().rev() {
+                    stack.push((val, format!("{}.{}", prefix, key.as_str())));
+                }
+            }
+            _ => {
+                flat.insert(prefix, value.clone());
             }
         }
-        _ => {
-            flat.insert(prefix, inputs.clone());
-        }
     }
+    flat
 }
 
 #[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
@@ -818,5 +820,33 @@ mod tests {
 
         let body = body::into_string(req.0.into_body()).await.unwrap();
         insta::assert_snapshot!(body, @r#"a=42"#);
+    }
+
+    #[test]
+    #[ignore] // Enable this to test performance of flatten_keys
+    fn flatten_keys_perf() {
+        let mut inputs = IndexMap::with_capacity_and_hasher(10, Default::default());
+        for i in 0..10 {
+            let mut children_i = IndexMap::with_capacity_and_hasher(10, Default::default());
+            for j in 0..10 {
+                let mut children_j = IndexMap::with_capacity_and_hasher(10, Default::default());
+                for k in 0..10 {
+                    let mut children_k = IndexMap::with_capacity_and_hasher(10, Default::default());
+                    for l in 0..10 {
+                        children_k.insert(l.to_string(), json!(l));
+                    }
+                    children_j.insert(k.to_string(), json!(children_k));
+                }
+                children_i.insert(j.to_string(), json!(children_j));
+            }
+            inputs.insert(i.to_string(), json!(children_i));
+        }
+
+        let start = std::time::Instant::now();
+        for _ in 0..1000 {
+            flatten_keys(&inputs);
+        }
+        let elapsed = start.elapsed();
+        println!("Total time: {}ms", elapsed.as_millis());
     }
 }
