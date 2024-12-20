@@ -133,7 +133,7 @@ mod test {
                     .build(),
             )
             .build();
-        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
+        let tracer = provider.tracer_builder("noop").build();
 
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
@@ -158,7 +158,7 @@ mod test {
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
+        let tracer = provider.tracer_builder("noop").build();
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -183,7 +183,7 @@ mod test {
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
+        let tracer = provider.tracer_builder("noop").build();
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`

@@ -1,12 +1,10 @@
-use opentelemetry_api::trace::Link;
-use opentelemetry_api::trace::SamplingDecision;
-use opentelemetry_api::trace::SamplingResult;
-use opentelemetry_api::trace::SpanKind;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::Key;
-use opentelemetry_api::KeyValue;
-use opentelemetry_api::OrderMap;
-use opentelemetry_api::Value;
+use opentelemetry::trace::Link;
+use opentelemetry::trace::SamplingDecision;
+use opentelemetry::trace::SamplingResult;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::TraceId;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry_sdk::trace::ShouldSample;
 
 use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
@@ -24,7 +22,7 @@ use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 #[derive(Debug, Clone)]
 pub(crate) struct DatadogAgentSampling {
     /// The underlying sampler used for initial sampling decisions
-    pub(crate) sampler: opentelemetry::sdk::trace::Sampler,
+    pub(crate) sampler: opentelemetry_sdk::trace::Sampler,
     /// Flag to enable parent-based sampling for consistent trace sampling
     pub(crate) parent_based_sampler: bool,
 }
@@ -35,7 +33,7 @@ impl DatadogAgentSampling {
     /// * `sampler` - The underlying sampler to use for initial sampling decisions
     /// * `parent_based_sampler` - Whether to use parent-based sampling for consistent trace sampling
     pub(crate) fn new(
-        sampler: opentelemetry::sdk::trace::Sampler,
+        sampler: opentelemetry_sdk::trace::Sampler,
         parent_based_sampler: bool,
     ) -> Self {
         Self {
@@ -48,11 +46,11 @@ impl DatadogAgentSampling {
 impl ShouldSample for DatadogAgentSampling {
     fn should_sample(
         &self,
-        parent_context: Option<&opentelemetry_api::Context>,
+        parent_context: Option<&opentelemetry::Context>,
         trace_id: TraceId,
         name: &str,
         span_kind: &SpanKind,
-        attributes: &OrderMap<Key, Value>,
+        attributes: &[KeyValue],
         links: &[Link],
     ) -> SamplingResult {
         let mut result = self.sampler.should_sample(
@@ -104,21 +102,20 @@ impl ShouldSample for DatadogAgentSampling {
 #[cfg(test)]
 mod tests {
     use buildstructor::Builder;
-    use opentelemetry::sdk::trace::Sampler;
+    use opentelemetry::trace::Link;
+    use opentelemetry::trace::SamplingDecision;
+    use opentelemetry::trace::SamplingResult;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry_api::trace::Link;
-    use opentelemetry_api::trace::SamplingDecision;
-    use opentelemetry_api::trace::SamplingResult;
-    use opentelemetry_api::trace::SpanContext;
-    use opentelemetry_api::trace::SpanId;
-    use opentelemetry_api::trace::SpanKind;
-    use opentelemetry_api::trace::TraceContextExt;
-    use opentelemetry_api::trace::TraceFlags;
-    use opentelemetry_api::trace::TraceId;
-    use opentelemetry_api::Context;
-    use opentelemetry_api::Key;
-    use opentelemetry_api::OrderMap;
-    use opentelemetry_api::Value;
+    use opentelemetry::Context;
+    use opentelemetry::KeyValue;
+    use opentelemetry::Value;
+    use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::ShouldSample;
 
     use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
@@ -137,7 +134,7 @@ mod tests {
             _trace_id: TraceId,
             _name: &str,
             _span_kind: &SpanKind,
-            _attributes: &OrderMap<Key, Value>,
+            _attributes: &[KeyValue],
             _links: &[Link],
         ) -> SamplingResult {
             SamplingResult {
@@ -162,7 +159,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -197,7 +194,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -232,7 +229,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -268,7 +265,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -310,7 +307,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -352,7 +349,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 

@@ -8,9 +8,8 @@ use std::sync::Arc;
 
 use lru::LruCache;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::KeyValue;
-use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::metrics::Unit;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -140,7 +139,7 @@ where
         let cache_estimated_storage_gauge = meter
             .i64_observable_gauge("apollo.router.cache.storage.estimated_size")
             .with_description("Estimated cache storage")
-            .with_unit(Unit::new("bytes"))
+            .with_unit("bytes")
             .with_callback(move |i| {
                 // If there's no storage then don't bother updating the gauge
                 let value = cache_estimated_storage_for_gauge.load(Ordering::SeqCst);
