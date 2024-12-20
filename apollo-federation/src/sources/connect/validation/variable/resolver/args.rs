@@ -29,7 +29,6 @@ impl NamespaceResolver for ArgsResolver<'_> {
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
         schema: &SchemaInfo,
-        location_offset: usize,
     ) -> Result<(), Message> {
         let Some(root) = resolver::get_root(reference) else {
             return Ok(()); // Not something we can type check this way TODO: delete all of this when Shape is available
@@ -48,22 +47,12 @@ impl NamespaceResolver for ArgsResolver<'_> {
                     root = root.as_str(),
                 ),
                 locations: expression
-                    .line_col_for_subslice(
-                        root.location.start + location_offset..root.location.end + location_offset,
-                        schema,
-                    )
+                    .line_col_for_subslice(root.location.start..root.location.end, schema)
                     .into_iter()
                     .collect(),
             })
             .map(|field| field.ty.clone())?;
 
-        resolver::resolve_path(
-            schema,
-            reference,
-            expression,
-            &field_type,
-            self.field,
-            location_offset,
-        )
+        resolver::resolve_path(schema, reference, expression, &field_type, self.field)
     }
 }

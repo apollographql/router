@@ -16,8 +16,9 @@ use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
     coordinate: HttpMethodCoordinate,
-    schema: &SchemaInfo,
+    expression_context: &expression::Context,
 ) -> Result<URLTemplate, Vec<Message>> {
+    let schema = expression_context.schema;
     let (template, str_value) = match parse_template(coordinate, schema) {
         Ok(tuple) => tuple,
         Err(message) => return Err(vec![message]),
@@ -27,7 +28,7 @@ pub(crate) fn validate_template(
         messages
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
-    let expression_context = expression::Context::new(schema, coordinate.connect);
+    let expression_context = expression::Context::for_connect_request(schema, coordinate.connect);
 
     for expression in template.expressions() {
         messages.extend(

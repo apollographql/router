@@ -43,13 +43,17 @@ pub(super) fn validate_selection(
 
     validate_selection_variables(
         &VariableResolver::new(
-            ConnectorsContext::new(coordinate.into(), Phase::Response, Target::Body),
+            ConnectorsContext::new(
+                coordinate.field_coordinate.object,
+                coordinate.field_coordinate.field,
+                Phase::Response,
+                Target::Body,
+            ),
             schema,
         ),
         selection_arg.coordinate,
         &json_selection,
         selection_arg.value,
-        0,
     )?;
 
     let field = coordinate.field_coordinate.field;
@@ -122,13 +126,17 @@ pub(super) fn validate_body_selection(
 
     validate_selection_variables(
         &VariableResolver::new(
-            ConnectorsContext::new(connect_coordinate.into(), Phase::Request, Target::Body),
+            ConnectorsContext::new(
+                connect_coordinate.field_coordinate.object,
+                connect_coordinate.field_coordinate.field,
+                Phase::Request,
+                Target::Body,
+            ),
             schema,
         ),
         coordinate,
         &selection,
         selection_str,
-        0,
     )
 }
 
@@ -138,7 +146,6 @@ pub(super) fn validate_selection_variables(
     coordinate: impl Display,
     selection: &JSONSelection,
     selection_str: GraphQLString,
-    location_offset: usize,
 ) -> Result<(), Message> {
     for reference in selection
         .external_var_paths()
@@ -146,7 +153,7 @@ pub(super) fn validate_selection_variables(
         .flat_map(|var_path| var_path.variable_reference())
     {
         variable_resolver
-            .resolve(&reference, selection_str, location_offset)
+            .resolve(&reference, selection_str)
             .map_err(|mut err| {
                 err.message = format!("In {coordinate}: {message}", message = err.message);
                 err
