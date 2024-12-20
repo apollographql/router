@@ -191,13 +191,6 @@ reqwest = { version = "0.12.9", default-features = false, features = [
     "stream",
 ] }
 
-reqwest-0_11 = { version = "0.11.27", default-features = false, features = [
-    "rustls-tls",
-    "rustls-tls-native-roots",
-    "gzip",
-    "json",
-    "stream",
-], package="reqwest" }
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.23.19"
 rustls-native-certs = "0.8.1"
@@ -227,12 +220,6 @@ tonic = { version = "0.12.3", features = [
     "gzip",
 ] }
 
-tonic-0_9 = { version = "0.9.0", features = [
-    "transport",
-    "tls",
-    "tls-roots",
-    "gzip",
-], package = "tonic" }
 tower.workspace = true
 tower-http = { version = "0.6.2", features = ["full"] }
 tower-service = "0.3.2"
@@ -252,7 +239,6 @@ tokio-tungstenite = { version = "0.24.0", features = [
 tokio-rustls = "0.26.0"
 hickory-resolver = "0.24.1"
 http-serde = "2.1.1"
-http-serde-1_1 = { version="1.1.3", package = "http-serde" }
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
 memchr = "2.7.4"
