@@ -6,9 +6,8 @@ use std::fmt::Write;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
-use jsonschema::Draft;
-use jsonschema::JSONSchema;
 use jsonschema::error::ValidationErrorKind;
+use jsonschema::Validator;
 use schemars::Schema;
 use schemars::generate::SchemaSettings;
 use yaml_rust::scanner::Marker;
@@ -94,16 +93,14 @@ pub(crate) fn validate_yaml_configuration(
         *plugins_value = serde_json::json!({});
     }
 
-    static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
-    let schema = SCHEMA.get_or_init(|| {
+    static VALIDATOR: OnceLock<Validator> = OnceLock::new();
+    let validator = VALIDATOR.get_or_init(|| {
         let config_schema = serde_json::to_value(generate_config_schema())
             .expect("failed to parse configuration schema");
 
-        let result = JSONSchema::options()
-            .with_draft(Draft::Draft7)
-            .compile(&config_schema);
+        let result = jsonschema::draft7::new(&config_schema);
         match result {
-            Ok(schema) => schema,
+            Ok(validator) => validator,
             Err(e) => {
                 panic!("failed to compile configuration schema: {e}")
             }
@@ -113,7 +110,7 @@ pub(crate) fn validate_yaml_configuration(
     if migration == Mode::Upgrade {
         let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::Minor)?;
         let expanded_yaml = expansion.expand(&upgraded)?;
-        if schema.validate(&expanded_yaml).is_ok() {
+        if validator.is_valid(&expanded_yaml) {
             yaml = upgraded;
         } else {
             tracing::warn!(
@@ -124,107 +121,50 @@ pub(crate) fn validate_yaml_configuration(
 
     let expanded_yaml = expansion.expand(&yaml)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
-    if let Err(errors_it) = schema.validate(&expanded_yaml) {
-        // Validation failed, translate the errors into something nice for the user
-        // We have to reparse the yaml to get the line number information for each error.
-        let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
+    {
+        let mut errors_it = validator.iter_errors(&expanded_yaml).peekable();
+        if errors_it.peek().is_some() {
+            // Validation failed, translate the errors into something nice for the user
+            // We have to reparse the yaml to get the line number information for each error.
+            let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
-        let mut errors = String::new();
+            let mut errors = String::new();
 
-        for (idx, mut e) in errors_it.enumerate() {
-            if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
-                match element {
-                    yaml::Value::String(value, marker) => {
-                        let start_marker = marker;
-                        let end_marker = marker;
-                        let offset = start_marker
-                            .line()
-                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY);
-                        let end = if end_marker.line() > yaml_split_by_lines.len() {
-                            yaml_split_by_lines.len()
-                        } else {
-                            end_marker.line()
-                        };
-                        let lines = yaml_split_by_lines[offset..end]
-                            .iter()
-                            .map(|line| format!("  {line}"))
-                            .join("\n");
+            for (idx, mut e) in errors_it.enumerate() {
+                if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
+                    match element {
+                        yaml::Value::String(value, marker) => {
+                            let start_marker = marker;
+                            let end_marker = marker;
+                            let offset = start_marker
+                                .line()
+                                .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY);
+                            let end = if end_marker.line() > yaml_split_by_lines.len() {
+                                yaml_split_by_lines.len()
+                            } else {
+                                end_marker.line()
+                            };
+                            let lines = yaml_split_by_lines[offset..end]
+                                .iter()
+                                .map(|line| format!("  {line}"))
+                                .join("\n");
 
-                        // Replace the value in the error message with the one from the raw config.
-                        // This guarantees that if the env variable contained a secret it won't be leaked.
-                        e.instance = Cow::Owned(coerce(value));
+                            // Replace the value in the error message with the one from the raw config.
+                            // This guarantees that if the env variable contained a secret it won't be leaked.
+                            e.instance = Cow::Owned(coerce(value));
 
-                        let _ = write!(
-                            &mut errors,
-                            "{}. at line {}\n\n{}\n{}^----- {}\n\n",
-                            idx + 1,
-                            start_marker.line(),
-                            lines,
-                            " ".repeat(2 + marker.col()),
-                            e
-                        );
-                    }
-                    seq_element @ yaml::Value::Sequence(_, m) => {
-                        let (start_marker, end_marker) = (m, seq_element.end_marker());
-
-                        let lines = context_lines(&yaml_split_by_lines, start_marker, end_marker);
-
-                        let _ = write!(
-                            &mut errors,
-                            "{}. at line {}\n\n{}\n└-----> {}\n\n",
-                            idx + 1,
-                            start_marker.line(),
-                            lines,
-                            e
-                        );
-                    }
-                    map_value @ yaml::Value::Mapping(current_label, map, marker) => {
-                        // workaround because ValidationErrorKind is not Clone
-                        let unexpected_opt = match &e.kind {
-                            ValidationErrorKind::AdditionalProperties { unexpected } => {
-                                Some(unexpected.clone())
-                            }
-                            _ => None,
-                        };
-
-                        if let Some(unexpected) = unexpected_opt {
-                            for key in unexpected {
-                                if let Some((label, value)) =
-                                    map.iter().find(|(label, _)| label.name == key)
-                                {
-                                    let (start_marker, end_marker) = (
-                                        label.marker.as_ref().unwrap_or(marker),
-                                        value.end_marker(),
-                                    );
-
-                                    let lines = context_lines(
-                                        &yaml_split_by_lines,
-                                        start_marker,
-                                        end_marker,
-                                    );
-
-                                    e.kind = ValidationErrorKind::AdditionalProperties {
-                                        unexpected: vec![key.clone()],
-                                    };
-
-                                    let _ = write!(
-                                        &mut errors,
-                                        "{}. at line {}\n\n{}\n└-----> {}\n\n",
-                                        idx + 1,
-                                        start_marker.line(),
-                                        lines,
-                                        e
-                                    );
-                                }
-                            }
-                        } else {
-                            let (start_marker, end_marker) = (
-                                current_label
-                                    .as_ref()
-                                    .and_then(|label| label.marker.as_ref())
-                                    .unwrap_or(marker),
-                                map_value.end_marker(),
+                            let _ = write!(
+                                &mut errors,
+                                "{}. at line {}\n\n{}\n{}^----- {}\n\n",
+                                idx + 1,
+                                start_marker.line(),
+                                lines,
+                                " ".repeat(2 + marker.col()),
+                                e
                             );
+                        }
+                        seq_element @ yaml::Value::Sequence(_, m) => {
+                            let (start_marker, end_marker) = (m, seq_element.end_marker());
 
                             let lines =
                                 context_lines(&yaml_split_by_lines, start_marker, end_marker);
@@ -238,19 +178,80 @@ pub(crate) fn validate_yaml_configuration(
                                 e
                             );
                         }
+                        map_value @ yaml::Value::Mapping(current_label, map, marker) => {
+                            // workaround because ValidationErrorKind is not Clone
+                            let unexpected_opt = match &e.kind {
+                                ValidationErrorKind::AdditionalProperties { unexpected } => {
+                                    Some(unexpected.clone())
+                                }
+                                _ => None,
+                            };
+
+                            if let Some(unexpected) = unexpected_opt {
+                                for key in unexpected {
+                                    if let Some((label, value)) =
+                                        map.iter().find(|(label, _)| label.name == key)
+                                    {
+                                        let (start_marker, end_marker) = (
+                                            label.marker.as_ref().unwrap_or(marker),
+                                            value.end_marker(),
+                                        );
+
+                                        let lines = context_lines(
+                                            &yaml_split_by_lines,
+                                            start_marker,
+                                            end_marker,
+                                        );
+
+                                        e.kind = ValidationErrorKind::AdditionalProperties {
+                                            unexpected: vec![key.clone()],
+                                        };
+
+                                        let _ = write!(
+                                            &mut errors,
+                                            "{}. at line {}\n\n{}\n└-----> {}\n\n",
+                                            idx + 1,
+                                            start_marker.line(),
+                                            lines,
+                                            e
+                                        );
+                                    }
+                                }
+                            } else {
+                                let (start_marker, end_marker) = (
+                                    current_label
+                                        .as_ref()
+                                        .and_then(|label| label.marker.as_ref())
+                                        .unwrap_or(marker),
+                                    map_value.end_marker(),
+                                );
+
+                                let lines =
+                                    context_lines(&yaml_split_by_lines, start_marker, end_marker);
+
+                                let _ = write!(
+                                    &mut errors,
+                                    "{}. at line {}\n\n{}\n└-----> {}\n\n",
+                                    idx + 1,
+                                    start_marker.line(),
+                                    lines,
+                                    e
+                                );
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        if !errors.is_empty() {
-            tracing::warn!(
-                "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1"
-            );
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "configuration had errors",
-                error: format!("\n{errors}"),
-            });
+            if !errors.is_empty() {
+                tracing::warn!(
+                    "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1"
+                );
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "configuration had errors",
+                    error: format!("\n{errors}"),
+                });
+            }
         }
     }
 
