@@ -5,7 +5,7 @@
 /// The implementation is a straight copy from [opentelemetry_http::HeaderExtractor].
 /// This can be removed after we update otel.
 pub struct HeaderExtractor<'a>(pub &'a http::HeaderMap);
-impl opentelemetry_api::propagation::Extractor for HeaderExtractor<'_> {
+impl opentelemetry::propagation::Extractor for HeaderExtractor<'_> {
     /// Get a value for a key from the HeaderMap.  If the value is not valid ASCII, returns None.
     fn get(&self, key: &str) -> Option<&str> {
         self.0.get(key).and_then(|value| value.to_str().ok())
@@ -26,7 +26,7 @@ impl opentelemetry_api::propagation::Extractor for HeaderExtractor<'_> {
 /// This can be removed after we update otel.
 pub struct HeaderInjector<'a>(pub &'a mut http::HeaderMap);
 
-impl opentelemetry_api::propagation::Injector for HeaderInjector<'_> {
+impl opentelemetry::propagation::Injector for HeaderInjector<'_> {
     /// Set a key and value in the HeaderMap.  Does nothing if the key or value are not valid inputs.
     fn set(&mut self, key: &str, value: String) {
         if let Ok(name) = http::header::HeaderName::from_bytes(key.as_bytes()) {

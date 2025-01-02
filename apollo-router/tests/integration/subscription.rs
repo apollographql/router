@@ -176,7 +176,7 @@ async fn test_subscription_without_dedup_load_standalone() -> Result<(), BoxErro
 
 async fn create_router(config: &'static str) -> Result<IntegrationTest, BoxError> {
     Ok(IntegrationTest::builder()
-        .telemetry(Telemetry::Jaeger)
+        .telemetry(Telemetry::Otlp { endpoint: None }) // TODO: Does this need an endpoint?
         .config(config)
         .build()
         .await)

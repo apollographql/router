@@ -3,12 +3,11 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use opentelemetry::metrics::Unit;
-use opentelemetry_api::metrics::Counter;
-use opentelemetry_api::metrics::Histogram;
-use opentelemetry_api::metrics::MeterProvider;
-use opentelemetry_api::metrics::UpDownCounter;
-use opentelemetry_api::KeyValue;
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::UpDownCounter;
+use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
 use opentelemetry_semantic_conventions::trace::SERVER_PORT;
@@ -178,7 +177,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_SERVER_REQUEST_DURATION_METRIC)
-                        .with_unit(Unit::new("s"))
+                        .with_unit("s")
                         .with_description("Duration of HTTP server requests.")
                         .init(),
                 ),
@@ -196,7 +195,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP server request bodies.")
                         .init(),
                 ),
@@ -214,7 +213,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP server response bodies.")
                         .init(),
                 ),
@@ -232,7 +231,7 @@ impl InstrumentsConfig {
                 StaticInstrument::UpDownCounterI64(
                     meter
                         .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
-                        .with_unit(Unit::new("request"))
+                        .with_unit("request")
                         .with_description("Number of active HTTP server requests.")
                         .init(),
                 ),
@@ -248,7 +247,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -260,7 +259,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -446,7 +445,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -458,7 +457,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -499,7 +498,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
-                        .with_unit(Unit::new("s"))
+                        .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
                         .init(),
                 ),
@@ -517,7 +516,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
                         .init(),
                 ),
@@ -535,7 +534,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
                         .init(),
                 ),
@@ -551,7 +550,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -563,7 +562,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -728,7 +727,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -740,7 +739,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -787,7 +786,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -799,7 +798,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -902,7 +901,7 @@ impl InstrumentsConfig {
                 StaticInstrument::CounterF64(
                     meter
                         .f64_counter(CACHE_METRIC)
-                        .with_unit(Unit::new("ops"))
+                        .with_unit("ops")
                         .with_description("Entity cache hit/miss operations at the subgraph level")
                         .init(),
                 ),
@@ -1131,21 +1130,21 @@ impl<T, Request, Response, EventResponse> Selectors<Request, Response, EventResp
 where
     T: Selectors<Request, Response, EventResponse>,
 {
-    fn on_request(&self, request: &Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<opentelemetry::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
-    fn on_response(&self, response: &Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<opentelemetry::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response(response),
         }
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_error(error, ctx),
@@ -1247,11 +1246,11 @@ where
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
     for<'a> &'a SelectorValue: Into<InstrumentValue<E>>,
 {
-    fn on_request(&self, request: &Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_request(request)
     }
 
-    fn on_response(&self, response: &Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_response(response)
     }
 
@@ -1259,11 +1258,11 @@ where
         &self,
         response: &EventResponse,
         ctx: &Context,
-    ) -> Vec<opentelemetry_api::KeyValue> {
+    ) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_response_event(response, ctx)
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_error(error, ctx)
     }
 }
@@ -1389,7 +1388,7 @@ where
 }
 
 impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrumentsConfig {
-    fn on_request(&self, request: &subgraph::Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &subgraph::Request) -> Vec<opentelemetry::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
         attrs.extend(self.http_client_request_duration.on_request(request));
         attrs.extend(self.http_client_response_body_size.on_request(request));
@@ -1397,7 +1396,7 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrument
         attrs
     }
 
-    fn on_response(&self, response: &subgraph::Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &subgraph::Response) -> Vec<opentelemetry::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_response(response);
         attrs.extend(self.http_client_request_duration.on_response(response));
         attrs.extend(self.http_client_response_body_size.on_response(response));
@@ -1405,7 +1404,7 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrument
         attrs
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_error(error, ctx);
         attrs.extend(self.http_client_request_duration.on_error(error, ctx));
         attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
@@ -1896,7 +1895,7 @@ where
     pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
     pub(crate) counter: Option<Counter<f64>>,
     pub(crate) condition: Condition<T>,
-    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
     pub(crate) incremented: bool,
     pub(crate) _phantom: PhantomData<EventResponse>,
@@ -2226,7 +2225,7 @@ struct ActiveRequestsCounter {
 struct ActiveRequestsCounterInner {
     counter: Option<UpDownCounter<i64>>,
     attrs_config: Arc<ActiveRequestsAttributes>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    attributes: Vec<opentelemetry::KeyValue>,
 }
 
 impl Instrumented for ActiveRequestsCounter {
@@ -2321,7 +2320,7 @@ where
     pub(crate) selector: Option<Arc<T>>,
     pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
     pub(crate) histogram: Option<Histogram<f64>>,
-    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
     // Useful when it's an histogram on events to know if we have to count for an event or not
     pub(crate) updated: bool,
     pub(crate) _phantom: PhantomData<EventResponse>,

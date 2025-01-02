@@ -1,5 +1,5 @@
 use derivative::Derivative;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;

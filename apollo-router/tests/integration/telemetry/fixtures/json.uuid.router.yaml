@@ -13,12 +13,11 @@ telemetry:
       propagation:
         trace_context: true
         jaeger: true
-      jaeger:
+      otlp:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        agent:
-          endpoint: default
+        endpoint: default
     logging:
       stdout:
         format:

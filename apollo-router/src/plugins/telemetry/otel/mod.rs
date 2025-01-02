@@ -7,9 +7,7 @@ pub(crate) mod tracer;
 
 pub(crate) use layer::layer;
 pub(crate) use layer::OpenTelemetryLayer;
-use opentelemetry::Key;
-use opentelemetry::OrderMap;
-use opentelemetry::Value;
+use opentelemetry::KeyValue;
 pub(crate) use span_ext::OpenTelemetrySpanExt;
 pub(crate) use tracer::PreSampledTracer;
 
@@ -25,7 +23,7 @@ pub(crate) struct OtelData {
     pub(crate) builder: opentelemetry::trace::SpanBuilder,
 
     /// Attributes gathered for the next event
-    pub(crate) event_attributes: Option<OrderMap<Key, Value>>,
+    pub(crate) event_attributes: Option<Vec<KeyValue>>,
 
     /// Forced status in case it's coming from the custom attributes
     pub(crate) forced_status: Option<opentelemetry::trace::Status>,

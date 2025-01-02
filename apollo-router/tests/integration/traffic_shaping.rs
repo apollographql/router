@@ -127,7 +127,7 @@ async fn test_router_timeout_custom_metric() -> Result<(), BoxError> {
     }
 
     let mut router = IntegrationTest::builder()
-        .telemetry(Telemetry::Jaeger)
+        .telemetry(Telemetry::Otlp { endpoint: None })
         .config(format!(
             r#"
             {PROMETHEUS_CONFIG}

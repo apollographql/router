@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::Key;
-use opentelemetry_api::KeyValue;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
