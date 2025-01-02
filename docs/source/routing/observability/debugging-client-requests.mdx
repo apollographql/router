@@ -6,7 +6,7 @@ description: Enable telemetry features to help gain more visibility into incomin
 
 By default, the GraphOS Router does not generate access logs for incoming client HTTP requests, nor are features like OpenTelemetry enabled to capture every request.
 
-The best way to see GraphQL operation data is to use [GraphOS Insights](https://www.apollographql.com/docs/graphos/platform/insights). Here you will be able to see failed requests, what the client id was, and what was the exact GraphQL error if enabled.
+The best way to see GraphQL operation data is to use [GraphOS Insights](https://www.apollographql.com/docs/graphos/platform/insights). Here you will be able to see failed requests, what the client id was, and what was the exact [GraphQL error if enabled](https://www.apollographql.com/docs/graphos/routing/graphos-reporting#errors).
 
 If however, you are having issues with some requests coming from clients and would like to enable debugging features in your own evnironment, we reccomend first doing this in a non-production environment or using logic to do this on a per-request basis.
 
@@ -16,7 +16,7 @@ Using [Router Telemetry](https://www.apollographql.com/docs/graphos/routing/obse
 This will include helpful information about the request and response, but you will notice that an attribute for the HTTP body text is not included. If you would like to see the GraphQL operation first check your [GraphOS Insights](https://www.apollographql.com/docs/graphos/platform/insights) or follow the other options listed below.
 
 ## Request/Response Logging
-Using either the [logging-when-header](https://www.apollographql.com/docs/graphos/reference/router/telemetry/log-exporters/overview#requestresponse-logging) feature you can include the request body in your logs conditionally.
+Using the [logging-when-header](https://www.apollographql.com/docs/graphos/reference/router/telemetry/log-exporters/overview#requestresponse-logging) feature you can include the request body in your logs conditionally.
 
 ```yaml title="router.yaml"
 telemetry:
