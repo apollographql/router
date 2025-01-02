@@ -30,7 +30,6 @@ use super::config_new::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
 use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
-use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use crate::plugins::telemetry::apollo::router_id;
@@ -200,10 +199,7 @@ impl ApolloOtlpExporter {
             .find(|kv| kv.key == APOLLO_PRIVATE_FTV1)
         {
             let subgraph_name = span
-                .attributes
-                .iter()
-                .find(|kv| kv.key == SUBGRAPH_NAME)
-                .and_then(|kv| extract_string(&kv.value))
+                .get_string_attribute(&SUBGRAPH_NAME)
                 .unwrap_or_default();
             let subgraph_error_config = self
                 .errors_configuration
