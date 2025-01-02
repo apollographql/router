@@ -1,0 +1,52 @@
+---
+title: Debugging Client Requests to GraphOS Router
+subtitle: Log incoming requests to help debug problematic queries or errors
+description: Enable telemetry features to help gain more visibility into incoming HTTP requests and help debug issues your clients may be having.
+---
+
+GraphOS Router by default does not emit access logs for the incoming client HTTP requests, nor are other features, like OpenTelemetry, on by default that include every request. Given the volume and size of GraphQL requests, this would produce a large amount of telemetry data that may impact your observability costs.
+
+The best way to see GraphQL operation data is to use [GraphOS Insights](https://www.apollographql.com/docs/graphos/platform/insights). Here you will be able to see failed requests, what the client id was, and what was the exact GraphQL error if enabled.
+
+If however, you are having issues with some requests coming from clients and would like to enable debugging features in your own evnironment, we reccomend first doing this in a non-production environment or using logic to do this on a per-request basis.
+
+## OpenTelemetry Spans and Traces
+Using [Router Telemetry](https://www.apollographql.com/docs/graphos/routing/observability/telemetry), the trace for a give request will have a span labeled as `router`. This span will contain the HTTP information for a given client request with our [standard attributes](https://www.apollographql.com/docs/graphos/reference/router/telemetry/instrumentation/standard-attributes#router).
+
+This will include helpful information about the request and response, but you will notice that an attribute for the HTTP body text is not included. If you would like to see the GraphQL operation first check your [GraphOS Insights](https://www.apollographql.com/docs/graphos/platform/insights) or follow the other options listed below.
+
+## Request/Response Logging
+Using either the [logging-when-header](https://www.apollographql.com/docs/graphos/reference/router/telemetry/log-exporters/overview#requestresponse-logging) feature you can include the request body in your logs conditionally.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    logging:
+      # If one of these headers matches we will log supergraph and subgraphs requests/responses
+      experimental_when_header:
+        - name: apollo-router-log-request
+          value: my_client
+          headers: true # default: false
+          body: true # default: false
+```
+
+## Rhai Scripts & Coprocessors
+
+
+## Debug Router Logs
+GraphOS Router by default uses the `info` level for its logging. [Enabling other logging levels](https://www.apollographql.com/docs/graphos/reference/router/telemetry/log-exporters/overview) can help debug specific scenarios. It is only reccomended for local or non-production environments.
+
+## Alternative Cloud Services
+If you are deploying GraphOS Router to a cloud service, it is likely that you already have access to the raw HTTP logs through other services such as a load balancer. Using the trace id or operation hash, you should be able to find a specific client request to logs for that operation. Check out the docs for popular cloud providers here:
+
+AWS
+* [AWS CloudWatch Logs](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/WhatIsCloudWatchLogs.html)
+* [AWS Elastic Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html)
+
+GCP
+* [Google Cloud Observability](https://cloud.google.com/logging/docs/log-analytics)
+* [Google Cloud Load Balancing](https://cloud.google.com/load-balancing/docs/l7-internal/monitoring)
+
+Azure
+* [Azure App Service Logging](https://learn.microsoft.com/en-us/azure/app-service/troubleshoot-diagnostic-logs)
+* [Azure Load Balancer](https://learn.microsoft.com/en-us/azure/load-balancer/monitor-load-balancer]
