@@ -31,7 +31,7 @@ telemetry:
 ```
 
 ## Rhai Scripts & Coprocessors
-
+Hooking into the `RouterService` layer for either [Rhai scripts](https://www.apollographql.com/docs/graphos/routing/customization/rhai) or [Coprocessors](https://www.apollographql.com/docs/graphos/routing/customization/coprocessor) will give you access to the full HTTP request/response before any processing takes place. Here you can add custom logic on what to log and when.
 
 ## Debug Router Logs
 GraphOS Router by default uses the `info` level for its logging. [Enabling other logging levels](https://www.apollographql.com/docs/graphos/reference/router/telemetry/log-exporters/overview) can help debug specific scenarios. It is only reccomended for local or non-production environments.
