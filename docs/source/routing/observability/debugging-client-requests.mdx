@@ -4,7 +4,7 @@ subtitle: Log incoming requests to help debug problematic queries or errors
 description: Enable telemetry features to help gain more visibility into incoming HTTP requests and help debug issues your clients may be having.
 ---
 
-GraphOS Router by default does not emit access logs for the incoming client HTTP requests, nor are other features, like OpenTelemetry, on by default that include every request. Given the volume and size of GraphQL requests, this would produce a large amount of telemetry data that may impact your observability costs.
+By default, the GraphOS Router does not generate access logs for incoming client HTTP requests, nor are features like OpenTelemetry enabled to capture every request.
 
 The best way to see GraphQL operation data is to use [GraphOS Insights](https://www.apollographql.com/docs/graphos/platform/insights). Here you will be able to see failed requests, what the client id was, and what was the exact GraphQL error if enabled.
 
