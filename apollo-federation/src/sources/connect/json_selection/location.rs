@@ -205,8 +205,13 @@ pub(crate) mod strip_ranges {
                     PathList::Key(key, rest) => {
                         PathList::Key(key.strip_ranges(), rest.strip_ranges())
                     }
-                    PathList::Expr(expr, rest) => {
-                        PathList::Expr(expr.strip_ranges(), rest.strip_ranges())
+                    PathList::Expr(expr_seq, rest) => {
+                        let stripped_expr_seq = expr_seq
+                            .as_ref()
+                            .iter()
+                            .map(|expr| expr.strip_ranges())
+                            .collect();
+                        PathList::Expr(WithRange::new(stripped_expr_seq, None), rest.strip_ranges())
                     }
                     PathList::Method(method, opt_args, rest) => PathList::Method(
                         method.strip_ranges(),
