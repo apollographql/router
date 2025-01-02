@@ -30,6 +30,7 @@ use super::config_new::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
 use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
+use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use crate::plugins::telemetry::apollo::router_id;
@@ -141,8 +142,7 @@ impl ApolloOtlpExporter {
                 SUPERGRAPH_SPAN_NAME => {
                     if span
                         .attributes
-                        .iter()
-                        .any(|kv| kv.key == APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .contains_key(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
                     {
                         export_spans.push(self.base_prepare_span(span));
                         // Mirrors the existing implementation in apollo_telemetry
@@ -178,7 +178,11 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: span.attributes,
+            attributes: span
+                .attributes
+                .iter()
+                .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
+                .collect(),
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: span.status,
@@ -193,27 +197,24 @@ impl ApolloOtlpExporter {
         let mut status = Status::Unset;
 
         // If there is an FTV1 attribute, process it for error redaction and replace it
-        if let Some(ftv1) = span
-            .attributes
-            .iter()
-            .find(|kv| kv.key == APOLLO_PRIVATE_FTV1)
-        {
+        if let Some(ftv1) = span.attributes.get(&APOLLO_PRIVATE_FTV1) {
             let subgraph_name = span
-                .get_string_attribute(&SUBGRAPH_NAME)
+                .attributes
+                .get(&SUBGRAPH_NAME)
+                .and_then(extract_string)
                 .unwrap_or_default();
             let subgraph_error_config = self
                 .errors_configuration
                 .subgraph
                 .get_error_config(&subgraph_name);
             if let Some(Ok((trace_result, error_count))) =
-                extract_ftv1_trace_with_error_count(&ftv1.value, subgraph_error_config)
+                extract_ftv1_trace_with_error_count(ftv1, subgraph_error_config)
             {
                 if error_count > 0 {
                     status = Status::error("ftv1")
                 }
                 let encoded = encode_ftv1_trace(&trace_result);
-                span.attributes
-                    .push(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
+                span.attributes.insert(APOLLO_PRIVATE_FTV1, encoded.into());
             }
         }
 
@@ -230,7 +231,11 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: span.attributes,
+            attributes: span
+                .attributes
+                .iter()
+                .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
+                .collect(),
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status,
