@@ -8,7 +8,7 @@ By default, the GraphOS Router doesn't generate logs for incoming HTTP requests 
 
 ## Using GraphOS Insights
 
-Without enabling additional telemetry, the easiest way to see GraphQL operation data  is through [GraphOS Insights](/graphos/platform/insights). GraphOS Studio lets you analyze data from failed requests, such as GraphQL error messages ([if enabled](/graphos/routing/graphos-reporting#errors)) and the ID of the client making the request. You can also [segment your insights data](/graphos/platform/insights/client-segmentation) based on the client ID.
+Without enabling additional telemetry, the easiest way to analyze GraphQL operation data is through [GraphOS Insights](/graphos/platform/insights). GraphOS Studio lets you analyze data from failed requests, such as GraphQL error messages ([if enabled](/graphos/routing/graphos-reporting#errors)) and the ID of the client making the request. You can also [segment your insights data](/graphos/platform/insights/client-segmentation) based on the client ID.
 
 <Tip>
 
@@ -28,9 +28,9 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 ### Telemetry spans and traces
 
-Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces have spans labeled `router`. These spans contain the HTTP information for a given client request with [standard router attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router).
+Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces have spans labeled `router`. These spans contain the HTTP information for a given client request in [standard router attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code`.
 
-These attributes include helpful information about the request and response. Spans don't include an attribute for the HTTP body text, however. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or follow the other options listed below.
+These attributes include helpful information about the request and response. Spans, however, don't include an attribute for the HTTP body text. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or use the other options listed below.
 
 ### Request and response logging
 
@@ -47,28 +47,36 @@ telemetry:
           headers: true # default: false
           body: true # default: false
 ```
-### Rhai scripts and coprocessors
-
-Hooking into the `RouterService` layer for either [Rhai scripts](/graphos/routing/customization/rhai) or [coprocessors](/graphos/routing/customization/coprocessor) gives you access to the full HTTP request and response before processing occurs. You can use either Rhai scripts or coprocessors to add custom logic for what to log and when.
 
 ### Debugging router logs
 
 By default, the router uses the `info` level for its logging. [Enabling other logging levels](/graphos/reference/router/telemetry/log-exporters/overview) can help debug specific scenarios. Using non-`info` level configurations is only recommended for local or non-production environments.
 
+### Rhai scripts and coprocessors
+
+Hooking into the `RouterService` layer for either [Rhai scripts](/graphos/routing/customization/rhai) or [coprocessors](/graphos/routing/customization/coprocessor) gives you access to the full HTTP request and response before processing occurs. You can use either Rhai scripts or coprocessors to add custom logic for what to log and when.
+
+See the Apollo Solutions ["Hello World" coprocessor](https://github.com/apollosolutions/example-coprocessor-helloworld) for an example of a coprocessor that simply logs the router's payload.
+
+<SolutionsNote />
+
 ### Alternative cloud services
 
-If you are deploying the router to a cloud service, you will likely already have access to the raw HTTP logs through other services like load balancers. You should be able to find specific client request logs for a particular operation using the operation hash or trace ID. Refer to the docs for your cloud providers for more information.
+If you are deploying the router to a cloud service, you likely already have access to the raw HTTP logs through other services like load balancers. You should be able to find specific client request logs for a particular operation using the operation hash or trace ID. Refer to the docs for your cloud providers for more information.
 
 Popular cloud provider links are provided below.
 
 #### Amazon Web Services
+
 - [AWS CloudWatch Logs](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/WhatIsCloudWatchLogs.html)
 - [AWS Elastic Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html)
 
 #### Google Cloud Platform
+
 - [Google Cloud Observability](https://cloud.google.com/logging/docs/log-analytics)
 - [Google Cloud Load Balancing](https://cloud.google.com/load-balancing/docs/l7-internal/monitoring)
 
 ### Microsoft Azure
+
 - [Azure App Service Logging](https://learn.microsoft.com/en-us/azure/app-service/troubleshoot-diagnostic-logs)
 - [Azure Load Balancer](https://learn.microsoft.com/en-us/azure/load-balancer/monitor-load-balancer)
