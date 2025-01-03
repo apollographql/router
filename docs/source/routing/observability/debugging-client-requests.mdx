@@ -6,7 +6,13 @@ description: Enable telemetry features to help gain more visibility into incomin
 
 By default, the GraphOS Router doesn't log incoming HTTP requests nor export other telemetry metrics. The high volume of requests your router likely processes can generate significant telemetry data, increasing observability costs. For this reason, you can [configure](/graphos/routing/observability/telemetry) exactly the telemetry you want your router to collect and export.
 
-The easiest way to see GraphQL operation data without enabling additional telemetry is through [GraphOS Insights](/graphos/platform/insights). GraphOS Studio lets you analyze data from  failed requests, such as client IDs and [exact GraphQL errors](/routing/graphos-reporting#errors).
+The easiest way to see GraphQL operation data without enabling additional telemetry is through [GraphOS Insights](/graphos/platform/insights). GraphOS Studio lets you analyze data from failed requests, such as client IDs and [exact GraphQL error messages](/routing/graphos-reporting#errors).
+
+<Tip>
+
+[Learn more about client ID enforcement.](/graphos/routing/observability/client-id-enforcement)
+
+</Tip>
 
 See the methods below if you need additional information to debug client requests.
 
