@@ -304,30 +304,30 @@ async fn test_plugin_ordering() {
         .join("tests")
         .join("fixtures")
         .join("test_plugin_ordering.rhai");
-    let mut service = TestHarness::builder()
-        .configuration_json(json!({
-            "plugins": {
-                "experimental.test_ordering_1": {},
-                "experimental.test_ordering_2": {},
-                "experimental.test_ordering_3": {},
-            },
-            "rhai": {
-                "main": rhai_main,
-            },
-            "coprocessor": {
-                "url": coprocessor_url,
-                "router": {
-                    "request": { "context": true },
-                    "response": { "context": true },
-                }
-            },
-        }))
-        .unwrap()
-        .build_router()
-        .await
-        .unwrap();
     // Repeat to get more confidence it’s deterministic
     for _ in 0..10 {
+        let mut service = TestHarness::builder()
+            .configuration_json(json!({
+                "plugins": {
+                    "experimental.test_ordering_1": {},
+                    "experimental.test_ordering_2": {},
+                    "experimental.test_ordering_3": {},
+                },
+                "rhai": {
+                    "main": rhai_main,
+                },
+                "coprocessor": {
+                    "url": coprocessor_url,
+                    "router": {
+                        "request": { "context": true },
+                        "response": { "context": true },
+                    }
+                },
+            }))
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
         let request = supergraph::Request::canned_builder().build().unwrap();
         let mut response = service
             .ready()
