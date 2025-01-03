@@ -293,5 +293,14 @@ mod tests {
         default_headers.append(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT));
         let accepts = parse_accept(&default_headers);
         assert!(accepts.multipart_defer);
+
+        // Multiple accepted types, including one with a parameter we are interested in
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("multipart/mixed;subscriptionSpec=1.0, application/json"),
+        );
+        let accepts = parse_accept(&default_headers);
+        assert!(accepts.multipart_subscription);
     }
 }
