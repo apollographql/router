@@ -9,6 +9,7 @@ use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
+use url::Url;
 
 use super::*;
 use crate::graphql;
@@ -33,6 +34,9 @@ pub(super) struct ExecutionRequestConf {
     pub(super) method: bool,
     /// Send the query plan
     pub(super) query_plan: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a router request/response stage
@@ -49,6 +53,9 @@ pub(super) struct ExecutionResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -65,7 +72,7 @@ impl ExecutionStage {
         &self,
         http_client: C,
         service: execution::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         sdl: Arc<String>,
     ) -> execution::BoxService
     where
@@ -81,7 +88,10 @@ impl ExecutionStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -125,10 +135,13 @@ impl ExecutionStage {
             let response_config = self.response.clone();
 
             MapFutureLayer::new(move |fut| {
-                let coprocessor_url = coprocessor_url.clone();
                 let sdl: Arc<String> = sdl.clone();
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
 
                 async move {
                     let response: execution::Response = fut.await?;
@@ -183,7 +196,7 @@ impl ExecutionStage {
 
 async fn process_execution_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: execution::Request,
     request_config: ExecutionRequestConf,
@@ -322,7 +335,7 @@ where
 
 async fn process_execution_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     response: execution::Response,
     response_config: ExecutionResponseConf,
@@ -563,12 +576,8 @@ mod tests {
     async fn external_plugin_execution_request() {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
-                headers: false,
-                context: false,
                 body: true,
-                sdl: false,
-                method: false,
-                query_plan: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -671,7 +680,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -697,12 +706,8 @@ mod tests {
     async fn external_plugin_execution_request_controlflow_break() {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
-                headers: false,
-                context: false,
                 body: true,
-                sdl: false,
-                method: false,
-                query_plan: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -740,7 +745,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -773,7 +778,7 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                status_code: false,
+                ..Default::default()
             },
             request: Default::default(),
         };
@@ -866,7 +871,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -905,7 +910,7 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                status_code: false,
+                ..Default::default()
             },
             request: Default::default(),
         };
@@ -980,7 +985,7 @@ mod tests {
         let service = execution_stage.as_service(
             mock_http_client,
             mock_execution_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 

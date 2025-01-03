@@ -9,6 +9,7 @@ use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
+use url::Url;
 
 use super::*;
 use crate::graphql;
@@ -36,6 +37,9 @@ pub(super) struct SupergraphRequestConf {
     pub(super) sdl: bool,
     /// Send the method
     pub(super) method: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a router request/response stage
@@ -55,6 +59,9 @@ pub(super) struct SupergraphResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -71,7 +78,7 @@ impl SupergraphStage {
         &self,
         http_client: C,
         service: supergraph::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         sdl: Arc<String>,
     ) -> supergraph::BoxService
     where
@@ -87,7 +94,10 @@ impl SupergraphStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -130,10 +140,13 @@ impl SupergraphStage {
             let response_config = self.response.clone();
 
             MapFutureLayer::new(move |fut| {
-                let coprocessor_url = coprocessor_url.clone();
                 let sdl: Arc<String> = sdl.clone();
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
 
                 async move {
                     let response: supergraph::Response = fut.await?;
@@ -187,7 +200,7 @@ impl SupergraphStage {
 
 async fn process_supergraph_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: supergraph::Request,
     mut request_config: SupergraphRequestConf,
@@ -330,7 +343,7 @@ where
 
 async fn process_supergraph_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     response: supergraph::Response,
     response_config: SupergraphResponseConf,
@@ -594,8 +607,7 @@ mod tests {
                 headers: false,
                 context: false,
                 body: true,
-                sdl: false,
-                method: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -698,7 +710,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -736,8 +748,7 @@ mod tests {
                 headers: false,
                 context: false,
                 body: true,
-                sdl: false,
-                method: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -776,7 +787,7 @@ mod tests {
         let service = supergraph_stage.clone().as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -853,7 +864,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -872,7 +883,7 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                status_code: false,
+                ..Default::default()
             },
             request: Default::default(),
         };
@@ -964,7 +975,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1004,7 +1015,7 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
-                status_code: false,
+                ..Default::default()
             },
             request: Default::default(),
         };
@@ -1079,7 +1090,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1118,6 +1129,7 @@ mod tests {
                     SelectorOrValue::Value(true.into()),
                 ])
                 .into(),
+                url: None,
                 headers: true,
                 context: true,
                 body: true,
@@ -1197,7 +1209,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
