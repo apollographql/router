@@ -72,7 +72,7 @@ fn response_shape(op_str: &str) -> response_shape::ResponseShape {
     let schema = Schema::parse_and_validate(SCHEMA_STR, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
     let op = ExecutableDocument::parse_and_validate(schema.schema(), op_str, "op.graphql").unwrap();
-    response_shape::compute_response_shape(&op, &schema).unwrap()
+    response_shape::compute_response_shape_for_operation(&op, &schema).unwrap()
 }
 
 //=================================================================================================

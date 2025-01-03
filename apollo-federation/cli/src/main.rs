@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::internal_error;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
@@ -276,12 +277,20 @@ fn cmd_plan(
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
     let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
     println!("{query_plan}");
-    apollo_federation::query_plan::correctness::check_plan(
-        planner.api_schema(),
+    // Use the supergraph schema, not the API schema, for correctness check,
+    // since the plan may access hidden fields.
+    let result = apollo_federation::query_plan::correctness::check_plan(
+        &supergraph.schema,
         &query_doc,
         &query_plan,
     )?;
-    Ok(())
+    match result {
+        None => Ok(()),
+        Some(e) => Err(internal_error!(
+            "Response shape from query plan does not match response shape from input operation:\n{}",
+            e.description()
+        )),
+    }
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {

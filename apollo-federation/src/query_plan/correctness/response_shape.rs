@@ -6,6 +6,9 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Fragment;
+use apollo_compiler::executable::FragmentMap;
+use apollo_compiler::executable::InlineFragment;
+use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
@@ -14,11 +17,14 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use crate::bail;
+use crate::compat::coerce_executable_values;
 use crate::display_helpers;
+use crate::ensure;
 use crate::internal_error;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 use crate::schema::ValidFederationSchema;
 use crate::utils::FallibleIterator;
 use crate::FederationError;
@@ -120,25 +126,20 @@ fn get_ground_types(
 }
 
 /// A sequence of type conditions applied (used for display)
-// - The vector must be non-empty.
+// - If the vector is empty, it means a "deduced type condition".
+//   Thus, we may not know how to display such a composition of types.
+//   That can happen when a more specific type condition is computed
+//   than the one that was explicitly provided.
 #[derive(Debug, Clone)]
 struct AppliedTypeCondition(Vec<CompositeTypeDefinitionPosition>);
-
-impl fmt::Display for AppliedTypeCondition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (i, cond) in self.0.iter().enumerate() {
-            if i > 0 {
-                write!(f, " ∧ ")?;
-            }
-            write!(f, "{}", cond.type_name())?;
-        }
-        Ok(())
-    }
-}
 
 impl AppliedTypeCondition {
     fn new(ty: CompositeTypeDefinitionPosition) -> Self {
         AppliedTypeCondition(vec![ty])
+    }
+
+    fn deduced() -> Self {
+        AppliedTypeCondition(Vec::new())
     }
 
     /// Construct a new type condition with a named type condition added.
@@ -169,9 +170,10 @@ impl AppliedTypeCondition {
 }
 
 #[derive(Debug, Clone)]
-struct NormalizedTypeCondition {
+pub struct NormalizedTypeCondition {
     // The set of object types that are used for comparison.
-    // - The ground_set must be non-empty.
+    // - The empty ground_set means the `_Entity` type.
+    // - The ground_set must be non-empty, if it's not the `_Entity` type.
     // - The ground_set must be sorted by type name.
     ground_set: Vec<ObjectTypeDefinitionPosition>,
 
@@ -187,36 +189,60 @@ impl PartialEq for NormalizedTypeCondition {
 
 impl Eq for NormalizedTypeCondition {}
 
-impl fmt::Display for NormalizedTypeCondition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.for_display)?;
-        if self.for_display.0.len() > 1 {
-            write!(f, " = {{")?;
-            for (i, ty) in self.ground_set.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", ty.type_name)?;
-            }
-            write!(f, "}}")?;
-        }
-        Ok(())
-    }
-}
-
 impl std::hash::Hash for NormalizedTypeCondition {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ground_set.hash(state);
     }
 }
 
+// Public accessors
+impl NormalizedTypeCondition {
+    pub fn implies(&self, other: &Self) -> bool {
+        self.ground_set.iter().all(|t| other.ground_set.contains(t))
+    }
+
+    pub(crate) fn ground_set(&self) -> &[ObjectTypeDefinitionPosition] {
+        &self.ground_set
+    }
+
+    pub(crate) fn from_ground_type(ty: &ObjectTypeDefinitionPosition) -> Self {
+        NormalizedTypeCondition {
+            ground_set: vec![ty.clone()],
+            for_display: AppliedTypeCondition::new(ty.clone().into()),
+        }
+    }
+
+    /// is this type condition represented by a single named type?
+    pub fn is_named_type(&self, type_name: &Name) -> bool {
+        let mut it = self.for_display.0.iter();
+        let Some(first) = it.next() else {
+            return false;
+        };
+        it.next().is_none() && first.type_name() == type_name
+    }
+}
+
 impl NormalizedTypeCondition {
     /// Construct a new type condition with a single named type condition.
-    fn from_type_name(name: Name, schema: &ValidFederationSchema) -> Result<Self, FederationError> {
+    pub(crate) fn from_type_name(
+        name: Name,
+        schema: &ValidFederationSchema,
+    ) -> Result<Self, FederationError> {
         let ty: CompositeTypeDefinitionPosition = schema.get_type(name)?.try_into()?;
         Ok(NormalizedTypeCondition {
             ground_set: get_ground_types(&ty, schema)?,
             for_display: AppliedTypeCondition::new(ty),
+        })
+    }
+
+    pub(crate) fn from_object_types(
+        types: impl Iterator<Item = ObjectTypeDefinitionPosition>,
+    ) -> Result<Self, FederationError> {
+        let mut ground_set: Vec<_> = types.collect();
+        ground_set.sort_by(|a, b| a.type_name.cmp(&b.type_name));
+        Ok(NormalizedTypeCondition {
+            ground_set,
+            for_display: AppliedTypeCondition::deduced(),
         })
     }
 
@@ -229,6 +255,14 @@ impl NormalizedTypeCondition {
         let other_ty: CompositeTypeDefinitionPosition =
             schema.get_type(name.clone())?.try_into()?;
         let other_types = get_ground_types(&other_ty, schema)?;
+        if self.ground_set.is_empty() {
+            // Special case: The `self` is the `_Entity` type.
+            // - Just returns `other`, since _Entity ∩ other = other.
+            return Ok(Some(NormalizedTypeCondition {
+                ground_set: other_types,
+                for_display: AppliedTypeCondition::new(other_ty),
+            }));
+        }
         let ground_set: Vec<ObjectTypeDefinitionPosition> = self
             .ground_set
             .iter()
@@ -251,25 +285,81 @@ impl NormalizedTypeCondition {
             }))
         }
     }
+
+    /// Special constructor for the `_Entity` type.
+    fn for_entity() -> Self {
+        NormalizedTypeCondition {
+            ground_set: Vec::new(),
+            for_display: AppliedTypeCondition(Vec::new()),
+        }
+    }
+
+    fn field_type_condition(
+        &self,
+        field: &Field,
+        schema: &ValidFederationSchema,
+    ) -> Result<Self, FederationError> {
+        let declared_type = field.ty().inner_named_type();
+
+        // Collect all possible object types for the field in the given parent type condition.
+        let mut types = IndexSet::default();
+        for ty_pos in &self.ground_set {
+            let ty_def = ty_pos.get(schema.schema())?;
+            let Some(field_def) = ty_def.fields.get(&field.name) else {
+                continue;
+            };
+            let field_ty = field_def.ty.inner_named_type().clone();
+            types.insert(field_ty);
+        }
+
+        // Simple case #1 - The collected types is just a single named type.
+        if types.len() == 1 {
+            if let Some(first) = types.first() {
+                return NormalizedTypeCondition::from_type_name(first.clone(), schema);
+            }
+        }
+
+        // Grind the type names into object types.
+        let mut ground_types = IndexSet::default();
+        for ty in &types {
+            let pos = schema.get_type(ty.clone())?.try_into()?;
+            let pos_types = schema.possible_runtime_types(pos)?;
+            ground_types.extend(pos_types.into_iter());
+        }
+
+        // Simple csae #2 - `declared_type` is same as the collected types.
+        let declared_type_cond =
+            NormalizedTypeCondition::from_type_name(declared_type.clone(), schema)?;
+        if declared_type_cond.ground_set.len() == ground_types.len()
+            && declared_type_cond
+                .ground_set
+                .iter()
+                .all(|t| ground_types.contains(t))
+        {
+            return Ok(declared_type_cond);
+        }
+
+        NormalizedTypeCondition::from_object_types(ground_types.into_iter())
+    }
 }
 
 //==================================================================================================
-// Logical conditions
+// Boolean conditions
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Literal {
+pub enum Literal {
     Pos(Name), // positive occurrence of the variable with the given name
     Neg(Name), // negated variable with the given name
 }
 
 impl Literal {
-    fn variable(&self) -> &Name {
+    pub fn variable(&self) -> &Name {
         match self {
             Literal::Pos(name) | Literal::Neg(name) => name,
         }
     }
 
-    fn polarity(&self) -> bool {
+    pub fn polarity(&self) -> bool {
         matches!(self, Literal::Pos(_))
     }
 }
@@ -279,32 +369,23 @@ impl Literal {
 // "false" can't be represented. Any cases with false condition must be dropped entirely.
 // This vector must be deduplicated.
 #[derive(Debug, Clone, Default, Eq)]
-struct Clause(Vec<Literal>);
-
-impl fmt::Display for Clause {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.0.is_empty() {
-            write!(f, "true")
-        } else {
-            for (i, l) in self.0.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ∧ ")?;
-                }
-                match l {
-                    Literal::Pos(v) => write!(f, "{}", v)?,
-                    Literal::Neg(v) => write!(f, "¬{}", v)?,
-                }
-            }
-            Ok(())
-        }
-    }
-}
+pub struct Clause(Vec<Literal>);
 
 impl Clause {
-    fn is_always_true(&self) -> bool {
+    pub fn is_always_true(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Creates a clause from a vector of literals.
+    pub fn from_literals(literals: &[Literal]) -> Self {
+        let variables: IndexMap<Name, bool> = literals
+            .iter()
+            .map(|lit| (lit.variable().clone(), lit.polarity()))
+            .collect();
+        Self::from_variable_map(&variables)
+    }
+
+    /// Creates a clause from a variable-to-Boolean mapping.
     /// variables: variable name (Name) -> polarity (bool)
     fn from_variable_map(variables: &IndexMap<Name, bool>) -> Self {
         let mut buf: Vec<Literal> = variables
@@ -318,7 +399,7 @@ impl Clause {
         Clause(buf)
     }
 
-    fn concatenate(&self, other: &Clause) -> Option<Clause> {
+    pub fn concatenate(&self, other: &Clause) -> Option<Clause> {
         let mut variables: IndexMap<Name, bool> = IndexMap::default();
         // Assume that `self` has no conflicts.
         for lit in &self.0 {
@@ -347,7 +428,7 @@ impl Clause {
 
     /// Returns a clause with everything included and a simplified version of the `clause`.
     /// - The simplified clause does not include variables that are already in `self`.
-    fn concatenate_and_simplify(&self, clause: &Clause) -> Option<(Clause, Clause)> {
+    pub fn concatenate_and_simplify(&self, clause: &Clause) -> Option<(Clause, Clause)> {
         let mut all_variables: IndexMap<Name, bool> = IndexMap::default();
         // Load `self` on `variables`.
         // - Assume that `self` has no conflicts.
@@ -395,7 +476,7 @@ fn boolean_clause_from_directives(
     let mut variables = IndexMap::default(); // variable name (Name) -> polarity (bool)
     if let Some(skip) = directives.get("skip") {
         let Some(value) = skip.specified_argument_by_name("if") else {
-            bail!("missing @skip(if:) argument");
+            bail!("missing @skip(if:) argument")
         };
 
         match value.as_ref() {
@@ -407,14 +488,14 @@ fn boolean_clause_from_directives(
                 variables.insert(name.clone(), false);
             }
             _ => {
-                bail!("expected boolean or variable `if` argument, got {value}");
+                bail!("expected boolean or variable `if` argument, got {value}")
             }
         }
     }
 
     if let Some(include) = directives.get("include") {
         let Some(value) = include.specified_argument_by_name("if") else {
-            bail!("missing @include(if:) argument");
+            bail!("missing @include(if:) argument")
         };
 
         match value.as_ref() {
@@ -431,15 +512,43 @@ fn boolean_clause_from_directives(
                 }
             }
             _ => {
-                bail!("expected boolean or variable `if` argument, got {value}");
+                bail!("expected boolean or variable `if` argument, got {value}")
             }
         }
     }
     Ok(Some(Clause::from_variable_map(&variables)))
 }
 
+fn normalize_ast_value(v: &mut ast::Value) {
+    // special cases
+    match v {
+        // Sort object fields by name
+        ast::Value::Object(fields) => {
+            fields.sort_by(|a, b| a.0.cmp(&b.0));
+            for (_name, value) in fields {
+                normalize_ast_value(value.make_mut());
+            }
+        }
+
+        // Recurse into list items.
+        ast::Value::List(items) => {
+            for value in items {
+                normalize_ast_value(value.make_mut());
+            }
+        }
+
+        _ => (), // otherwise, do nothing
+    }
+}
+
 fn normalized_arguments(args: &[Node<ast::Argument>]) -> Vec<Node<ast::Argument>> {
-    vec_sorted_by(args, |a, b| a.name.cmp(&b.name))
+    // sort by name
+    let mut args = vec_sorted_by(args, |a, b| a.name.cmp(&b.name));
+    // normalize argument values in place
+    for arg in &mut args {
+        normalize_ast_value(arg.make_mut().value.make_mut());
+    }
+    args
 }
 
 fn remove_conditions_from_directives(directives: &ast::DirectiveList) -> ast::DirectiveList {
@@ -450,7 +559,7 @@ fn remove_conditions_from_directives(directives: &ast::DirectiveList) -> ast::Di
         .collect()
 }
 
-type FieldSelectionKey = Field;
+pub type FieldSelectionKey = Field;
 
 // Extract the selection key
 fn field_selection_key(field: &Field) -> FieldSelectionKey {
@@ -462,6 +571,11 @@ fn field_selection_key(field: &Field) -> FieldSelectionKey {
         directives: ast::DirectiveList::default(), // not used for comparison
         selection_set: SelectionSet::new(field.selection_set.ty.clone()), // not used for comparison
     }
+}
+
+fn eq_field_selection_key(a: &FieldSelectionKey, b: &FieldSelectionKey) -> bool {
+    // Note: Arguments are expected to be normalized.
+    a.name == b.name && a.arguments == b.arguments
 }
 
 //==================================================================================================
@@ -480,33 +594,89 @@ fn field_display(field: &Field) -> Field {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-struct DefinitionVariant {
+pub struct DefinitionVariant {
     /// Boolean clause is the secondary key after NormalizedTypeCondition as primary key.
     boolean_clause: Clause,
 
-    /// Field selection for definition/display (see `fn field_display`).
+    /// Representative field selection for definition/display (see `fn field_display`).
     /// - This is the first field of the same field selection key in depth-first order as
     ///   defined by `CollectFields` and `ExecuteField` algorithms in the GraphQL spec.
-    field_display: Field,
+    representative_field: Field,
 
     /// Different variants can have different sets of sub-selections (if any).
     sub_selection_response_shape: Option<ResponseShape>,
 }
 
+// Public accessors & constructors
+impl DefinitionVariant {
+    pub fn boolean_clause(&self) -> &Clause {
+        &self.boolean_clause
+    }
+
+    pub fn representative_field(&self) -> &Field {
+        &self.representative_field
+    }
+
+    pub fn sub_selection_response_shape(&self) -> Option<&ResponseShape> {
+        self.sub_selection_response_shape.as_ref()
+    }
+
+    pub fn with_updated_sub_selection_response_shape(&self, new_shape: ResponseShape) -> Self {
+        DefinitionVariant {
+            boolean_clause: self.boolean_clause.clone(),
+            representative_field: self.representative_field.clone(),
+            sub_selection_response_shape: Some(new_shape),
+        }
+    }
+
+    pub fn with_updated_fields(
+        &self,
+        boolean_clause: Clause,
+        sub_selection_response_shape: Option<ResponseShape>,
+    ) -> Self {
+        DefinitionVariant {
+            boolean_clause,
+            sub_selection_response_shape,
+            representative_field: self.representative_field.clone(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
-struct PossibleDefinitionsPerTypeCondition {
+pub struct PossibleDefinitionsPerTypeCondition {
     /// The key for comparison (only used for GraphQL invariant check).
     /// - Under each type condition, all variants must have the same selection key.
     field_selection_key: FieldSelectionKey,
 
     /// Under each type condition, there may be multiple variants with different Boolean conditions.
     conditional_variants: Vec<DefinitionVariant>,
-    // - Every variant's (Boolean condition, directive key) must be unique.
-    // - (TBD) Their Boolean conditions must be mutually exclusive.
+    // - Every variant's Boolean condition must be unique.
+    // - Note: The Boolean conditions between variants may not be mutually exclusive.
+}
+
+// Public accessors & constructors
+impl PossibleDefinitionsPerTypeCondition {
+    pub fn field_selection_key(&self) -> &FieldSelectionKey {
+        &self.field_selection_key
+    }
+
+    pub fn conditional_variants(&self) -> &[DefinitionVariant] {
+        &self.conditional_variants
+    }
+
+    pub fn with_updated_conditional_variants(&self, new_variants: Vec<DefinitionVariant>) -> Self {
+        PossibleDefinitionsPerTypeCondition {
+            field_selection_key: self.field_selection_key.clone(),
+            conditional_variants: new_variants,
+        }
+    }
 }
 
 impl PossibleDefinitionsPerTypeCondition {
-    fn insert_variant(&mut self, variant: DefinitionVariant) {
+    pub(crate) fn insert_variant(
+        &mut self,
+        variant: DefinitionVariant,
+    ) -> Result<(), FederationError> {
         for existing in &mut self.conditional_variants {
             if existing.boolean_clause == variant.boolean_clause {
                 // Merge response shapes (MergeSelectionSets from GraphQL spec 6.4.3)
@@ -516,16 +686,17 @@ impl PossibleDefinitionsPerTypeCondition {
                 ) {
                     (None, None) => {} // nothing to do
                     (Some(existing_rs), Some(ref variant_rs)) => {
-                        existing_rs.merge_with(variant_rs);
+                        existing_rs.merge_with(variant_rs)?;
                     }
                     (None, Some(_)) | (Some(_), None) => {
                         unreachable!("mismatched sub-selection options")
                     }
                 }
-                return;
+                return Ok(());
             }
         }
         self.conditional_variants.push(variant);
+        Ok(())
     }
 }
 
@@ -533,25 +704,64 @@ impl PossibleDefinitionsPerTypeCondition {
 /// - At the top level, all possibilities are indexed by the type condition.
 /// - However, they are not necessarily mutually exclusive.
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
-struct PossibleDefinitions(IndexMap<NormalizedTypeCondition, PossibleDefinitionsPerTypeCondition>);
+pub struct PossibleDefinitions(
+    IndexMap<NormalizedTypeCondition, PossibleDefinitionsPerTypeCondition>,
+);
+
+// Public accessors
+impl PossibleDefinitions {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &NormalizedTypeCondition,
+            &PossibleDefinitionsPerTypeCondition,
+        ),
+    > {
+        self.0.iter()
+    }
+
+    pub fn get(
+        &self,
+        type_cond: &NormalizedTypeCondition,
+    ) -> Option<&PossibleDefinitionsPerTypeCondition> {
+        self.0.get(type_cond)
+    }
+
+    pub fn insert(
+        &mut self,
+        type_condition: NormalizedTypeCondition,
+        value: PossibleDefinitionsPerTypeCondition,
+    ) -> bool {
+        self.0.insert(type_condition, value).is_some()
+    }
+}
 
 impl PossibleDefinitions {
     fn insert_possible_definition(
         &mut self,
         type_conditions: NormalizedTypeCondition,
         boolean_clause: Clause, // the aggregate boolean condition of the current selection set
-        field_display: Field,
+        representative_field: Field,
         sub_selection_response_shape: Option<ResponseShape>,
-    ) {
-        let field_selection_key = field_selection_key(&field_display);
+    ) -> Result<(), FederationError> {
+        let field_selection_key = field_selection_key(&representative_field);
         let entry = self.0.entry(type_conditions);
         let insert_variant = |per_type_cond: &mut PossibleDefinitionsPerTypeCondition| {
             let value = DefinitionVariant {
                 boolean_clause,
-                field_display,
+                representative_field,
                 sub_selection_response_shape,
             };
-            per_type_cond.insert_variant(value);
+            per_type_cond.insert_variant(value)
         };
         match entry {
             indexmap::map::Entry::Vacant(e) => {
@@ -560,34 +770,67 @@ impl PossibleDefinitions {
                     field_selection_key,
                     conditional_variants: vec![],
                 };
-                insert_variant(e.insert(empty_per_type_cond));
+                insert_variant(e.insert(empty_per_type_cond))?;
             }
             indexmap::map::Entry::Occupied(mut e) => {
                 // GraphQL invariant: per_type_cond.field_selection_key must be the same
                 //                    as the given field_selection_key.
-                assert_eq!(e.get().field_selection_key, field_selection_key);
-                insert_variant(e.get_mut());
+                ensure!(
+                    eq_field_selection_key(&e.get().field_selection_key, &field_selection_key),
+                    "field_selection_key was expected to be the same"
+                );
+                insert_variant(e.get_mut())?;
             }
         };
+        Ok(())
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ResponseShape {
     /// The default type condition is only used for display.
-    default_type_condition: NormalizedTypeCondition,
+    default_type_condition: Name,
     definitions_per_response_key: IndexMap</*response_key*/ Name, PossibleDefinitions>,
 }
 
+// Public accessors
 impl ResponseShape {
-    fn new(default_type_condition: NormalizedTypeCondition) -> Self {
+    pub fn default_type_condition(&self) -> &Name {
+        &self.default_type_condition
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.definitions_per_response_key.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.definitions_per_response_key.len()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Name, &PossibleDefinitions)> {
+        self.definitions_per_response_key.iter()
+    }
+
+    pub fn get(&self, response_key: &Name) -> Option<&PossibleDefinitions> {
+        self.definitions_per_response_key.get(response_key)
+    }
+
+    pub fn insert(&mut self, response_key: Name, value: PossibleDefinitions) -> bool {
+        self.definitions_per_response_key
+            .insert(response_key, value)
+            .is_some()
+    }
+}
+
+impl ResponseShape {
+    pub fn new(default_type_condition: Name) -> Self {
         ResponseShape {
             default_type_condition,
             definitions_per_response_key: IndexMap::default(),
         }
     }
 
-    fn merge_with(&mut self, other: &Self) {
+    pub fn merge_with(&mut self, other: &Self) -> Result<(), FederationError> {
         for (response_key, other_defs) in &other.definitions_per_response_key {
             let value = self
                 .definitions_per_response_key
@@ -598,99 +841,18 @@ impl ResponseShape {
                     value.insert_possible_definition(
                         type_condition.clone(),
                         variant.boolean_clause.clone(),
-                        variant.field_display.clone(),
+                        variant.representative_field.clone(),
                         variant.sub_selection_response_shape.clone(),
-                    );
+                    )?;
                 }
             }
         }
+        Ok(())
     }
 }
 
 //==================================================================================================
-// ResponseShape display
-
-impl PossibleDefinitionsPerTypeCondition {
-    fn has_boolean_conditions(&self) -> bool {
-        self.conditional_variants.len() > 1
-            || self
-                .conditional_variants
-                .first()
-                .is_some_and(|variant| !variant.boolean_clause.is_always_true())
-    }
-}
-
-impl PossibleDefinitions {
-    /// Is conditional on runtime type?
-    fn has_type_conditions(&self, default_type_condition: &NormalizedTypeCondition) -> bool {
-        self.0.len() > 1
-            || self
-                .0
-                .first()
-                .is_some_and(|(type_condition, _)| type_condition != default_type_condition)
-    }
-
-    /// Has multiple possible definitions or has any boolean conditions?
-    /// Note: This method may miss a type condition. So, check `has_type_conditions` as well.
-    fn has_multiple_definitions(&self) -> bool {
-        self.0.len() > 1
-            || self
-                .0
-                .first()
-                .is_some_and(|(_, per_type_cond)| per_type_cond.has_boolean_conditions())
-    }
-}
-
-impl ResponseShape {
-    fn write_indented(&self, state: &mut display_helpers::State<'_, '_>) -> fmt::Result {
-        state.write("{")?;
-        state.indent_no_new_line();
-        for (response_key, defs) in &self.definitions_per_response_key {
-            let has_type_cond = defs.has_type_conditions(&self.default_type_condition);
-            let arrow_sym = if has_type_cond || defs.has_multiple_definitions() {
-                "-may->"
-            } else {
-                "----->"
-            };
-            for (type_condition, per_type_cond) in &defs.0 {
-                for variant in &per_type_cond.conditional_variants {
-                    let field_display = &variant.field_display;
-                    let type_cond_str = if has_type_cond {
-                        format!(" on {}", type_condition)
-                    } else {
-                        "".to_string()
-                    };
-                    let boolean_str = if !variant.boolean_clause.is_always_true() {
-                        format!(" if {}", variant.boolean_clause)
-                    } else {
-                        "".to_string()
-                    };
-                    state.new_line()?;
-                    state.write(format_args!(
-                        "{response_key} {arrow_sym} {field_display}{type_cond_str}{boolean_str}"
-                    ))?;
-                    if let Some(sub_selection_response_shape) =
-                        &variant.sub_selection_response_shape
-                    {
-                        state.write(" ")?;
-                        sub_selection_response_shape.write_indented(state)?;
-                    }
-                }
-            }
-        }
-        state.dedent()?;
-        state.write("}")
-    }
-}
-
-impl fmt::Display for ResponseShape {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.write_indented(&mut display_helpers::State::new(f))
-    }
-}
-
-//==================================================================================================
-// ResponseShape computation
+// ResponseShape computation from operation
 
 struct ResponseShapeContext {
     schema: ValidFederationSchema,
@@ -699,6 +861,7 @@ struct ResponseShapeContext {
     type_condition: NormalizedTypeCondition, // accumulated type condition down from the parent field.
     inherited_clause: Clause, // accumulated conditions from the root up to parent field
     current_clause: Clause,   // accumulated conditions down from the parent field
+    skip_introspection: bool, // true for input operation's root contexts only
 }
 
 impl ResponseShapeContext {
@@ -745,6 +908,15 @@ impl ResponseShapeContext {
         response_shape: &mut ResponseShape,
         field: &Node<Field>,
     ) -> Result<(), FederationError> {
+        // Skip __typename fields in the input root context.
+        if self.skip_introspection && field.name == *INTROSPECTION_TYPENAME_FIELD_NAME {
+            return Ok(());
+        }
+        // Skip introspection fields since QP ignores them.
+        // (see comments on `FieldSelection::from_field`)
+        if is_introspection_field_name(&field.name) {
+            return Ok(());
+        }
         let Some(field_clause) = self
             .current_clause
             .add_selection_directives(&field.directives)?
@@ -764,14 +936,17 @@ impl ResponseShapeContext {
         {
             None
         } else {
+            // The field's declared type may not be the most specific type (in case of up-casting).
+
             // internal invariant check
-            assert_eq!(*field.ty().inner_named_type(), field.selection_set.ty);
+            ensure!(*field.ty().inner_named_type() == field.selection_set.ty, "internal invariant failure: field's type does not match with its selection set's type");
 
             // A brand new context with the new type condition.
             // - Still inherits the boolean conditions for simplification purposes.
             let parent_type = field.selection_set.ty.clone();
-            let type_condition =
-                NormalizedTypeCondition::from_type_name(parent_type.clone(), &self.schema)?;
+            let type_condition = self
+                .type_condition
+                .field_type_condition(field, &self.schema)?;
             let context = ResponseShapeContext {
                 schema: self.schema.clone(),
                 fragment_defs: self.fragment_defs.clone(),
@@ -779,6 +954,7 @@ impl ResponseShapeContext {
                 type_condition,
                 inherited_clause,
                 current_clause: Clause::default(), // empty
+                skip_introspection: false,         // false by default
             };
             Some(context.process_selection_set(&field.selection_set)?)
         };
@@ -792,8 +968,7 @@ impl ResponseShapeContext {
             field_clause,
             field_display(field),
             sub_selection_response_shape,
-        );
-        Ok(())
+        )
     }
 
     /// For both inline fragments and fragment spreads
@@ -805,7 +980,7 @@ impl ResponseShapeContext {
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
         // internal invariant check
-        assert_eq!(*fragment_type_condition, selection_set.ty);
+        ensure!(*fragment_type_condition == selection_set.ty, "internal invariant failure: fragment's type condition does not match with its selection set's type");
 
         let Some(type_condition) = NormalizedTypeCondition::add_type_name(
             &self.type_condition,
@@ -835,6 +1010,7 @@ impl ResponseShapeContext {
             type_condition,
             inherited_clause: self.inherited_clause.clone(), // no change
             current_clause,
+            skip_introspection: self.skip_introspection,
         };
         context.process_selection_set_within(response_shape, selection_set)
     }
@@ -857,45 +1033,262 @@ impl ResponseShapeContext {
         &self,
         selection_set: &SelectionSet,
     ) -> Result<ResponseShape, FederationError> {
-        let type_condition =
-            NormalizedTypeCondition::from_type_name(selection_set.ty.clone(), &self.schema)?;
-        let mut response_shape = ResponseShape::new(type_condition);
+        let mut response_shape = ResponseShape::new(selection_set.ty.clone());
         self.process_selection_set_within(&mut response_shape, selection_set)?;
         Ok(response_shape)
     }
-
-    fn process_operation(
-        operation_doc: &Valid<ExecutableDocument>,
-        schema: &ValidFederationSchema,
-    ) -> Result<ResponseShape, FederationError> {
-        let mut op_iter = operation_doc.operations.iter();
-        let Some(first) = op_iter.next() else {
-            return Err(internal_error!("Operation not found"));
-        };
-        if op_iter.next().is_some() {
-            return Err(internal_error!("Multiple operations are not supported"));
-        }
-
-        let fragment_defs = Arc::new(operation_doc.fragments.clone());
-        let parent_type = first.selection_set.ty.clone();
-        let type_condition = NormalizedTypeCondition::from_type_name(parent_type.clone(), schema)?;
-        // Start a new root context.
-        // - Not using `process_selection_set` because there is no parent context.
-        let context = ResponseShapeContext {
-            schema: schema.clone(),
-            fragment_defs,
-            parent_type,
-            type_condition,
-            inherited_clause: Clause::default(), // empty
-            current_clause: Clause::default(),   // empty
-        };
-        context.process_selection_set(&first.selection_set)
-    }
 }
 
-pub fn compute_response_shape(
+fn is_introspection_field_name(name: &Name) -> bool {
+    name == "__schema" || name == "__type"
+}
+
+fn get_operation_and_fragment_definitions(
+    operation_doc: &Valid<ExecutableDocument>,
+) -> Result<(Node<Operation>, Arc<FragmentMap>), FederationError> {
+    let mut op_iter = operation_doc.operations.iter();
+    let Some(first) = op_iter.next() else {
+        bail!("Operation not found")
+    };
+    if op_iter.next().is_some() {
+        bail!("Multiple operations are not supported")
+    }
+
+    let fragment_defs = Arc::new(operation_doc.fragments.clone());
+    Ok((first.clone(), fragment_defs))
+}
+
+pub fn compute_response_shape_for_operation(
     operation_doc: &Valid<ExecutableDocument>,
     schema: &ValidFederationSchema,
 ) -> Result<ResponseShape, FederationError> {
-    ResponseShapeContext::process_operation(operation_doc, schema)
+    // Coerce constant expressions since query planner does it for subgraph fetch operations.
+    let mut operation_doc = operation_doc.clone().into_inner();
+    coerce_executable_values(schema.schema(), &mut operation_doc);
+    let operation_doc = operation_doc.validate(schema.schema())?;
+
+    let (operation, fragment_defs) = get_operation_and_fragment_definitions(&operation_doc)?;
+
+    // Start a new root context and process the root selection set.
+    // - Not using `process_selection_set` because there is no parent context.
+    let parent_type = operation.selection_set.ty.clone();
+    let type_condition = NormalizedTypeCondition::from_type_name(parent_type.clone(), schema)?;
+    let context = ResponseShapeContext {
+        schema: schema.clone(),
+        fragment_defs,
+        parent_type,
+        type_condition,
+        inherited_clause: Clause::default(), // empty
+        current_clause: Clause::default(),   // empty
+        skip_introspection: true,            // true for root context
+    };
+    context.process_selection_set(&operation.selection_set)
+}
+
+pub fn compute_the_root_type_condition_for_operation(
+    operation_doc: &Valid<ExecutableDocument>,
+) -> Result<Name, FederationError> {
+    let (operation, _) = get_operation_and_fragment_definitions(operation_doc)?;
+    Ok(operation.selection_set.ty.clone())
+}
+
+pub fn compute_response_shape_for_entity_fetch_operation(
+    operation_doc: &Valid<ExecutableDocument>,
+    schema: &ValidFederationSchema,
+) -> Result<ResponseShape, FederationError> {
+    let (operation, fragment_defs) = get_operation_and_fragment_definitions(operation_doc)?;
+
+    // drill down the `_entities` selection set
+    let mut sel_iter = operation.selection_set.selections.iter();
+    let Some(first_selection) = sel_iter.next() else {
+        bail!("Entity fetch is expected to have at least one selection")
+    };
+    if sel_iter.next().is_some() {
+        bail!("Entity fetch is expected to have exactly one selection")
+    }
+    let Selection::Field(field) = first_selection else {
+        bail!("Entity fetch is expected to have a field selection only")
+    };
+    if field.name != crate::subgraph::spec::ENTITIES_QUERY {
+        bail!("Entity fetch is expected to have a field selection named `_entities`")
+    }
+
+    // Start a new root context and process the `_entities` selection set.
+    // - Not using `process_selection_set` because there is no parent context.
+    let parent_type = crate::subgraph::spec::ENTITY_UNION_NAME.clone();
+    let type_condition = NormalizedTypeCondition::for_entity();
+    let context = ResponseShapeContext {
+        schema: schema.clone(),
+        fragment_defs,
+        parent_type: parent_type.clone(),
+        type_condition: type_condition.clone(),
+        inherited_clause: Clause::default(), // empty
+        current_clause: Clause::default(),   // empty
+        skip_introspection: false,           // false by default
+    };
+    // Note: Can't call `context.process_selection_set` here, since the type condition is
+    //       special for the `_entities` field.
+    let mut response_shape = ResponseShape::new(parent_type);
+    context.process_selection_set_within(&mut response_shape, &field.selection_set)?;
+    Ok(response_shape)
+}
+
+/// Used for fetch-requires handling
+pub fn compute_response_shape_for_inline_fragment(
+    inline: &InlineFragment,
+    schema: &ValidFederationSchema,
+) -> Result<ResponseShape, FederationError> {
+    let Some(type_condition) = &inline.type_condition else {
+        bail!("Requires inline fragment must have a type condition")
+    };
+    let normalized_type_condition =
+        NormalizedTypeCondition::from_type_name(type_condition.clone(), schema)?;
+    let context = ResponseShapeContext {
+        schema: schema.clone(),
+        fragment_defs: Default::default(), // empty
+        parent_type: type_condition.clone(),
+        type_condition: normalized_type_condition,
+        inherited_clause: Clause::default(), // empty
+        current_clause: Clause::default(),   // empty
+        skip_introspection: false,           // false by default
+    };
+    context.process_selection_set(&inline.selection_set)
+}
+
+//==================================================================================================
+// ResponseShape display
+// - This section is only for display and thus untrusted.
+
+impl fmt::Display for AppliedTypeCondition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.0.is_empty() {
+            return write!(f, "<deduced>");
+        }
+        for (i, cond) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ∧ ")?;
+            }
+            write!(f, "{}", cond.type_name())?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for NormalizedTypeCondition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.ground_set.is_empty() {
+            write!(f, "{}", crate::subgraph::spec::ENTITY_UNION_NAME)?;
+            return Ok(());
+        }
+
+        write!(f, "{}", self.for_display)?;
+        if self.for_display.0.len() != 1 {
+            write!(f, " = {{")?;
+            for (i, ty) in self.ground_set.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", ty.type_name)?;
+            }
+            write!(f, "}}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Clause {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.0.is_empty() {
+            write!(f, "true")
+        } else {
+            for (i, l) in self.0.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ∧ ")?;
+                }
+                match l {
+                    Literal::Pos(v) => write!(f, "{}", v)?,
+                    Literal::Neg(v) => write!(f, "¬{}", v)?,
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+impl PossibleDefinitionsPerTypeCondition {
+    fn has_boolean_conditions(&self) -> bool {
+        self.conditional_variants.len() > 1
+            || self
+                .conditional_variants
+                .first()
+                .is_some_and(|variant| !variant.boolean_clause.is_always_true())
+    }
+}
+
+impl PossibleDefinitions {
+    /// Is conditional on runtime type?
+    fn has_type_conditions(&self, default_type_condition: &Name) -> bool {
+        self.0.len() > 1
+            || self.0.first().is_some_and(|(type_condition, _)| {
+                !type_condition.is_named_type(default_type_condition)
+            })
+    }
+
+    /// Has multiple possible definitions or has any boolean conditions?
+    /// Note: This method may miss a type condition. So, check `has_type_conditions` as well.
+    fn has_multiple_definitions(&self) -> bool {
+        self.0.len() > 1
+            || self
+                .0
+                .first()
+                .is_some_and(|(_, per_type_cond)| per_type_cond.has_boolean_conditions())
+    }
+}
+
+impl ResponseShape {
+    fn write_indented(&self, state: &mut display_helpers::State<'_, '_>) -> fmt::Result {
+        state.write("{")?;
+        state.indent_no_new_line();
+        for (response_key, defs) in &self.definitions_per_response_key {
+            let has_type_cond = defs.has_type_conditions(&self.default_type_condition);
+            let arrow_sym = if has_type_cond || defs.has_multiple_definitions() {
+                "-may->"
+            } else {
+                "----->"
+            };
+            for (type_condition, per_type_cond) in &defs.0 {
+                for variant in &per_type_cond.conditional_variants {
+                    let field_display = &variant.representative_field;
+                    let type_cond_str = if has_type_cond {
+                        format!(" on {}", type_condition)
+                    } else {
+                        "".to_string()
+                    };
+                    let boolean_str = if !variant.boolean_clause.is_always_true() {
+                        format!(" if {}", variant.boolean_clause)
+                    } else {
+                        "".to_string()
+                    };
+                    state.new_line()?;
+                    state.write(format_args!(
+                        "{response_key} {arrow_sym} {field_display}{type_cond_str}{boolean_str}"
+                    ))?;
+                    if let Some(sub_selection_response_shape) =
+                        &variant.sub_selection_response_shape
+                    {
+                        state.write(" ")?;
+                        sub_selection_response_shape.write_indented(state)?;
+                    }
+                }
+            }
+        }
+        state.dedent()?;
+        state.write("}")
+    }
+}
+
+impl fmt::Display for ResponseShape {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.write_indented(&mut display_helpers::State::new(f))
+    }
 }
