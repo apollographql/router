@@ -4,17 +4,21 @@ subtitle: Log incoming requests to help debug problematic requests
 description: Enable telemetry features to help gain more visibility into incoming HTTP requests and help debug issues your clients may be having.
 ---
 
-By default, the GraphOS Router doesn't log incoming HTTP requests nor export other telemetry metrics. The high volume of requests your router likely processes can generate significant telemetry data, increasing observability costs. For this reason, you can [configure](/graphos/routing/observability/telemetry) exactly the telemetry you want your router to collect and export.
+By default, the GraphOS Router doesn't generate logs for incoming HTTP requests nor export other telemetry metrics. The high request volume your router likely processes can generate significant telemetry data, increasing observability costs. For this reason, you can [configure](/graphos/routing/observability/telemetry) exactly the telemetry you want your router to collect and export.
 
-The easiest way to see GraphQL operation data without enabling additional telemetry is through [GraphOS Insights](/graphos/platform/insights). GraphOS Studio lets you analyze data from failed requests, such as client IDs and [exact GraphQL error messages](/routing/graphos-reporting#errors).
+## Using GraphOS Insights
+
+Without enabling additional telemetry, the easiest way to see GraphQL operation data  is through [GraphOS Insights](/graphos/platform/insights). GraphOS Studio lets you analyze data from failed requests, such as GraphQL error messages ([if enabled](/graphos/routing/graphos-reporting#errors)) and the ID of the client making the request. You can also [segment your insights data](/graphos/platform/insights/client-segmentation) based on the client ID.
 
 <Tip>
 
-[Learn more about client ID enforcement.](/graphos/routing/observability/client-id-enforcement)
+[Learn how to ensure client IDs are included in all requests.](/graphos/routing/observability/client-id-enforcement)
 
 </Tip>
 
-See the methods below if you need additional information to debug client requests.
+## Enabling additional telemetry
+
+Use the methods below if you need information outside of what's presented in GraphOS Studio to debug client requests.
 
 <Note>
 
@@ -22,13 +26,13 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 </Note>
 
-## OpenTelemetry spans and traces
+### Telemetry spans and traces
 
 Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces have spans labeled `router`. These spans contain the HTTP information for a given client request with [standard router attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router).
 
 These attributes include helpful information about the request and response. Spans don't include an attribute for the HTTP body text, however. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or follow the other options listed below.
 
-## Request and response logging
+### Request and response logging
 
 You can conditionally include the request body in your logs using the [`experimental-when-header`](/graphos/reference/router/telemetry/log-exporters/overview#requestresponse-logging) configuration option.
 
@@ -43,23 +47,25 @@ telemetry:
           headers: true # default: false
           body: true # default: false
 ```
-## Rhai scripts and coprocessors
+### Rhai scripts and coprocessors
 
-Hooking into the `RouterService` layer for either [Rhai scripts](/graphos/routing/customization/rhai) or [coprocessors](/graphos/routing/customization/coprocessor) gives you access to the full HTTP request and response before processing occurs. You can use these customization methods to add custom logic for what to log and when.
+Hooking into the `RouterService` layer for either [Rhai scripts](/graphos/routing/customization/rhai) or [coprocessors](/graphos/routing/customization/coprocessor) gives you access to the full HTTP request and response before processing occurs. You can use either Rhai scripts or coprocessors to add custom logic for what to log and when.
 
-## Debugging router logs
+### Debugging router logs
 
 By default, the router uses the `info` level for its logging. [Enabling other logging levels](/graphos/reference/router/telemetry/log-exporters/overview) can help debug specific scenarios. Using non-`info` level configurations is only recommended for local or non-production environments.
 
-## Alternative cloud services
+### Alternative cloud services
 
-If you are deploying the router to a cloud service, you will likely already have access to the raw HTTP logs through other services like load balancers. You should be able to find specific client request logs for a particular operation using the trace ID or operation hash. Refer to the docs for your cloud providers. Popular cloud provider links are provided below.
+If you are deploying the router to a cloud service, you will likely already have access to the raw HTTP logs through other services like load balancers. You should be able to find specific client request logs for a particular operation using the operation hash or trace ID. Refer to the docs for your cloud providers for more information.
 
-### Amazon Web Services
+Popular cloud provider links are provided below.
+
+#### Amazon Web Services
 - [AWS CloudWatch Logs](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/WhatIsCloudWatchLogs.html)
 - [AWS Elastic Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html)
 
-### Google Cloud Platform
+#### Google Cloud Platform
 - [Google Cloud Observability](https://cloud.google.com/logging/docs/log-analytics)
 - [Google Cloud Load Balancing](https://cloud.google.com/load-balancing/docs/l7-internal/monitoring)
 
