@@ -1,0 +1,22 @@
+telemetry:
+  apollo:
+    field_level_instrumentation_sampler: always_off
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+      common:
+        service_name: router
+        sampler: 1.0
+        preview_datadog_agent_sampling: false
+      datadog:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        fixed_span_names: false
+        enable_span_mapping: false
+  instrumentation:
+    spans:
+      mode: spec_compliant
+

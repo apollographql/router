@@ -1,5 +1,4 @@
 use std::io::IsTerminal;
-use std::sync::atomic::AtomicU64;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -52,8 +51,6 @@ pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
 static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
-
-pub(super) static SPAN_SAMPLING_RATE: AtomicU64 = AtomicU64::new(0);
 
 pub(super) static METRICS_LAYER: OnceCell<MetricsLayer> = OnceCell::new();
 pub(crate) fn metrics_layer() -> &'static MetricsLayer {
