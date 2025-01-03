@@ -28,7 +28,7 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 ### Telemetry spans and traces
 
-Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces have spans labeled `router`. These spans contain the HTTP information for a given client request in [standard router attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code`.
+Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces have spans labeled `router`. These spans contain the HTTP information for a given client request via [OpenTelemetry standard attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code`.
 
 These attributes include helpful information about the request and response. Spans, however, don't include an attribute for the HTTP body text. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or use the other options listed below.
 
@@ -54,7 +54,7 @@ By default, the router uses the `info` level for its logging. [Enabling other lo
 
 ### Rhai scripts and coprocessors
 
-Hooking into the `RouterService` layer for either [Rhai scripts](/graphos/routing/customization/rhai) or [coprocessors](/graphos/routing/customization/coprocessor) gives you access to the full HTTP request and response before processing occurs. You can use either Rhai scripts or coprocessors to add custom logic for what to log and when.
+Hooking into the `RouterService` layer with either [Rhai scripts](/graphos/routing/customization/rhai) or [coprocessors](/graphos/routing/customization/coprocessor) gives you access to the full HTTP request and response before processing occurs. You can use either Rhai scripts or coprocessors to add custom logic for what to log and when.
 
 See the Apollo Solutions ["Hello World" coprocessor](https://github.com/apollosolutions/example-coprocessor-helloworld) for an example of a coprocessor that simply logs the router's payload.
 
@@ -76,7 +76,7 @@ Popular cloud provider links are provided below.
 - [Google Cloud Observability](https://cloud.google.com/logging/docs/log-analytics)
 - [Google Cloud Load Balancing](https://cloud.google.com/load-balancing/docs/l7-internal/monitoring)
 
-### Microsoft Azure
+#### Microsoft Azure
 
 - [Azure App Service Logging](https://learn.microsoft.com/en-us/azure/app-service/troubleshoot-diagnostic-logs)
 - [Azure Load Balancer](https://learn.microsoft.com/en-us/azure/load-balancer/monitor-load-balancer)
