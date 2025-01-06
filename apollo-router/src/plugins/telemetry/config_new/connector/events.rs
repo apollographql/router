@@ -6,11 +6,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
-use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
@@ -24,7 +22,6 @@ use crate::plugins::telemetry::config_new::events::CustomEventInner;
 use crate::plugins::telemetry::config_new::events::CustomEvents;
 use crate::plugins::telemetry::config_new::events::Event;
 use crate::plugins::telemetry::config_new::events::EventLevel;
-use crate::plugins::telemetry::config_new::events::StandardEvent;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -40,12 +37,6 @@ pub(crate) struct ConnectorEventsConfig {
     /// Log the connector HTTP error
     pub(crate) error: StandardEventConfig<ConnectorSelector>,
 }
-
-#[derive(Clone)]
-pub(crate) struct ConnectorEventRequest(pub(crate) StandardEvent<ConnectorSelector>);
-
-#[derive(Clone)]
-pub(crate) struct ConnectorEventResponse(pub(crate) StandardEvent<ConnectorSelector>);
 
 pub(crate) type ConnectorEvents =
     CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, ConnectorSelector>;
@@ -135,10 +126,12 @@ impl Instrumented
                     format!("{:?}", request.http_request.version()).into(),
                 ),
             ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_BODY,
-                opentelemetry::Value::String(format!("{:?}", request.http_request.body()).into()),
-            ));
+            // FIXME: need to re-introduce this the same way we did for router request body but we need a request id in order to
+            // match the request to the element in context.extensions to make sure to not mismatch the request body settings to another one
+            // attrs.push(KeyValue::new(
+            //     HTTP_REQUEST_BODY,
+            //     opentelemetry::Value::String(format!("{:?}", request.http_request.body()).into()),
+            // ));
             log_event(self.request.level(), "connector.request", attrs, "");
         }
         for custom_event in &self.custom {
@@ -183,10 +176,12 @@ impl Instrumented
                     format!("{:?}", response.http_response.version()).into(),
                 ),
             ));
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_BODY,
-                opentelemetry::Value::String(format!("{:?}", response.http_response.body()).into()),
-            ));
+            // FIXME: need to re-introduce this the same way we did for router response body but we need a request id in order to
+            // match the request to the element in context.extensions to make sure to not mismatch the response body settings to another one
+            // attrs.push(KeyValue::new(
+            //     HTTP_RESPONSE_BODY,
+            //     opentelemetry::Value::String(format!("{:?}", response.http_response.body()).into()),
+            // ));
             log_event(self.response.level(), "connector.response", attrs, "");
         }
         for custom_event in &self.custom {

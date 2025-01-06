@@ -25,6 +25,7 @@ use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::services::connect;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 
 pub(crate) fn make_request(
@@ -65,19 +66,19 @@ pub(crate) fn make_request(
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
                     let len = encoded.bytes().len();
-                    (hyper::Body::from(encoded), len)
+                    (router::body::from_bytes(encoded), len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
-                    (hyper::Body::from(bytes), len)
+                    (router::body::from_bytes(bytes), len)
                 }
             } else {
-                (hyper::Body::empty(), 0)
+                (router::body::empty(), 0)
             };
             (json_body, form_body, body, content_length, apply_to_errors)
         } else {
-            (None, None, hyper::Body::empty(), 0, vec![])
+            (None, None, router::body::empty(), 0, vec![])
         };
 
     match transport.method {
@@ -88,7 +89,7 @@ pub(crate) fn make_request(
     }
 
     let request = request
-        .body(body.into())
+        .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
     let debug_request = debug.as_ref().map(|_| {
@@ -154,26 +155,28 @@ fn make_uri(
     Ok(url)
 }
 
-// URLTemplate expects a map with flat dot-delimited keys.
+/// Flatten map-of-maps to a map of dot-delimited keys and built-in JSON values.
 fn flatten_keys(inputs: &IndexMap<String, Value>) -> Map<ByteString, Value> {
     let mut flat = serde_json_bytes::Map::with_capacity(inputs.len());
-    for (key, value) in inputs {
-        flatten_keys_recursive(value, &mut flat, key.clone());
-    }
-    flat
-}
+    let mut stack: Vec<_> = inputs
+        .iter()
+        .rev()
+        .map(|(key, value)| (value, key.clone()))
+        .collect();
 
-fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, prefix: String) {
-    match inputs {
-        Value::Object(map) => {
-            for (key, value) in map {
-                flatten_keys_recursive(value, flat, [prefix.as_str(), ".", key.as_str()].concat());
+    while let Some((value, prefix)) = stack.pop() {
+        match value {
+            Value::Object(map) => {
+                for (key, val) in map.iter().rev() {
+                    stack.push((val, format!("{}.{}", prefix, key.as_str())));
+                }
+            }
+            _ => {
+                flat.insert(prefix, value.clone());
             }
         }
-        _ => {
-            flat.insert(prefix, inputs.clone());
-        }
     }
+    flat
 }
 
 #[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
@@ -632,6 +635,7 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
+    use crate::services::router::body;
     use crate::Context;
 
     #[test]
@@ -652,7 +656,7 @@ mod tests {
             &IndexMap::with_hasher(Default::default()),
             &Map::default(),
         );
-        let request = request.body(hyper::Body::empty()).unwrap();
+        let request = request.body(body::empty()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -685,7 +689,7 @@ mod tests {
             &config,
             &Map::default(),
         );
-        let request = request.body(hyper::Body::empty()).unwrap();
+        let request = request.body(body::empty()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
@@ -719,8 +723,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn make_request() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn make_request() {
         let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
@@ -756,19 +760,18 @@ mod tests {
                     "content-type": "application/json",
                     "content-length": "8",
                 },
-                body: Body(
-                    Full(
-                        b"{\"a\":42}",
-                    ),
-                ),
+                body: UnsyncBoxBody,
             },
             None,
         )
         "###);
+
+        let body = body::into_string(req.0.into_body()).await.unwrap();
+        insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
 
-    #[test]
-    fn make_request_form_encoded() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn make_request_form_encoded() {
         let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
@@ -809,14 +812,41 @@ mod tests {
                     "content-type": "application/x-www-form-urlencoded",
                     "content-length": "4",
                 },
-                body: Body(
-                    Full(
-                        b"a=42",
-                    ),
-                ),
+                body: UnsyncBoxBody,
             },
             None,
         )
         "###);
+
+        let body = body::into_string(req.0.into_body()).await.unwrap();
+        insta::assert_snapshot!(body, @r#"a=42"#);
+    }
+
+    #[test]
+    #[ignore] // Enable this to test performance of flatten_keys
+    fn flatten_keys_perf() {
+        let mut inputs = IndexMap::with_capacity_and_hasher(10, Default::default());
+        for i in 0..10 {
+            let mut children_i = IndexMap::with_capacity_and_hasher(10, Default::default());
+            for j in 0..10 {
+                let mut children_j = IndexMap::with_capacity_and_hasher(10, Default::default());
+                for k in 0..10 {
+                    let mut children_k = IndexMap::with_capacity_and_hasher(10, Default::default());
+                    for l in 0..10 {
+                        children_k.insert(l.to_string(), json!(l));
+                    }
+                    children_j.insert(k.to_string(), json!(children_k));
+                }
+                children_i.insert(j.to_string(), json!(children_j));
+            }
+            inputs.insert(i.to_string(), json!(children_i));
+        }
+
+        let start = std::time::Instant::now();
+        for _ in 0..1000 {
+            flatten_keys(&inputs);
+        }
+        let elapsed = start.elapsed();
+        println!("Total time: {}ms", elapsed.as_millis());
     }
 }

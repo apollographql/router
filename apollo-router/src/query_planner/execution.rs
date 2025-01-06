@@ -128,7 +128,7 @@ impl PlanNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(Value, Vec<Error>)> {
+    ) -> future::BoxFuture<'a, (Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;

@@ -93,9 +93,9 @@ pub(crate) fn api_schema_and_planner(
 ) -> (ValidFederationSchema, QueryPlanner) {
     let supergraph = compose(function_path, subgraph_names_and_schemas);
     let supergraph = apollo_federation::Supergraph::new(&supergraph).unwrap();
-    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config.clone()).unwrap();
     let api_schema_config = apollo_federation::ApiSchemaOptions {
-        include_defer: true,
+        include_defer: config.incremental_delivery.enable_defer,
         include_stream: false,
     };
     let api_schema = supergraph.to_api_schema(api_schema_config).unwrap();

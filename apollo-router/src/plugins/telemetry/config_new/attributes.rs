@@ -67,10 +67,10 @@ const NETWORK_LOCAL_PORT: Key = Key::from_static_str("network.local.port");
 const NETWORK_PEER_ADDRESS: Key = Key::from_static_str("network.peer.address");
 const NETWORK_PEER_PORT: Key = Key::from_static_str("network.peer.port");
 
-pub(super) const HTTP_REQUEST_HEADERS: Key = Key::from_static_str("http.request.headers");
-pub(super) const HTTP_REQUEST_URI: Key = Key::from_static_str("http.request.uri");
-pub(super) const HTTP_REQUEST_VERSION: Key = Key::from_static_str("http.request.version");
-pub(super) const HTTP_REQUEST_BODY: Key = Key::from_static_str("http.request.body");
+pub(crate) const HTTP_REQUEST_HEADERS: Key = Key::from_static_str("http.request.headers");
+pub(crate) const HTTP_REQUEST_URI: Key = Key::from_static_str("http.request.uri");
+pub(crate) const HTTP_REQUEST_VERSION: Key = Key::from_static_str("http.request.version");
+pub(crate) const HTTP_REQUEST_BODY: Key = Key::from_static_str("http.request.body");
 
 pub(super) const HTTP_RESPONSE_HEADERS: Key = Key::from_static_str("http.response.headers");
 pub(super) const HTTP_RESPONSE_STATUS: Key = Key::from_static_str("http.response.status");
@@ -1159,7 +1159,7 @@ impl<'a> SubgraphRequestResendCountKey<'a> {
     }
 }
 
-impl<'a> From<SubgraphRequestResendCountKey<'a>> for String {
+impl From<SubgraphRequestResendCountKey<'_>> for String {
     fn from(value: SubgraphRequestResendCountKey) -> Self {
         format!(
             "apollo::telemetry::http_request_resend_count_{}",

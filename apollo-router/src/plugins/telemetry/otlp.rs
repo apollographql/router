@@ -1,11 +1,12 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
-use lazy_static::lazy_static;
+use http_0_2 as http;
 use opentelemetry::sdk::metrics::reader::TemporalitySelector;
 use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
@@ -19,6 +20,7 @@ use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
+use tonic_0_9 as tonic;
 use tower::BoxError;
 use url::Url;
 
@@ -26,10 +28,10 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-lazy_static! {
-    static ref DEFAULT_GRPC_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4317");
-    static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
-}
+static DEFAULT_GRPC_ENDPOINT: LazyLock<Uri> =
+    LazyLock::new(|| Uri::from_static("http://127.0.0.1:4317"));
+static DEFAULT_HTTP_ENDPOINT: LazyLock<Uri> =
+    LazyLock::new(|| Uri::from_static("http://127.0.0.1:4318"));
 
 const DEFAULT_HTTP_ENDPOINT_PATH: &str = "/v1/traces";
 
@@ -65,7 +67,7 @@ pub(crate) struct Config {
     pub(crate) temporality: Temporality,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum TelemetryDataKind {
     Traces,
     Metrics,
@@ -78,7 +80,7 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
+                let endpoint = self.endpoint.to_uri_0_2(&DEFAULT_GRPC_ENDPOINT);
                 let grpc = self.grpc.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
@@ -97,7 +99,7 @@ impl Config {
                 let endpoint = add_missing_path(
                     kind,
                     self.endpoint
-                        .to_uri(&DEFAULT_HTTP_ENDPOINT)
+                        .to_uri_0_2(&DEFAULT_HTTP_ENDPOINT)
                         .map(|e| e.into_parts()),
                 )?;
                 let http = self.http.clone();
@@ -179,7 +181,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) key: Option<String>,
 
     /// gRPC metadata
-    #[serde(with = "http_serde::header_map")]
+    #[serde(with = "http_serde_1_1::header_map")]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: http::HeaderMap,
 }

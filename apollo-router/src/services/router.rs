@@ -12,6 +12,7 @@ use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http_body_util::BodyExt;
 use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -27,7 +28,6 @@ use super::supergraph;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
-use crate::services;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 use crate::Context;
@@ -35,8 +35,8 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
-//#[deprecated]
-pub type Body = hyper::Body;
+
+pub type Body = RouterBody;
 pub type Error = hyper::Error;
 
 pub mod body;
@@ -63,6 +63,33 @@ impl From<(http::Request<Body>, Context)> for Request {
             router_request,
             context,
         }
+    }
+}
+
+/// Helper type to conveniently construct a body from several types used commonly in tests.
+///
+/// It's only meant for integration tests, as the "real" router should create bodies explicitly accounting for
+/// streaming, size limits, etc.
+pub struct IntoBody(Body);
+
+impl From<Body> for IntoBody {
+    fn from(value: Body) -> Self {
+        Self(value)
+    }
+}
+impl From<String> for IntoBody {
+    fn from(value: String) -> Self {
+        Self(self::body::from_bytes(value))
+    }
+}
+impl From<Bytes> for IntoBody {
+    fn from(value: Bytes) -> Self {
+        Self(self::body::from_bytes(value))
+    }
+}
+impl From<Vec<u8>> for IntoBody {
+    fn from(value: Vec<u8>) -> Self {
+        Self(self::body::from_bytes(value))
     }
 }
 
@@ -101,12 +128,12 @@ impl Request {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         uri: Option<http::Uri>,
         method: Option<Method>,
-        body: Option<Body>,
+        body: Option<IntoBody>,
     ) -> Result<Request, BoxError> {
         let mut router_request = http::Request::builder()
             .uri(uri.unwrap_or_else(|| http::Uri::from_static("http://example.com/")))
             .method(method.unwrap_or(Method::GET))
-            .body(body.unwrap_or_else(Body::empty))?;
+            .body(body.map_or_else(self::body::empty, |constructed| constructed.0))?;
         *router_request.headers_mut() = header_map(headers)?;
         Ok(Self {
             router_request,
@@ -157,14 +184,13 @@ impl TryFrom<supergraph::Request> for Request {
                 .parse()
                 .map_err(ParseError::InvalidUri)?;
 
-            http::Request::from_parts(parts, RouterBody::empty().into_inner())
+            http::Request::from_parts(parts, self::body::empty())
         } else {
             http::Request::from_parts(
                 parts,
-                RouterBody::from(
+                self::body::from_bytes(
                     serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
-                )
-                .into_inner(),
+                ),
             )
         };
         Ok(Self {
@@ -184,8 +210,8 @@ pub struct Response {
 
 #[buildstructor::buildstructor]
 impl Response {
-    pub async fn next_response(&mut self) -> Option<Result<Bytes, Error>> {
-        self.response.body_mut().next().await
+    pub async fn next_response(&mut self) -> Option<Result<Bytes, axum::Error>> {
+        self.response.body_mut().into_data_stream().next().await
     }
 
     #[deprecated]
@@ -236,9 +262,7 @@ impl Response {
             }
         }
 
-        // let response = builder.body(once(ready(res)).boxed())?;
-
-        let response = builder.body(RouterBody::from(serde_json::to_vec(&res)?).into_inner())?;
+        let response = builder.body(self::body::from_bytes(serde_json::to_vec(&res)?))?;
 
         Ok(Self { response, context })
     }
@@ -301,7 +325,9 @@ impl Response {
         }
 
         let response = builder
-            .body(RouterBody::from(serde_json::to_vec(&res).expect("can't fail")).into_inner())
+            .body(self::body::from_bytes(
+                serde_json::to_vec(&res).expect("can't fail"),
+            ))
             .expect("can't fail");
 
         Self { response, context }
@@ -322,7 +348,10 @@ impl Response {
                         || *value == MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE
                 })
             {
-                let multipart = Multipart::new(self.response.into_body(), "graphql");
+                let multipart = Multipart::new(
+                    http_body_util::BodyDataStream::new(self.response.into_body()),
+                    "graphql",
+                );
 
                 Either::Left(futures::stream::unfold(multipart, |mut m| async {
                     if let Ok(Some(response)) = m.next_field().await {
@@ -336,7 +365,7 @@ impl Response {
                     None
                 }))
             } else {
-                let mut body = self.response.into_body();
+                let mut body = http_body_util::BodyDataStream::new(self.response.into_body());
                 let res = body.next().await.and_then(|res| res.ok());
 
                 Either::Right(
@@ -447,9 +476,7 @@ where
     let val_any = &mut b as &mut dyn Any;
     match val_any.downcast_mut::<Body>() {
         Some(body) => mem::take(body),
-        None => Body::wrap_stream(services::http::body_stream::BodyStream::new(
-            b.map_err(Into::into),
-        )),
+        None => Body::new(http_body_util::BodyStream::new(b.map_err(axum::Error::new))),
     }
 }
 
@@ -459,11 +486,11 @@ mod test {
     use std::task::Context;
     use std::task::Poll;
 
-    use http::HeaderMap;
+    use http_body::Frame;
     use tower::BoxError;
 
-    use crate::services::router::body::get_body_bytes;
-    use crate::services::router::convert_to_body;
+    use super::convert_to_body;
+    use crate::services::router;
 
     struct MockBody {
         data: Option<&'static str>,
@@ -472,22 +499,15 @@ mod test {
         type Data = bytes::Bytes;
         type Error = BoxError;
 
-        fn poll_data(
-            mut self: Pin<&mut Self>,
+        fn poll_frame(
+            self: Pin<&mut Self>,
             _cx: &mut Context<'_>,
-        ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-            if let Some(data) = self.data.take() {
-                Poll::Ready(Some(Ok(bytes::Bytes::from(data))))
+        ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            if let Some(data) = self.get_mut().data.take() {
+                Poll::Ready(Some(Ok(Frame::data(bytes::Bytes::from(data)))))
             } else {
                 Poll::Ready(None)
             }
-        }
-
-        fn poll_trailers(
-            self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-            Poll::Ready(Ok(None))
         }
     }
 
@@ -495,16 +515,16 @@ mod test {
     async fn test_convert_from_http_body() {
         let body = convert_to_body(MockBody { data: Some("test") });
         assert_eq!(
-            &String::from_utf8(get_body_bytes(body).await.unwrap().to_vec()).unwrap(),
+            &String::from_utf8(router::body::into_bytes(body).await.unwrap().to_vec()).unwrap(),
             "test"
         );
     }
 
     #[tokio::test]
     async fn test_convert_from_hyper_body() {
-        let body = convert_to_body(hyper::Body::from("test"));
+        let body = convert_to_body(String::from("test"));
         assert_eq!(
-            &String::from_utf8(get_body_bytes(body).await.unwrap().to_vec()).unwrap(),
+            &String::from_utf8(router::body::into_bytes(body).await.unwrap().to_vec()).unwrap(),
             "test"
         );
     }

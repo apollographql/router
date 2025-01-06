@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::Name;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
@@ -17,6 +18,8 @@ use serde_json_bytes::Value;
 use super::http::Request;
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::Context;
@@ -97,20 +100,21 @@ impl RequestInputs {
 pub(crate) enum ResponseKey {
     RootField {
         name: String,
-        typename: ResponseTypeName,
         selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
     Entity {
         index: usize,
-        typename: ResponseTypeName,
         selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
     EntityField {
         index: usize,
         field_name: String,
-        typename: ResponseTypeName,
+        /// Is Some only if the output type is a concrete object type. If it's
+        /// an interface, it's treated as an interface object and we can't emit
+        /// a __typename in the response.
+        typename: Option<Name>,
         selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
@@ -134,12 +138,33 @@ impl ResponseKey {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum ResponseTypeName {
-    Concrete(String),
-    /// For interfaceObject support. We don't want to include __typename in the
-    /// response because this subgraph doesn't know the concrete type
-    Omitted,
+/// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
+/// the behavior of a GraphQL subgraph, including the `_entities` field. When
+/// the path gets to [`FetchNode::response_at_path`], it will be amended and
+/// appended to a parent path to create the full path to the field. For ex:
+///
+/// - parent path: `["posts", @, "user"]
+/// - path from key: `["_entities", 0, "user", "profile"]`
+/// - result: `["posts", 1, "user", "profile"]`
+impl From<&ResponseKey> for Path {
+    fn from(key: &ResponseKey) -> Self {
+        match key {
+            ResponseKey::RootField { name, .. } => {
+                Path::from_iter(vec![PathElement::Key(name.to_string(), None)])
+            }
+            ResponseKey::Entity { index, .. } => Path::from_iter(vec![
+                PathElement::Key("_entities".to_string(), None),
+                PathElement::Index(*index),
+            ]),
+            ResponseKey::EntityField {
+                index, field_name, ..
+            } => Path::from_iter(vec![
+                PathElement::Key("_entities".to_string(), None),
+                PathElement::Index(*index),
+                PathElement::Key(field_name.clone(), None),
+            ]),
+        }
+    }
 }
 
 pub(crate) fn make_requests(
@@ -262,9 +287,6 @@ fn root_fields(
 
                 let response_key = ResponseKey::RootField {
                     name: response_name,
-                    typename: ResponseTypeName::Concrete(
-                        field.definition.ty.inner_named_type().to_string(),
-                    ),
                     selection: Arc::new(
                         connector
                             .selection
@@ -322,8 +344,7 @@ fn entities_from_request(
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let (entities_field, typename_requested) =
-        graphql_utils::get_entity_fields(&request.operation, op)?;
+    let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
 
     let selection = Arc::new(
         connector
@@ -337,27 +358,6 @@ fn entities_from_request(
         .iter()
         .enumerate()
         .map(|(i, rep)| {
-            // TODO abstract types?
-            let typename = rep
-                .as_object()
-                .ok_or_else(|| InvalidRepresentations("representation is not an object".into()))?
-                .get(TYPENAME)
-                .ok_or_else(|| {
-                    InvalidRepresentations("representation is missing __typename".into())
-                })?
-                .as_str()
-                .ok_or_else(|| InvalidRepresentations("__typename is not a string".into()))?
-                .to_string();
-
-            // if the fetch node operation doesn't include __typename, then
-            // we're assuming this is for an interface object and we don't want
-            // to include a __typename in the response.
-            let typename = if typename_requested {
-                ResponseTypeName::Concrete(typename)
-            } else {
-                ResponseTypeName::Omitted
-            };
-
             let request_inputs = RequestInputs {
                 args: rep
                     .as_object()
@@ -372,7 +372,6 @@ fn entities_from_request(
 
             Ok(ResponseKey::Entity {
                 index: i,
-                typename,
                 selection: selection.clone(),
                 inputs: request_inputs,
             })
@@ -448,7 +447,7 @@ fn entities_with_fields_from_request(
                                 )))
                             }
                         };
-                        field.map(|f| Ok((typename.to_string(), f)))
+                        field.map(|f| Ok((typename, f)))
                     })
                     .collect::<Result<Vec<_>, _>>()?)
             }
@@ -478,7 +477,7 @@ fn entities_with_fields_from_request(
                                 )));
                             }
                         };
-                        field.map(|f| Ok((typename.to_string(), f)))
+                        field.map(|f| Ok((typename, f)))
                     })
                     .collect::<Result<Vec<_>, _>>()?)
             }
@@ -514,15 +513,6 @@ fn entities_with_fields_from_request(
                         InvalidArguments("cannot build inputs from field arguments".into())
                     })?;
 
-                // if the fetch node operation doesn't include __typename, then
-                // we're assuming this is for an interface object and we don't want
-                // to include a __typename in the response.
-                let typename = if typename_requested {
-                    ResponseTypeName::Concrete(typename.to_string())
-                } else {
-                    ResponseTypeName::Omitted
-                };
-
                 let response_name = field
                     .alias
                     .as_ref()
@@ -541,7 +531,13 @@ fn entities_with_fields_from_request(
                 Ok::<_, MakeRequestError>(ResponseKey::EntityField {
                     index: *i,
                     field_name: response_name.to_string(),
-                    typename,
+                    // if the fetch node operation doesn't include __typename, then
+                    // we're assuming this is for an interface object and we don't want
+                    // to include a __typename in the response.
+                    //
+                    // TODO: is this fragile? should we just check the output
+                    // type of the field and omit the typename if it's abstract?
+                    typename: typename_requested.then_some(typename.clone()),
                     selection: selection.clone(),
                     inputs: request_inputs,
                 })
@@ -629,9 +625,6 @@ mod tests {
             [
                 RootField {
                     name: "a",
-                    typename: Concrete(
-                        "A",
-                    ),
                     selection: Named(
                         SubSelection {
                             selections: [
@@ -660,9 +653,6 @@ mod tests {
                 },
                 RootField {
                     name: "a2",
-                    typename: Concrete(
-                        "A",
-                    ),
                     selection: Named(
                         SubSelection {
                             selections: [
@@ -766,9 +756,6 @@ mod tests {
             [
                 RootField {
                     name: "b",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -803,9 +790,6 @@ mod tests {
                 },
                 RootField {
                     name: "b2",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -931,9 +915,6 @@ mod tests {
             [
                 RootField {
                     name: "c",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -997,9 +978,6 @@ mod tests {
                 },
                 RootField {
                     name: "c2",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -1165,9 +1143,6 @@ mod tests {
         [
             Entity {
                 index: 0,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1275,9 +1250,6 @@ mod tests {
             },
             Entity {
                 index: 1,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1487,9 +1459,6 @@ mod tests {
         [
             Entity {
                 index: 0,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1597,9 +1566,6 @@ mod tests {
             },
             Entity {
                 index: 1,
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1790,9 +1756,6 @@ mod tests {
         [
             RootField {
                 name: "a",
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -1845,9 +1808,6 @@ mod tests {
             },
             RootField {
                 name: "b",
-                typename: Concrete(
-                    "Entity",
-                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -2016,7 +1976,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2059,7 +2019,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2102,7 +2062,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2145,7 +2105,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2294,7 +2254,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2337,7 +2297,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2380,7 +2340,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2423,7 +2383,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "alias",
-                typename: Concrete(
+                typename: Some(
                     "Entity",
                 ),
                 selection: Named(
@@ -2569,7 +2529,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "field",
-                typename: Omitted,
+                typename: None,
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -2610,7 +2570,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
-                typename: Omitted,
+                typename: None,
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -2704,25 +2664,29 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        let requests = super::make_requests(req, &connector, &None).unwrap();
+        let requests: Vec<_> = super::make_requests(req, &connector, &None)
+            .unwrap()
+            .into_iter()
+            .map(|req| {
+                let (parts, _body) = req.request.into_parts();
+                let new_req =
+                    http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
+                (new_req, req.key, req.debug_request)
+            })
+            .collect();
 
         assert_debug_snapshot!(requests, @r###"
         [
-            Request {
-                request: Request {
+            (
+                Request {
                     method: GET,
                     uri: http://localhost/api/path,
                     version: HTTP/1.1,
                     headers: {},
-                    body: Body(
-                        Empty,
-                    ),
+                    body: Empty,
                 },
-                key: RootField {
+                RootField {
                     name: "a",
-                    typename: Concrete(
-                        "String",
-                    ),
                     selection: Path(
                         PathSelection {
                             path: WithRange {
@@ -2766,8 +2730,8 @@ mod tests {
                         this: {},
                     },
                 },
-                debug_request: None,
-            },
+                None,
+            ),
         ]
         "###);
     }

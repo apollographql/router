@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use futures::stream::once;
 use futures::StreamExt;
+use http_body_util::BodyExt;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -19,7 +20,6 @@ use crate::plugin::PluginInit;
 use crate::services::execution;
 use crate::services::external::externalize_header_map;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -125,13 +125,13 @@ impl Plugin for Record {
                     })
                     .filter_map(|a| async move { a.unwrap() });
 
-                    let stream = stream.chain(after_complete);
+                    let stream = stream.into_data_stream().chain(after_complete);
 
                     Ok(router::Response {
                         context: res.context,
                         response: http::Response::from_parts(
                             parts,
-                            RouterBody::wrap_stream(stream).into_inner(),
+                            router::body::from_result_stream(stream),
                         ),
                     })
                 }

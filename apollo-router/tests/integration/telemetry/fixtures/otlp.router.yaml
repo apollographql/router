@@ -9,7 +9,7 @@ telemetry:
       otlp:
         enabled: true
         protocol: http
-        endpoint: <otel-collector-endpoint>/traces
+        endpoint: <otel-collector-endpoint>
         batch_processor:
           scheduled_delay: 10ms
     metrics:
@@ -22,3 +22,15 @@ telemetry:
         batch_processor:
           scheduled_delay: 10ms
 
+
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      supergraph:
+        attributes:
+          graphql.operation.name: true
+
+      subgraph:
+        attributes:
+          otel.name:
+            subgraph_operation_name: string

@@ -25,7 +25,8 @@ use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
 use crate::error::FetchError;
 use crate::plugins::connectors::error::Error as ConnectorError;
-use crate::plugins::connectors::handle_responses::handle_responses;
+use crate::plugins::connectors::handle_responses::aggregate_responses;
+use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::http::Request;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
@@ -36,6 +37,7 @@ use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
+use crate::services::router::body::RouterBody;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
@@ -205,10 +207,9 @@ async fn execute(
     connector: &Connector,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
-    let context2 = request.context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
-    let (debug, request_limit) = context.extensions().with_lock(|lock| {
+    let (ref debug, request_limit) = context.extensions().with_lock(|lock| {
         let debug = lock.get::<Arc<Mutex<ConnectorContext>>>().cloned();
         let request_limit = lock
             .get::<Arc<RequestLimits>>()
@@ -217,7 +218,7 @@ async fn execute(
         (debug, request_limit)
     });
 
-    let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
+    let requests = make_requests(request, connector, debug).map_err(BoxError::from)?;
 
     let tasks = requests.into_iter().map(
         move |Request {
@@ -239,63 +240,73 @@ async fn execute(
             let original_subgraph_name = original_subgraph_name.clone();
             let request_limit = request_limit.clone();
             async move {
-                if let Some(request_limit) = request_limit {
-                    if !request_limit.allow() {
-                        return Ok(ConnectorResponse {
-                            result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
+                let res = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
+                    ConnectorResponse {
+                        result: ConnectorResult::<RouterBody>::Err(
+                            ConnectorError::RequestLimitExceeded,
+                        ),
+                        key,
+                        debug_request,
+                    }
+                } else {
+                    let client = http_client_factory.create(&original_subgraph_name);
+                    let req = HttpRequest {
+                        http_request: req,
+                        context: context.clone(),
+                    };
+                    let res = match client.oneshot(req).await {
+                        Ok(res) => ConnectorResponse {
+                            result: ConnectorResult::HttpResponse(res.http_response),
                             key,
                             debug_request,
-                        });
-                    }
-                }
-                let client = http_client_factory.create(&original_subgraph_name);
-                let req = HttpRequest {
-                    http_request: req,
-                    context,
-                };
-                let res = client.oneshot(req).await.map_err(|e| {
-                    match e.downcast::<FetchError>() {
-                        // Replace the internal subgraph name with the connector label
-                        Ok(inner) => match *inner {
-                            FetchError::SubrequestHttpError {
-                                status_code,
-                                service: _,
-                                reason,
-                            } => Box::new(FetchError::SubrequestHttpError {
-                                status_code,
-                                service: connector.id.label.clone(),
-                                reason,
-                            }),
-                            _ => inner,
                         },
-                        Err(e) => e,
-                    }
-                });
+                        Err(e) => ConnectorResponse {
+                            result: ConnectorResult::<RouterBody>::Err(
+                                ConnectorError::HTTPClientError(handle_subrequest_http_error(
+                                    e, connector,
+                                )),
+                            ),
+                            key,
+                            debug_request,
+                        },
+                    };
 
-                u64_counter!(
-                    "apollo.router.operations.connectors",
-                    "Total number of requests to connectors",
-                    1,
-                    "connector.type" = CONNECTOR_TYPE_HTTP,
-                    "subgraph.name" = original_subgraph_name
-                );
+                    u64_counter!(
+                        "apollo.router.operations.connectors",
+                        "Total number of requests to connectors",
+                        1,
+                        "connector.type" = CONNECTOR_TYPE_HTTP,
+                        "subgraph.name" = original_subgraph_name
+                    );
 
-                Ok::<_, BoxError>(ConnectorResponse {
-                    result: ConnectorResult::HttpResponse(res?.http_response),
-                    key,
-                    debug_request,
-                })
+                    res
+                };
+
+                Ok::<_, BoxError>(process_response(res, connector, &context, debug).await)
             }
         },
     );
 
-    let responses = futures::future::try_join_all(tasks)
-        .await
-        .map_err(BoxError::from)?;
+    aggregate_responses(futures::future::try_join_all(tasks).await?).map_err(BoxError::from)
+}
 
-    handle_responses(responses, connector, &context2, &debug)
-        .await
-        .map_err(BoxError::from)
+fn handle_subrequest_http_error(err: BoxError, connector: &Connector) -> BoxError {
+    match err.downcast::<FetchError>() {
+        // Replace the internal subgraph name with the connector label
+        Ok(inner) => match *inner {
+            FetchError::SubrequestHttpError {
+                status_code,
+                service: _,
+                reason,
+            } => Box::new(FetchError::SubrequestHttpError {
+                status_code,
+                service: connector.id.subgraph_source(),
+                reason,
+            }),
+            _ => inner,
+        },
+        Err(e) => e,
+    }
 }
 
 #[derive(Clone)]

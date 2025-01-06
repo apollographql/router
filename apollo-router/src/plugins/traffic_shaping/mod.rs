@@ -23,6 +23,7 @@ use http::HeaderValue;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::util::future::EitherResponseFuture;
 use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
@@ -273,8 +274,8 @@ impl Plugin for TrafficShaping {
     }
 }
 
-pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
-    Either<
+pub(crate) type TrafficShapingSubgraphFuture<S> = EitherResponseFuture<
+    EitherResponseFuture<
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
     >,
@@ -400,8 +401,7 @@ impl TrafficShaping {
                 tower::retry::RetryLayer::new(retry_policy)
             });
 
-            Either::A(ServiceBuilder::new()
-
+            Either::Left(ServiceBuilder::new()
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
@@ -447,7 +447,7 @@ impl TrafficShaping {
                     req
                 }))
         } else {
-            Either::B(service)
+            Either::Right(service)
         }
     }
 
@@ -471,7 +471,6 @@ register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -586,14 +585,9 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.clone(),
-            config.clone(),
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
+        let planner = BridgeQueryPlannerPool::new(schema.clone(), config.clone())
+            .await
+            .unwrap();
         let subgraph_schemas = planner.subgraph_schemas();
 
         let mut builder =

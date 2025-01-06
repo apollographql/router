@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 
@@ -954,5 +955,105 @@ fn test_interface_object_advance_with_non_collecting_and_type_preserving_transit
       },
     }
     "###
+    );
+}
+
+#[test]
+fn test_type_conditioned_fetching_with_interface_object_does_not_crash() {
+    let planner = planner!(
+        config = QueryPlannerConfig {
+          type_conditioned_fetching: true,
+          ..Default::default()
+        },
+        S1: r#"
+          type I @interfaceObject @key(fields: "id") {
+            id: ID!
+            t: T
+          }
+
+          type T {
+            relatedIs: [I]
+          }
+        "#,
+        S2: r#"
+          type Query {
+            i: I
+          }
+
+          interface I @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
+
+          type A implements I @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            i {
+              t {
+                relatedIs {
+                  a
+                }
+              }
+            }
+          }
+        "#,
+
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "S2") {
+              {
+                i {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "i") {
+              Fetch(service: "S1") {
+                {
+                  ... on I {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on I {
+                    t {
+                      relatedIs {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "i.t.relatedIs.@") {
+              Fetch(service: "S2") {
+                {
+                  ... on I {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on I {
+                    __typename
+                    a
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
     );
 }

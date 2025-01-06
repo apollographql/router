@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::body::StreamBody;
 use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
@@ -12,7 +11,6 @@ use bytes::BytesMut;
 use futures::future::join_all;
 use futures::future::ready;
 use futures::future::BoxFuture;
-use futures::stream;
 use futures::stream::once;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -24,9 +22,10 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use http_body::Body as _;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
+use opentelemetry::KeyValue;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -49,8 +48,19 @@ use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+<<<<<<< HEAD
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
+=======
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
+use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::events::DisplayRouterRequest;
+use crate::plugins::telemetry::config_new::events::DisplayRouterResponse;
+use crate::plugins::telemetry::config_new::events::RouterResponseBodyExtensionType;
+>>>>>>> next
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
@@ -64,8 +74,6 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::body::get_body_bytes;
-use crate::services::router::body::RouterBody;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
@@ -274,6 +282,10 @@ impl RouterService {
             .extensions()
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
+        let display_router_response: DisplayRouterResponse = context
+            .extensions()
+            .with_lock(|lock| lock.get().cloned())
+            .unwrap_or_default();
 
         let (mut parts, mut body) = response.into_parts();
         process_vary_header(&mut parts.headers);
@@ -292,10 +304,9 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(
-                            RouterBody::from("router service is not available to process request")
-                                .into_inner(),
-                        )
+                        .body(router::body::from_bytes(
+                            "router service is not available to process request",
+                        ))
                         .expect("cannot fail"),
                     context,
                 })
@@ -312,15 +323,22 @@ impl RouterService {
                     parts
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
-                    tracing::trace_span!("serialize_response").in_scope(|| {
-                        let body = serde_json::to_string(&response)?;
-                        Ok(router::Response {
-                            response: http::Response::from_parts(
-                                parts,
-                                RouterBody::from(body).into_inner(),
-                            ),
-                            context,
-                        })
+                    let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
+                        .in_scope(|| {
+                            let body = serde_json::to_string(&response)?;
+                            Ok(body)
+                        });
+                    let body = body?;
+
+                    if display_router_response.0 {
+                        context.extensions().with_lock(|mut ext| {
+                            ext.insert(RouterResponseBodyExtensionType(body.clone()));
+                        });
+                    }
+
+                    Ok(router::Response {
+                        response: http::Response::from_parts(parts, router::body::from_bytes(body)),
+                        context,
                     })
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
@@ -344,48 +362,22 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
-                    let multipart_stream = match response.subscribed {
-                        Some(true) => {
-                            let context_clone = context.clone();
-                            StreamBody::new(Multipart::new(
-                                body.inspect(move |response: &graphql::Response| {
-                                    if !response.errors.is_empty() {
-                                        Self::count_errors(&response.errors, &context_clone);
-                                    }
-                                }),
+                    let response = match response.subscribed {
+                        Some(true) => http::Response::from_parts(
+                            parts,
+                            router::body::from_result_stream(Multipart::new(
+                                body,
                                 ProtocolMode::Subscription,
-                            ))
-                        }
-                        _ => {
-                            let context_clone = context.clone();
-                            StreamBody::new(Multipart::new(
-                                once(ready(response)).chain(body.inspect(move |response| {
-                                    if !response.errors.is_empty() {
-                                        Self::count_errors(&response.errors, &context_clone);
-                                    }
-                                })),
+                            )),
+                        ),
+                        _ => http::Response::from_parts(
+                            parts,
+                            router::body::from_result_stream(Multipart::new(
+                                once(ready(response)).chain(body),
                                 ProtocolMode::Defer,
-                            ))
-                        }
+                            )),
+                        ),
                     };
-                    let response = (parts, multipart_stream).into_response().map(|body| {
-                        // Axum makes this `body` have type:
-                        // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                        let mut body = Box::pin(body);
-                        // We make a stream based on its `poll_data` method
-                        // in order to create a `hyper::Body`.
-                        RouterBody::wrap_stream(stream::poll_fn(move |ctx| {
-                            body.as_mut().poll_data(ctx)
-                        }))
-                        .into_inner()
-                        // … but we ignore the `poll_trailers` method:
-                        // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                        // Apparently HTTP/2 trailers are like headers, except after the response body.
-                        // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                        // so ignoring `poll_trailers` is fine.
-                        // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                        // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                    });
 
                     Ok(RouterResponse { response, context })
                 } else {
@@ -427,7 +419,7 @@ impl RouterService {
     async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context;
         let (parts, body) = req.router_request.into_parts();
-        let requests = self.get_graphql_requests(&parts, body).await?;
+        let requests = self.get_graphql_requests(&context, &parts, body).await?;
 
         let (supergraph_requests, is_batch) = match futures::future::ready(requests)
             .and_then(|r| self.translate_request(&context, parts, r))
@@ -505,17 +497,19 @@ impl RouterService {
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
-            bytes.extend_from_slice(&get_body_bytes(body).await?);
+            bytes.extend_from_slice(&router::body::into_bytes(body).await?);
             for result in results_it {
                 bytes.put(&b", "[..]);
-                bytes.extend_from_slice(&get_body_bytes(result.response.into_body()).await?);
+                bytes.extend_from_slice(
+                    &router::body::into_bytes(result.response.into_body()).await?,
+                );
             }
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
                 response: http::Response::from_parts(
                     parts,
-                    RouterBody::from(bytes.freeze()).into_inner(),
+                    router::body::from_bytes(bytes.freeze()),
                 ),
                 context,
             })
@@ -768,6 +762,7 @@ impl RouterService {
 
     async fn get_graphql_requests(
         &self,
+        context: &Context,
         parts: &Parts,
         body: Body,
     ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
@@ -775,9 +770,51 @@ impl RouterService {
             if parts.method == Method::GET {
                 self.translate_query_request(parts).await
             } else {
-                let bytes = get_body_bytes(body)
+                let bytes = router::body::into_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await?;
+                if let Some(level) = context
+                    .extensions()
+                    .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+                    .map(|d| d.0)
+                {
+                    let mut attrs = Vec::with_capacity(5);
+                    #[cfg(test)]
+                    let mut headers: indexmap::IndexMap<String, HeaderValue> = parts
+                        .headers
+                        .clone()
+                        .into_iter()
+                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                        .collect();
+                    #[cfg(test)]
+                    headers.sort_keys();
+                    #[cfg(not(test))]
+                    let headers = &parts.headers;
+
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_HEADERS,
+                        opentelemetry::Value::String(format!("{:?}", headers).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_METHOD,
+                        opentelemetry::Value::String(format!("{}", parts.method).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_URI,
+                        opentelemetry::Value::String(format!("{}", parts.uri).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_VERSION,
+                        opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_BODY,
+                        opentelemetry::Value::String(
+                            format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                        ),
+                    ));
+                    log_event(level, "router.request", attrs, "");
+                }
                 self.translate_bytes_request(&bytes)
             };
         Ok(graphql_requests)

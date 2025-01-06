@@ -9,6 +9,7 @@ use mime::APPLICATION_JSON;
 use mockall::mock;
 use mockall::predicate::eq;
 use req_asserts::Matcher;
+use serde_json::Value;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 use tracing_core::span::Attributes;
@@ -135,10 +136,13 @@ async fn max_requests() {
           "message": "Request limit exceeded",
           "path": [
             "users",
-            "@"
+            1
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id}",
+            "service": "connectors",
+            "connector": {
+              "coordinate": "connectors:Query.user@connect[0]"
+            },
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -205,10 +209,13 @@ async fn source_max_requests() {
           "message": "Request limit exceeded",
           "path": [
             "users",
-            "@"
+            1
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id}",
+            "service": "connectors",
+            "connector": {
+              "coordinate": "connectors:Query.user@connect[0]"
+            },
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -235,7 +242,7 @@ async fn test_root_field_plus_entity() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username } }",
+        "query { users { __typename id name username } }",
         Default::default(),
         None,
         |_| {},
@@ -247,11 +254,13 @@ async fn test_root_field_plus_entity() {
       "data": {
         "users": [
           {
+            "__typename": "User",
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
+            "__typename": "User",
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette"
@@ -280,12 +289,12 @@ async fn test_root_field_plus_entity_plus_requires() {
     Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(json!({
-              "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
+              "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { c } } }",
               "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
             })))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .insert_header(wiremock::http::HeaderName::from_string(CONTENT_TYPE.to_string()).unwrap(), APPLICATION_JSON.essence_str())
                     .set_body_json(json!({
                       "data": {
                         "_entities": [{
@@ -302,7 +311,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username d } }",
+        "query { users { __typename id name username d } }",
         Default::default(),
         None,
         |_| {},
@@ -314,12 +323,14 @@ async fn test_root_field_plus_entity_plus_requires() {
       "data": {
         "users": [
           {
+            "__typename": "User",
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret",
             "d": "1-770-736-8031 x56442"
           },
           {
+            "__typename": "User",
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette",
@@ -334,9 +345,9 @@ async fn test_root_field_plus_entity_plus_requires() {
         &mock_server.received_requests().await.unwrap(),
         vec![
             Matcher::new().method("GET").path("/users"),
-            Matcher::new().method("POST").path("/graphql"),
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
+            Matcher::new().method("POST").path("/graphql"),
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
         ],
@@ -402,10 +413,113 @@ async fn basic_errors() {
         })))
         .mount(&mock_server)
         .await;
+    Mock::given(method("GET"))
+        .and(path("/posts"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([{ "id": "1", "userId": "1" }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"error": "bad"})))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/1/nicknames"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"error": "bad"})))
+        .mount(&mock_server)
+        .await;
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
+        "{ users { id } posts { id user { name nickname } } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "users": null,
+        "posts": [
+          {
+            "id": "1",
+            "user": {
+              "name": null,
+              "nickname": null
+            }
+          }
+        ]
+      },
+      "errors": [
+        {
+          "message": "Request failed",
+          "path": [
+            "users"
+          ],
+          "extensions": {
+            "service": "connectors",
+            "http": {
+              "status": 404
+            },
+            "connector": {
+              "coordinate": "connectors:Query.users@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
+          }
+        },
+        {
+          "message": "Request failed",
+          "path": [
+            "posts",
+            0,
+            "user"
+          ],
+          "extensions": {
+            "service": "connectors",
+            "http": {
+              "status": 400
+            },
+            "connector": {
+              "coordinate": "connectors:Query.user@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
+          }
+        },
+        {
+          "message": "Request failed",
+          "path": [
+            "posts",
+            0,
+            "user",
+            "nickname"
+          ],
+          "extensions": {
+            "service": "connectors",
+            "http": {
+              "status": 400
+            },
+            "connector": {
+              "coordinate": "connectors:User.nickname@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
+          }
+        }
+      ]
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn basic_connection_errors() {
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        "http://localhost:9999",
         "{ users { id } }",
         Default::default(),
         None,
@@ -413,30 +527,35 @@ async fn basic_errors() {
     )
     .await;
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users")],
+    assert_eq!(response.get("data").unwrap(), &Value::Null);
+    assert_eq!(response.get("errors").unwrap().as_array().unwrap().len(), 1);
+    let err = response
+        .get("errors")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .first()
+        .unwrap();
+    // Different OSes have different codes at the end of the message so we have to assert on the parts separately
+    let msg = err.get("message").unwrap().as_str().unwrap();
+    assert!(
+        msg.starts_with(
+            "HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+        ),
+        "got message: {}",
+        msg
     );
-
-    insta::assert_json_snapshot!(response, @r###"
-    {
-      "data": null,
-      "errors": [
-        {
-          "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
-          "path": [],
-          "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors.json http: GET /users",
-            "reason": "404: Not Found",
-            "http": {
-              "status": 404
-            }
-          }
-        }
-      ]
-    }
-    "###);
+    assert_eq!(err.get("path").unwrap(), &serde_json::json!(["users"]));
+    assert_eq!(
+        err.get("extensions").unwrap(),
+        &serde_json::json!({
+          "service": "connectors",
+          "connector": {
+            "coordinate": "connectors:Query.users@connect[0]"
+          },
+          "code": "HTTP_CLIENT_ERROR"
+        })
+    );
 }
 
 #[tokio::test]
@@ -1062,15 +1181,19 @@ async fn error_not_redacted() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
-          "path": [],
+          "message": "Request failed",
+          "path": [
+            "users"
+          ],
           "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors.json http: GET /users",
-            "reason": "404: Not Found",
+            "service": "connectors",
             "http": {
               "status": 404
-            }
+            },
+            "connector": {
+              "coordinate": "connectors:Query.users@connect[0]"
+            },
+            "code": "CONNECTOR_FETCH"
           }
         }
       ]
@@ -1112,7 +1235,9 @@ async fn error_redacted() {
       "errors": [
         {
           "message": "Subgraph errors redacted",
-          "path": []
+          "path": [
+            "users"
+          ]
         }
       ]
     }
@@ -1216,23 +1341,22 @@ async fn test_interface_object() {
         &mock_server.received_requests().await.unwrap(),
         vec![
           Matcher::new().method("GET").path("/itfs"),
+          Matcher::new().method("GET").path("/itfs/1/e"),
+          Matcher::new().method("GET").path("/itfs/2/e"),
+          Matcher::new().method("GET").path("/itfs/1"),
+          Matcher::new().method("GET").path("/itfs/2"),
           Matcher::new()
             .method("POST")
             .path("/graphql")
             .body(serde_json::json!({
-              "query": r#"query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onItf3_0}}fragment _generated_onItf3_0 on Itf{__typename ...on T1{a}...on T2{b}}"#,
+              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ..._generated_onItf3_0 } } fragment _generated_onItf3_0 on Itf { __typename ... on T1 { a } ... on T2 { b } }"#,
               "variables": {
                 "representations": [
                   { "__typename": "Itf", "id": 1 },
                   { "__typename": "Itf", "id": 2 }
                 ]
               }
-            }))
-            ,
-          Matcher::new().method("GET").path("/itfs/1"),
-          Matcher::new().method("GET").path("/itfs/2"),
-          Matcher::new().method("GET").path("/itfs/1/e"),
-          Matcher::new().method("GET").path("/itfs/2/e"),
+            })),
         ],
     );
 }
@@ -1422,6 +1546,194 @@ async fn test_variables() {
     );
 }
 
+mod quickstart_tests {
+    use http::Uri;
+
+    use super::*;
+    use crate::test_harness::http_snapshot::SnapshotServer;
+
+    const SNAPSHOT_DIR: &str = "./src/plugins/connectors/testdata/quickstart_api_snapshots/";
+
+    macro_rules! map {
+        ($($tt:tt)*) => {
+          serde_json_bytes::json!($($tt)*).as_object().unwrap().clone()
+        };
+    }
+
+    async fn execute(
+        query: &str,
+        variables: JsonMap,
+        snapshot_file_name: &str,
+    ) -> serde_json::Value {
+        let snapshot_path = [SNAPSHOT_DIR, snapshot_file_name, ".json"].concat();
+
+        let server = SnapshotServer::spawn(
+            snapshot_path,
+            Uri::from_str("https://jsonPlaceholder.typicode.com/").unwrap(),
+            true,
+            false,
+            Some(vec![CONTENT_TYPE.to_string()]),
+        )
+        .await;
+
+        super::execute(
+            &QUICKSTART_SCHEMA.replace("https://jsonplaceholder.typicode.com", &server.uri()),
+            &server.uri(),
+            query,
+            variables,
+            None,
+            |_| {},
+        )
+        .await
+    }
+    #[tokio::test]
+    async fn query_1() {
+        let query = r#"
+          query Posts {
+            posts {
+              id
+              body
+              title
+            }
+          }
+        "#;
+
+        let response = execute(query, Default::default(), "query_1").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "posts": [
+              {
+                "id": 1,
+                "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
+                "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"
+              },
+              {
+                "id": 2,
+                "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla",
+                "title": "qui est esse"
+              }
+            ]
+          }
+        }
+        "###);
+    }
+
+    #[tokio::test]
+    async fn query_2() {
+        let query = r#"
+          query Post($postId: ID!) {
+            post(id: $postId) {
+              id
+              title
+              body
+            }
+          }
+        "#;
+
+        let response = execute(query, map!({ "postId": "1" }), "query_2").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "post": {
+              "id": 1,
+              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+            }
+          }
+        }
+        "###);
+    }
+
+    #[tokio::test]
+    async fn query_3() {
+        let query = r#"
+          query PostWithAuthor($postId: ID!) {
+            post(id: $postId) {
+              id
+              title
+              body
+              author {
+                id
+                name
+              }
+            }
+          }
+      "#;
+
+        let response = execute(query, map!({ "postId": "1" }), "query_3").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "post": {
+              "id": 1,
+              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
+              "author": {
+                "id": 1,
+                "name": "Leanne Graham"
+              }
+            }
+          }
+        }
+        "###);
+    }
+
+    #[tokio::test]
+    async fn query_4() {
+        let query = r#"
+          query PostsForUser($userId: ID!) {
+            user(id: $userId) {
+              id
+              name
+              posts {
+                id
+                title
+                author {
+                  id
+                  name
+                }
+              }
+            }
+          }
+      "#;
+
+        let response = execute(query, map!({ "userId": "1" }), "query_4").await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "user": {
+              "id": 1,
+              "name": "Leanne Graham",
+              "posts": [
+                {
+                  "id": 1,
+                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 2,
+                  "title": "qui est esse",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                }
+              ]
+            }
+          }
+        }
+        "###);
+    }
+}
+
 async fn execute(
     schema: &str,
     uri: &str,
@@ -1449,8 +1761,7 @@ async fn execute(
                     }
                 }
             }
-        },
-        "experimental_query_planner_mode": "legacy"
+        }
     });
     let config = if let Some(mut config) = config {
         config.deep_merge(common_config);

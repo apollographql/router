@@ -890,7 +890,7 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<router::BoxService, router::Request>,
+    service: Buffer<router::Request, <router::BoxService as Service<router::Request>>::Future>,
 }
 
 impl Handler {

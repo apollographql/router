@@ -66,13 +66,65 @@ impl UriEndpoint {
                 .expect("uri cannot be invalid as it was constructed from existing parts")
         })
     }
+
+    // Temp pending Otel upgrade
+    pub(crate) fn to_uri_0_2(&self, default_endpoint: &http_0_2::Uri) -> Option<http_0_2::Uri> {
+        self.uri.as_ref().and_then(|uri| {
+            let mut parts = http_0_2::Uri::from_str(&uri.to_string()).ok()?.into_parts();
+            if parts.scheme.is_none() {
+                parts.scheme = default_endpoint.scheme().cloned();
+            }
+
+            match (&parts.authority, default_endpoint.authority()) {
+                (None, Some(default_authority)) => {
+                    parts.authority = Some(default_authority.clone());
+                }
+                (Some(authority), Some(default_authority)) => {
+                    let host = if authority.host().is_empty() {
+                        default_authority.host()
+                    } else {
+                        authority.host()
+                    };
+                    let port = if authority.port().is_none() {
+                        default_authority.port()
+                    } else {
+                        authority.port()
+                    };
+
+                    if let Some(port) = port {
+                        parts.authority = Some(
+                            http_0_2::uri::Authority::from_str(
+                                format!("{}:{}", host, port).as_str(),
+                            )
+                            .expect("host and port must have come from a valid uri, qed"),
+                        )
+                    } else {
+                        parts.authority = Some(
+                            http_0_2::uri::Authority::from_str(host)
+                                .expect("host must have come from a valid uri, qed"),
+                        );
+                    }
+                }
+                _ => {}
+            }
+
+            if parts.path_and_query.is_none() {
+                parts.path_and_query = default_endpoint.path_and_query().cloned();
+            }
+
+            Some(
+                http_0_2::Uri::from_parts(parts)
+                    .expect("uri cannot be invalid as it was constructed from existing parts"),
+            )
+        })
+    }
 }
 
 impl<'de> Deserialize<'de> for UriEndpoint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EndpointVisitor;
 
-        impl<'de> Visitor<'de> for EndpointVisitor {
+        impl Visitor<'_> for EndpointVisitor {
             type Value = UriEndpoint;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -134,7 +186,7 @@ impl<'de> Deserialize<'de> for SocketEndpoint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EndpointVisitor;
 
-        impl<'de> Visitor<'de> for EndpointVisitor {
+        impl Visitor<'_> for EndpointVisitor {
             type Value = SocketEndpoint;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {

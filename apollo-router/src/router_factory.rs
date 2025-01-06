@@ -7,12 +7,12 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
+use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
@@ -40,7 +40,6 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
-use crate::services::transport;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
@@ -71,29 +70,15 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
-    #[deprecated = "use `from_router_service` instead"]
-    #[allow(deprecated)]
-    pub fn new(path: String, handler: transport::BoxService) -> Self {
-        let router_service = ServiceBuilder::new()
-            .map_request(|request: router::Request| request.router_request)
-            .map_response(|response: transport::Response| response.into())
-            .service(handler)
-            .boxed();
-        Self {
-            path,
-            handler: Handler::new(router_service),
-        }
-    }
-
-    /// Creates an Endpoint given a path and a Boxed Service
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
             handler: Handler::new(handler),
         }
     }
+
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<crate::services::router::Body>| {
+        let handler = move |req: http::Request<axum::body::Body>| {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
@@ -295,20 +280,10 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlannerPool::new(
-            previous_supergraph
-                .as_ref()
-                .map(|router| router.js_planners())
-                .unwrap_or_default(),
-            schema.clone(),
-            configuration.clone(),
-            configuration
-                .supergraph
-                .query_planning
-                .experimental_query_planner_parallelism()?,
-        )
-        .instrument(query_planner_span)
-        .await?;
+        let bridge_query_planner =
+            BridgeQueryPlannerPool::new(schema.clone(), configuration.clone())
+                .instrument(query_planner_span)
+                .await?;
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
@@ -478,7 +453,7 @@ pub(crate) fn create_certificate_store(
     })?;
     for certificate in certificates {
         store
-            .add(&certificate)
+            .add(certificate)
             .map_err(|e| ConfigurationError::CertificateAuthorities {
                 error: format!("could not add certificate to root store: {e}"),
             })?;
@@ -492,17 +467,20 @@ pub(crate) fn create_certificate_store(
     }
 }
 
-fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     tracing::debug!("loading root certificates");
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to load certificate".to_string(),
-        )
-    })?;
-    Ok(certs.into_iter().map(rustls::Certificate).collect())
+    rustls_pemfile::certs(&mut certificates.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
+        // instead of replacing it with this generic error message?
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "failed to load certificate".to_string(),
+            )
+        })
 }
 
 /// test only helper method to create a router factory in integration tests
@@ -518,12 +496,9 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
+        r#"failed to initialize the query planner: An internal error has occurred, please report this bug to Apollo.
 
-Details:
-Error: Cannot find type "Review" in subgraph "products"
-caused by
-"#
+Details: Object field "Product.reviews"'s inner type "Review" does not refer to an existing output type."#
     );
 }
 

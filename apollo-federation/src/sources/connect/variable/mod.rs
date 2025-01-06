@@ -185,7 +185,7 @@ pub(crate) struct VariableReference<'a, N: FromStr + ToString> {
     pub(crate) location: Range<usize>,
 }
 
-impl<'a> VariableReference<'a, Namespace> {
+impl VariableReference<'_, Namespace> {
     pub(crate) fn into_owned(self) -> VariableReference<'static, Namespace> {
         VariableReference {
             namespace: self.namespace,
@@ -275,7 +275,7 @@ pub(crate) struct VariablePathPart<'a> {
     pub(crate) location: Range<usize>,
 }
 
-impl<'a> VariablePathPart<'a> {
+impl VariablePathPart<'_> {
     fn into_owned(self) -> VariablePathPart<'static> {
         VariablePathPart {
             part: Cow::from(self.part.into_owned()),
