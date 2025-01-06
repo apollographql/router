@@ -10,7 +10,6 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
-use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -94,8 +93,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             let schema = Schema::parse(schema, &config).unwrap();
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
-            let introspection = Arc::new(IntrospectionCache::new(&config));
-            let planner = QueryPlannerService::new(schema.into(), Arc::new(config), introspection)
+            let planner = QueryPlannerService::new(schema.into(), Arc::new(config))
                 .await
                 .unwrap();
             (sdl, supergraph, planner.subgraph_schemas())

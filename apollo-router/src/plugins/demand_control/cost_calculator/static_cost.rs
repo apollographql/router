@@ -633,7 +633,6 @@ mod tests {
     use tower::Service;
 
     use super::*;
-    use crate::introspection::IntrospectionCache;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
     use crate::services::layers::query_analysis::ParsedDocument;
@@ -722,13 +721,9 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = QueryPlannerService::new(
-            schema.into(),
-            config.clone(),
-            Arc::new(IntrospectionCache::new(&config)),
-        )
-        .await
-        .unwrap();
+        let mut planner = QueryPlannerService::new(schema.into(), config.clone())
+            .await
+            .unwrap();
 
         let ctx = Context::new();
         ctx.extensions()

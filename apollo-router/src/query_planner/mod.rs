@@ -2,7 +2,6 @@
 
 #![allow(missing_docs)] // FIXME
 
-pub(crate) use bridge_query_planner_pool::*;
 pub(crate) use caching_query_planner::*;
 pub use plan::QueryPlan;
 pub(crate) use plan::*;
@@ -10,7 +9,6 @@ pub(crate) use query_planner_service::*;
 
 pub use self::fetch::OperationKind;
 
-mod bridge_query_planner_pool;
 mod caching_query_planner;
 mod convert;
 mod execution;
