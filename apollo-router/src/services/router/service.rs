@@ -45,16 +45,16 @@ use crate::configuration::BatchingMode;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
-use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::content_negotiation;
@@ -305,14 +305,16 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
+                    println!("pre-count_errors 1");
                     if !response.errors.is_empty() {
-                        Self::count_errors(&response.errors);
+                        Self::count_errors(&response.errors, &context);
                     }
 
                     if let Some(path) = response.path.clone() {
                         println!("response path: {}", path);
                     }
 
+                    /*
                     let operation_id: String = context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default();
                     let operation_kind = context.get::<_, String>(OPERATION_KIND).unwrap_or_default().unwrap_or_default();
                     let operation_name = context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default();
@@ -323,6 +325,7 @@ impl RouterService {
                     println!("operation_name: {}", operation_name);
                     println!("client_name: {}", client_name);
                     println!("client_version: {}", client_version);
+                    */
 
                     parts
                         .headers
@@ -350,8 +353,9 @@ impl RouterService {
                         );
                     }
 
+                    println!("pre-count_errors 2");
                     if !response.errors.is_empty() {
-                        Self::count_errors(&response.errors);
+                        Self::count_errors(&response.errors, &context);
                     }
 
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
@@ -360,22 +364,30 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
                     let multipart_stream = match response.subscribed {
-                        Some(true) => StreamBody::new(Multipart::new(
-                            body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            }),
-                            ProtocolMode::Subscription,
-                        )),
-                        _ => StreamBody::new(Multipart::new(
-                            once(ready(response)).chain(body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            })),
-                            ProtocolMode::Defer,
-                        )),
+                        Some(true) => {
+                            let context_clone = context.clone();
+                            StreamBody::new(Multipart::new(
+                                body.inspect(move |response: &graphql::Response| {
+                                    println!("pre-count_errors 3");
+                                    if !response.errors.is_empty() {
+                                        Self::count_errors(&response.errors, &context_clone);
+                                    }
+                                }),
+                                ProtocolMode::Subscription,
+                            ))
+                        }
+                        _ => {
+                            let context_clone = context.clone();
+                            StreamBody::new(Multipart::new(
+                                once(ready(response)).chain(body.inspect(move |response| {
+                                    println!("pre-count_errors 4");
+                                    if !response.errors.is_empty() {
+                                        Self::count_errors(&response.errors, &context_clone);
+                                    }
+                                })),
+                                ProtocolMode::Defer,
+                            ))
+                        }
                     };
                     let response = (parts, multipart_stream).into_response().map(|body| {
                         // Axum makes this `body` have type:
@@ -792,36 +804,37 @@ impl RouterService {
         Ok(graphql_requests)
     }
 
-    fn count_errors(errors: &[graphql::Error]) {
+    fn count_errors(errors: &[graphql::Error], context: &Context) {
+        let unwrap_context_string = |context_key: &str| -> String {
+            context
+                .get::<_, String>(context_key)
+                .unwrap_or_default()
+                .unwrap_or_default()
+        };
+
+        let operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
+        let operation_name = unwrap_context_string(OPERATION_NAME);
+        let operation_kind = unwrap_context_string(OPERATION_KIND);
+        let client_name = unwrap_context_string(CLIENT_NAME);
+        let client_version = unwrap_context_string(CLIENT_VERSION);
+
         let mut map = HashMap::new();
         for error in errors {
             let code = error.extensions.get("code").and_then(|c| c.as_str());
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
 
-            let temp_code = code.unwrap_or_default().to_string();
-            let temp_service = error.extensions.get("service").and_then(|s| s.as_str())
-                .unwrap_or_default().to_string();
-            let temp_path = match &error.path {
-                None => "".into(),
-                Some(path) => path.to_string()
-            };
-            println!("temp_code: {temp_code}");
-            println!("temp_path: {temp_path}");
-            println!("temp_service: {temp_service}");
-
+            let code_str = code.unwrap_or_default().to_string();
             u64_counter!(
-                "temp.nick.apollo.router.operations.error",
-                "Temp metric",
+                "apollo.router.operations.error",
+                "Number of errors returned by operation",
                 1,
-                "apollo.operation.id" = "todo",
-                "apollo.operation.name" = "todo",
-                "apollo.client.name" = "todo",
-                "apollo.client.version" = "todo",
-                "graphql.error.extensions.code" = temp_code,
-                "graphql.error.path" = temp_path,
-                "apollo.router.error.source" = temp_service,
-                "apollo.router.error.coordinate" = "todo"
+                "apollo.operation.id" = operation_id.clone(),
+                "graphql.operation.name" = operation_name.clone(),
+                "graphql.operation.type" = operation_kind.clone(),
+                "apollo.client.name" = client_name.clone(),
+                "apollo.client.version" = client_version.clone(),
+                "graphql.error.extensions.code" = code_str
             );
         }
 
