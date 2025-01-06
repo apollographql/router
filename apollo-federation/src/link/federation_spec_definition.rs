@@ -33,6 +33,7 @@ pub(crate) const FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("shar
 pub(crate) const FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC: Name = name!("override");
 pub(crate) const FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
 pub(crate) const FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("fromContext");
+pub(crate) const FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
@@ -252,6 +253,42 @@ impl FederationSpecDefinition {
                 value: Node::new(Value::String(reason)),
             }));
         }
+        Ok(Directive {
+            name: name_in_schema,
+            arguments,
+        })
+    }
+
+    pub(crate) fn tag_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                        FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC
+                    ),
+                }.into()
+            })
+    }
+
+    pub(crate) fn tag_directive(
+        &self,
+        schema: &FederationSchema,
+        name: String,
+    ) -> Result<Directive, FederationError> {
+        let name_in_schema = self
+            .directive_name_in_schema(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find federation spec in schema".to_owned(),
+            })?;
+        let mut arguments = Vec::new();
+        arguments.push(Node::new(Argument {
+            name: FEDERATION_NAME_ARGUMENT_NAME,
+            value: Node::new(Value::String(name)),
+        }));
         Ok(Directive {
             name: name_in_schema,
             arguments,
