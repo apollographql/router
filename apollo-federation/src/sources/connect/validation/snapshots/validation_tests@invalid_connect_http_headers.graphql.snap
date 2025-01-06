@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_connect_http_headers.graphql
 ---
 [
@@ -67,6 +67,13 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_c
         message: "In `@connect(http.headers:)` on `Query.resources` header 'content-type' can't be set with `from`, only with `value`",
         locations: [
             24:19..24:33,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.resources` header 'accept' can't be set with `from`, only with `value`",
+        locations: [
+            25:19..25:27,
         ],
     },
 ]
