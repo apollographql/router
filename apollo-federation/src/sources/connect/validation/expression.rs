@@ -292,11 +292,13 @@ mod tests {
     #[case("$args.object.bool")]
     #[case("$args.array->echo(1)")]
     #[case("$args.int->map(@)")]
-    #[case::chained_methods("$args.array->map(@)->slice(0,2)->first.bool")]
+    #[case::chained_methods("$args.array->map(@)->slice(0,2)->first.bool")]  // TODO: fix the bug in ->map here
     #[case::match_scalars("$args.string->match([\"hello\", \"world\"], [@, null])")]
     #[case::slice("$args.string->slice(0, 2)")]
     #[case::size("$args.array->size")]
-    fn valid_args(#[case] selection: &str) {
+    #[case::first("$args.array->first.bool")]
+    #[case::last("$args.array->last.bool")]
+    fn valid_after_args_resolution(#[case] selection: &str) {
         let schema = Schema::parse(SCHEMA, "schema").unwrap();
         let connect = name!("connect");
         let source = name!("source");
@@ -320,6 +322,8 @@ mod tests {
     #[case::map_array("$args.array->map(@)")]
     #[case::slice_array("$args.array->slice(0, 2)")]
     #[case::entries_scalar("$args.int->entries")]
+    #[case::first("$args.array->first")]
+    #[case::last("$args.array->last")]
     fn invalid_args(#[case] selection: &str) {
         let schema = Schema::parse(SCHEMA, "schema").unwrap();
         let connect = name!("connect");

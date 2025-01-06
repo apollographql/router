@@ -2,6 +2,7 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
+use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -362,6 +363,7 @@ fn first_shape(
                 Shape::one([tail.clone(), Shape::none()])
             }
         }
+        ShapeCase::Name(_, _) => input_shape.child(&NamedShapePathKey::Index(0)),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.
         _ => input_shape.clone(),
@@ -450,6 +452,7 @@ fn last_shape(
                 Shape::one([tail.clone(), Shape::none()])
             }
         }
+        ShapeCase::Name(_, _) => input_shape.any_item(),
         // When there is no obvious last element, ->last gives us the input
         // value itself, which has input_shape.
         _ => input_shape.clone(),
