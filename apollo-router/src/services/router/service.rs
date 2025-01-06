@@ -305,27 +305,9 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
-                    println!("pre-count_errors 1");
                     if !response.errors.is_empty() {
                         Self::count_errors(&response.errors, &context);
                     }
-
-                    if let Some(path) = response.path.clone() {
-                        println!("response path: {}", path);
-                    }
-
-                    /*
-                    let operation_id: String = context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default();
-                    let operation_kind = context.get::<_, String>(OPERATION_KIND).unwrap_or_default().unwrap_or_default();
-                    let operation_name = context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default();
-                    let client_name = context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default();
-                    let client_version = context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default();
-                    println!("operation_id: {}", operation_id);
-                    println!("operation_kind: {}", operation_kind);
-                    println!("operation_name: {}", operation_name);
-                    println!("client_name: {}", client_name);
-                    println!("client_version: {}", client_version);
-                    */
 
                     parts
                         .headers
@@ -353,7 +335,6 @@ impl RouterService {
                         );
                     }
 
-                    println!("pre-count_errors 2");
                     if !response.errors.is_empty() {
                         Self::count_errors(&response.errors, &context);
                     }
@@ -368,7 +349,6 @@ impl RouterService {
                             let context_clone = context.clone();
                             StreamBody::new(Multipart::new(
                                 body.inspect(move |response: &graphql::Response| {
-                                    println!("pre-count_errors 3");
                                     if !response.errors.is_empty() {
                                         Self::count_errors(&response.errors, &context_clone);
                                     }
@@ -380,7 +360,6 @@ impl RouterService {
                             let context_clone = context.clone();
                             StreamBody::new(Multipart::new(
                                 once(ready(response)).chain(body.inspect(move |response| {
-                                    println!("pre-count_errors 4");
                                     if !response.errors.is_empty() {
                                         Self::count_errors(&response.errors, &context_clone);
                                     }
