@@ -82,10 +82,8 @@ impl<'a> SchemaUpgrader<'a> {
         subgraphs: &'a ValidFederationSubgraphs,
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Result<Self, FederationError> {
-        let cloned_schema =
-            FederationSchema::new(original_subgraph.schema.schema().clone().into_inner())?;
         Ok(SchemaUpgrader {
-            schema: cloned_schema,
+            schema: (&*original_subgraph.schema).clone(),
             original_subgraph,
             subgraphs,
             object_type_map,
