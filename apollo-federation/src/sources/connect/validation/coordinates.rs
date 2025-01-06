@@ -43,18 +43,20 @@ impl Display for FieldCoordinate<'_> {
 #[derive(Clone, Copy)]
 pub(super) struct ConnectDirectiveCoordinate<'a> {
     pub(super) directive: &'a Node<Directive>,
-    pub(super) connect_directive_name: &'a Name,
     pub(super) field_coordinate: FieldCoordinate<'a>,
 }
 
 impl Display for ConnectDirectiveCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let Self {
-            directive: _,
-            connect_directive_name,
+            directive,
             field_coordinate,
         } = self;
-        write!(f, "`@{connect_directive_name}` on {field_coordinate}",)
+        write!(
+            f,
+            "`@{connect_directive_name}` on {field_coordinate}",
+            connect_directive_name = directive.name
+        )
     }
 }
 
@@ -66,13 +68,13 @@ pub(super) struct SelectionCoordinate<'a> {
 impl Display for SelectionCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let ConnectDirectiveCoordinate {
-            directive: _,
-            connect_directive_name,
+            directive,
             field_coordinate,
         } = self.connect_directive_coordinate;
         write!(
             f,
-            "`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on {field_coordinate}"
+            "`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on {field_coordinate}",
+            connect_directive_name = directive.name
         )
     }
 }
@@ -93,13 +95,13 @@ pub(super) struct ConnectHTTPCoordinate<'a> {
 impl Display for ConnectHTTPCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let ConnectDirectiveCoordinate {
-            directive: _,
-            connect_directive_name,
+            directive,
             field_coordinate,
         } = self.connect_directive_coordinate;
         write!(
             f,
             "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on {field_coordinate}",
+            connect_directive_name = directive.name
         )
     }
 }
@@ -125,8 +127,7 @@ impl Display for HttpMethodCoordinate<'_> {
         let Self {
             connect:
                 ConnectDirectiveCoordinate {
-                    directive: _,
-                    connect_directive_name,
+                    directive,
                     field_coordinate,
                 },
             http_method,
@@ -135,6 +136,7 @@ impl Display for HttpMethodCoordinate<'_> {
         write!(
             f,
             "`{http_method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on {field_coordinate}",
+            connect_directive_name = directive.name,
         )
     }
 }
@@ -208,8 +210,7 @@ impl Display for HttpHeadersCoordinate<'_> {
             Self::Connect {
                 connect:
                     ConnectDirectiveCoordinate {
-                        directive: _,
-                        connect_directive_name,
+                        directive,
                         field_coordinate: _,
                     },
                 object,
@@ -218,13 +219,13 @@ impl Display for HttpHeadersCoordinate<'_> {
                 write!(
                     f,
                     "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)` on `{}.{}`",
-                    object, field
+                    object, field, connect_directive_name = directive.name
                 )
             }
             Self::Source { directive_name } => {
                 write!(
                     f,
-                    "`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)`"
+                    "`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)`",
                 )
             }
         }

@@ -206,7 +206,6 @@ fn validate_field(
     for connect_directive in connect_directives {
         let field_coordinate = FieldCoordinate { object, field };
         let connect_coordinate = ConnectDirectiveCoordinate {
-            connect_directive_name: schema.connect_directive_name,
             directive: connect_directive,
             field_coordinate,
         };

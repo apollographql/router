@@ -567,6 +567,7 @@ fn slice_shape(
             Shape::array([], Shape::one(one_shapes))
         }
         ShapeCase::String(_) => Shape::string(),
+        ShapeCase::Name(_, _) => input_shape, // TODO: add a way to validate inputs after name resolution
         _ => Shape::error_with_range(
             format!(
                 "Method ->{} requires an array or string input",
@@ -649,6 +650,7 @@ fn size_shape(
     match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::int_value(value.len() as i64),
         ShapeCase::String(None) => Shape::int(),
+        ShapeCase::Name(_, _) => Shape::int(), // TODO: catch errors after name resolution
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 Shape::int_value(prefix.len() as i64)
@@ -763,6 +765,12 @@ fn entries_shape(
                     Shape::object(tail_key_value_pair, Shape::none()),
                 )
             }
+        }
+        ShapeCase::Name(_, _) => {
+            let mut entries = Shape::empty_map();
+            entries.insert("key".to_string(), Shape::string());
+            entries.insert("value".to_string(), input_shape.any_field());
+            Shape::list(Shape::object(entries, Shape::none()))
         }
         _ => Shape::error_with_range(
             format!("Method ->{} requires an object input", method_name.as_ref()),

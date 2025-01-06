@@ -15,7 +15,7 @@ use crate::sources::connect::Namespace;
 /// These should be consistent for all pieces of a connector in the request phase.
 pub(super) struct Context<'schema> {
     pub(crate) schema: &'schema SchemaInfo<'schema>,
-    var_lookup: IndexMap<Namespace, Shape>,
+    var_lookup: IndexMap<Namespace, Option<Shape>>,
 }
 
 impl<'schema> Context<'schema> {
@@ -34,10 +34,10 @@ impl<'schema> Context<'schema> {
                 .mutation
                 .as_ref()
                 .is_some_and(|mutation| mutation.name == object_type.name);
-        let mut var_lookup: IndexMap<Namespace, Shape> = [
+        let mut var_lookup: IndexMap<Namespace, Option<Shape>> = [
             (
                 Namespace::Args,
-                Shape::record(
+                Some(Shape::record(
                     coordinate
                         .field_coordinate
                         .field
@@ -45,15 +45,15 @@ impl<'schema> Context<'schema> {
                         .iter()
                         .map(|arg| (arg.name.to_string(), Shape::from(arg.ty.as_ref())))
                         .collect(),
-                ),
+                )),
             ),
-            (Namespace::Config, Shape::none()),
-            (Namespace::Context, Shape::none()),
+            (Namespace::Config, None),
+            (Namespace::Context, None),
         ]
         .into_iter()
         .collect();
         if !is_root_type {
-            var_lookup.insert(Namespace::This, Shape::from(object_type.as_ref()));
+            var_lookup.insert(Namespace::This, Some(Shape::from(object_type.as_ref())));
         }
 
         Self { schema, var_lookup }
@@ -61,12 +61,10 @@ impl<'schema> Context<'schema> {
 
     /// Create a context valid for expressions within the `@source` directive
     pub(super) fn for_source(schema: &'schema SchemaInfo) -> Self {
-        let var_lookup: IndexMap<Namespace, Shape> = [
-            (Namespace::Config, Shape::none()),
-            (Namespace::Context, Shape::none()),
-        ]
-        .into_iter()
-        .collect();
+        let var_lookup: IndexMap<Namespace, Option<Shape>> =
+            [(Namespace::Config, None), (Namespace::Context, None)]
+                .into_iter()
+                .collect();
         Self { schema, var_lookup }
     }
 }
@@ -74,7 +72,7 @@ impl<'schema> Context<'schema> {
 /// Take a single expression and check that it's valid for the given context. This checks that
 /// the expression can be executed given the known args and that the output shape is as expected.
 ///
-/// TODO: this is only useful for URIs and headers right now, because of assumptions it makes.
+/// TODO: this is only useful for URIs and headers right now, because it assumes objects/arrays are invalid.
 pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(), Vec<Error>> {
     let Expression {
         expression,
@@ -130,7 +128,7 @@ fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
                     )
                 })?;
-                context
+                let Some(var_shape) = context
                     .var_lookup
                     .get(&namespace)
                     .ok_or_else(|| {
@@ -140,6 +138,10 @@ fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
                         )
                     })?
                     .clone()
+                else {
+                    return Ok(()); // We don't know the shape of this var, so we can't validate it
+                };
+                var_shape
             } else {
                 context
                     .schema
@@ -166,5 +168,187 @@ fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
         | ShapeCase::Int(_)
         | ShapeCase::Float
         | ShapeCase::Null => Ok(()), // We use null as any/unknown right now, so don't say anything about it
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+    use apollo_compiler::Schema;
+    use rstest::rstest;
+
+    use super::*;
+    use crate::sources::connect::validation::coordinates::FieldCoordinate;
+    use crate::sources::connect::JSONSelection;
+
+    fn expression(selection: &str) -> Expression {
+        Expression {
+            expression: JSONSelection::parse(selection).unwrap(),
+            location: 0..0,
+        }
+    }
+
+    const SCHEMA: &str = r#"
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
+        
+        type Query {
+          aField(
+            int: Int
+            string: String
+            customScalar: CustomScalar
+            object: InputObject
+            array: [InputObject]
+          ): AnObject  @connect(source: "v2")
+          something: String
+        }
+        
+        scalar CustomScalar
+        
+        input InputObject {
+          bool: Boolean
+        }
+        
+        type AnObject {
+          bool: Boolean
+        }
+    "#;
+
+    #[rstest]
+    #[case::int("$(1)")]
+    #[case::float("$(1.0)")]
+    #[case::bool("$(true)")]
+    #[case::string("$(\"hello\")")]
+    #[case::null("$(null)")]
+    fn allowed_literals(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let context = Context::for_source(&schema_info);
+        validate(&expression(selection), &context).unwrap();
+    }
+
+    #[rstest]
+    #[case::array("$([])")]
+    #[case::object("$({\"a\": 1})")]
+    fn disallowed_literals(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let context = Context::for_source(&schema_info);
+        assert!(validate(&expression(selection), &context).is_err());
+    }
+
+    #[rstest]
+    #[case::echo_valid_constants("$->echo(1)")]
+    #[case::map_unknown("$config->map(@)")]
+    #[case::map_scalar("$(1)->map(@)")]
+    #[case::match_only_valid_values("$config->match([1, 1], [2, true])")]
+    #[case::first("$([1, 2])->first")]
+    #[case::first_type_unknown("$config.something->first")]
+    #[case::last("$([1, 2])->last")]
+    #[case::last_type_unknown("$config.something->last")]
+    #[case::slice_of_string("$(\"hello\")->slice(0, 2)")]
+    #[case::slice_when_type_unknown("$config.something->slice(0, 2)")]
+    #[case::size_when_type_unknown("$config.something->size")]
+    #[case::size_of_array("$([])->size")]
+    #[case::size_of_entries("$config->entries->size")]
+    #[case::size_of_slice("$([1, 2, 3])->slice(0, 2)->size")]
+    fn valid_methods(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let context = Context::for_source(&schema_info);
+        validate(&expression(selection), &context).unwrap();
+    }
+
+    #[rstest]
+    #[case::echo_invalid_constants("$->echo([])")]
+    #[case::map_array("$([])->map(@)")]
+    #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
+    #[case::slice_of_array("$([])->slice(0, 2)")]
+    #[case::entries("$config.something->entries")]
+    fn invalid_methods(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let context = Context::for_source(&schema_info);
+        assert!(validate(&expression(selection), &context).is_err());
+    }
+
+    #[rstest]
+    #[case("$args.int")]
+    #[case("$args.string")]
+    #[case("$args.customScalar")]
+    #[case("$args.object.bool")]
+    #[case("$args.array->echo(1)")]
+    #[case("$args.int->map(@)")]
+    #[case::chained_methods("$args.array->map(@)->slice(0,2)->first.bool")]
+    #[case::match_scalars("$args.string->match([\"hello\", \"world\"], [@, null])")]
+    #[case::slice("$args.string->slice(0, 2)")]
+    #[case::size("$args.array->size")]
+    fn valid_args(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let object = schema.get_object("Query").unwrap();
+        let field = object.fields.get("aField").unwrap();
+        let directive = field.directives.get("connect").unwrap();
+        let coordinate = ConnectDirectiveCoordinate {
+            field_coordinate: FieldCoordinate { field, object },
+            directive,
+        };
+        let context = Context::for_connect_request(&schema_info, coordinate);
+        validate(&expression(selection), &context).unwrap();
+    }
+
+    #[rstest]
+    #[case::unknown_var("$args.unknown")]
+    #[case::arg_is_array("$args.array")]
+    #[case::arg_is_object("$args.object")]
+    #[case::unknown_field_on_object("$args.object.unknown")]
+    #[case::map_array("$args.array->map(@)")]
+    #[case::slice_array("$args.array->slice(0, 2)")]
+    #[case::entries_scalar("$args.int->entries")]
+    fn invalid_args(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let object = schema.get_object("Query").unwrap();
+        let field = object.fields.get("aField").unwrap();
+        let directive = field.directives.get("connect").unwrap();
+        let coordinate = ConnectDirectiveCoordinate {
+            field_coordinate: FieldCoordinate { field, object },
+            directive,
+        };
+        let context = Context::for_connect_request(&schema_info, coordinate);
+        assert!(validate(&expression(selection), &context).is_err());
+    }
+
+    #[test]
+    fn this_on_query() {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let object = schema.get_object("Query").unwrap();
+        let field = object.fields.get("aField").unwrap();
+        let directive = field.directives.get("connect").unwrap();
+        let coordinate = ConnectDirectiveCoordinate {
+            field_coordinate: FieldCoordinate { field, object },
+            directive,
+        };
+        let context = Context::for_connect_request(&schema_info, coordinate);
+        assert!(validate(&expression("$this.something"), &context).is_err());
     }
 }
