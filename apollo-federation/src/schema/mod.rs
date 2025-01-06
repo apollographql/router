@@ -61,7 +61,7 @@ fn compute_subgraph_metadata(
 pub(crate) mod type_and_directive_specification;
 
 /// A GraphQL schema with federation data.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FederationSchema {
     schema: Schema,
     referencers: Referencers,

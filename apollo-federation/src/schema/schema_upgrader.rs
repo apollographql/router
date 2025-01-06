@@ -1,18 +1,19 @@
+use std::borrow::BorrowMut;
+
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::Name;
 
+use super::FederationSchema;
 use super::TypeDefinitionPosition;
 use crate::error::FederationError;
 use crate::schema::SubgraphMetadata;
-use crate::ValidFederationSchema;
 use crate::ValidFederationSubgraph;
 use crate::ValidFederationSubgraphs;
 
 #[derive(Clone, Debug)]
 struct SchemaUpgrader<'a> {
-    schema: ValidFederationSchema,
-    name: String,
-    url: String,
+    schema: FederationSchema,
+    original_subgraph: &'a ValidFederationSubgraph,
     subgraphs: &'a ValidFederationSubgraphs,
     object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
 }
@@ -41,17 +42,20 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     for subgraph in subgraphs.subgraphs.values() {
         if let Some(subgraph_metadata) = subgraph.schema.subgraph_metadata() {
             for pos in subgraph.schema.get_types() {
-                if matches!(pos, TypeDefinitionPosition::Object(_) | TypeDefinitionPosition::Interface(_)) {
+                if matches!(
+                    pos,
+                    TypeDefinitionPosition::Object(_) | TypeDefinitionPosition::Interface(_)
+                ) {
                     object_type_map
-                    .entry(pos.type_name().clone())
-                    .or_default()
-                    .insert(
-                        subgraph.name.clone(),
-                        TypeInfo {
-                            pos: pos.clone(),
-                            metadata: subgraph_metadata.clone(),
-                        },
-                    );                 
+                        .entry(pos.type_name().clone())
+                        .or_default()
+                        .insert(
+                            subgraph.name.clone(),
+                            TypeInfo {
+                                pos: pos.clone(),
+                                metadata: subgraph_metadata.clone(),
+                            },
+                        );
                 }
             }
         }
@@ -64,7 +68,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
                 schema: subgraph.schema.clone(),
             })?;
         } else {
-            let upgrader = SchemaUpgrader::new(subgraph, &subgraphs, &object_type_map);
+            let mut upgrader = SchemaUpgrader::new(subgraph, &subgraphs, &object_type_map)?;
             federation_subgraphs.add(upgrader.upgrade()?)?;
         }
     }
@@ -74,20 +78,21 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
 
 impl<'a> SchemaUpgrader<'a> {
     fn new(
-        original_subgraph: &ValidFederationSubgraph,
+        original_subgraph: &'a ValidFederationSubgraph,
         subgraphs: &'a ValidFederationSubgraphs,
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
-    ) -> Self {
-        SchemaUpgrader {
-            schema: original_subgraph.schema.clone(),
-            name: original_subgraph.name.clone(),
-            url: original_subgraph.url.clone(),
+    ) -> Result<Self, FederationError> {
+        let cloned_schema =
+            FederationSchema::new(original_subgraph.schema.schema().clone().into_inner())?;
+        Ok(SchemaUpgrader {
+            schema: cloned_schema,
+            original_subgraph,
             subgraphs,
             object_type_map,
-        }
+        })
     }
 
-    fn upgrade(&self) -> Result<ValidFederationSubgraph, FederationError> {
+    fn upgrade(&mut self) -> Result<ValidFederationSubgraph, FederationError> {
         self.pre_upgrade_validations();
 
         self.fix_federation_directives_arguments();
@@ -147,12 +152,54 @@ impl<'a> SchemaUpgrader<'a> {
         todo!();
     }
 
-    fn remove_directives_on_interface(&self) {
+    fn remove_directives_on_interface(&mut self) -> Result<(), FederationError> {
+        let schema = &mut self.schema;
+        let Some(metadata) = &schema.subgraph_metadata else {
+            return Ok(());
+        };
+
+        let provides_directive = metadata
+            .federation_spec_definition()
+            .provides_directive_definition(schema)?;
+
+        let requires_directive = metadata
+            .federation_spec_definition()
+            .requires_directive_definition(schema)?;
+
+        let key_directive = metadata
+            .federation_spec_definition()
+            .key_directive_definition(schema)?;
+        
+        
         todo!();
     }
 
-    fn remove_provides_on_non_composite(&self) {
-        todo!();
+    fn remove_provides_on_non_composite(&mut self) -> Result<(), FederationError> {
+        let schema = &mut self.schema;
+        let Some(metadata) = &schema.subgraph_metadata else {
+            return Ok(());
+        };
+
+        let provides_directive = metadata
+            .federation_spec_definition()
+            .provides_directive_definition(schema)?;
+        let references_to_remove: Vec<_> = schema.
+            referencers()
+            .get_directive(provides_directive.name.as_str())?
+            .object_fields
+            .iter()
+            .cloned()
+            .filter(|ref_field| {
+                schema
+                    .get_type(ref_field.type_name.clone())
+                    .map(|t| !t.is_composite_type())
+                    .unwrap_or(false)
+            })
+            .collect();
+        for reference in &references_to_remove {
+            reference.remove(schema)?;
+        }
+        Ok(())
     }
 
     fn remove_unused_externals(&self) {
@@ -163,7 +210,7 @@ impl<'a> SchemaUpgrader<'a> {
         todo!();
     }
 
-    fn remove_tag_on_external(&self) {
+    fn remove_tag_on_external(&self) -> Result<(), FederationError> {
         todo!();
     }
 }
