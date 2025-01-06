@@ -1,6 +1,6 @@
 {
   "experimental": {
-    "experimental_response_trace_id": "https://github.com/apollographql/router/discussions/2147"
+    "experimental_response_trace_id": "https://github.com/apollographql/router/discussions/2147",
     "experimental_when_header": "https://github.com/apollographql/router/discussions/1961"
   },
   "preview": {
