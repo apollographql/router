@@ -260,6 +260,7 @@ mod tests {
     #[case::size_of_array("$([])->size")]
     #[case::size_of_entries("$config->entries->size")]
     #[case::size_of_slice("$([1, 2, 3])->slice(0, 2)->size")]
+    #[case::slice_after_match("$config->match([1, \"something\"], [2, \"another\"])->slice(0, 2)")]
     fn valid_methods(#[case] selection: &str) {
         let schema = Schema::parse(SCHEMA, "schema").unwrap();
         let connect = name!("connect");
