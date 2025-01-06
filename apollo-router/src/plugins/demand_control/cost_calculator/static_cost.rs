@@ -635,7 +635,7 @@ mod tests {
     use super::*;
     use crate::introspection::IntrospectionCache;
     use crate::plugins::authorization::CacheKeyMetadata;
-    use crate::query_planner::BridgeQueryPlanner;
+    use crate::query_planner::QueryPlannerService;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::query_planner::PlanOptions;
     use crate::services::QueryPlannerContent;
@@ -722,7 +722,7 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = BridgeQueryPlanner::new(
+        let mut planner = QueryPlannerService::new(
             schema.into(),
             config.clone(),
             Arc::new(IntrospectionCache::new(&config)),

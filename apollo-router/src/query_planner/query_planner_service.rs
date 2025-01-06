@@ -63,7 +63,7 @@ const INTERNAL_INIT_ERROR: &str = "internal";
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
-pub(crate) struct BridgeQueryPlanner {
+pub(crate) struct QueryPlannerService {
     planner: PlannerMode,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
@@ -208,7 +208,7 @@ impl PlannerMode {
     }
 }
 
-impl BridgeQueryPlanner {
+impl QueryPlannerService {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
@@ -363,7 +363,7 @@ impl BridgeQueryPlanner {
     }
 }
 
-impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
+impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Response = QueryPlannerResponse;
 
     type Error = QueryPlannerError;
@@ -447,7 +447,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 // Appease clippy::type_complexity
 pub(crate) type FilteredQuery = (Vec<Path>, ast::Document);
 
-impl BridgeQueryPlanner {
+impl QueryPlannerService {
     async fn get(
         &self,
         mut key: QueryKey,
@@ -661,7 +661,7 @@ mod tests {
         let config = Arc::default();
         let schema = Schema::parse(sdl, &config).unwrap();
         let introspection = Arc::new(IntrospectionCache::new(&config));
-        let error = BridgeQueryPlanner::new(schema.into(), config, introspection)
+        let error = QueryPlannerService::new(schema.into(), config, introspection)
             .await
             .err()
             .expect("expected error for fed1 supergraph");
@@ -672,7 +672,7 @@ mod tests {
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
             let introspection = Arc::new(IntrospectionCache::new(&config));
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, introspection)
+            let _planner = QueryPlannerService::new(schema.into(), config, introspection)
                 .await
                 .unwrap();
 
@@ -692,7 +692,7 @@ mod tests {
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
-        let planner = BridgeQueryPlanner::new(
+        let planner = QueryPlannerService::new(
             schema.clone(),
             Default::default(),
             Arc::new(IntrospectionCache::new(&config)),
@@ -797,7 +797,7 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(
+        let planner = QueryPlannerService::new(
             schema.into(),
             configuration.clone(),
             Arc::new(IntrospectionCache::new(&configuration)),
@@ -945,7 +945,7 @@ mod tests {
         }}"#);
     }
 
-    async fn subselections_keys(query: &str, planner: &BridgeQueryPlanner) -> String {
+    async fn subselections_keys(query: &str, planner: &QueryPlannerService) -> String {
         fn check_query_plan_coverage(
             node: &PlanNode,
             parent_label: Option<&str>,
@@ -1109,7 +1109,7 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(schema, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(
+        let planner = QueryPlannerService::new(
             schema.into(),
             configuration.clone(),
             Arc::new(IntrospectionCache::new(&configuration)),

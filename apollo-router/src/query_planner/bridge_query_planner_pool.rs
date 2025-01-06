@@ -8,7 +8,7 @@ use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use opentelemetry::metrics::ObservableGauge;
 
-use super::bridge_query_planner::BridgeQueryPlanner;
+use super::query_planner_service::QueryPlannerService;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::introspection::IntrospectionCache;
@@ -29,7 +29,7 @@ pub(crate) struct BridgeQueryPlannerPool {
 // TODO: remove
 #[derive(Clone)]
 enum PoolMode {
-    PassThrough { delegate: BridgeQueryPlanner },
+    PassThrough { delegate: QueryPlannerService },
 }
 
 impl BridgeQueryPlannerPool {
@@ -42,7 +42,7 @@ impl BridgeQueryPlannerPool {
         let introspection_cache = Arc::new(IntrospectionCache::new(&configuration));
 
         let delegate =
-            BridgeQueryPlanner::new(schema.clone(), configuration, introspection_cache.clone())
+            QueryPlannerService::new(schema.clone(), configuration, introspection_cache.clone())
                 .await?;
 
         Ok(Self {
