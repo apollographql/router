@@ -232,25 +232,20 @@ impl LightSpanData {
         let filtered_attributes = match include_attr_names {
             None => value
                 .attributes
-                .iter()
-                .map(|KeyValue { key, value }| (key.clone(), value.clone()))
+                .into_iter()
+                .map(|KeyValue { key, value }| (key, value))
                 .collect(),
-            Some(attr_names) => {
-                // Looks like this transformation will be easier after upgrading opentelemetry_sdk >= 0.21
-                // when attributes are stored as Vec<KeyValue>.
-                // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
-                let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
-                let mut new_attrs = HashMap::with_capacity(max_attr_len);
-                value
-                    .attributes
-                    .into_iter()
-                    .for_each(|KeyValue { key, value }| {
-                        if attr_names.contains(&key) {
-                            new_attrs.insert(key, value);
-                        }
-                    });
-                new_attrs
-            }
+            Some(attr_names) => value
+                .attributes
+                .into_iter()
+                .filter_map(|kv| {
+                    if attr_names.contains(&kv.key) {
+                        Some((kv.key, kv.value))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         };
         Self {
             trace_id: value.span_context.trace_id(),

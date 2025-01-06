@@ -179,7 +179,6 @@ mod test {
             resources: Default::default(),
         };
         let resource = test_config.to_resource();
-        // TODO: Wrap semantic convention keys statically
         assert!(resource
             .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
             .unwrap()
