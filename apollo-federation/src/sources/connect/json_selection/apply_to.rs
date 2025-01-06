@@ -677,13 +677,23 @@ impl ApplyToInternal for WithRange<PathList> {
                 }
 
                 if let Some(method) = ArrowMethod::lookup(method_name) {
-                    let method_result_shape = method.shape(
-                        method_name,
-                        method_args.as_ref(),
-                        input_shape,
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                    );
+                    let method_result_shape = if let ShapeCase::One(cases) = input_shape.case() {
+                        Shape::one(cases.iter().map(|case| {
+                            self.compute_output_shape(
+                                case.clone(),
+                                dollar_shape.clone(),
+                                named_var_shapes,
+                            )
+                        }))
+                    } else {
+                        method.shape(
+                            method_name,
+                            method_args.as_ref(),
+                            input_shape,
+                            dollar_shape.clone(),
+                            named_var_shapes,
+                        )
+                    };
 
                     if method_result_shape.is_none() {
                         method_result_shape.clone()
