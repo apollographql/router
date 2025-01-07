@@ -197,9 +197,11 @@ impl Request {
         let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            u64_histogram!(
+                "apollo.router.operations.batching.size",
+                "Number of queries contained within each query batch",
+                result.len() as u64,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
             u64_counter!(
@@ -226,9 +228,11 @@ impl Request {
         let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = "batch_http_link" // Only supported mode right now
+            u64_histogram!(
+                "apollo.router.operations.batching.size",
+                "Number of queries contained within each query batch",
+                result.len() as u64,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
             u64_counter!(

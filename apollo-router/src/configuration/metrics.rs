@@ -120,19 +120,20 @@ impl InstrumentData {
     }
 
     pub(crate) fn populate_config_instruments(&mut self, yaml: &serde_json::Value) {
-        // This macro will query the config json for a primary metric and optionally metric attributes.
-
-        // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
-        // We should consider converting the rest of the codebase to use jsonpath_rust.
-
-        // Example usage:
-        // populate_usage_instrument!(
-        //             value.apollo.router.config.authorization, // The metric name
-        //             "$.authorization", // The path into the config
-        //             opt.require_authentication, // The name of the attribute
-        //             "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
-        //         );
-
+        /// This macro will query the config json for a primary metric and optionally metric attributes.
+        ///
+        /// The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
+        /// We should consider converting the rest of the codebase to use jsonpath_rust.
+        ///
+        /// Example usage:
+        /// ```rust,ignore
+        /// populate_config_instrument!(
+        ///     apollo.router.config.authorization, // The metric name
+        ///     "$.authorization", // The path into the config
+        ///     opt.require_authentication, // The name of the attribute
+        ///     "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
+        /// );
+        /// ```
         macro_rules! populate_config_instrument {
             ($($metric:ident).+, $path:literal) => {
                 let instrument_name = stringify!($($metric).+).to_string();
@@ -299,9 +300,7 @@ impl InstrumentData {
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
-            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]",
-            opt.subgraph.retry,
-            "$[?(@.all.experimental_retry || @.subgraphs..experimental_retry)]"
+            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
 
         populate_config_instrument!(
