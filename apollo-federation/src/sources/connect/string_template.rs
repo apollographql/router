@@ -50,7 +50,7 @@ impl<Const: FromStr> StringTemplate<Const> {
                     let start_of_parse_error = offset + err.offset;
                     Error {
                         message: err.message,
-                        location: start_of_parse_error..(start_of_parse_error + expression.len()),
+                        location: start_of_parse_error..(offset + expression.len()),
                     }
                 })?;
                 parts.push(Part::Expression(Expression {
