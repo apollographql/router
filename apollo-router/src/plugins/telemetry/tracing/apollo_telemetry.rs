@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
@@ -16,6 +17,8 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
@@ -34,6 +37,7 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use url::Url;
 
+use crate::metrics::meter_provider;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -262,6 +266,47 @@ impl LightSpanData {
     }
 }
 
+/// An externally updateable gauge for "apollo_router_span_lru_size".
+///
+/// When observed, it reports the most recently stored value (give or take atomicity looseness).
+///
+/// This *could* be generalised to any kind of gauge, but we should ideally have gauges that can just
+/// observe their accurate value whenever requested. The externally updateable approach is kind of
+/// a hack that happens to work here because we only have one place where the value can change, and
+/// otherwise we might have to use an inconvenient Mutex or RwLock around the entire LRU cache.
+#[derive(Debug)]
+struct SpanLruSizeInstrument {
+    value: Arc<AtomicU64>,
+    _gauge: ObservableGauge<u64>,
+}
+
+impl SpanLruSizeInstrument {
+    fn new() -> Self {
+        let value = Arc::new(AtomicU64::new(0));
+
+        let meter = meter_provider().meter("apollo/router");
+        let gauge = meter
+            .u64_observable_gauge("apollo_router_span_lru_size")
+            .with_callback({
+                let value = Arc::clone(&value);
+                move |gauge| {
+                    gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
+                }
+            })
+            .init();
+
+        Self {
+            value,
+            _gauge: gauge,
+        }
+    }
+
+    fn update(&self, value: u64) {
+        self.value
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
@@ -270,6 +315,7 @@ impl LightSpanData {
 #[derivative(Debug)]
 pub(crate) struct Exporter {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
+    span_lru_size_instrument: SpanLruSizeInstrument,
     #[derivative(Debug = "ignore")]
     report_exporter: Option<Arc<ApolloExporter>>,
     #[derivative(Debug = "ignore")]
@@ -342,8 +388,12 @@ impl Exporter {
                 Sampler::AlwaysOff => 0f64,
             },
         };
+
+        let span_lru_size_instrument = SpanLruSizeInstrument::new();
+
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
+            span_lru_size_instrument,
             report_exporter: if otlp_tracing_ratio < 1f64 {
                 Some(Arc::new(ApolloExporter::new(
                     endpoint,
@@ -1102,7 +1152,11 @@ impl SpanExporter for Exporter {
                     );
             }
         }
-        tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
+
+        // Note this won't be correct anymore if there is any way outside of `.export()`
+        // to affect the size of the cache.
+        self.span_lru_size_instrument
+            .update(self.spans_by_parent_id.len() as u64);
 
         #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
         let report_exporter = match self.report_exporter.as_ref() {

@@ -11,27 +11,28 @@
         "jsonPlaceholder": {
           "snapshot": {
             "path": "./http_snapshots.json",
-            "base_url": "https://jsonplaceholder.typicode.com/"
+            "base_url": "http://localhost:4007/"
           }
         }
       }
     },
     {
       "type": "Request",
-      "request": {
-        "query": "query { post(id: 1) { id author { name } title } }"
+      "headers": {
+        "Accept": "multipart/mixed;deferSpec=20220824"
       },
-      "expected_response": {
-        "data": {
-          "post": {
-            "id": 1,
-            "author": {
-              "name": "Leanne Graham"
-            },
-            "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"
-          }
+      "request": {
+        "query": "mutation { m { f ... @defer { entity { id f } } } }"
+      },
+      "expected_response": [
+        { "data": { "m": { "f": "1" } }, "hasNext": true },
+        {
+          "hasNext": false,
+          "incremental": [
+            { "data": { "entity": { "id": 2, "f": "3" } }, "path": ["m"] }
+          ]
         }
-      }
+      ]
     },
     {
       "type": "Stop"

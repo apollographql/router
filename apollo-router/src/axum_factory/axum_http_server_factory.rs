@@ -24,12 +24,15 @@ use http::HeaderValue;
 use http::Request;
 use itertools::Itertools;
 use multimap::MultiMap;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
 use serde::Serialize;
 use serde_json::json;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::layer::layer_fn;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -53,6 +56,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::metrics::meter_provider;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
@@ -65,20 +69,29 @@ use crate::Context;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
+fn session_count_instrument() -> ObservableGauge<u64> {
+    let meter = meter_provider().meter("apollo/router");
+    meter
+        .u64_observable_gauge("apollo_router_session_count_active")
+        .with_description("Amount of in-flight sessions")
+        .with_callback(|gauge| {
+            gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
+        })
+        .init()
+}
+
 struct SessionCountGuard;
 
 impl SessionCountGuard {
     fn start() -> Self {
-        let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
-        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
         Self
     }
 }
 
 impl Drop for SessionCountGuard {
     fn drop(&mut self) {
-        let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
-        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
     }
 }
 
@@ -554,10 +567,19 @@ where
         router = router.route("/", get(handle_graphql::<RF>).post(handle_graphql::<RF>));
     }
 
-    router.route_layer(Extension(HandlerOptions {
+    router = router.route_layer(Extension(HandlerOptions {
         early_cancel: configuration.supergraph.early_cancel,
         experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
-    }))
+    }));
+    // Tie the lifetime of the session count instrument to the lifetime of the router
+    // by moving it into a no-op layer.
+    let instrument = session_count_instrument();
+    router = router.layer(layer_fn(move |service| {
+        let _ = &instrument;
+        service
+    }));
+
+    router
 }
 
 async fn handle_graphql<RF: RouterFactory>(
