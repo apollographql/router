@@ -147,6 +147,10 @@ Configuring selectors with JSON paths, such as supergraph `response_data` and `r
 
 ```yaml title="router.yaml"
 telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
   instrumentation:
     instruments:
       supergraph:
@@ -156,14 +160,11 @@ telemetry:
           unit: error
           description: my description
           condition:
-            eq:
-              - none
-              - response_errors: "$.[0].extensions.code"
+            exists:
+              response_errors: "$.[0].extensions.code"
           attributes:
             response_errors:
-              response_errors: "$.*"
-            response_data:
-              response_data: "$.*"
+              response_errors: "$.[0].extensions.code"
 ```
 
 ### Getting GraphQL operation info
