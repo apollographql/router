@@ -75,6 +75,9 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
 
+    // NOTE: Unless we re-create our router, this test will fail with a 500
+    // instead of the desired 413. We need to figure out why before this
+    // PR is merged.
     let mut router = IntegrationTest::builder()
         .config(
             include_str!("fixtures/coprocessor_body_limit.router.yaml")
