@@ -2555,17 +2555,6 @@ mod tests {
 
         assert_eq!(
             selection!(r#"
-                id
-                name
-                friends: friend_ids->map({ id: @ })
-                alias: arrayOfArrays { x y }
-                ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).shape().pretty_print(),
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        );
-
-        assert_eq!(
-            selection!(r#"
                 upc
                 ... kind->match(
                     ["book", ${ author title }],

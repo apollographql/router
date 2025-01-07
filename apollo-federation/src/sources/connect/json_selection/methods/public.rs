@@ -147,18 +147,10 @@ fn map_shape(
                 Shape::array(new_prefix, new_tail)
             }
             ShapeCase::Name(_name, _subpath) => {
-                // Since we do not know if a named shape is an array or a
-                // non-array, we hedge the input shape using a .* subpath
-                // wildcard, which denotes the union of all array element shapes
-                // for arrays, or the shape itself (no union) for non-arrays.
-                let any_subshape = input_shape.any_item();
-                first_arg.compute_output_shape(
-                    // When we ->map, the @ variable gets rebound to each
-                    // element visited, but the $ variable stays the same.
-                    any_subshape.clone(),
-                    dollar_shape.clone(),
-                    named_var_shapes,
-                )
+                // We don't have a way to tell if this is an array, where map is applied to each
+                // element, or a different value where map is applied to just one. So for now we
+                // erase the type (until we add more sophisticated resolution in the future).
+                Shape::unknown()
             }
             _ => first_arg.compute_output_shape(
                 input_shape.clone(),
