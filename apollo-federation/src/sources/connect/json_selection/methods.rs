@@ -34,6 +34,7 @@ pub(super) enum ArrowMethod {
     Slice,
     Size,
     Entries,
+    JsonStringify,
 
     // Future methods:
     TypeOf,
@@ -142,6 +143,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Slice => &public::SliceMethod,
             Self::Size => &public::SizeMethod,
             Self::Entries => &public::EntriesMethod,
+            Self::JsonStringify => &public::JsonStringifyMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -195,6 +197,7 @@ impl ArrowMethod {
             "not" => Some(Self::Not),
             "or" => Some(Self::Or),
             "and" => Some(Self::And),
+            "jsonStringify" => Some(Self::JsonStringify),
             _ => None,
         };
 
@@ -218,6 +221,7 @@ impl ArrowMethod {
                 | Self::Slice
                 | Self::Size
                 | Self::Entries
+                | Self::JsonStringify
         )
     }
 }

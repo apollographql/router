@@ -1138,3 +1138,39 @@ fn test_logical_methods() {
         (Some(json!(false)), vec![]),
     );
 }
+
+#[rstest::rstest]
+#[case(json!(null), json!("null"), vec![])]
+#[case(json!(true), json!("true"), vec![])]
+#[case(json!(false), json!("false"), vec![])]
+#[case(json!(42), json!("42"), vec![])]
+#[case(json!(10.8), json!("10.8"), vec![])]
+#[case(json!("hello world"), json!("\"hello world\""), vec![])]
+#[case(json!([1, 2, 3]), json!("[1,2,3]"), vec![])]
+#[case(json!({ "key": "value" }), json!("{\"key\":\"value\"}"), vec![])]
+#[case(json!([1, "two", true, null]), json!("[1,\"two\",true,null]"), vec![])]
+fn table_test_json_stringify_method(
+    #[case] input: JSON,
+    #[case] expected: JSON,
+    #[case] errors: Vec<ApplyToError>,
+) {
+    assert_eq!(
+        selection!("$->jsonStringify").apply_to(&input),
+        (Some(expected), errors),
+    );
+}
+
+#[test]
+fn test_json_stringify_method_error() {
+    assert_eq!(
+        selection!("$->jsonStringify(1)").apply_to(&json!(null)),
+        (
+            None,
+            vec![ApplyToError::new(
+                "Method ->jsonStringify does not take any arguments".to_string(),
+                vec![json!("->jsonStringify")],
+                Some(3..16)
+            )]
+        ),
+    );
+}
