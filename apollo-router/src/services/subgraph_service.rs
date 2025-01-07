@@ -847,9 +847,12 @@ pub(crate) async fn process_batch(
     let client = client_factory.create(&service);
 
     // Update our batching metrics (just before we fetch)
-    tracing::info!(histogram.apollo.router.operations.batching.size = listener_count as f64,
-        mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
-        subgraph = &service
+    u64_histogram!(
+        "apollo.router.operations.batching.size",
+        "Number of queries contained within each query batch",
+        listener_count as u64,
+        mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
+        subgraph = service.clone()
     );
 
     u64_counter!(

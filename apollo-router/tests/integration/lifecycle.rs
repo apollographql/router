@@ -231,16 +231,11 @@ async fn test_experimental_notice() {
     let mut router = IntegrationTest::builder()
         .config(
             "
-traffic_shaping:
-  all:
-    experimental_retry:
-      min_per_sec: 10
-      ttl: 10s
-      retry_percent: 0.2
-  subgraphs:
-    accounts:
-      experimental_retry:
-        min_per_sec: 20
+            telemetry:
+              exporters:
+                tracing:
+                  experimental_response_trace_id:
+                    enabled: true
             ",
         )
         .build()
