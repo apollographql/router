@@ -1,1 +1,1 @@
-Example testing the connectors feature
+This tests using defer and connectors. It uses a mutation because there was an expansion bug with mutation root type definitions that appeared only when using defer.
