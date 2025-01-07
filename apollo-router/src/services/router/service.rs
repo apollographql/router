@@ -48,10 +48,6 @@ use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-<<<<<<< HEAD
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
-=======
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -60,7 +56,8 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::events::DisplayRouterResponse;
 use crate::plugins::telemetry::config_new::events::RouterResponseBodyExtensionType;
->>>>>>> next
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
@@ -381,12 +378,8 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    u64_counter!(
-                        "apollo.router.graphql_error",
-                        "Number of GraphQL error responses returned by the router",
-                        1,
-                        code = "INVALID_ACCEPT_HEADER"
-                    );
+                    Self::count_error_codes(vec![Some("INVALID_ACCEPT_HEADER")], &context);
+
                     // Useful for selector in spans/instruments/events
                     context.insert_json_value(
                         CONTAINS_GRAPHQL_ERROR,
@@ -821,6 +814,11 @@ impl RouterService {
     }
 
     fn count_errors(errors: &[graphql::Error], context: &Context) {
+        let codes = errors.iter().map(|e| e.extensions.get("code").and_then(|c| c.as_str())).collect();
+        Self::count_error_codes(codes, context);
+    }
+
+    fn count_error_codes(codes: Vec<Option<&str>>, context: &Context) {
         let unwrap_context_string = |context_key: &str| -> String {
             context
                 .get::<_, String>(context_key)
@@ -835,8 +833,7 @@ impl RouterService {
         let client_version = unwrap_context_string(CLIENT_VERSION);
 
         let mut map = HashMap::new();
-        for error in errors {
-            let code = error.extensions.get("code").and_then(|c| c.as_str());
+        for code in &codes {
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
 
