@@ -36,11 +36,12 @@ type T @key(fields: "id") {
   wrapped: D
   unwrapped: String!
   external: External @external
+  external2: External2 @external
   computed: String!
     @requires(fields: "external")
     @connect(
       http: {
-        GET: "http://test/computed?id={$this.id}&external={$this.external.id}"
+        GET: "http://test/computed?id={$this.id}&external={$this.external.id}&external2={$this.external2.id}"
       }
       selection: "$"
     )
@@ -65,4 +66,8 @@ type Unused {
 
 type External {
   id: ID! @external
+}
+
+type External2 @external {
+  id: ID!
 }
