@@ -814,7 +814,10 @@ impl RouterService {
     }
 
     fn count_errors(errors: &[graphql::Error], context: &Context) {
-        let codes = errors.iter().map(|e| e.extensions.get("code").and_then(|c| c.as_str())).collect();
+        let codes = errors
+            .iter()
+            .map(|e| e.extensions.get("code").and_then(|c| c.as_str()))
+            .collect();
         Self::count_error_codes(codes, context);
     }
 
