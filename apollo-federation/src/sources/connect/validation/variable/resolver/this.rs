@@ -25,7 +25,7 @@ impl<'a> ThisResolver<'a> {
 }
 
 impl NamespaceResolver for ThisResolver<'_> {
-    fn resolve(
+    fn check(
         &self,
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,

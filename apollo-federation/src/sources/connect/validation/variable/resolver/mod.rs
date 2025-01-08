@@ -15,9 +15,9 @@ use crate::sources::connect::variable::VariableReference;
 pub(super) mod args;
 pub(super) mod this;
 
-/// Resolves variables with a specific namespace
+/// Checks that the variables are valid within a specific namespace
 pub(crate) trait NamespaceResolver {
-    fn resolve(
+    fn check(
         &self,
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,

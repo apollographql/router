@@ -28,9 +28,9 @@ use crate::sources::connect::validation::coordinates::connect_directive_http_bod
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::variable::VariableResolver;
-use crate::sources::connect::variable::ConnectorsContext;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
+use crate::sources::connect::variable::VariableContext;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
@@ -43,7 +43,7 @@ pub(super) fn validate_selection(
 
     validate_selection_variables(
         &VariableResolver::new(
-            ConnectorsContext::new(
+            VariableContext::new(
                 coordinate.field_coordinate.object,
                 coordinate.field_coordinate.field,
                 Phase::Response,
@@ -126,7 +126,7 @@ pub(super) fn validate_body_selection(
 
     validate_selection_variables(
         &VariableResolver::new(
-            ConnectorsContext::new(
+            VariableContext::new(
                 connect_coordinate.field_coordinate.object,
                 connect_coordinate.field_coordinate.field,
                 Phase::Request,

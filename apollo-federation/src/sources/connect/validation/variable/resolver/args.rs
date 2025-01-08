@@ -24,7 +24,7 @@ impl<'a> ArgsResolver<'a> {
 }
 
 impl NamespaceResolver for ArgsResolver<'_> {
-    fn resolve(
+    fn check(
         &self,
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,

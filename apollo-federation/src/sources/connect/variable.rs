@@ -11,25 +11,10 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use itertools::Itertools;
 
-/// The context of an expression containing variable references. The context determines what
-/// variable namespaces are available for use in the expression.
-pub(crate) trait ExpressionContext<N: FromStr + ToString> {
-    /// Get the variable namespaces that are available in this context
-    fn available_namespaces(&self) -> impl Iterator<Item = N>;
-
-    /// Get the list of namespaces joined as a comma separated list
-    fn namespaces_joined(&self) -> String {
-        self.available_namespaces()
-            .map(|s| s.to_string())
-            .sorted()
-            .join(", ")
-    }
-}
-
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
 /// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
 #[derive(Clone, PartialEq)]
-pub(crate) struct ConnectorsContext<'schema> {
+pub(crate) struct VariableContext<'schema> {
     /// The object type containing the field the directive is on
     pub(crate) object: &'schema Node<ObjectType>,
 
@@ -39,7 +24,7 @@ pub(crate) struct ConnectorsContext<'schema> {
     pub(super) target: Target,
 }
 
-impl<'schema> ConnectorsContext<'schema> {
+impl<'schema> VariableContext<'schema> {
     pub(crate) fn new(
         object: &'schema Node<ObjectType>,
         field: &'schema Component<FieldDefinition>,
@@ -53,10 +38,9 @@ impl<'schema> ConnectorsContext<'schema> {
             target,
         }
     }
-}
 
-impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
-    fn available_namespaces(&self) -> impl Iterator<Item = Namespace> {
+    /// Get the variable namespaces that are available in this context
+    pub(crate) fn available_namespaces(&self) -> impl Iterator<Item = Namespace> {
         match &self.phase {
             Phase::Response => {
                 vec![
@@ -78,10 +62,17 @@ impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
         }
         .into_iter()
     }
+
+    /// Get the list of namespaces joined as a comma separated list
+    pub(crate) fn namespaces_joined(&self) -> String {
+        self.available_namespaces()
+            .map(|s| s.to_string())
+            .sorted()
+            .join(", ")
+    }
 }
 
 /// The phase an expression is associated with
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Phase {
     /// The request phase
