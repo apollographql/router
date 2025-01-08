@@ -7447,6 +7447,20 @@ snapshot_kind: text
       ],
       "type": "string"
     },
+    "WorkerPool": {
+      "additionalProperties": false,
+      "description": "Experimental configuration for the worker thread pool.\n\nPlease note this configuration does **not** support hot reloading.",
+      "properties": {
+        "size": {
+          "default": 0,
+          "description": "Number of threads to use for compute-heavy work, such as GraphQL query validation and planning. The default value is 0, which means to use the total available parallelism.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector": {
       "anyOf": [
         {
@@ -8342,6 +8356,10 @@ snapshot_kind: text
       "default": false,
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
+    },
+    "experimental_worker_pool": {
+      "$ref": "#/definitions/WorkerPool",
+      "description": "#/definitions/WorkerPool"
     },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig",

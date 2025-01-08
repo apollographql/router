@@ -27,6 +27,7 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
+use crate::compute_job;
 use crate::configuration::metrics::Metrics;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
@@ -140,6 +141,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 if let (Some(schema), Some(configuration), Some(license)) =
                     (schema, configuration, license)
                 {
+                    // The worker pool does not support resizing today, so we only set it on
+                    // startup.
+                    compute_job::experimental_set_thread_pool_size(
+                        configuration.experimental_worker_pool.size,
+                    );
+
                     new_state = Some(
                         Self::try_start(
                             state_machine,
@@ -184,6 +191,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 let (mut license_reload, mut schema_reload, mut configuration_reload) =
                     (false, false, false);
                 if let Some(new_configuration) = new_configuration {
+                    if configuration.experimental_worker_pool.size
+                        != new_configuration.experimental_worker_pool.size
+                    {
+                        tracing::warn!("Changing the `experimental_worker_pool.size` configuration requires a full restart to take effect.");
+                    }
+
                     *configuration = new_configuration;
                     configuration_reload = true;
                 }

@@ -189,6 +189,10 @@ pub struct Configuration {
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
+
+    /// Experimental configuration for the worker thread pool.
+    #[serde(default)]
+    pub(crate) experimental_worker_pool: WorkerPool,
 }
 
 impl PartialEq for Configuration {
@@ -254,6 +258,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_query_planner_mode: QueryPlannerMode,
+            experimental_worker_pool: WorkerPool,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -284,6 +289,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
+            experimental_worker_pool: ad_hoc.experimental_worker_pool,
 
             // serde(skip)
             notify,
@@ -327,6 +333,7 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
+        experimental_worker_pool: Option<WorkerPool>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
@@ -353,6 +360,7 @@ impl Configuration {
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            experimental_worker_pool: experimental_worker_pool.unwrap_or_default(),
             notify,
         };
 
@@ -475,6 +483,7 @@ impl Configuration {
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
+        experimental_worker_pool: Option<WorkerPool>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -500,6 +509,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             batching: batching.unwrap_or_default(),
+            experimental_worker_pool: experimental_worker_pool.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -1610,4 +1620,16 @@ impl Batching {
             None => false,
         }
     }
+}
+
+/// Experimental configuration for the worker thread pool.
+///
+/// Please note this configuration does **not** support hot reloading.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct WorkerPool {
+    /// Number of threads to use for compute-heavy work, such as GraphQL query validation and planning.
+    /// The default value is 0, which means to use the total available parallelism.
+    pub(crate) size: usize,
 }
