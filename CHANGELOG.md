@@ -4,6 +4,64 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.59.1] - 2025-01-08
+
+## 🐛 Fixes
+
+### Fix transmitted header value for Datadog priority sampling resolution ([PR #6017](https://github.com/apollographql/router/pull/6017))
+
+The router now transmits correct values of `x-datadog-sampling-priority` to downstream services.
+
+Previously, an `x-datadog-sampling-priority` of `-1` was incorrectly converted to `0` for downstream requests, and `2` was incorrectly converted to `1`. When propagating to downstream services, this resulted in values of `USER_REJECT` being incorrectly transmitted as `AUTO_REJECT`.
+
+### Enable accurate Datadog APM metrics ([PR #6017](https://github.com/apollographql/router/pull/6017))
+
+The router supports a new preview feature, the `preview_datadog_agent_sampling` option, to enable sending all spans to the Datadog Agent so APM metrics and views are accurate.
+
+Previously, the sampler option in `telemetry.exporters.tracing.common.sampler` wasn't Datadog-aware. To get accurate Datadog APM metrics, all spans must be sent to the Datadog Agent with a `psr` or `sampling.priority` attribute set appropriately to record the sampling decision.
+
+The `preview_datadog_agent_sampling` option enables accurate Datadog APM metrics. It should be used when exporting to the Datadog Agent, via OTLP or Datadog-native.
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        sampler: 0.1
+        # Send all spans to the Datadog agent.
+        preview_datadog_agent_sampling: true
+```
+
+Using these options can decrease your Datadog bill, because you will be sending only a percentage of spans from the Datadog Agent to Datadog.
+
+> [!IMPORTANT]
+> - Users must enable `preview_datadog_agent_sampling` to get accurate APM metrics. Users that have been using recent versions of the router will have to modify their configuration to retain full APM metrics.
+> - The router doesn't support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+> - Configuring `traces_per_second` in the Datadog Agent won't dynamically adjust the router's sampling rate to meet the target rate.
+> - Sending all spans to the Datadog Agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and Datadog native exporters.
+
+Learn more by reading the [updated Datadog tracing documentation](https://apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog) for more information on configuration options and their implications.
+
+### Fix non-parent sampling ([PR #6481](https://github.com/apollographql/router/pull/6481))
+
+When the user specifies a non-parent sampler the router should ignore the information from upstream and use its own sampling rate.
+
+The following configuration would not work correctly:
+
+```
+  exporters:
+    tracing:
+      common:
+        service_name: router
+        sampler: 0.00001
+        parent_based_sampler: false
+```
+All spans are being sampled.
+This is now fixed and the router will correctly ignore any upstream sampling decision.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6481
+
 # [1.59.0] - 2024-12-17
 
 > [!IMPORTANT]
