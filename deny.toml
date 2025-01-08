@@ -30,6 +30,7 @@ git-fetch-with-cli = true
 ignore = [
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0376", # we do not use tonic::transport::Server
+    "RUSTSEC-2024-0421", # DO NOT MERGE: already fixed in 1.59.0
 ]
 
 # This section is considered when running `cargo deny check licenses`
