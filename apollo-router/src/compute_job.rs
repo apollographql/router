@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::panic::UnwindSafe;
+use std::sync::atomic::AtomicUsize;
 use std::sync::OnceLock;
 
 use opentelemetry::metrics::MeterProvider as _;
@@ -14,13 +15,28 @@ use crate::metrics::meter_provider;
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
 const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
 
+static CONFIGURED_POOL_SIZE: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn experimental_set_thread_pool_size(size: usize) {
+    CONFIGURED_POOL_SIZE.store(size, std::sync::atomic::Ordering::Release);
+}
+
 /// Let this thread pool use all available resources if it can.
 /// In the worst case, we’ll have moderate context switching cost
 /// as the kernel’s scheduler distributes time to it or Tokio or other threads.
 fn thread_pool_size() -> usize {
-    std::thread::available_parallelism()
-        .expect("available_parallelism() failed")
-        .get()
+    let configured_size = CONFIGURED_POOL_SIZE.load(std::sync::atomic::Ordering::Acquire);
+    if configured_size == 0 {
+        std::thread::available_parallelism()
+            .expect("available_parallelism() failed")
+            .get()
+    } else {
+        tracing::info!(
+            configured_size = configured_size,
+            "starting worker pool with experimental custom size"
+        );
+        configured_size
+    }
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
