@@ -1,0 +1,33 @@
+# A valid router configuration with every incompatible
+# router feature turned on for testing warnings.
+
+apq:
+  subgraph:
+    subgraphs:
+      connectors:
+        enabled: true
+coprocessor:
+  url: http://127.0.0.1:8081
+  subgraph:
+    all:
+      request:
+        headers: true
+headers:
+  all:
+    request:
+      - propagate:
+          matching: ^upstream-header-.*
+      - remove:
+          named: "x-legacy-account-id"
+telemetry:
+  apollo:
+    errors:
+      subgraph:
+        all:
+          send: true
+          redact: false
+traffic_shaping:
+  subgraphs:
+    connectors:
+      deduplicate_query: false
+      compression: gzip

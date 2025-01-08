@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::CustomConfiguration;
+use itertools::Itertools as _;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -66,8 +68,15 @@ pub(crate) struct SourceConfiguration {
 }
 
 /// Modifies connectors with values from the configuration
-pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -> Connectors {
-    let Some(config) = config.apollo_plugins.plugins.get(PLUGIN_NAME) else {
+pub(crate) fn apply_config(
+    router_config: &Configuration,
+    mut connectors: Connectors,
+) -> Connectors {
+    // Enabling connectors might end up interfering with other router features, so we insert warnings
+    // into the logs for any incompatibilites found.
+    warn_incompatible_plugins(router_config, &connectors);
+
+    let Some(config) = router_config.apollo_plugins.plugins.get(PLUGIN_NAME) else {
         return connectors;
     };
     let Ok(config) = serde_json::from_value::<ConnectorsConfig>(config.clone()) else {
@@ -95,4 +104,103 @@ pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -
         connector.config = Some(subgraph_config.custom.clone());
     }
     connectors
+}
+
+/// Warn about possible incompatibilities with other router features / plugins.
+///
+/// Connectors do not currently work with some of the existing router
+/// features, so we need to inform the user when those features are
+/// detected as being enabled.
+fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
+    let connector_enabled_subgraphs: HashSet<&String> = connectors
+        .by_service_name
+        .values()
+        .map(|v| &v.id.subgraph_name)
+        .collect();
+
+    // If we don't have any connector-enabled subgraphs, then no need to warn
+    if connector_enabled_subgraphs.is_empty() {
+        return;
+    }
+
+    // Plugins tend to have a few forms of specifying which subgraph to target:
+    // - A catch-all `all`
+    // - By the subgraph's actual name under a `subgraphs` key
+    // In either case, the configuration will have a prefix which then ends in the
+    // target subgraph, so we keep track of all of those prefixes which aren't
+    // supported by connector-enabled subgraphs.
+    //
+    // TODO: Each of these config options come from a corresponding plugin which
+    // is identified by its name. These are currently hardcoded here, so it'd be
+    // nice to extract them from the plugins themselves...
+    let incompatible_prefixes = [
+        ("apq", ["subgraph"].as_slice()),
+        ("authentication", &["subgraph"]),
+        ("batching", &["subgraph"]),
+        ("coprocessor", &["subgraph"]),
+        ("headers", &[]),
+        (
+            "telemetry",
+            &["exporters", "metrics", "common", "attributes", "subgraph"],
+        ),
+        ("preview_entity_cache", &["subgraph"]),
+        ("telemetry", &["apollo", "errors", "subgraph"]),
+        ("traffic_shaping", &[]),
+    ];
+
+    for (plugin_name, prefix) in incompatible_prefixes {
+        // Plugin configuration is only populated if the user has specified it,
+        // so we can skip any that are missing.
+        let Some(plugin_config) = config.apollo_plugins.plugins.get(plugin_name) else {
+            continue;
+        };
+
+        // Drill into the prefix
+        let Some(prefixed_config) = prefix
+            .iter()
+            .try_fold(plugin_config, |acc, next| acc.get(next))
+        else {
+            continue;
+        };
+
+        // Check if any of the connector enabled subgraphs are targeted
+        let incompatible_subgraphs = if prefixed_config.get("all").is_some() {
+            // If all is configured, then all connector-enabled subgraphs are affected.
+            &connector_enabled_subgraphs
+        } else if let Some(subgraphs) = prefixed_config.get("subgraphs") {
+            // Otherwise, we'll need to do a set intersection between the list of connector-enabled
+            // subgraphs and configured subgraphs to see which, if any, are affected.
+            let configured = subgraphs
+                .as_object()
+                .map(|o| o.keys().collect())
+                .unwrap_or(HashSet::new());
+
+            &configured
+                .intersection(&connector_enabled_subgraphs)
+                .copied()
+                .collect()
+        } else {
+            &HashSet::new()
+        };
+
+        if !incompatible_subgraphs.is_empty() {
+            tracing::warn!(
+                subgraphs = incompatible_subgraphs.iter().join(","),
+                "plugin `{plugin_name}` is enabled for connector-enabled subgraphs, which is not yet supported. See https://go.apollo.dev/INSERT_DOCS_LINK for more info"
+            );
+        }
+    }
+
+    // Lastly, there are a few plugins which influence all subgraphs, regardless
+    // of configuration, so we warn about these statically here if we have
+    // any connector-enabled subgraphs.
+    let incompatible_plugins = ["demand_control", "rhai"];
+    for plugin in incompatible_plugins {
+        if config.apollo_plugins.plugins.get(plugin).is_some() {
+            tracing::warn!(
+                subgraphs = connector_enabled_subgraphs.iter().join(","),
+                "plugin `{plugin}` is enabled for connector-enabled subgraphs, which is not yet supported. See https://go.apollo.dev/INSERT_DOCS_LINK for more info"
+            );
+        }
+    }
 }
