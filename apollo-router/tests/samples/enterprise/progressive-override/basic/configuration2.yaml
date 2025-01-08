@@ -7,8 +7,6 @@ telemetry:
       stdout:
         format: text
 
-experimental_query_planner_mode: legacy
-
 rhai:
   scripts: "tests/samples/enterprise/progressive-override/basic/rhai"
   main: "main.rhai"

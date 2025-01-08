@@ -58,7 +58,7 @@ impl<'a> ExtensionsGuard<'a> {
     }
 }
 
-impl<'a> Deref for ExtensionsGuard<'a> {
+impl Deref for ExtensionsGuard<'_> {
     type Target = super::Extensions;
 
     fn deref(&self) -> &super::Extensions {

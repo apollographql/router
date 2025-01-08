@@ -193,7 +193,7 @@ impl<T> From<WithErrors<T>> for DemandControlError {
     }
 }
 
-impl<'a> From<FieldLookupError<'a>> for DemandControlError {
+impl From<FieldLookupError<'_>> for DemandControlError {
     fn from(value: FieldLookupError) -> Self {
         match value {
             FieldLookupError::NoSuchType => DemandControlError::QueryParseFailure(

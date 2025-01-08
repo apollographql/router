@@ -871,9 +871,12 @@ pub(crate) async fn process_batch(
     let client = client_factory.create(&service);
 
     // Update our batching metrics (just before we fetch)
-    tracing::info!(histogram.apollo.router.operations.batching.size = listener_count as f64,
-        mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
-        subgraph = &service
+    u64_histogram!(
+        "apollo.router.operations.batching.size",
+        "Number of queries contained within each query batch",
+        listener_count as u64,
+        mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
+        subgraph = service.clone()
     );
 
     u64_counter!(
@@ -1939,7 +1942,7 @@ mod tests {
                             .unwrap());
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -1950,7 +1953,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -1996,7 +1999,7 @@ mod tests {
                             .unwrap());
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2007,7 +2010,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -2038,7 +2041,7 @@ mod tests {
                     }
 
                     if request.query.is_none() {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2053,9 +2056,9 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     } else {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2066,7 +2069,7 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     }
                 }
                 Err(_) => {
@@ -2098,7 +2101,7 @@ mod tests {
                     }
 
                     if request.query.is_none() {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2113,9 +2116,9 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     } else {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2126,7 +2129,7 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     }
                 }
                 Err(_) => {
@@ -2157,7 +2160,7 @@ mod tests {
                         panic!("persistedQuery expected when configuration has apq_enabled=true")
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2168,7 +2171,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -2200,7 +2203,7 @@ mod tests {
                         )
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2211,7 +2214,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")

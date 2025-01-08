@@ -1,0 +1,27 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+expression: stream.next_response().await.unwrap()
+snapshot_kind: text
+---
+{
+  "data": {
+    "computer": {
+      "id": "Computer1"
+    }
+  },
+  "errors": [
+    {
+      "message": "Subgraph error with invalid path",
+      "extensions": {
+        "service": "computers"
+      }
+    },
+    {
+      "message": "Subgraph error with partially valid path",
+      "extensions": {
+        "service": "computers"
+      }
+    }
+  ],
+  "hasNext": true
+}

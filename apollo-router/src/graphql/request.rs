@@ -197,9 +197,11 @@ impl Request {
         let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            u64_histogram!(
+                "apollo.router.operations.batching.size",
+                "Number of queries contained within each query batch",
+                result.len() as u64,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
             u64_counter!(
@@ -226,9 +228,11 @@ impl Request {
         let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = "batch_http_link" // Only supported mode right now
+            u64_histogram!(
+                "apollo.router.operations.batching.size",
+                "Number of queries contained within each query batch",
+                result.len() as u64,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
             u64_counter!(
@@ -307,7 +311,7 @@ fn get_from_urlencoded_value<'a, T: Deserialize<'a>>(
 
 struct RequestFromBytesSeed<'data>(&'data Bytes);
 
-impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
+impl<'de> DeserializeSeed<'de> for RequestFromBytesSeed<'_> {
     type Value = Request;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -329,7 +333,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
 
         struct RequestVisitor<'data>(&'data Bytes);
 
-        impl<'data, 'de> serde::de::Visitor<'de> for RequestVisitor<'data> {
+        impl<'de> serde::de::Visitor<'de> for RequestVisitor<'_> {
             type Value = Request;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

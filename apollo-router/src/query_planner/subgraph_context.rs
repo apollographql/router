@@ -229,7 +229,7 @@ pub(crate) fn build_operation_with_aliasing(
 
         return ed
             .validate(subgraph_schema)
-            .map_err(ContextBatchingError::InvalidDocumentGenerated);
+            .map_err(|e| ContextBatchingError::InvalidDocumentGenerated(Box::new(e)));
     }
     Err(ContextBatchingError::NoSelectionSet)
 }
@@ -348,7 +348,7 @@ fn transform_field_arguments(
 pub(crate) enum ContextBatchingError {
     NoSelectionSet,
     // The only use of the field is in `Debug`, on purpose.
-    InvalidDocumentGenerated(#[allow(unused)] WithErrors<ExecutableDocument>),
+    InvalidDocumentGenerated(#[allow(unused)] Box<WithErrors<ExecutableDocument>>),
     InvalidRelativePath,
     UnexpectedSelection,
 }

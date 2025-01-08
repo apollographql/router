@@ -26,7 +26,7 @@ impl Serialize for FieldType {
     {
         struct BorrowedFieldType<'a>(&'a schema::Type);
 
-        impl<'a> Serialize for BorrowedFieldType<'a> {
+        impl Serialize for BorrowedFieldType<'_> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: serde::Serializer,

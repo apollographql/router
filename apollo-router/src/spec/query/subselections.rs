@@ -47,7 +47,7 @@ impl<'de> Deserialize<'de> for SubSelectionKey {
 }
 
 struct SubSelectionKeyVisitor;
-impl<'de> Visitor<'de> for SubSelectionKeyVisitor {
+impl Visitor<'_> for SubSelectionKeyVisitor {
     type Value = SubSelectionKey;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

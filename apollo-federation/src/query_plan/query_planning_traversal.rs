@@ -371,7 +371,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             }
         }
         self.compute_best_plan_from_closed_branches()?;
-        return Ok(self.best_plan.as_ref());
+        Ok(self.best_plan.as_ref())
     }
 
     /// Returns whether to terminate planning immediately, and any new open branches to push onto
@@ -1201,7 +1201,7 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
 //            The same would be infeasible to implement in Rust due to the cyclic references.
 //            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
-impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
+impl ConditionResolver for QueryPlanningTraversal<'_, '_> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
     #[track_caller]
     fn resolve(

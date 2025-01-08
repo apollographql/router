@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -7,7 +9,6 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -543,14 +544,10 @@ impl SpecDefinition for FederationSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        None
-    }
 }
 
-lazy_static! {
-    pub(crate) static ref FEDERATION_VERSIONS: SpecDefinitions<FederationSpecDefinition> = {
+pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::federation_identity());
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
@@ -593,8 +590,7 @@ lazy_static! {
             minor: 9,
         }));
         definitions
-    };
-}
+    });
 
 pub(crate) fn get_federation_spec_definition_from_subgraph(
     schema: &FederationSchema,

@@ -18,16 +18,17 @@ The **Apollo Router Core** is a configurable, high-performance **graph router** 
 
 ## Development
 
-You will need a recent version of rust (`1.72` works well as of writing).
+You will need a recent version of rust (`1.83.0` works well as of writing).
 Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
-the recommended way to do it as it will install rustup, rustfmt and other
-goodies that are not always included by default in other rust distribution channels:
+the recommended way to do it as it will automatically install the toolchain version
+specified in `rust-toolchain.toml`, including rustfmt and clippy
+that are not always included by default in other rust distribution channels:
 
 ```
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/) and [cmake](https://cmake.org/).
+In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
 
 Set up your git hooks:
 
@@ -98,7 +99,7 @@ You have to build the router with your choice of feature flags and you must use 
 e.g.: heap and ad-hoc allocation tracing
 
 ```shell
-# e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
+cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
 ```
 
 e.g.: heap allocation tracing
@@ -107,10 +108,13 @@ e.g.: heap allocation tracing
 cargo build --profile release-dhat --features dhat-heap 
 ```
 
-This will create a router in `./target/release-dhat`.
+This will create a router in `./target/release-dhat`, which can be run with:
+```shell
+cargo run --profile release-dhat --feautures dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
+```
 
 When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can
-be examined using standard DHAT tooling.
+be examined using standard DHAT tooling, e.g. [DHAT html viewer](https://nnethercote.github.io/dh_view/dh_view.html)
 
 For more details on interpreting these files and running tests, see the [dhat-rs](https://docs.rs/dhat/latest/dhat/#running) crate documentation.
 

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -8,7 +9,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -19,7 +19,6 @@ use strum::IntoEnumIterator;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
@@ -2357,11 +2356,18 @@ fn resolvable_key_applications<'doc>(
     Ok(applications)
 }
 
-lazy_static! {
-    static ref CONTEXT_PARSING_LEADING_PATTERN: Regex =
-        Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap();
-    static ref CONTEXT_PARSING_CONTEXT_PATTERN: Regex =
-        Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap();
+static CONTEXT_PARSING_LEADING_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap());
+
+static CONTEXT_PARSING_CONTEXT_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap());
+
+fn context_parse_error(context: &str, message: &str) -> FederationError {
+    SingleFederationError::FromContextParseError {
+        context: context.to_string(),
+        message: message.to_string(),
+    }
+    .into()
 }
 
 fn parse_context(field: &str) -> Result<(String, String), FederationError> {
@@ -2380,15 +2386,16 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
         iter_into_single_item(CONTEXT_PARSING_LEADING_PATTERN.captures_iter(input))
             .and_then(|c| c.get(1))
             .map(|m| m.as_str())
-            .ok_or_else(|| {
-                internal_error!(r#"Failed to skip any leading ignored tokens in @fromContext substring "{input}""#)
-            })
+            .ok_or_else(|| context_parse_error(input, "Failed to skip any leading ignored tokens"))
     }
 
     let dollar_start = strip_leading_ignored_tokens(field)?;
     let mut dollar_iter = dollar_start.chars();
     if dollar_iter.next() != Some('$') {
-        bail!(r#"Failed to find leading "$" in @fromContext substring "{dollar_start}""#);
+        return Err(context_parse_error(
+            dollar_start,
+            r#"Failed to find leading "$""#,
+        ));
     }
     let after_dollar = dollar_iter.as_str();
 
@@ -2396,26 +2403,29 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     let Some(context_captures) =
         iter_into_single_item(CONTEXT_PARSING_CONTEXT_PATTERN.captures_iter(context_start))
     else {
-        bail!(
-            r#"Failed to find context name token and selection in @fromContext substring "{context_start}""#
-        );
+        return Err(context_parse_error(
+            dollar_start,
+            "Failed to find context name token and selection",
+        ));
     };
 
     let context = match context_captures.get(1).map(|m| m.as_str()) {
         Some(context) if !context.is_empty() => context,
         _ => {
-            bail!(
-                r#"Expected to find non-empty context name in @fromContext substring "{context_start}""#
-            );
+            return Err(context_parse_error(
+                context_start,
+                "Expected to find non-empty context name",
+            ));
         }
     };
 
     let selection = match context_captures.get(2).map(|m| m.as_str()) {
         Some(selection) if !selection.is_empty() => selection,
         _ => {
-            bail!(
-                r#"Expected to find non-empty selection in @fromContext substring "{context_start}""#
-            );
+            return Err(context_parse_error(
+                context_start,
+                "Expected to find non-empty selection",
+            ));
         }
     };
 

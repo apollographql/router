@@ -19,7 +19,6 @@ use crate::uplink::UplinkResponse;
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
 )]
-
 pub(crate) struct PersistedQueriesManifestQuery;
 
 impl From<UplinkRequest> for persisted_queries_manifest_query::Variables {

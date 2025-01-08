@@ -138,12 +138,12 @@ impl OwnedSelectionKey {
     }
 }
 
+#[cfg(test)]
 impl<'a> SelectionKey<'a> {
     /// Create a selection key for a specific field name.
     ///
     /// This is available for tests only as selection keys should not normally be created outside of
     /// `HasSelectionKey::key`.
-    #[cfg(test)]
     pub(crate) fn field_name(name: &'a Name) -> Self {
         static EMPTY_LIST: DirectiveList = DirectiveList::new();
         SelectionKey::Field {

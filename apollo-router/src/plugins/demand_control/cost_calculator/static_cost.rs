@@ -561,7 +561,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
     }
 }
 
-impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
+impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
@@ -629,7 +629,6 @@ mod tests {
     use ahash::HashMapExt;
     use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
-    use router_bridge::planner::PlanOptions;
     use test_log::test;
     use tower::Service;
 
@@ -638,6 +637,7 @@ mod tests {
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::query_planner::PlanOptions;
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::spec;
@@ -725,8 +725,6 @@ mod tests {
         let mut planner = BridgeQueryPlanner::new(
             schema.into(),
             config.clone(),
-            None,
-            None,
             Arc::new(IntrospectionCache::new(&config)),
         )
         .await
@@ -1144,5 +1142,16 @@ mod tests {
         "#;
 
         assert_eq!(estimated_cost(schema, query, variables), 1.0);
+    }
+
+    #[test(tokio::test)]
+    async fn subscription_request() {
+        let schema = include_str!("./fixtures/subscription_schema.graphql");
+        let query = include_str!("./fixtures/subscription_query.graphql");
+        let variables = "{}";
+
+        assert_eq!(estimated_cost(schema, query, variables), 1.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 1.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 1.0);
     }
 }

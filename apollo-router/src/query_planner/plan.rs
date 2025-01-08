@@ -3,14 +3,13 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
-use router_bridge::planner::PlanOptions;
-use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::cache::estimate_size;
 use crate::configuration::Batching;
 use crate::error::CacheResolverError;
@@ -21,6 +20,7 @@ use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
+use crate::services::query_planner::PlanOptions;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
 
@@ -354,7 +354,8 @@ impl PlanNode {
                     }
                 }
             }
-            PlanNode::Subscription { primary: _, rest } => {
+            PlanNode::Subscription { primary, rest } => {
+                primary.init_parsed_operation(subgraph_schemas)?;
                 if let Some(node) = rest.as_mut() {
                     node.init_parsed_operations(subgraph_schemas)?;
                 }

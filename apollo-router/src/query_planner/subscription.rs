@@ -12,10 +12,12 @@ use tower::ServiceExt;
 use tracing_futures::Instrument;
 
 use super::execution::ExecutionParameters;
+use super::fetch::SubgraphSchemas;
 use super::fetch::Variables;
 use super::rewrites;
 use super::OperationKind;
 use crate::error::FetchError;
+use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -85,7 +87,7 @@ impl SubscriptionNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: tokio::sync::mpsc::Sender<Response>,
-    ) -> future::BoxFuture<Vec<Error>> {
+    ) -> future::BoxFuture<'a, Vec<Error>> {
         if parameters.subscription_handle.is_none() {
             tracing::error!("No subscription handle provided for a subscription");
             return Box::pin(async {
@@ -271,5 +273,14 @@ impl SubscriptionNode {
             .into_parts();
 
         Ok(response.errors)
+    }
+
+    pub(crate) fn init_parsed_operation(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+    ) -> Result<(), ValidationErrors> {
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
+        self.operation.init_parsed(schema)?;
+        Ok(())
     }
 }

@@ -19,7 +19,6 @@ use crate::uplink::UplinkResponse;
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
 )]
-
 pub(crate) struct SupergraphSdlQuery;
 
 impl From<UplinkRequest> for supergraph_sdl_query::Variables {

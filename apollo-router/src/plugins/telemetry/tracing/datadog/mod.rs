@@ -162,7 +162,7 @@ impl TracingConfigurator for Config {
                             return value.as_str();
                         }
                     }
-                    return span.name.as_ref();
+                    span.name.as_ref()
                 })
             })
             .with_name_mapping(move |span, _model_config| {

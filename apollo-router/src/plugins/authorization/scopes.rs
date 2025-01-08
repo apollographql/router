@@ -122,7 +122,7 @@ fn scopes_argument(
         .filter_map(|value| value.as_str().map(str::to_owned))
 }
 
-impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
+impl traverse::Visitor for ScopeExtractionVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_scopes.extend(scopes_argument(
@@ -418,7 +418,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
+impl transform::Visitor for ScopeFilteringVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -767,7 +767,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,

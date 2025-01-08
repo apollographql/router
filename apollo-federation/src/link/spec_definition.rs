@@ -17,7 +17,6 @@ use crate::schema::FederationSchema;
 
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
-    fn minimum_federation_version(&self) -> Option<&Version>;
 
     fn identity(&self) -> &Identity {
         &self.url().identity
@@ -25,23 +24,6 @@ pub(crate) trait SpecDefinition {
 
     fn version(&self) -> &Version {
         &self.url().version
-    }
-
-    fn is_spec_directive_name(
-        &self,
-        schema: &FederationSchema,
-        name_in_schema: &Name,
-    ) -> Result<bool, FederationError> {
-        let Some(metadata) = schema.metadata() else {
-            return Err(SingleFederationError::Internal {
-                message: "Schema is not a core schema (add @link first)".to_owned(),
-            }
-            .into());
-        };
-        Ok(metadata
-            .source_link_of_directive(name_in_schema)
-            .map(|e| e.link.url.identity == *self.identity())
-            .unwrap_or(false))
     }
 
     fn is_spec_type_name(

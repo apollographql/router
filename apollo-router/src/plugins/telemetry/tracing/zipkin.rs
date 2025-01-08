@@ -1,6 +1,7 @@
 //! Configuration for zipkin tracing.
+use std::sync::LazyLock;
+
 use http::Uri;
-use lazy_static::lazy_static;
 use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
@@ -17,9 +18,8 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
-lazy_static! {
-    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:9411/api/v2/spans");
-}
+static DEFAULT_ENDPOINT: LazyLock<Uri> =
+    LazyLock::new(|| Uri::from_static("http://127.0.0.1:9411/api/v2/spans"));
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]

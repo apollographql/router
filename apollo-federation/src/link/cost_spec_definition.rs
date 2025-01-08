@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
@@ -10,7 +11,6 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::internal_error;
@@ -37,7 +37,6 @@ const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
 #[derive(Clone)]
 pub struct CostSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
 }
 
 macro_rules! propagate_demand_control_directives {
@@ -109,13 +108,12 @@ macro_rules! propagate_demand_control_directives_to_position {
 }
 
 impl CostSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::cost_identity(),
                 version,
             },
-            minimum_federation_version,
         }
     }
 
@@ -242,22 +240,14 @@ impl SpecDefinition for CostSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
-    }
 }
 
-lazy_static! {
-    pub(crate) static ref COST_VERSIONS: SpecDefinitions<CostSpecDefinition> = {
+pub(crate) static COST_VERSIONS: LazyLock<SpecDefinitions<CostSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::cost_identity());
-        definitions.add(CostSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-            Some(Version { major: 2, minor: 9 }),
-        ));
+        definitions.add(CostSpecDefinition::new(Version { major: 0, minor: 1 }));
         definitions
-    };
-}
+    });
 
 pub struct CostDirective {
     weight: i32,
