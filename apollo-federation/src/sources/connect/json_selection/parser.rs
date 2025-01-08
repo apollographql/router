@@ -1191,38 +1191,31 @@ impl Ranged<MethodArgs> for MethodArgs {
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
     fn parse(input: Span) -> ParseResult<Self> {
-        tuple((
-            spaces_or_comments,
-            ranged_span("("),
-            spaces_or_comments,
-            opt(map(
-                tuple((
-                    LitExpr::parse,
-                    many0(preceded(
-                        tuple((spaces_or_comments, char(','))),
-                        LitExpr::parse,
-                    )),
-                    opt(tuple((spaces_or_comments, char(',')))),
-                )),
-                |(first, rest, _trailing_comma)| {
-                    let mut output = vec![first];
-                    output.extend(rest);
-                    output
-                },
-            )),
-            spaces_or_comments,
-            ranged_span(")"),
-        ))(input)
-        .map(|(remainder, (_, open_paren, _, args, _, close_paren))| {
-            let range = merge_ranges(open_paren.range(), close_paren.range());
-            (
-                remainder,
-                Self {
-                    args: args.unwrap_or_default(),
-                    range,
-                },
-            )
-        })
+        let input = spaces_or_comments(input)?.0;
+        let (mut input, open_paren) = ranged_span("(")(input)?;
+        input = spaces_or_comments(input)?.0;
+
+        let mut args = Vec::new();
+        if let Ok((remainder, first)) = LitExpr::parse(input) {
+            args.push(first);
+            input = remainder;
+
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+                input = spaces_or_comments(remainder)?.0;
+                if let Ok((remainder, arg)) = LitExpr::parse(input) {
+                    args.push(arg);
+                    input = remainder;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        input = spaces_or_comments(input)?.0;
+        let (input, close_paren) = ranged_span(")")(input)?;
+
+        let range = merge_ranges(open_paren.range(), close_paren.range());
+        Ok((input, Self { args, range }))
     }
 }
 
