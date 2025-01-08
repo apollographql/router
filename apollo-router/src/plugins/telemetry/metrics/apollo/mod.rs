@@ -192,6 +192,7 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::subscription;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::default_buffer_size;
@@ -364,7 +365,7 @@ mod test {
                 request_builder.header("accept", "multipart/mixed;subscriptionSpec=1.0");
         }
         TestHarness::builder()
-            .extra_plugin(plugin)
+            .extra_private_plugin(plugin)
             .extra_plugin(create_subscription_plugin().await?)
             .build_router()
             .await?
@@ -421,7 +422,7 @@ mod test {
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
-        subscription::Subscription::new(PluginInit::fake_new(
+        <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
         ))

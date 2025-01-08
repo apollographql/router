@@ -14,6 +14,8 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper::server::conn::Http;
 use multimap::MultiMap;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::KeyValue;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -26,12 +28,28 @@ use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
+use crate::metrics::meter_provider;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
 
-static SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+static TOTAL_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
+
+struct TotalSessionCountGuard;
+
+impl TotalSessionCountGuard {
+    fn start() -> Self {
+        TOTAL_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
+        Self
+    }
+}
+
+impl Drop for TotalSessionCountGuard {
+    fn drop(&mut self) {
+        TOTAL_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
@@ -202,6 +220,7 @@ pub(super) fn serve_router_on_listen_addr(
     address: ListenAddr,
     router: axum::Router,
     main_graphql_port: bool,
+    http_config: Http,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -213,9 +232,19 @@ pub(super) fn serve_router_on_listen_addr(
     let server = async move {
         tokio::pin!(shutdown_receiver);
 
-        let connection_shutdown = Arc::new(Notify::new());
+        let _total_session_count_instrument = meter_provider()
+            .meter("apollo/router")
+            .u64_observable_gauge("apollo_router_session_count_total")
+            .with_description("Number of currently connected clients")
+            .with_callback(move |gauge| {
+                gauge.observe(
+                    TOTAL_SESSION_COUNT.load(Ordering::Relaxed),
+                    &[KeyValue::new("listener", address.to_string())],
+                );
+            })
+            .init();
 
-        let address = address.to_string();
+        let connection_shutdown = Arc::new(Notify::new());
 
         loop {
             tokio::select! {
@@ -233,16 +262,11 @@ pub(super) fn serve_router_on_listen_addr(
                                 tracing::info!("can accept connections again");
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
-                            // We only want to recognise sessions if we are the main graphql port.
-                            if main_graphql_port {
-                                let session_count = SESSION_COUNT.fetch_add(1, Ordering::Acquire)+1;
-                                tracing::info!(
-                                    value.apollo_router_session_count_total = session_count,
-                                    listener = &address
-                                );
-                            }
 
-                            let address = address.clone();
+                            // We only want to recognise sessions if we are the main graphql port.
+                            let _guard = main_graphql_port.then(TotalSessionCountGuard::start);
+
+                            let mut http_config = http_config.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
@@ -261,11 +285,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
-                                            let connection = Http::new()
-                                            .http1_keep_alive(true)
-                                            .http1_header_read_timeout(Duration::from_secs(10))
-                                            .serve_connection(stream, app);
 
+                                        let connection = http_config.serve_connection(stream, app);
                                         tokio::pin!(connection);
                                         tokio::select! {
                                             // the connection finished first
@@ -291,9 +312,7 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
-                                        let connection = Http::new()
-                                        .http1_keep_alive(true)
-                                        .serve_connection(stream, app);
+                                        let connection = http_config.serve_connection(stream, app);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -329,9 +348,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             let protocol = stream.get_ref().1.alpn_protocol();
                                             let http2 = protocol == Some(&b"h2"[..]);
 
-                                            let connection = Http::new()
-                                            .http1_keep_alive(true)
-                                            .http1_header_read_timeout(Duration::from_secs(10))
+                                        let connection = http_config
                                             .http2_only(http2)
                                             .serve_connection(stream, app);
 
@@ -356,15 +373,6 @@ pub(super) fn serve_router_on_listen_addr(
                                             }
                                         }
                                     }
-                                }
-
-                                // We only want to recognise sessions if we are the main graphql port.
-                                if main_graphql_port {
-                                    let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Acquire)-1;
-                                    tracing::info!(
-                                        value.apollo_router_session_count_total = session_count,
-                                        listener = &address
-                                    );
                                 }
                             });
                         }

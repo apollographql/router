@@ -14,6 +14,9 @@ use std::process::ExitCode;
 use libtest_mimic::Arguments;
 use libtest_mimic::Failed;
 use libtest_mimic::Trial;
+use mediatype::MediaTypeList;
+use mediatype::ReadParams;
+use multer::Multipart;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -27,6 +30,8 @@ use wiremock::ResponseTemplate;
 #[path = "./common.rs"]
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
+
+use crate::common::Query;
 
 fn main() -> Result<ExitCode, Box<dyn Error>> {
     let args = Arguments::from_args();
@@ -53,7 +58,7 @@ fn lookup_dir(
                 path.file_name().unwrap().to_str().unwrap()
             );
 
-            if path.join("plan.json").exists() {
+            let plan: Option<Plan> = if path.join("plan.json").exists() {
                 let mut file = File::open(path.join("plan.json")).map_err(|e| {
                     format!(
                         "could not open file at path '{:?}': {e}",
@@ -68,8 +73,8 @@ fn lookup_dir(
                     )
                 })?;
 
-                let plan: Plan = match serde_json::from_str(&s) {
-                    Ok(data) => data,
+                match serde_json::from_str(&s) {
+                    Ok(data) => Some(data),
                     Err(e) => {
                         return Err(format!(
                             "could not deserialize test plan at {}: {e}",
@@ -77,8 +82,37 @@ fn lookup_dir(
                         )
                         .into());
                     }
-                };
+                }
+            } else if path.join("plan.yaml").exists() {
+                let mut file = File::open(path.join("plan.yaml")).map_err(|e| {
+                    format!(
+                        "could not open file at path '{:?}': {e}",
+                        &path.join("plan.yaml")
+                    )
+                })?;
+                let mut s = String::new();
+                file.read_to_string(&mut s).map_err(|e| {
+                    format!(
+                        "could not read file at path: '{:?}': {e}",
+                        &path.join("plan.yaml")
+                    )
+                })?;
 
+                match serde_yaml::from_str(&s) {
+                    Ok(data) => Some(data),
+                    Err(e) => {
+                        return Err(format!(
+                            "could not deserialize test plan at {}: {e}",
+                            path.display()
+                        )
+                        .into());
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Some(plan) = plan {
                 if plan.enterprise
                     && !(std::env::var("TEST_APOLLO_KEY").is_ok()
                         && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok())
@@ -169,16 +203,20 @@ impl TestExecution {
                     .await
             }
             Action::Request {
+                description,
                 request,
                 query_path,
                 headers,
                 expected_response,
+                expected_headers,
             } => {
                 self.request(
+                    description.clone(),
                     request.clone(),
                     query_path.as_deref(),
                     headers,
                     expected_response,
+                    expected_headers,
                     path,
                     out,
                 )
@@ -231,6 +269,22 @@ impl TestExecution {
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
+        if let Some(requests) = self
+            .subgraphs_server
+            .as_ref()
+            .unwrap()
+            .received_requests()
+            .await
+        {
+            writeln!(out, "Will reload config, subgraphs received requests:").unwrap();
+            for request in requests {
+                writeln!(out, "\tmethod: {}", request.method).unwrap();
+                writeln!(out, "\tpath: {}", request.url).unwrap();
+                writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
+            }
+        } else {
+            writeln!(out, "subgraphs received no requests").unwrap();
+        }
         let mut subgraphs_server = match self.subgraphs_server.take() {
             Some(subgraphs_server) => subgraphs_server,
             None => self.start_subgraphs(out).await.0,
@@ -405,12 +459,15 @@ impl TestExecution {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn request(
         &mut self,
+        description: Option<String>,
         mut request: Value,
         query_path: Option<&str>,
         headers: &HashMap<String, String>,
         expected_response: &Value,
+        expected_headers: &HashMap<String, String>,
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
@@ -433,38 +490,122 @@ impl TestExecution {
             }
         }
 
+        writeln!(out).unwrap();
+        if let Some(description) = description {
+            writeln!(out, "description: {description}").unwrap();
+        }
+
         writeln!(out, "query: {}\n", serde_json::to_string(&request).unwrap()).unwrap();
+        writeln!(out, "header: {:?}\n", headers).unwrap();
+
         let (_, response) = router
-            .execute_query_with_headers(&request, headers.clone())
+            .execute_query(
+                Query::builder()
+                    .body(request)
+                    .headers(headers.clone())
+                    .build(),
+            )
             .await;
-        let body = response.bytes().await.map_err(|e| {
-            writeln!(out, "could not get graphql response data: {e}").unwrap();
+        writeln!(out, "response headers: {:?}", response.headers()).unwrap();
+
+        let mut failed = false;
+        for (key, value) in expected_headers {
+            if !response.headers().contains_key(key) {
+                failed = true;
+                writeln!(out, "expected header {} to be present", key).unwrap();
+            } else if response.headers().get(key).unwrap() != value {
+                failed = true;
+                writeln!(
+                    out,
+                    "expected header {} to be {}, got {:?}",
+                    key,
+                    value,
+                    response.headers().get(key).unwrap()
+                )
+                .unwrap();
+            }
+        }
+        if failed {
+            self.print_received_requests(out).await;
             let f: Failed = out.clone().into();
-            f
-        })?;
-        let graphql_response: Value = serde_json::from_slice(&body).map_err(|e| {
-            writeln!(out, "could not deserialize graphql response data: {e}").unwrap();
-            let f: Failed = out.clone().into();
-            f
-        })?;
+            return Err(f);
+        }
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let mut is_multipart = false;
+        let mut boundary = None;
+        for mime in MediaTypeList::new(content_type).flatten() {
+            if mime.ty == mediatype::names::MULTIPART && mime.subty == mediatype::names::MIXED {
+                is_multipart = true;
+                boundary = mime.get_param(mediatype::names::BOUNDARY).map(|v| {
+                    // multer does not strip quotes from the boundary: https://github.com/rwf2/multer/issues/64
+                    let mut s = v.as_str();
+                    if s.starts_with('\"') && s.ends_with('\"') {
+                        s = &s[1..s.len() - 1];
+                    }
+
+                    s.to_string()
+                });
+            }
+        }
+
+        let graphql_response: Value = if !is_multipart {
+            let body = response.bytes().await.map_err(|e| {
+                writeln!(out, "could not get graphql response data: {e}").unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })?;
+            serde_json::from_slice(&body).map_err(|e| {
+                writeln!(
+                    out,
+                    "could not deserialize graphql response data: {e}\nfrom:\n{}",
+                    std::str::from_utf8(&body).unwrap()
+                )
+                .unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })?
+        } else {
+            let mut chunks = Vec::new();
+
+            let mut multipart = Multipart::new(response.bytes_stream(), boundary.unwrap());
+
+            // Iterate over the fields, use `next_field()` to get the next field.
+            while let Some(mut field) = multipart.next_field().await.map_err(|e| {
+                writeln!(out, "could not get next field from multipart body: {e}",).unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })? {
+                while let Some(chunk) = field.chunk().await.map_err(|e| {
+                    writeln!(out, "could not get next chunk from multipart body: {e}",).unwrap();
+                    let f: Failed = out.clone().into();
+                    f
+                })? {
+                    writeln!(out, "multipart chunk: {:?}\n", std::str::from_utf8(&chunk)).unwrap();
+
+                    let parsed: Value = serde_json::from_slice(&chunk).map_err(|e| {
+                        writeln!(
+                            out,
+                            "could not deserialize graphql response data: {e}\nfrom:\n{}",
+                            std::str::from_utf8(&chunk).unwrap()
+                        )
+                        .unwrap();
+                        let f: Failed = out.clone().into();
+                        f
+                    })?;
+                    chunks.push(parsed);
+                }
+            }
+            Value::Array(chunks)
+        };
 
         if expected_response != &graphql_response {
-            if let Some(requests) = self
-                .subgraphs_server
-                .as_ref()
-                .unwrap()
-                .received_requests()
-                .await
-            {
-                writeln!(out, "subgraphs received requests:").unwrap();
-                for request in requests {
-                    writeln!(out, "\tmethod: {}", request.method).unwrap();
-                    writeln!(out, "\tpath: {}", request.url).unwrap();
-                    writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
-                }
-            } else {
-                writeln!(out, "subgraphs received no requests").unwrap();
-            }
+            self.print_received_requests(out).await;
 
             writeln!(out, "assertion `left == right` failed").unwrap();
             writeln!(
@@ -483,6 +624,25 @@ impl TestExecution {
         }
 
         Ok(())
+    }
+
+    async fn print_received_requests(&mut self, out: &mut String) {
+        if let Some(requests) = self
+            .subgraphs_server
+            .as_ref()
+            .unwrap()
+            .received_requests()
+            .await
+        {
+            writeln!(out, "subgraphs received requests:").unwrap();
+            for request in requests {
+                writeln!(out, "\tmethod: {}", request.method).unwrap();
+                writeln!(out, "\tpath: {}", request.url).unwrap();
+                writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
+            }
+        } else {
+            writeln!(out, "subgraphs received no requests").unwrap();
+        }
     }
 
     async fn endpoint_request(
@@ -549,6 +709,7 @@ fn check_path(path: &Path, out: &mut String) -> Result<(), Failed> {
 
 #[derive(Deserialize)]
 #[allow(dead_code)]
+#[serde(deny_unknown_fields)]
 struct Plan {
     #[serde(default)]
     enterprise: bool,
@@ -558,7 +719,7 @@ struct Plan {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", deny_unknown_fields)]
 enum Action {
     Start {
         schema_path: String,
@@ -578,11 +739,14 @@ enum Action {
         update_url_overrides: bool,
     },
     Request {
+        description: Option<String>,
         request: Value,
         query_path: Option<String>,
         #[serde(default)]
         headers: HashMap<String, String>,
         expected_response: Value,
+        #[serde(default)]
+        expected_headers: HashMap<String, String>,
     },
     EndpointRequest {
         url: url::Url,
@@ -592,17 +756,20 @@ enum Action {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Subgraph {
     requests: Vec<SubgraphRequestMock>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubgraphRequestMock {
     request: HttpRequest,
     response: HttpResponse,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HttpRequest {
     method: Option<String>,
     path: Option<String>,
@@ -612,6 +779,7 @@ struct HttpRequest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HttpResponse {
     status: Option<u16>,
     #[serde(default)]

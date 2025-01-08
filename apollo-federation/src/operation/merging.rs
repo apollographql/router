@@ -15,11 +15,12 @@ use super::NamedFragments;
 use super::Selection;
 use super::SelectionSet;
 use super::SelectionValue;
+use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
-use crate::internal_error;
+use crate::error::SingleFederationError;
 
-impl<'a> FieldSelectionValue<'a> {
+impl FieldSelectionValue<'_> {
     /// Merges the given field selections into this one.
     ///
     /// # Preconditions
@@ -42,22 +43,33 @@ impl<'a> FieldSelectionValue<'a> {
                 other_field.schema == self_field.schema,
                 "Cannot merge field selections from different schemas",
             );
-            ensure!(
-                other_field.field_position == self_field.field_position,
-                "Cannot merge field selection for field \"{}\" into a field selection for field \"{}\"",
-                other_field.field_position,
-                self_field.field_position,
-            );
+            if other_field.field_position != self_field.field_position {
+                return Err(SingleFederationError::InternalUnmergeableFields {
+                    message: format!(
+                        "Cannot merge field selection for field \"{}\" into a field selection for \
+                        field \"{}\". This is a known query planning bug in the old Javascript \
+                        query planner that was silently ignored. The Rust-native query planner \
+                        does not address this bug at this time, but in some cases does catch when \
+                        this bug occurs. If you're seeing this message, this bug was likely \
+                        triggered by one of the field selections mentioned previously having an \
+                        alias that was the same name as the field in the other field selection. \
+                        The recommended workaround is to change this alias to a different one in \
+                        your operation.",
+                        other_field.field_position, self_field.field_position,
+                    ),
+                }
+                .into());
+            }
             if self.get().selection_set.is_some() {
                 let Some(other_selection_set) = &other.selection_set else {
-                    internal_error!(
+                    bail!(
                         "Field \"{}\" has composite type but not a selection set",
                         other_field.field_position,
                     );
                 };
                 selection_sets.push(other_selection_set);
             } else if other.selection_set.is_some() {
-                internal_error!(
+                bail!(
                     "Field \"{}\" has non-composite type but also has a selection set",
                     other_field.field_position,
                 );
@@ -70,7 +82,7 @@ impl<'a> FieldSelectionValue<'a> {
     }
 }
 
-impl<'a> InlineFragmentSelectionValue<'a> {
+impl InlineFragmentSelectionValue<'_> {
     /// Merges the given normalized inline fragment selections into this one.
     ///
     /// # Preconditions
@@ -105,7 +117,7 @@ impl<'a> InlineFragmentSelectionValue<'a> {
     }
 }
 
-impl<'a> FragmentSpreadSelectionValue<'a> {
+impl FragmentSpreadSelectionValue<'_> {
     /// Merges the given normalized fragment spread selections into this one.
     ///
     /// # Preconditions
@@ -183,17 +195,17 @@ impl SelectionSet {
         let target = Arc::make_mut(&mut self.selections);
         for other_selection in others {
             let other_key = other_selection.key();
-            match target.entry(other_key.clone()) {
+            match target.entry(other_key) {
                 selection_map::Entry::Occupied(existing) => match existing.get() {
                     Selection::Field(self_field_selection) => {
                         let Selection::Field(other_field_selection) = other_selection else {
-                            internal_error!(
+                            bail!(
                                 "Field selection key for field \"{}\" references non-field selection",
                                 self_field_selection.field.field_position,
                             );
                         };
                         fields
-                            .entry(other_key)
+                            .entry(other_key.to_owned_key())
                             .or_insert_with(Vec::new)
                             .push(other_field_selection);
                     }
@@ -201,13 +213,13 @@ impl SelectionSet {
                         let Selection::FragmentSpread(other_fragment_spread_selection) =
                             other_selection
                         else {
-                            internal_error!(
+                            bail!(
                                 "Fragment spread selection key for fragment \"{}\" references non-field selection",
                                 self_fragment_spread_selection.spread.fragment_name,
                             );
                         };
                         fragment_spreads
-                            .entry(other_key)
+                            .entry(other_key.to_owned_key())
                             .or_insert_with(Vec::new)
                             .push(other_fragment_spread_selection);
                     }
@@ -215,7 +227,7 @@ impl SelectionSet {
                         let Selection::InlineFragment(other_inline_fragment_selection) =
                             other_selection
                         else {
-                            internal_error!(
+                            bail!(
                                 "Inline fragment selection key under parent type \"{}\" {}references non-field selection",
                                 self_inline_fragment_selection.inline_fragment.parent_type_position,
                                 self_inline_fragment_selection.inline_fragment.type_condition_position.clone()
@@ -226,7 +238,7 @@ impl SelectionSet {
                             );
                         };
                         inline_fragments
-                            .entry(other_key)
+                            .entry(other_key.to_owned_key())
                             .or_insert_with(Vec::new)
                             .push(other_inline_fragment_selection);
                     }
@@ -237,10 +249,11 @@ impl SelectionSet {
             }
         }
 
-        for (key, self_selection) in target.iter_mut() {
+        for self_selection in target.values_mut() {
+            let key = self_selection.key().to_owned_key();
             match self_selection {
                 SelectionValue::Field(mut self_field_selection) => {
-                    if let Some(other_field_selections) = fields.shift_remove(key) {
+                    if let Some(other_field_selections) = fields.shift_remove(&key) {
                         self_field_selection.merge_into(
                             other_field_selections.iter().map(|selection| &***selection),
                         )?;
@@ -248,7 +261,7 @@ impl SelectionSet {
                 }
                 SelectionValue::FragmentSpread(mut self_fragment_spread_selection) => {
                     if let Some(other_fragment_spread_selections) =
-                        fragment_spreads.shift_remove(key)
+                        fragment_spreads.shift_remove(&key)
                     {
                         self_fragment_spread_selection.merge_into(
                             other_fragment_spread_selections
@@ -259,7 +272,7 @@ impl SelectionSet {
                 }
                 SelectionValue::InlineFragment(mut self_inline_fragment_selection) => {
                     if let Some(other_inline_fragment_selections) =
-                        inline_fragments.shift_remove(key)
+                        inline_fragments.shift_remove(&key)
                     {
                         self_inline_fragment_selection.merge_into(
                             other_inline_fragment_selections
@@ -368,7 +381,7 @@ pub(crate) fn merge_selection_sets(
     mut selection_sets: Vec<SelectionSet>,
 ) -> Result<SelectionSet, FederationError> {
     let Some((first, remainder)) = selection_sets.split_first_mut() else {
-        internal_error!("merge_selection_sets(): must have at least one selection set");
+        bail!("merge_selection_sets(): must have at least one selection set");
     };
     first.merge_into(remainder.iter())?;
 

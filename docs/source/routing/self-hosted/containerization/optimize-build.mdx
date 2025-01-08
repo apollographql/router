@@ -1,0 +1,58 @@
+---
+title: Optimizing Custom GraphOS Router Builds
+subtitle: Enhance performance, minimize build time, and address system requirements
+description: Recommendations and considerations for minimizing build time when using custom Apollo GraphOS Router builds.
+published: 2023-01-19
+id: TN0030
+tags: [router]
+redirectFrom:
+  - /technotes/TN0030-optimizing-router-builds/
+---
+
+While running the GraphOS Router in production has great performance, this comes at the cost of increased build time and higher system requirements when compiling from source.
+
+Building the router including custom plugins from source is a memory-expensive process, and as such it's not suited for all build environments.
+
+Some cloud build pipelines such as Google Cloud Build, will require changes to the default build configuration to increase the memory and CPU capacity of the build worker pool.
+
+The router will also download a large collection of dependencies during the build process each build by default. We can use [Kaniko](https://github.com/GoogleContainerTools/kaniko) to cache intermediate build layers.
+
+In this example for Google Cloud Build, we have replaced the standard docker [gcr.io/cloud-builders/docker](http://gcr.io/cloud-builders/docker) container image, with [gcr.io/kaniko-project/executor](http://gcr.io/kaniko-project/executor).
+This is all that's needed to enable caching of the intermediate build steps. Each step will be pushed to the destination container repo as soon as each layer is built, so even failed builds will contribute to increased build speeds as successful layers are cached.
+
+We also changed the default `options.machineType` value to `E2_HIGHCPU_8`, this is because the default worker pool doesn't have the CPU or memory resources necessary to compile the router.
+
+```yaml
+#cloudbuild.yaml
+
+steps:
+  - id: Build Router
+    name: 'gcr.io/kaniko-project/executor:latest'
+    args:
+      - '--cache=true'
+      - '--dockerfile=$_DOCKERFILE'
+      - '--context=dir://$_IMAGE_NAME'
+      - >-
+        --destination=$_GCR_HOSTNAME/$PROJECT_ID/$REPO_NAME/$_IMAGE_NAME:$COMMIT_SHA
+  - id: Deploy Router
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - $_SERVICE_NAME
+      - '--platform=managed'
+      - '--image=$_GCR_HOSTNAME/$PROJECT_ID/$REPO_NAME/$_IMAGE_NAME:$COMMIT_SHA'
+      - '--region=$_DEPLOY_REGION'
+      - '--quiet'
+options:
+  machineType: E2_HIGHCPU_8
+substitutions:
+  _DOCKERFILE: custom-router/Dockerfile
+  _IMAGE_NAME: custom-router
+  _SERVICE_NAME: apollo-router
+  _DEPLOY_REGION: northamerica-northeast1
+  _GCR_HOSTNAME: northamerica-northeast1-docker.pkg.dev
+  _PLATFORM: managed
+```

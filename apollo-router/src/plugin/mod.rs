@@ -69,11 +69,16 @@ pub struct PluginInit<T> {
     pub config: T,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
+    /// Router Supergraph Schema ID (SHA256 of the SDL))
+    pub(crate) supergraph_schema_id: Arc<String>,
     /// The supergraph schema (parsed)
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
+
+    /// Launch ID
+    pub(crate) launch_id: Option<Arc<String>>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
 }
@@ -91,6 +96,7 @@ where
                 Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
                     .expect("failed to parse supergraph schema"),
             ))
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -114,6 +120,7 @@ where
                         BoxError::from(e.errors.to_string())
                     })?,
             ))
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -130,8 +137,10 @@ where
 
         PluginInit::fake_builder()
             .config(config)
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
+            .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
             .build()
     }
@@ -165,15 +174,19 @@ where
     pub(crate) fn new_builder(
         config: T,
         supergraph_sdl: Arc<String>,
+        supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         PluginInit {
             config,
             supergraph_sdl,
+            supergraph_schema_id,
             supergraph_schema,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id: launch_id.flatten(),
             notify,
         }
     }
@@ -186,8 +199,10 @@ where
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
+        supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
@@ -195,7 +210,9 @@ where
             config,
             supergraph_sdl,
             supergraph_schema,
+            supergraph_schema_id,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id,
             notify,
         })
     }
@@ -205,16 +222,20 @@ where
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,
+        supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
         subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
         PluginInit {
             config,
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
+            supergraph_schema_id: supergraph_schema_id.unwrap_or_default(),
             supergraph_schema: supergraph_schema
                 .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
         }
     }
@@ -229,6 +250,7 @@ impl PluginInit<serde_json::Value> {
         PluginInit::try_builder()
             .config(self.config)
             .supergraph_schema(self.supergraph_schema)
+            .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
@@ -618,6 +640,9 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
+
+    /// The point of no return this plugin is about to go live
+    fn activate(&self) {}
 }
 
 #[async_trait]
@@ -665,6 +690,8 @@ where
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         PluginUnstable::web_endpoints(self)
     }
+
+    fn activate(&self) {}
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -721,6 +748,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// Support downcasting
     #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// The point of no return, this plugin is about to go live
+    fn activate(&self) {}
 }
 
 #[async_trait]
@@ -770,6 +800,19 @@ where
     #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn activate(&self) {
+        self.activate()
+    }
+}
+
+impl<T> From<T> for Box<dyn DynPlugin>
+where
+    T: PluginPrivate,
+{
+    fn from(value: T) -> Self {
+        Box::new(value)
     }
 }
 

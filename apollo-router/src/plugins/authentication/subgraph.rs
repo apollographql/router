@@ -409,17 +409,21 @@ impl SigningParamsConfig {
 }
 
 fn increment_success_counter(subgraph_name: &str) {
-    tracing::info!(
-        monotonic_counter.apollo.router.operations.authentication.aws.sigv4 = 1u64,
+    u64_counter!(
+        "apollo.router.operations.authentication.aws.sigv4",
+        "Number of subgraph requests signed with AWS SigV4",
+        1,
         authentication.aws.sigv4.failed = false,
-        subgraph.service.name = %subgraph_name,
+        subgraph.service.name = subgraph_name.to_string()
     );
 }
 fn increment_failure_counter(subgraph_name: &str) {
-    tracing::info!(
-        monotonic_counter.apollo.router.operations.authentication.aws.sigv4 = 1u64,
+    u64_counter!(
+        "apollo.router.operations.authentication.aws.sigv4",
+        "Number of subgraph requests signed with AWS SigV4",
+        1,
         authentication.aws.sigv4.failed = true,
-        subgraph.service.name = %subgraph_name,
+        subgraph.service.name = subgraph_name.to_string()
     );
 }
 
@@ -508,6 +512,7 @@ mod test {
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
     use crate::query_planner::fetch::OperationKind;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::Context;
@@ -806,6 +811,7 @@ mod test {
             http::Response::default(),
             Context::new(),
             req.subgraph_name.unwrap_or_else(|| String::from("test")),
+            SubgraphRequestId(String::new()),
         ))
     }
 

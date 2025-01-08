@@ -12,9 +12,9 @@ use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::schema::ValidFederationSchema;
 use sha1::Digest;
 
-const ROVER_FEDERATION_VERSION: &str = "2.7.4";
+const ROVER_FEDERATION_VERSION: &str = "2.9.0";
 
-const DEFAULT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+const DEFAULT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@context", "@fromContext", "@cost", "@listSize"])"#;
 
 /// Runs composition on the given subgraph schemas and return `(api_schema, query_planner)`
 ///
@@ -93,9 +93,9 @@ pub(crate) fn api_schema_and_planner(
 ) -> (ValidFederationSchema, QueryPlanner) {
     let supergraph = compose(function_path, subgraph_names_and_schemas);
     let supergraph = apollo_federation::Supergraph::new(&supergraph).unwrap();
-    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config.clone()).unwrap();
     let api_schema_config = apollo_federation::ApiSchemaOptions {
-        include_defer: true,
+        include_defer: config.incremental_delivery.enable_defer,
         include_stream: false,
     };
     let api_schema = supergraph.to_api_schema(api_schema_config).unwrap();

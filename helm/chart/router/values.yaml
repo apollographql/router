@@ -4,7 +4,7 @@
 
 replicaCount: 1
 
-# -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
+# -- See https://www.apollographql.com/docs/graphos/reference/router/configuration#yaml-config-file for yaml structure
 router:
   configuration:
     supergraph:
@@ -167,6 +167,8 @@ virtualservice:
   # gatewayNames: []
   #  - "gateway-1"
   #  - "gateway-2"
+  # Hosts: "" # configurable but will default to '*'
+  #  - somehost.domain.com
   # http:
   #   main:
   #     # set enabled to true to add

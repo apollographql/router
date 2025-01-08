@@ -50,9 +50,6 @@ impl std::fmt::Display for InvalidationErrors {
 
 impl std::error::Error for InvalidationErrors {}
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct InvalidationTopic;
-
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum InvalidationOrigin {
     Endpoint,
@@ -257,6 +254,14 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { subgraph }
             | InvalidationRequest::Type { subgraph, .. }
             | InvalidationRequest::Entity { subgraph, .. } => subgraph,
+        }
+    }
+
+    pub(super) fn kind(&self) -> &'static str {
+        match self {
+            InvalidationRequest::Subgraph { .. } => "subgraph",
+            InvalidationRequest::Type { .. } => "type",
+            InvalidationRequest::Entity { .. } => "entity",
         }
     }
 }

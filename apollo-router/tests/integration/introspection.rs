@@ -3,35 +3,16 @@ use apollo_router::services::supergraph::Request;
 use serde_json::json;
 use tower::ServiceExt;
 
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test]
-async fn simple_legacy_mode() {
+async fn simple() {
     let request = Request::fake_builder()
         .query("{ __schema { queryType { name } } }")
         .build()
         .unwrap();
-    let response = make_request(request, "legacy").await;
-    insta::assert_json_snapshot!(response, @r###"
-    {
-      "data": {
-        "__schema": {
-          "queryType": {
-            "name": "Query"
-          }
-        }
-      }
-    }
-    "###);
-}
-
-#[tokio::test]
-async fn simple_new_mode() {
-    let request = Request::fake_builder()
-        .query("{ __schema { queryType { name } } }")
-        .build()
-        .unwrap();
-    let response = make_request(request, "new").await;
+    let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -51,7 +32,7 @@ async fn top_level_inline_fragment() {
         .query("{ ... { __schema { queryType { name } } } }")
         .build()
         .unwrap();
-    let response = make_request(request, "legacy").await;
+    let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -82,15 +63,18 @@ async fn variable() {
         .variable("d", true)
         .build()
         .unwrap();
-    let response = make_request(request, "legacy").await;
+    let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
         {
-          "message": "introspection error : Variable \"$d\" of required type \"Boolean!\" was not provided.",
-          "extensions": {
-            "code": "INTROSPECTION_ERROR"
-          }
+          "message": "missing value for non-null variable 'd'",
+          "locations": [
+            {
+              "line": 2,
+              "column": 23
+            }
+          ]
         }
       ]
     }
@@ -109,17 +93,16 @@ async fn two_operations() {
         .operation_name("ThisOp")
         .build()
         .unwrap();
-    let response = make_request(request, "legacy").await;
+    let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
-      "errors": [
-        {
-          "message": "Schema introspection is currently not supported with multiple operations in the same document",
-          "extensions": {
-            "code": "INTROSPECTION_WITH_MULTIPLE_OPERATIONS"
+      "data": {
+        "__schema": {
+          "queryType": {
+            "name": "Query"
           }
         }
-      ]
+      }
     }
     "###);
 }
@@ -135,7 +118,7 @@ async fn operation_name_error() {
         )
         .build()
         .unwrap();
-    let response = make_request(request, "legacy").await;
+    let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
@@ -154,7 +137,7 @@ async fn operation_name_error() {
         .operation_name("NonExistentOp")
         .build()
         .unwrap();
-    let response = make_request(request, "legacy").await;
+    let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
@@ -180,12 +163,12 @@ async fn mixed() {
         )
         .build()
         .unwrap();
-    let response = make_request(request, "legacy").await;
+    let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
         {
-          "message": "Mixed queries with both schema introspection and concrete fields are not supported",
+          "message": "Mixed queries with both schema introspection and concrete fields are not supported yet: https://github.com/apollographql/router/issues/2789",
           "extensions": {
             "code": "MIXED_INTROSPECTION"
           }
@@ -195,10 +178,9 @@ async fn mixed() {
     "###);
 }
 
-async fn make_request(request: Request, mode: &str) -> apollo_router::graphql::Response {
+async fn make_request(request: Request) -> apollo_router::graphql::Response {
     apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "experimental_introspection_mode": mode,
             "supergraph": {
                 "introspection": true,
             },
@@ -229,36 +211,10 @@ async fn make_request(request: Request, mode: &str) -> apollo_router::graphql::R
 }
 
 #[tokio::test]
-async fn both_mode_integration() {
-    let mut router = IntegrationTest::builder()
-        .config(
-            "
-                # `experimental_introspection_mode` now defaults to `both`
-                supergraph:
-                    introspection: true
-            ",
-        )
-        .supergraph("tests/fixtures/schema_to_introspect.graphql")
-        .log("error,apollo_router=info,apollo_router::query_planner=trace")
-        .build()
-        .await;
-    router.start().await;
-    router.assert_started().await;
-    let query = json!({
-        "query": include_str!("../fixtures/introspect_full_schema.graphql"),
-    });
-    let (_trace_id, response) = router.execute_query(&query).await;
-    insta::assert_json_snapshot!(response.json::<serde_json::Value>().await.unwrap());
-    router.assert_log_contains("Introspection match! 🎉").await;
-    router.graceful_shutdown().await;
-}
-
-#[tokio::test]
 async fn integration() {
     let mut router = IntegrationTest::builder()
         .config(
             "
-                experimental_introspection_mode: new
                 supergraph:
                     introspection: true
             ",
@@ -271,7 +227,9 @@ async fn integration() {
     let query = json!({
         "query": include_str!("../fixtures/introspect_full_schema.graphql"),
     });
-    let (_trace_id, response) = router.execute_query(&query).await;
+    let (_trace_id, response) = router
+        .execute_query(Query::builder().body(query).build())
+        .await;
     insta::assert_json_snapshot!(response.json::<serde_json::Value>().await.unwrap());
     router.graceful_shutdown().await;
 }

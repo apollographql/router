@@ -7,7 +7,7 @@ Fetch(
         service_name: "accounts",
         requires: [],
         variable_usages: [],
-        operation: "{me{name{first last}}}",
+        operation: "{ me { name { first last } } }",
         operation_name: None,
         operation_kind: Query,
         id: None,
@@ -15,7 +15,7 @@ Fetch(
         output_rewrites: None,
         context_rewrites: None,
         schema_aware_hash: QueryHash(
-            "5c5036eef33484e505dd5a8666fd0a802e60d830964a4dbbf662526398563ffd",
+            "16d9399fe60cb6dcc81f522fab6a54056e8b65b02095667b76f1cdd7048aab50",
         ),
         authorization: CacheKeyMetadata {
             is_authenticated: false,

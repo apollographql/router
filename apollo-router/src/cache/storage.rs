@@ -101,6 +101,18 @@ where
         })
     }
 
+    pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
+        Self {
+            cache_size_gauge: Default::default(),
+            cache_estimated_storage_gauge: Default::default(),
+            cache_size: Default::default(),
+            cache_estimated_storage: Default::default(),
+            caller,
+            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
+            redis: None,
+        }
+    }
+
     fn create_cache_size_gauge(&self) -> ObservableGauge<i64> {
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let current_cache_size_for_gauge = self.cache_size.clone();
@@ -158,30 +170,38 @@ where
 
         match res {
             Some(v) => {
-                tracing::info!(
-                    monotonic_counter.apollo_router_cache_hit_count = 1u64,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
+                let duration = instant_memory.elapsed();
+                f64_histogram!(
+                    "apollo_router_cache_hit_time",
+                    "Time to get a value from the cache in seconds",
+                    duration.as_secs_f64(),
+                    kind = self.caller,
+                    storage = CacheStorageName::Memory.to_string()
                 );
-                let duration = instant_memory.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo_router_cache_hit_time = duration,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
+                u64_counter!(
+                    "apollo_router_cache_hit_count",
+                    "Number of cache hits",
+                    1,
+                    kind = self.caller,
+                    storage = CacheStorageName::Memory.to_string()
                 );
                 Some(v)
             }
             None => {
-                let duration = instant_memory.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo_router_cache_miss_time = duration,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
+                let duration = instant_memory.elapsed();
+                f64_histogram!(
+                    "apollo_router_cache_miss_time",
+                    "Time to check the cache for an uncached value in seconds",
+                    duration.as_secs_f64(),
+                    kind = self.caller,
+                    storage = CacheStorageName::Memory.to_string()
                 );
-                tracing::info!(
-                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
+                u64_counter!(
+                    "apollo_router_cache_miss_count",
+                    "Number of cache misses",
+                    1,
+                    kind = self.caller,
+                    storage = CacheStorageName::Memory.to_string()
                 );
 
                 let instant_redis = Instant::now();
@@ -202,30 +222,38 @@ where
                         Some(v) => {
                             self.insert_in_memory(key.clone(), v.0.clone()).await;
 
-                            tracing::info!(
-                                monotonic_counter.apollo_router_cache_hit_count = 1u64,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            let duration = instant_redis.elapsed();
+                            f64_histogram!(
+                                "apollo_router_cache_hit_time",
+                                "Time to get a value from the cache in seconds",
+                                duration.as_secs_f64(),
+                                kind = self.caller,
+                                storage = CacheStorageName::Redis.to_string()
                             );
-                            let duration = instant_redis.elapsed().as_secs_f64();
-                            tracing::info!(
-                                histogram.apollo_router_cache_hit_time = duration,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            u64_counter!(
+                                "apollo_router_cache_hit_count",
+                                "Number of cache hits",
+                                1,
+                                kind = self.caller,
+                                storage = CacheStorageName::Redis.to_string()
                             );
                             Some(v.0)
                         }
                         None => {
-                            tracing::info!(
-                                monotonic_counter.apollo_router_cache_miss_count = 1u64,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            let duration = instant_redis.elapsed();
+                            f64_histogram!(
+                                "apollo_router_cache_miss_time",
+                                "Time to check the cache for an uncached value in seconds",
+                                duration.as_secs_f64(),
+                                kind = self.caller,
+                                storage = CacheStorageName::Redis.to_string()
                             );
-                            let duration = instant_redis.elapsed().as_secs_f64();
-                            tracing::info!(
-                                histogram.apollo_router_cache_miss_time = duration,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            u64_counter!(
+                                "apollo_router_cache_miss_count",
+                                "Number of cache misses",
+                                1,
+                                kind = self.caller,
+                                storage = CacheStorageName::Redis.to_string()
                             );
                             None
                         }

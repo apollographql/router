@@ -1,0 +1,4 @@
+description: supergraph.query_planning.legacy_introspection_caching was removed
+actions:
+  - type: delete
+    path: supergraph.query_planning.legacy_introspection_caching

@@ -1,0 +1,11 @@
+include_subgraph_errors:
+  all: true
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text
+
+plugins:
+  experimental.expose_query_plan: true

@@ -1,0 +1,27 @@
+---
+source: apollo-router/src/batching.rs
+expression: response
+---
+[
+  {
+    "data": {
+      "entryA": {
+        "index": 0
+      }
+    }
+  },
+  {
+    "data": {
+      "entryA": {
+        "index": 1
+      }
+    }
+  },
+  {
+    "data": {
+      "entryA": {
+        "index": 2
+      }
+    }
+  }
+]

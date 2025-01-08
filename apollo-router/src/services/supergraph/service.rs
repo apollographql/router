@@ -12,8 +12,6 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use router_bridge::planner::Planner;
-use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
@@ -26,6 +24,7 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
@@ -40,7 +39,6 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
@@ -50,7 +48,6 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
-use crate::query_planner::QueryPlanResult;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;
@@ -171,20 +168,20 @@ async fn service_call(
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
 
-    let QueryPlannerResponse {
-        content,
-        context,
-        errors,
-    } = match plan_query(
+    let QueryPlannerResponse { content, errors } = match plan_query(
         planning,
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
+        // We cannot assume that the query is present as it may have been modified by coprocessors or plugins.
+        // There is a deeper issue here in that query analysis is doing a bunch of stuff that it should not and
+        // places the results in context. Therefore plugins that have modified the query won't actually take effect.
+        // However, this can't be resolved before looking at the pipeline again.
         req.supergraph_request
             .body()
             .query
             .clone()
-            .expect("query presence was checked before"),
+            .unwrap_or_default(),
     )
     .await
     {
@@ -210,7 +207,8 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Response { response }) => Ok(
+        Some(QueryPlannerContent::Response { response })
+        | Some(QueryPlannerContent::CachedIntrospectionResponse { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
@@ -809,9 +807,7 @@ impl PluggableSupergraphServiceBuilder {
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
         for (_, plugin) in self.plugins.iter() {
-            if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
-                telemetry.activate();
-            }
+            plugin.activate();
         }
 
         // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
@@ -928,10 +924,6 @@ impl SupergraphCreator {
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
         self.query_planner_service.previous_cache()
-    }
-
-    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.query_planner_service.js_planners()
     }
 
     pub(crate) async fn warm_up_query_planner(

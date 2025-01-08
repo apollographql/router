@@ -107,6 +107,68 @@ async fn aliased() {
 }
 
 #[tokio::test]
+async fn inside_inline_fragment() {
+    let request = Request::fake_builder()
+        .query("{ ... { __typename } }")
+        .build()
+        .unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "__typename": "MyQuery"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn inside_fragment() {
+    let query = r#"
+       { ...SomeFragment }
+
+       fragment SomeFragment on MyQuery {
+         __typename
+       }
+    "#;
+    let request = Request::fake_builder().query(query).build().unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "__typename": "MyQuery"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn deeply_nested_inside_fragments() {
+    let query = r#"
+       { ...SomeFragment }
+
+       fragment SomeFragment on MyQuery {
+         ... {
+           ...AnotherFragment
+         }
+       }
+
+       fragment AnotherFragment on MyQuery {
+         __typename
+       }
+    "#;
+    let request = Request::fake_builder().query(query).build().unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "__typename": "MyQuery"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
 async fn mutation() {
     let request = Request::fake_builder()
         .query("mutation { __typename }")

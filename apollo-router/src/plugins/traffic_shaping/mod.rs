@@ -8,7 +8,6 @@
 //!
 mod deduplication;
 pub(crate) mod rate;
-mod retry;
 pub(crate) mod timeout;
 
 use std::collections::HashMap;
@@ -32,9 +31,9 @@ use tower::ServiceExt;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 use self::rate::RateLimited;
-pub(crate) use self::retry::RetryPolicy;
 use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
+use crate::configuration::shared::DnsResolutionStrategy;
 use crate::error::ConfigurationError;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
@@ -67,11 +66,10 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
-    /// Retry configuration
-    //  *experimental feature*: Enables request retry
-    experimental_retry: Option<RetryConfig>,
     /// Enable HTTP2 for subgraphs
     experimental_http2: Option<Http2Config>,
+    /// DNS resolution strategy for subgraphs
+    dns_resolution_strategy: Option<DnsResolutionStrategy>,
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -99,52 +97,16 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.global_rate_limit.as_ref())
                     .cloned(),
-                experimental_retry: self
-                    .experimental_retry
-                    .as_ref()
-                    .or(fallback.experimental_retry.as_ref())
-                    .cloned(),
                 experimental_http2: self
                     .experimental_http2
                     .as_ref()
                     .or(fallback.experimental_http2.as_ref())
                     .cloned(),
-            },
-        }
-    }
-}
-
-/// Retry configuration
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RetryConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "String", default)]
-    /// how long a single deposit should be considered. Must be between 1 and 60 seconds,
-    /// default value is 10 seconds
-    ttl: Option<Duration>,
-    /// minimum rate of retries allowed to accomodate clients that have just started
-    /// issuing requests, or clients that do not issue many requests per window. The
-    /// default value is 10
-    min_per_sec: Option<u32>,
-    /// percentage of calls to deposit that can be retried. This is in addition to any
-    /// retries allowed for via min_per_sec. Must be between 0 and 1000, default value
-    /// is 0.2
-    retry_percent: Option<f32>,
-    /// allows request retries on mutations. This should only be activated if mutations
-    /// are idempotent. Disabled by default
-    retry_mutations: Option<bool>,
-}
-
-impl Merge for RetryConfig {
-    fn merge(&self, fallback: Option<&Self>) -> Self {
-        match fallback {
-            None => self.clone(),
-            Some(fallback) => RetryConfig {
-                ttl: self.ttl.or(fallback.ttl),
-                min_per_sec: self.min_per_sec.or(fallback.min_per_sec),
-                retry_percent: self.retry_percent.or(fallback.retry_percent),
-                retry_mutations: self.retry_mutations.or(fallback.retry_mutations),
+                dns_resolution_strategy: self
+                    .dns_resolution_strategy
+                    .as_ref()
+                    .or(fallback.dns_resolution_strategy.as_ref())
+                    .cloned(),
             },
         }
     }
@@ -382,17 +344,6 @@ impl TrafficShaping {
                         .clone()
                 });
 
-            let retry = config.shaping.experimental_retry.as_ref().map(|config| {
-                let retry_policy = RetryPolicy::new(
-                    config.ttl,
-                    config.min_per_sec,
-                    config.retry_percent,
-                    config.retry_mutations,
-                    name.to_string(),
-                );
-                tower::retry::RetryLayer::new(retry_policy)
-            });
-
             Either::A(ServiceBuilder::new()
 
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
@@ -428,7 +379,6 @@ impl TrafficShaping {
                         .timeout
                         .unwrap_or(DEFAULT_TIMEOUT),
                     ))
-                    .option_layer(retry)
                     .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
@@ -444,13 +394,19 @@ impl TrafficShaping {
         }
     }
 
-    pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> Http2Config {
+    pub(crate) fn subgraph_client_config(
+        &self,
+        service_name: &str,
+    ) -> crate::configuration::shared::Client {
         Self::merge_config(
             self.config.all.as_ref(),
             self.config.subgraphs.get(service_name),
         )
-        .and_then(|config| config.shaping.experimental_http2)
-        .unwrap_or(Http2Config::Enable)
+        .map(|config| crate::configuration::shared::Client {
+            experimental_http2: config.shaping.experimental_http2,
+            dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -458,7 +414,6 @@ register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -564,20 +519,18 @@ mod test {
             r#"
         traffic_shaping:
             deduplicate_variables: true
+        supergraph:
+            # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            generate_query_fragments: false
         "#,
         )
         .unwrap();
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.clone(),
-            config.clone(),
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
+        let planner = BridgeQueryPlannerPool::new(schema.clone(), config.clone())
+            .await
+            .unwrap();
         let subgraph_schemas = planner.subgraph_schemas();
 
         let mut builder =
@@ -749,16 +702,19 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_enable_subgraph_http2() {
+    async fn test_subgraph_client_config() {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
           experimental_http2: disable
+          dns_resolution_strategy: ipv6_only
         subgraphs: 
           products:
             experimental_http2: enable
+            dns_resolution_strategy: ipv6_then_ipv4
           reviews:
             experimental_http2: disable
+            dns_resolution_strategy: ipv4_only
         router:
           timeout: 65s
         "#,
@@ -769,9 +725,27 @@ mod test {
             .await
             .unwrap();
 
-        assert!(shaping_config.enable_subgraph_http2("products") == Http2Config::Enable);
-        assert!(shaping_config.enable_subgraph_http2("reviews") == Http2Config::Disable);
-        assert!(shaping_config.enable_subgraph_http2("this_doesnt_exist") == Http2Config::Disable);
+        assert_eq!(
+            shaping_config.subgraph_client_config("products"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Enable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
+            },
+        );
+        assert_eq!(
+            shaping_config.subgraph_client_config("reviews"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Disable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
+            },
+        );
+        assert_eq!(
+            shaping_config.subgraph_client_config("this_doesnt_exist"),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Disable),
+                dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
+            },
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

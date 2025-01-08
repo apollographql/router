@@ -44,6 +44,7 @@ use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
+use super::subgraph::SubgraphRequestId;
 use super::Plugins;
 use crate::batching::assemble_batch;
 use crate::batching::BatchQuery;
@@ -299,16 +300,20 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         })?;
                         stream_tx.send(Box::pin(handle.into_stream())).await?;
 
-                        tracing::info!(
-                            monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-                            subscriptions.mode = %"callback",
+                        u64_counter!(
+                            "apollo.router.operations.subscriptions",
+                            "Total requests with subscription operations",
+                            1,
+                            subscriptions.mode = "callback",
                             subscriptions.deduplicated = !created,
-                            subgraph.service.name = service_name,
+                            subgraph.service.name = service_name.clone()
                         );
                         if !created {
-                            tracing::info!(
-                                monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
-                                mode = %"callback",
+                            u64_counter!(
+                                "apollo_router_deduplicated_subscriptions_total",
+                                "Total deduplicated subscription requests (deprecated)",
+                                1,
+                                mode = "callback"
                             );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
@@ -494,6 +499,7 @@ async fn call_websocket(
         subgraph_request,
         subscription_stream,
         connection_closed_signal,
+        id: subgraph_request_id,
         ..
     } = request;
     let subscription_stream_tx =
@@ -505,19 +511,23 @@ async fn call_websocket(
     let (handle, created) = notify
         .create_or_subscribe(subscription_hash.clone(), false)
         .await?;
-    tracing::info!(
-        monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-        subscriptions.mode = %"passthrough",
+    u64_counter!(
+        "apollo.router.operations.subscriptions",
+        "Total requests with subscription operations",
+        1,
+        subscriptions.mode = "passthrough",
         subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name,
+        subgraph.service.name = service_name.clone()
     );
     if !created {
         subscription_stream_tx
             .send(Box::pin(handle.into_stream()))
             .await?;
-        tracing::info!(
-            monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
-            mode = %"passthrough",
+        u64_counter!(
+            "apollo_router_deduplicated_subscriptions_total",
+            "Total deduplicated subscription requests (deprecated)",
+            1,
+            mode = "passthrough"
         );
 
         // Dedup happens here
@@ -707,6 +717,7 @@ async fn call_websocket(
         resp.map(|_| graphql::Response::default()),
         context,
         service_name,
+        subgraph_request_id,
     ))
 }
 
@@ -807,7 +818,7 @@ fn http_response_to_graphql_response(
 pub(crate) async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
-    mut contexts: Vec<Context>,
+    mut contexts: Vec<(Context, SubgraphRequestId)>,
     mut request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
@@ -854,19 +865,28 @@ pub(crate) async fn process_batch(
     let batch_context = contexts
         .first()
         .expect("we have at least one context in the batch")
+        .0
         .clone();
     let display_body = batch_context.contains_key(LOGGING_DISPLAY_BODY);
     let client = client_factory.create(&service);
 
     // Update our batching metrics (just before we fetch)
-    tracing::info!(histogram.apollo.router.operations.batching.size = listener_count as f64,
-        mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
-        subgraph = &service
+    u64_histogram!(
+        "apollo.router.operations.batching.size",
+        "Number of queries contained within each query batch",
+        listener_count as u64,
+        mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
+        subgraph = service.clone()
     );
 
-    tracing::info!(monotonic_counter.apollo.router.operations.batching = 1u64,
-        mode = %BatchingMode::BatchHttpLink, // Only supported mode right now
-        subgraph = &service
+    u64_counter!(
+        "apollo.router.operations.batching",
+        "Total requests with batched operations",
+        1,
+        // XXX(@goto-bus-stop): Should these be `batching.mode`, `batching.subgraph`?
+        // Also, other metrics use a different convention to report the subgraph name
+        mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
+        subgraph = service.clone()
     );
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
@@ -1014,9 +1034,10 @@ pub(crate) async fn process_batch(
                 .map(|mut http_res| {
                     *http_res.headers_mut() = parts.headers.clone();
                     // Use the original context for the request to create the response
-                    let context = contexts.pop().expect("we have a context for each response");
+                    let (context, id) =
+                        contexts.pop().expect("we have a context for each response");
                     let resp =
-                        SubgraphResponse::new_from_response(http_res, context, subgraph_name);
+                        SubgraphResponse::new_from_response(http_res, context, subgraph_name, id);
 
                     tracing::debug!("we have a resp: {resp:?}");
                     resp
@@ -1047,6 +1068,8 @@ pub(crate) async fn notify_batch_query(
         Err(e) => {
             for tx in senders {
                 // Try to notify all waiters. If we can't notify an individual sender, then log an error
+                // which, unlike failing to notify on success (see below), contains the the entire error
+                // response.
                 if let Err(log_error) = tx.send(Err(Box::new(e.clone()))).map_err(|error| {
                     FetchError::SubrequestBatchingError {
                         service: service.clone(),
@@ -1076,13 +1099,15 @@ pub(crate) async fn notify_batch_query(
             // graphql_response, so zip_eq shouldn't panic.
             // Use the tx to send a graphql_response message to each waiter.
             for (response, sender) in rs.into_iter().zip_eq(senders) {
-                if let Err(log_error) =
-                    sender
-                        .send(Ok(response))
-                        .map_err(|error| FetchError::SubrequestBatchingError {
-                            service: service.to_string(),
-                            reason: format!("tx send failed: {error:?}"),
-                        })
+                if let Err(log_error) = sender
+                    .send(Ok(response))
+                    // If we fail to notify the waiter that our request succeeded, do not log
+                    // out the entire response since this may be substantial and/or contain
+                    // PII data. Simply log that the send failed.
+                    .map_err(|_error| FetchError::SubrequestBatchingError {
+                        service: service.to_string(),
+                        reason: "tx send failed".to_string(),
+                    })
                 {
                     tracing::error!(service, error=%log_error, "failed to notify sender that batch processing succeeded");
                 }
@@ -1094,7 +1119,12 @@ pub(crate) async fn notify_batch_query(
 }
 
 type BatchInfo = (
-    (String, http::Request<RouterBody>, Vec<Context>, usize),
+    (
+        String,
+        http::Request<RouterBody>,
+        Vec<(Context, SubgraphRequestId)>,
+        usize,
+    ),
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
 
@@ -1222,7 +1252,9 @@ pub(crate) async fn call_single_http(
     });
 
     let SubgraphRequest {
-        subgraph_request, ..
+        subgraph_request,
+        id: subgraph_request_id,
+        ..
     } = request;
 
     let operation_name = subgraph_request
@@ -1353,6 +1385,7 @@ pub(crate) async fn call_single_http(
                     .expect("it won't fail everything is coming from an existing response"),
                 context.clone(),
                 service_name.to_owned(),
+                subgraph_request_id.clone(),
             );
             should_log = condition.lock().evaluate_response(&subgraph_response);
         }
@@ -1397,6 +1430,7 @@ pub(crate) async fn call_single_http(
         resp,
         context,
         service_name.to_owned(),
+        subgraph_request_id,
     ))
 }
 
@@ -1695,7 +1729,6 @@ mod tests {
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
-    use crate::plugins::traffic_shaping::Http2Config;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
@@ -1909,7 +1942,7 @@ mod tests {
                             .unwrap());
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -1920,7 +1953,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -1966,7 +1999,7 @@ mod tests {
                             .unwrap());
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -1977,7 +2010,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -2008,7 +2041,7 @@ mod tests {
                     }
 
                     if request.query.is_none() {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2023,9 +2056,9 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     } else {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2036,7 +2069,7 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     }
                 }
                 Err(_) => {
@@ -2068,7 +2101,7 @@ mod tests {
                     }
 
                     if request.query.is_none() {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2083,9 +2116,9 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     } else {
-                        return Ok(http::Response::builder()
+                        Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .body(
@@ -2096,7 +2129,7 @@ mod tests {
                                 .expect("always valid")
                                 .into(),
                             )
-                            .unwrap());
+                            .unwrap())
                     }
                 }
                 Err(_) => {
@@ -2127,7 +2160,7 @@ mod tests {
                         panic!("persistedQuery expected when configuration has apq_enabled=true")
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2138,7 +2171,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -2170,7 +2203,7 @@ mod tests {
                         )
                     }
 
-                    return Ok(http::Response::builder()
+                    Ok(http::Response::builder()
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .status(StatusCode::OK)
                         .body(
@@ -2181,7 +2214,7 @@ mod tests {
                             .expect("always valid")
                             .into(),
                         )
-                        .unwrap());
+                        .unwrap())
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -2372,7 +2405,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "testbis",
                 &Configuration::default(),
-                Http2Config::Disable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2416,7 +2449,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2450,7 +2483,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2485,7 +2518,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2523,7 +2556,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2562,7 +2595,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2605,7 +2638,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2646,7 +2679,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2699,7 +2732,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2743,7 +2776,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2785,7 +2818,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2823,7 +2856,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2861,7 +2894,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2898,7 +2931,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2935,7 +2968,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -2981,7 +3014,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3025,7 +3058,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3066,7 +3099,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3107,7 +3140,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");
@@ -3148,7 +3181,7 @@ mod tests {
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
-                Http2Config::Enable,
+                crate::configuration::shared::Client::default(),
             ),
         )
         .expect("can create a SubgraphService");

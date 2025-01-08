@@ -64,6 +64,68 @@ fn it_preservers_aliased_typename() {
 }
 
 #[test]
+fn it_preserves_typename_with_directives() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query($v: Boolean!) {
+            t {
+              __typename
+              __typename @skip(if: $v)
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            __typename @skip(if: $v)
+          }
+        }
+      },
+    }
+    "###
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          query($v: Boolean!) {
+            t {
+              __typename @skip(if: $v)
+              __typename
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            __typename @skip(if: $v)
+          }
+        }
+      },
+    }
+    "###
+    );
+}
+
+#[test]
 fn it_does_not_needlessly_consider_options_for_typename() {
     let planner = planner!(
         Subgraph1: r#"

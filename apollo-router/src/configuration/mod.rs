@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -162,14 +163,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the query planner implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_query_planner_mode: QueryPlannerMode,
-
-    /// Set the GraphQL schema introspection implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_introspection_mode: IntrospectionMode,
-
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -201,52 +194,6 @@ impl PartialEq for Configuration {
     }
 }
 
-/// Query planner modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum QueryPlannerMode {
-    /// Use the new Rust-based implementation.
-    ///
-    /// Raises an error at Router startup if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use primarily the Javascript-based implementation,
-    /// but also schedule background jobs to run the Rust implementation and compare results,
-    /// logging warnings if the implementations disagree.
-    ///
-    /// Raises an error at Router startup if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    Both,
-    /// Use primarily the Javascript-based implementation,
-    /// but also schedule on a best-effort basis background jobs
-    /// to run the Rust implementation and compare results,
-    /// logging warnings if the implementations disagree.
-    ///
-    /// Falls back to `legacy` with a warning
-    /// if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    #[default]
-    BothBestEffort,
-}
-
-/// Which implementation of GraphQL schema introspection to use, if enabled
-#[derive(Copy, Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum IntrospectionMode {
-    /// Use the new Rust-based implementation.
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side,
-    /// logging warnings if the implementations disagree.
-    #[default]
-    Both,
-}
-
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -272,8 +219,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
-            experimental_query_planner_mode: QueryPlannerMode,
-            experimental_introspection_mode: IntrospectionMode,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -300,8 +245,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
-            experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
-            experimental_introspection_mode: ad_hoc.experimental_introspection_mode,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -331,6 +274,7 @@ fn test_listen() -> ListenAddr {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -347,8 +291,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
-        experimental_query_planner_mode: Option<QueryPlannerMode>,
-        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
@@ -363,8 +305,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
-            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -416,24 +356,32 @@ impl Configuration {
             ).build())
     }
 
-    pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
-        router_bridge::planner::QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments,
-            generate_query_fragments: Some(self.supergraph.generate_query_fragments),
-            incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
-                enable_defer: Some(self.supergraph.defer_support),
-            }),
-            graphql_validation: false,
-            debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
-                bypass_planner_for_single_subgraph: None,
-                max_evaluated_plans: self
-                    .supergraph
-                    .query_planning
-                    .experimental_plans_limit
-                    .or(Some(10000)),
-                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
-            }),
+    pub(crate) fn rust_query_planner_config(
+        &self,
+    ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+        use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
+
+        let max_evaluated_plans = self
+            .supergraph
+            .query_planning
+            .experimental_plans_limit
+            // Fails if experimental_plans_limit is zero; use our default.
+            .and_then(NonZeroU32::new)
+            .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
+
+        QueryPlannerConfig {
+            subgraph_graphql_validation: false,
+            generate_query_fragments: self.supergraph.generate_query_fragments,
+            incremental_delivery: QueryPlanIncrementalDeliveryConfig {
+                enable_defer: self.supergraph.defer_support,
+            },
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+            debug: QueryPlannerDebugConfig {
+                max_evaluated_plans,
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            },
         }
     }
 }
@@ -449,6 +397,7 @@ impl Default for Configuration {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -466,8 +415,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
-        experimental_query_planner_mode: Option<QueryPlannerMode>,
-        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -478,8 +425,6 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
-            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -502,6 +447,14 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        #[cfg(not(feature = "hyper_header_limits"))]
+        if self.limits.http1_max_request_headers.is_some() {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "'limits.http1_max_request_headers' requires 'hyper_header_limits' feature",
+                error: "enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'".to_string(),
+            });
+        }
+
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
@@ -685,13 +638,8 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
-    /// Enable reuse of query fragments
-    /// Default: depends on the federation version
-    #[serde(rename = "experimental_reuse_query_fragments")]
-    pub(crate) reuse_query_fragments: Option<bool>,
-
     /// Enable QP generation of fragments for subgraph requests
-    /// Default: false
+    /// Default: true
     pub(crate) generate_query_fragments: bool,
 
     /// Set to false to disable defer support
@@ -711,23 +659,14 @@ pub(crate) struct Supergraph {
     pub(crate) experimental_log_on_broken_pipe: bool,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", untagged)]
-pub(crate) enum AvailableParallelism {
-    Auto(Auto),
-    Fixed(NonZeroUsize),
+const fn default_generate_query_fragments() -> bool {
+    true
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Auto {
     Auto,
-}
-
-impl Default for AvailableParallelism {
-    fn default() -> Self {
-        Self::Fixed(NonZeroUsize::new(1).expect("cannot fail"))
-    }
 }
 
 fn default_defer_support() -> bool {
@@ -737,13 +676,13 @@ fn default_defer_support() -> bool {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        reuse_query_fragments: Option<bool>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
@@ -754,16 +693,8 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: generate_query_fragments.and_then(|v|
-                if v {
-                    if reuse_query_fragments.is_some_and(|v| v) {
-                        // warn the user that both are enabled and it's overridden
-                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
-                    }
-                    Some(false)
-                } else { reuse_query_fragments }
-            ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -774,13 +705,13 @@ impl Supergraph {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        reuse_query_fragments: Option<bool>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
@@ -791,16 +722,8 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: generate_query_fragments.and_then(|v|
-                if v {
-                    if reuse_query_fragments.is_some_and(|v| v) {
-                        // warn the user that both are enabled and it's overridden
-                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
-                    }
-                    Some(false)
-                } else { reuse_query_fragments }
-            ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_default(),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -885,7 +808,7 @@ impl Default for Apq {
 }
 
 /// Query planning cache configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -922,45 +845,6 @@ pub(crate) struct QueryPlanning {
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
-
-    /// Set the size of a pool of workers to enable query planning parallelism.
-    /// Default: 1.
-    pub(crate) experimental_parallelism: AvailableParallelism,
-
-    /// Activates introspection response caching
-    /// Historically, the Router has executed introspection queries in the query planner, and cached their
-    /// response in its cache because they were expensive. This will change soon as introspection will be
-    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
-    /// the cache, this option can be used to deactivate it.
-    /// Default: true
-    pub(crate) legacy_introspection_caching: bool,
-}
-
-impl Default for QueryPlanning {
-    fn default() -> Self {
-        Self {
-            cache: QueryPlanCache::default(),
-            warmed_up_queries: Default::default(),
-            experimental_plans_limit: Default::default(),
-            experimental_parallelism: Default::default(),
-            experimental_paths_limit: Default::default(),
-            experimental_reuse_query_plans: Default::default(),
-            legacy_introspection_caching: default_legacy_introspection_caching(),
-        }
-    }
-}
-
-const fn default_legacy_introspection_caching() -> bool {
-    true
-}
-
-impl QueryPlanning {
-    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
-        match self.experimental_parallelism {
-            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
-            AvailableParallelism::Fixed(n) => Ok(n),
-        }
-    }
 }
 
 /// Cache configuration

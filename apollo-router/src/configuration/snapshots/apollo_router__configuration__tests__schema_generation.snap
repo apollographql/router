@@ -307,25 +307,6 @@ expression: "&schema"
         }
       ]
     },
-    "Auto": {
-      "enum": [
-        "auto"
-      ],
-      "type": "string"
-    },
-    "AvailableParallelism": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Auto",
-          "description": "#/definitions/Auto"
-        },
-        {
-          "format": "uint",
-          "minimum": 1.0,
-          "type": "integer"
-        }
-      ]
-    },
     "BatchProcessorConfig": {
       "description": "Batch processor configuration",
       "properties": {
@@ -549,6 +530,11 @@ expression: "&schema"
     "Client": {
       "additionalProperties": false,
       "properties": {
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
@@ -1261,6 +1247,9 @@ expression: "&schema"
       "type": "object"
     },
     "Conf5": {
+      "type": "object"
+    },
+    "Conf6": {
       "anyOf": [
         {
           "additionalProperties": {
@@ -1272,7 +1261,7 @@ expression: "&schema"
       ],
       "description": "Subgraph URL mappings"
     },
-    "Conf6": {
+    "Conf7": {
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
@@ -1289,7 +1278,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Conf7": {
+    "Conf8": {
       "additionalProperties": false,
       "description": "Telemetry configuration",
       "properties": {
@@ -1312,6 +1301,20 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
+        "http1_max_request_buf_size": {
+          "default": null,
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
+          "nullable": true,
+          "type": "string"
+        },
+        "http1_max_request_headers": {
+          "default": null,
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
@@ -1681,6 +1684,11 @@ expression: "&schema"
           "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
         "invalidation": {
           "$ref": "#/definitions/InvalidationEndpointConfig",
           "description": "#/definitions/InvalidationEndpointConfig",
@@ -1720,7 +1728,7 @@ expression: "&schema"
         },
         "client_name_header": {
           "default": "apollographql-client-name",
-          "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.",
           "nullable": true,
           "type": "string"
         },
@@ -2160,6 +2168,45 @@ expression: "&schema"
         },
         {
           "type": "boolean"
+        }
+      ]
+    },
+    "DnsResolutionStrategy": {
+      "oneOf": [
+        {
+          "description": "Only query for `A` (IPv4) records",
+          "enum": [
+            "ipv4_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Only query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv6_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for both `A` (IPv4) and `AAAA` (IPv6) records in parallel",
+          "enum": [
+            "ipv4_and_ipv6"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records",
+          "enum": [
+            "ipv6_then_ipv4"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records",
+          "enum": [
+            "ipv4_then_ipv6"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -3562,32 +3609,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "IntrospectionMode": {
-      "description": "Which implementation of GraphQL schema introspection to use, if enabled",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
@@ -4413,39 +4434,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "QueryPlannerMode": {
-      "description": "Query planner modes.",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use primarily the Javascript-based implementation, but also schedule background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "both_best_effort"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "QueryPlanning": {
       "additionalProperties": false,
       "description": "Query planning cache configuration",
@@ -4453,10 +4441,6 @@ expression: "&schema"
         "cache": {
           "$ref": "#/definitions/QueryPlanCache",
           "description": "#/definitions/QueryPlanCache"
-        },
-        "experimental_parallelism": {
-          "$ref": "#/definitions/AvailableParallelism",
-          "description": "#/definitions/AvailableParallelism"
         },
         "experimental_paths_limit": {
           "default": null,
@@ -4477,11 +4461,6 @@ expression: "&schema"
         "experimental_reuse_query_plans": {
           "default": false,
           "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
-          "type": "boolean"
-        },
-        "legacy_introspection_caching": {
-          "default": true,
-          "description": "Activates introspection response caching Historically, the Router has executed introspection queries in the query planner, and cached their response in its cache because they were expensive. This will change soon as introspection will be removed from the query planner. In the meantime, since storing introspection responses can fill up the cache, this option can be used to deactivate it. Default: true",
           "type": "boolean"
         },
         "warmed_up_queries": {
@@ -4694,36 +4673,6 @@ expression: "&schema"
           "type": "string"
         }
       ]
-    },
-    "RetryConfig": {
-      "additionalProperties": false,
-      "description": "Retry configuration",
-      "properties": {
-        "min_per_sec": {
-          "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "retry_mutations": {
-          "description": "allows request retries on mutations. This should only be activated if mutations are idempotent. Disabled by default",
-          "nullable": true,
-          "type": "boolean"
-        },
-        "retry_percent": {
-          "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
-          "format": "float",
-          "nullable": true,
-          "type": "number"
-        },
-        "ttl": {
-          "default": null,
-          "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
-          "type": "string"
-        }
-      },
-      "type": "object"
     },
     "Router": {
       "additionalProperties": false,
@@ -5023,6 +4972,25 @@ expression: "&schema"
           },
           "required": [
             "request_method"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A value from context.",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "request_context": {
+              "description": "The request context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_context"
           ],
           "type": "object"
         },
@@ -5689,6 +5657,11 @@ expression: "&schema"
     "SubgraphAttributes": {
       "additionalProperties": false,
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -5942,6 +5915,11 @@ expression: "&schema"
           "description": "Send the service name",
           "type": "boolean"
         },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
+          "type": "boolean"
+        },
         "uri": {
           "default": false,
           "description": "Send the subgraph URI",
@@ -5982,6 +5960,11 @@ expression: "&schema"
         "status_code": {
           "default": false,
           "description": "Send the http status",
+          "type": "boolean"
+        },
+        "subgraph_request_id": {
+          "default": false,
+          "description": "Send the subgraph request id",
           "type": "boolean"
         }
       },
@@ -6170,6 +6153,24 @@ expression: "&schema"
           },
           "required": [
             "subgraph_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "subgraph_resend_count": {
+              "description": "The subgraph http resend count",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_resend_count"
           ],
           "type": "object"
         },
@@ -6407,14 +6408,14 @@ expression: "&schema"
           "nullable": true,
           "type": "boolean"
         },
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
         "experimental_http2": {
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
-          "nullable": true
-        },
-        "experimental_retry": {
-          "$ref": "#/definitions/RetryConfig",
-          "description": "#/definitions/RetryConfig",
           "nullable": true
         },
         "global_rate_limit": {
@@ -6550,15 +6551,9 @@ expression: "&schema"
           "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
           "type": "boolean"
         },
-        "experimental_reuse_query_fragments": {
-          "default": null,
-          "description": "Enable reuse of query fragments Default: depends on the federation version",
-          "nullable": true,
-          "type": "boolean"
-        },
         "generate_query_fragments": {
-          "default": false,
-          "description": "Enable QP generation of fragments for subgraph requests Default: false",
+          "default": true,
+          "description": "Enable QP generation of fragments for subgraph requests Default: true",
           "type": "boolean"
         },
         "introspection": {
@@ -7306,6 +7301,12 @@ expression: "&schema"
           "description": "Whether to use parent based sampling",
           "type": "boolean"
         },
+        "preview_datadog_agent_sampling": {
+          "default": null,
+          "description": "Use datadog agent sampling. This means that all spans will be sent to the Datadog agent and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog",
+          "nullable": true,
+          "type": "boolean"
+        },
         "resource": {
           "additionalProperties": {
             "$ref": "#/definitions/AttributeValue",
@@ -7686,6 +7687,11 @@ expression: "&schema"
         "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -7715,6 +7721,11 @@ expression: "&schema"
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
+        "http.request.resend_count": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -8267,18 +8278,14 @@ expression: "&schema"
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
     },
-    "experimental_introspection_mode": {
-      "$ref": "#/definitions/IntrospectionMode",
-      "description": "#/definitions/IntrospectionMode"
-    },
-    "experimental_query_planner_mode": {
-      "$ref": "#/definitions/QueryPlannerMode",
-      "description": "#/definitions/QueryPlannerMode"
-    },
     "experimental_type_conditioned_fetching": {
       "default": false,
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
+    },
+    "fleet_detector": {
+      "$ref": "#/definitions/Conf5",
+      "description": "#/definitions/Conf5"
     },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig",
@@ -8305,8 +8312,8 @@ expression: "&schema"
       "description": "#/definitions/Config"
     },
     "override_subgraph_url": {
-      "$ref": "#/definitions/Conf5",
-      "description": "#/definitions/Conf5"
+      "$ref": "#/definitions/Conf6",
+      "description": "#/definitions/Conf6"
     },
     "persisted_queries": {
       "$ref": "#/definitions/PersistedQueries",
@@ -8329,8 +8336,8 @@ expression: "&schema"
       "description": "#/definitions/Config8"
     },
     "rhai": {
-      "$ref": "#/definitions/Conf6",
-      "description": "#/definitions/Conf6"
+      "$ref": "#/definitions/Conf7",
+      "description": "#/definitions/Conf7"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
@@ -8345,8 +8352,8 @@ expression: "&schema"
       "description": "#/definitions/Supergraph"
     },
     "telemetry": {
-      "$ref": "#/definitions/Conf7",
-      "description": "#/definitions/Conf7"
+      "$ref": "#/definitions/Conf8",
+      "description": "#/definitions/Conf8"
     },
     "tls": {
       "$ref": "#/definitions/Tls",

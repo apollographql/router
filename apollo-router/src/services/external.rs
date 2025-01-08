@@ -1,4 +1,5 @@
-#![allow(missing_docs)] // FIXME
+//! Structures for externalised data, communicating the state of the router pipeline at the
+//! different stages.
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -20,6 +21,7 @@ use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
 
+use super::subgraph::SubgraphRequestId;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
@@ -102,6 +104,8 @@ pub(crate) struct Externalizable<T> {
     pub(crate) has_next: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     query_plan: Option<Arc<QueryPlan>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) subgraph_request_id: Option<SubgraphRequestId>,
 }
 
 #[buildstructor::buildstructor]
@@ -113,6 +117,7 @@ where
     /// This is the constructor (or builder) to use when constructing a Router
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn router_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -145,6 +150,7 @@ where
             service_name: None,
             has_next: None,
             query_plan: None,
+            subgraph_request_id: None,
         }
     }
 
@@ -152,6 +158,7 @@ where
     /// This is the constructor (or builder) to use when constructing a Supergraph
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn supergraph_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -184,6 +191,7 @@ where
             service_name: None,
             has_next,
             query_plan: None,
+            subgraph_request_id: None,
         }
     }
 
@@ -191,6 +199,7 @@ where
     /// This is the constructor (or builder) to use when constructing an Execution
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn execution_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -224,6 +233,7 @@ where
             service_name: None,
             has_next,
             query_plan,
+            subgraph_request_id: None,
         }
     }
 
@@ -231,6 +241,7 @@ where
     /// This is the constructor (or builder) to use when constructing a Subgraph
     /// `Externalizable`.
     ///
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn subgraph_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -242,6 +253,7 @@ where
         method: Option<String>,
         service_name: Option<String>,
         uri: Option<String>,
+        subgraph_request_id: Option<SubgraphRequestId>,
     ) -> Self {
         assert!(matches!(
             stage,
@@ -263,6 +275,7 @@ where
             service_name,
             has_next: None,
             query_plan: None,
+            subgraph_request_id,
         }
     }
 

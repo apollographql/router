@@ -17,6 +17,7 @@ use url::Url;
 pub(crate) mod license_enforcement;
 pub(crate) mod license_stream;
 pub(crate) mod persisted_queries_manifest_stream;
+pub(crate) mod schema;
 pub(crate) mod schema_stream;
 
 const GCP_URL: &str = "https://uplink.api.apollographql.com";
@@ -210,7 +211,7 @@ where
     Response: Send + 'static + Debug,
     TransformedResponse: Send + 'static + Debug,
 {
-    let query = query_name::<Query>();
+    let query_name = query_name::<Query>();
     let (sender, receiver) = channel(2);
     let client = match reqwest::Client::builder()
         .no_gzip()
@@ -245,10 +246,12 @@ where
             .await
             {
                 Ok(response) => {
-                    tracing::info!(
-                        monotonic_counter.apollo_router_uplink_fetch_count_total = 1u64,
+                    u64_counter!(
+                        "apollo_router_uplink_fetch_count_total",
+                        "Total number of requests to Apollo Uplink",
+                        1u64,
                         status = "success",
-                        query
+                        query = query_name
                     );
                     match response {
                         UplinkResponse::New {
@@ -294,10 +297,12 @@ where
                     }
                 }
                 Err(err) => {
-                    tracing::info!(
-                        monotonic_counter.apollo_router_uplink_fetch_count_total = 1u64,
+                    u64_counter!(
+                        "apollo_router_uplink_fetch_count_total",
+                        "Total number of requests to Apollo Uplink",
+                        1u64,
                         status = "failure",
-                        query
+                        query = query_name
                     );
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");
@@ -340,13 +345,14 @@ where
         match http_request::<Query>(client, url.as_str(), request_body).await {
             Ok(response) => match response.data.map(Into::into) {
                 None => {
-                    tracing::info!(
-                        histogram.apollo_router_uplink_fetch_duration_seconds =
-                            now.elapsed().as_secs_f64(),
-                        query,
+                    f64_histogram!(
+                        "apollo_router_uplink_fetch_duration_seconds",
+                        "Duration of Apollo Uplink fetches.",
+                        now.elapsed().as_secs_f64(),
+                        query = query,
                         url = url.to_string(),
-                        "kind" = "uplink_error",
-                        error = "empty response from uplink",
+                        kind = "uplink_error",
+                        error = "empty response from uplink"
                     );
                 }
                 Some(UplinkResponse::New {
@@ -354,12 +360,13 @@ where
                     id,
                     delay,
                 }) => {
-                    tracing::info!(
-                        histogram.apollo_router_uplink_fetch_duration_seconds =
-                            now.elapsed().as_secs_f64(),
-                        query,
+                    f64_histogram!(
+                        "apollo_router_uplink_fetch_duration_seconds",
+                        "Duration of Apollo Uplink fetches.",
+                        now.elapsed().as_secs_f64(),
+                        query = query,
                         url = url.to_string(),
-                        "kind" = "new"
+                        kind = "new"
                     );
                     match transform_new_response(response).await {
                         Ok(res) => {
@@ -370,22 +377,19 @@ where
                             })
                         }
                         Err(err) => {
-                            tracing::debug!(
-                                    "failed to process results of Uplink response from {}: {}. Other endpoints will be tried",
-                                    url,
-                                    err
-                                );
+                            tracing::debug!("failed to process results of Uplink response from {url}: {err}. Other endpoints will be tried");
                             continue;
                         }
                     }
                 }
                 Some(UplinkResponse::Unchanged { id, delay }) => {
-                    tracing::info!(
-                        histogram.apollo_router_uplink_fetch_duration_seconds =
-                            now.elapsed().as_secs_f64(),
-                        query,
+                    f64_histogram!(
+                        "apollo_router_uplink_fetch_duration_seconds",
+                        "Duration of Apollo Uplink fetches.",
+                        now.elapsed().as_secs_f64(),
+                        query = query,
                         url = url.to_string(),
-                        "kind" = "unchanged"
+                        kind = "unchanged"
                     );
                     return Ok(UplinkResponse::Unchanged { id, delay });
                 }
@@ -394,14 +398,15 @@ where
                     code,
                     retry_later,
                 }) => {
-                    tracing::info!(
-                        histogram.apollo_router_uplink_fetch_duration_seconds =
-                            now.elapsed().as_secs_f64(),
-                        query,
+                    f64_histogram!(
+                        "apollo_router_uplink_fetch_duration_seconds",
+                        "Duration of Apollo Uplink fetches.",
+                        now.elapsed().as_secs_f64(),
+                        query = query,
                         url = url.to_string(),
-                        "kind" = "uplink_error",
-                        error = message,
-                        code
+                        kind = "uplink_error",
+                        error = message.clone(),
+                        code = code.clone()
                     );
                     return Ok(UplinkResponse::Error {
                         message,
@@ -410,21 +415,18 @@ where
                     });
                 }
             },
-            Err(e) => {
-                tracing::info!(
-                    histogram.apollo_router_uplink_fetch_duration_seconds =
-                        now.elapsed().as_secs_f64(),
-                    query,
+            Err(err) => {
+                f64_histogram!(
+                    "apollo_router_uplink_fetch_duration_seconds",
+                    "Duration of Apollo Uplink fetches.",
+                    now.elapsed().as_secs_f64(),
+                    query = query,
                     url = url.to_string(),
-                    "kind" = "http_error",
-                    error = e.to_string(),
-                    code = e.status().unwrap_or_default().as_str()
+                    kind = "http_error",
+                    error = err.to_string(),
+                    code = err.status().unwrap_or_default().to_string()
                 );
-                tracing::debug!(
-                    "failed to fetch from Uplink endpoint {}: {}. Other endpoints will be tried",
-                    url,
-                    e
-                );
+                tracing::debug!("failed to fetch from Uplink endpoint {url}: {err}. Other endpoints will be tried");
             }
         };
     }

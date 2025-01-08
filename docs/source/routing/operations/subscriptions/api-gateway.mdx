@@ -1,0 +1,100 @@
+---
+title: Enabling HTTP Subscriptions with the GraphOS Router and an API Gateway
+subtitle: Enable HTTP multipart subscriptions when using an API gateway in front of the router
+description: Enable HTTP multipart subscriptions when using an API gateway in front of the router.
+published: 2024-03-11
+id: TN0047
+tags: [router]
+redirectFrom:
+  - /technotes/TN0047-using-http-subscriptions-api-gateway/
+---
+
+Learn how to configure an API gateway to support HTTP multipart subscriptions with the GraphOS Router.
+
+Organizations can require their APIs—including [the router](/graphos/routing/router-api-gateway-comparison)—to be fronted by an API gateway. API gateways often aren't configured to support [subscriptions over HTTP multipart](/graphos/routing/operations/subscriptions#http-callback-setup): API gateways by default usually buffer HTTP responses, but subscriptions over HTTP multipart require multipart responses to be streamed, not buffered.
+
+The rest of this article describes how to configure API gateways from different vendors to stream and not buffer HTTP responses, therefore supporting subscriptions over HTTP multipart.
+
+
+
+## Azure API Management (APIM)
+
+By default, an HTTP API endpoint in APIM buffers each response from a downstream service, where the endpoint must receive all chunks of an HTTP response before it sends the response to the client.
+
+To enable HTTP subscriptions, the `forward-request` policy on the `backend` must be updated with `buffer-response="false"`. This configures the HTTP API endpoint to send the chunks of a response to the requesting client as they are received.
+
+```xml
+<policies>
+    <backend>
+        <forward-request http-version="2or1" buffer-response="false" />
+    </backend>
+</policies>
+```
+
+<Note>
+
+For more information, see the [Azure API Management policy reference - forward-request](https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy#attributes).
+
+</Note>
+
+
+
+## Google Apigee
+
+By default, an HTTP API endpoint in Apigee buffers each response from a downstream service, where the endpoint must receive all chunks of an HTTP response before it sends the response to the client.
+
+To enable HTTP subscriptions, the `response.streaming.enabled` property must be set to `true` in both your `ProxyEndpoint` and `TargetEndpoint` definitions in the proxy bundle. This configures the HTTP API endpoint to send the chunks of a response to the requesting client as they are received.
+
+```xml
+<TargetEndpoint name="default">
+  <HTTPTargetConnection>
+    <URL>http://mocktarget.apigee.net</URL>
+    <Properties>
+      <Property name="response.streaming.enabled">true</Property>
+    </Properties>
+  </HTTPTargetConnection>
+</TargetEndpoint>
+```
+
+```xml
+<ProxyEndpoint name="default">
+  <HTTPProxyConnection>
+    <BasePath>/v1/weather</BasePath>
+    <Properties>
+      <Property name="response.streaming.enabled">true</Property>
+    </Properties>
+  </HTTPProxyConnection>
+</ProxyEndpoint>
+```
+
+<Note>
+
+For more information, see [Streaming requests and responses in the Apigee documentation](https://cloud.google.com/apigee/docs/api-platform/develop/enabling-streaming?hl=en).
+
+</Note>
+
+## Mulesoft
+
+
+
+### Flex Gateway
+
+Streaming of HTTP multipart is supported out of the box with no additional configuration required.
+
+
+
+### Proxy (Mule 4, CloudHub 2.0)
+
+Streaming of HTTP multipart isn't supported. Use Flex Gateway instead.
+
+## Kong
+
+Streaming of HTTP multipart is supported out of the box with no additional configuration required.
+
+
+
+## AWS API Gateway
+
+AWS API Gateway doesn't support streaming of HTTP data.
+
+A possible workaround is to use a Lambda expression which does support streaming. To learn more, see [AWS Lambda response streaming](https://aws.amazon.com/blogs/compute/introducing-aws-lambda-response-streaming/).

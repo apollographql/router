@@ -8,6 +8,7 @@ use wiremock::Mock;
 use wiremock::ResponseTemplate;
 
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -43,7 +44,7 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     // Expect a small query
     Mock::given(method("POST"))
         .and(path("/"))
-        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
+        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query ExampleQuery {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
         )
@@ -75,12 +76,135 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     assert_eq!(response.status(), 200);
 
     // This query is huge and will be rejected because it is too large before hitting the coprocessor
-    let (_trace_id, response) = router.execute_huge_query().await;
+    let (_trace_id, response) = router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     assert_eq!(response.status(), 413);
     assert_yaml_snapshot!(response.text().await?);
 
     router.graceful_shutdown().await;
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    test_full_pipeline(400, "RouterRequest", empty_body_string).await;
+    test_full_pipeline(200, "RouterResponse", empty_body_string).await;
+    test_full_pipeline(500, "SupergraphRequest", empty_body_string).await;
+    test_full_pipeline(500, "SupergraphResponse", empty_body_string).await;
+    test_full_pipeline(200, "SubgraphRequest", empty_body_string).await;
+    test_full_pipeline(200, "SubgraphResponse", empty_body_string).await;
+    test_full_pipeline(500, "ExecutionRequest", empty_body_string).await;
+    test_full_pipeline(500, "ExecutionResponse", empty_body_string).await;
+
+    test_full_pipeline(500, "RouterRequest", empty_body_object).await;
+    test_full_pipeline(500, "RouterResponse", empty_body_object).await;
+    test_full_pipeline(200, "SupergraphRequest", empty_body_object).await;
+    test_full_pipeline(200, "SupergraphResponse", empty_body_object).await;
+    test_full_pipeline(200, "SubgraphRequest", empty_body_object).await;
+    test_full_pipeline(200, "SubgraphResponse", empty_body_object).await;
+    test_full_pipeline(200, "ExecutionRequest", empty_body_object).await;
+    test_full_pipeline(200, "ExecutionResponse", empty_body_object).await;
+
+    test_full_pipeline(200, "RouterRequest", remove_body).await;
+    test_full_pipeline(200, "RouterResponse", remove_body).await;
+    test_full_pipeline(200, "SupergraphRequest", remove_body).await;
+    test_full_pipeline(200, "SupergraphResponse", remove_body).await;
+    test_full_pipeline(200, "SubgraphRequest", remove_body).await;
+    test_full_pipeline(200, "SubgraphResponse", remove_body).await;
+    test_full_pipeline(200, "ExecutionRequest", remove_body).await;
+    test_full_pipeline(200, "ExecutionResponse", remove_body).await;
+
+    test_full_pipeline(500, "RouterRequest", null_out_response).await;
+    test_full_pipeline(500, "RouterResponse", null_out_response).await;
+    test_full_pipeline(500, "SupergraphRequest", null_out_response).await;
+    test_full_pipeline(500, "SupergraphResponse", null_out_response).await;
+    test_full_pipeline(200, "SubgraphRequest", null_out_response).await;
+    test_full_pipeline(200, "SubgraphResponse", null_out_response).await;
+    test_full_pipeline(500, "ExecutionRequest", null_out_response).await;
+    test_full_pipeline(500, "ExecutionResponse", null_out_response).await;
+    Ok(())
+}
+
+fn empty_body_object(mut body: serde_json::Value) -> serde_json::Value {
+    *body
+        .as_object_mut()
+        .expect("body")
+        .get_mut("body")
+        .expect("body") = serde_json::Value::Object(serde_json::Map::new());
+    body
+}
+
+fn empty_body_string(mut body: serde_json::Value) -> serde_json::Value {
+    *body
+        .as_object_mut()
+        .expect("body")
+        .get_mut("body")
+        .expect("body") = serde_json::Value::String("".to_string());
+    body
+}
+
+fn remove_body(mut body: serde_json::Value) -> serde_json::Value {
+    body.as_object_mut().expect("body").remove("body");
+    body
+}
+
+fn null_out_response(_body: serde_json::Value) -> serde_json::Value {
+    serde_json::Value::String("".to_string())
+}
+
+async fn test_full_pipeline(
+    response_status: u16,
+    stage: &'static str,
+    coprocessor: impl Fn(serde_json::Value) -> serde_json::Value + Send + Sync + 'static,
+) {
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let mut body = req.body_json::<serde_json::Value>().expect("body");
+            if body
+                .as_object()
+                .unwrap()
+                .get("stage")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                == stage
+            {
+                body = coprocessor(body);
+            }
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(
+        response.status(),
+        response_status,
+        "Failed at stage {}",
+        stage
+    );
+
+    router.graceful_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

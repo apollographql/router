@@ -181,6 +181,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                             PluginInit::builder()
                                 .config(plugin_config.clone())
                                 .supergraph_sdl(schema.raw_sdl.clone())
+                                .supergraph_schema_id(schema.schema_id.clone())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .build(),
@@ -294,20 +295,10 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlannerPool::new(
-            previous_supergraph
-                .as_ref()
-                .map(|router| router.js_planners())
-                .unwrap_or_default(),
-            schema.clone(),
-            configuration.clone(),
-            configuration
-                .supergraph
-                .query_planning
-                .experimental_query_planner_parallelism()?,
-        )
-        .instrument(query_planner_span)
-        .await?;
+        let bridge_query_planner =
+            BridgeQueryPlannerPool::new(schema.clone(), configuration.clone())
+                .instrument(query_planner_span)
+                .await?;
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
@@ -416,7 +407,7 @@ pub(crate) async fn create_subgraph_services(
             name,
             configuration,
             &tls_root_store,
-            shaping.enable_subgraph_http2(name),
+            shaping.subgraph_client_config(name),
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
@@ -497,12 +488,9 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
+        r#"failed to initialize the query planner: An internal error has occurred, please report this bug to Apollo.
 
-Details:
-Error: Cannot find type "Review" in subgraph "products"
-caused by
-"#
+Details: Object field "Product.reviews"'s inner type "Review" does not refer to an existing output type."#
     );
 }
 
@@ -512,8 +500,10 @@ pub(crate) async fn add_plugin(
     factory: &PluginFactory,
     plugin_config: &Value,
     schema: Arc<String>,
+    schema_id: Arc<String>,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    launch_id: Option<Arc<String>>,
     notify: &crate::notification::Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
@@ -523,8 +513,10 @@ pub(crate) async fn add_plugin(
             PluginInit::builder()
                 .config(plugin_config.clone())
                 .supergraph_sdl(schema)
+                .supergraph_schema_id(schema_id)
                 .supergraph_schema(supergraph_schema)
                 .subgraph_schemas(subgraph_schemas)
+                .launch_id(launch_id)
                 .notify(notify.clone())
                 .build(),
         )
@@ -548,6 +540,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
+    let supergraph_schema_id = schema.schema_id.clone();
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -578,8 +571,10 @@ pub(crate) async fn create_plugins(
                 $factory,
                 &$plugin_config,
                 schema.as_string().clone(),
+                supergraph_schema_id.clone(),
                 supergraph_schema.clone(),
                 subgraph_schemas.clone(),
+                schema.launch_id.clone(),
                 &configuration.notify.clone(),
                 &mut plugin_instances,
                 &mut errors,
@@ -673,6 +668,7 @@ pub(crate) async fn create_plugins(
     }
     add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("traffic_shaping");
+    add_mandatory_apollo_plugin!("fleet_detector");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
     add_optional_apollo_plugin!("override_subgraph_url");
