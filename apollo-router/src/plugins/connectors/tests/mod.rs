@@ -1579,6 +1579,7 @@ mod quickstart_tests {
             true,
             false,
             Some(vec![CONTENT_TYPE.to_string()]),
+            None,
         )
         .await;
 

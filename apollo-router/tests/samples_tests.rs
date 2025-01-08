@@ -372,6 +372,7 @@ impl TestExecution {
                         true,
                         snapshot.update.unwrap_or(false),
                         Some(vec![CONTENT_TYPE.to_string(), CONTENT_LENGTH.to_string()]),
+                        snapshot.port,
                     )
                     .await;
                     let snapshot_url = snapshot_server.uri();
@@ -811,6 +812,7 @@ struct Snapshot {
     path: String,
     base_url: String,
     update: Option<bool>,
+    port: Option<u16>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
