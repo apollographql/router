@@ -241,7 +241,8 @@ mod test {
     use http::StatusCode;
     use tower::BoxError;
 
-    use crate::plugins::limits::layer::BodyLimitControl;
+    // TODO: Re-instate when test re-instated
+    // use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
