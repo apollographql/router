@@ -1137,4 +1137,15 @@ mod tests {
 
         assert_eq!(estimated_cost(schema, query, variables), 1.0);
     }
+
+    #[test(tokio::test)]
+    async fn subscription_request() {
+        let schema = include_str!("./fixtures/subscription_schema.graphql");
+        let query = include_str!("./fixtures/subscription_query.graphql");
+        let variables = "{}";
+
+        assert_eq!(estimated_cost(schema, query, variables), 1.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 1.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 1.0);
+    }
 }
