@@ -99,7 +99,7 @@ You have to build the router with your choice of feature flags and you must use 
 e.g.: heap and ad-hoc allocation tracing
 
 ```shell
-# e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
+cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
 ```
 
 e.g.: heap allocation tracing
@@ -108,10 +108,13 @@ e.g.: heap allocation tracing
 cargo build --profile release-dhat --features dhat-heap 
 ```
 
-This will create a router in `./target/release-dhat`.
+This will create a router in `./target/release-dhat`, which can be run with:
+```shell
+cargo run --profile release-dhat --feautures dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
+```
 
 When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can
-be examined using standard DHAT tooling.
+be examined using standard DHAT tooling, e.g. [DHAT html viewer](https://nnethercote.github.io/dh_view/dh_view.html)
 
 For more details on interpreting these files and running tests, see the [dhat-rs](https://docs.rs/dhat/latest/dhat/#running) crate documentation.
 

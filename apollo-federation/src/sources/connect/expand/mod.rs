@@ -48,7 +48,10 @@ pub enum ExpansionResult {
 /// each connector is separated into its own unique subgraph with relevant GraphQL directives to enforce
 /// field dependencies and response structures. This allows for satisfiability and validation to piggy-back
 /// off of existing functionality in a reproducable way.
-pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, FederationError> {
+pub fn expand_connectors(
+    supergraph_str: &str,
+    api_schema_options: &ApiSchemaOptions,
+) -> Result<ExpansionResult, FederationError> {
     // TODO: Don't rely on finding the URL manually to short out
     let connect_url = ConnectSpec::identity();
     let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
@@ -57,11 +60,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
     }
 
     let supergraph = Supergraph::new(supergraph_str)?;
-    let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
-        // TODO: Get these options from the router?
-        include_defer: true,
-        include_stream: false,
-    })?;
+    let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
     let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph
         .extract_subgraphs()?
@@ -314,6 +313,13 @@ mod helpers {
                 .as_ref()
                 .map(|m| m.name.clone())
                 .unwrap_or(name!("Query"));
+            let mutation_alias = self
+                .original_schema
+                .schema()
+                .schema_definition
+                .mutation
+                .as_ref()
+                .map(|m| m.name.clone());
 
             let field = &connector.id.directive.field;
             let field_def = field.get(self.original_schema.schema())?;
@@ -377,16 +383,33 @@ mod helpers {
 
             self.insert_query_for_field(&mut schema, &query_alias, &parent_object, field_def)?;
 
-            let root = SchemaRootDefinitionPosition {
+            let query_root = SchemaRootDefinitionPosition {
                 root_kind: SchemaRootDefinitionKind::Query,
             };
-            root.insert(
+            query_root.insert(
                 &mut schema,
                 ComponentName {
                     origin: ComponentOrigin::Definition,
                     name: query_alias,
                 },
             )?;
+
+            if let Some(mutation_alias) = mutation_alias {
+                // only add the mutation root definition if we've added the
+                // type to this schema
+                if schema.get_type(mutation_alias.clone()).is_ok() {
+                    let mutation_root = SchemaRootDefinitionPosition {
+                        root_kind: SchemaRootDefinitionKind::Mutation,
+                    };
+                    mutation_root.insert(
+                        &mut schema,
+                        ComponentName {
+                            origin: ComponentOrigin::Definition,
+                            name: mutation_alias,
+                        },
+                    )?;
+                }
+            }
 
             // Process any outputs needed by the connector
             self.process_outputs(
