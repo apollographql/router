@@ -40,7 +40,7 @@ pub fn unsupported_set_axum_router_callback(
 /// Named param: /foo/:bar/baz => /foo/{bar}/baz
 /// Final wildcard: /foo/*wild => /foo/{*wild}
 pub(crate) fn rewrite_path_for_axum_0_8(path: &str) -> String {
-    let path = NAMED_PARAMETER_REGEX.replace_all(&path, "/{$1}");
+    let path = NAMED_PARAMETER_REGEX.replace_all(path, "/{$1}");
     let path = NAMED_WILDCARD_REGEX.replace_all(&path, "/{$1}");
     path.to_string()
 }
