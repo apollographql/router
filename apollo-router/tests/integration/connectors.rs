@@ -31,7 +31,18 @@ async fn test_incompatible_plugin_warnings() -> Result<(), BoxError> {
     router.start().await;
 
     // Make sure that we have the warnings we expect
-    let plugins = ["coprocessor", "headers", "telemetry", "traffic_shaping"];
+    // Note: This order is sadly required since asserting that logs exist consume
+    // previous statements...
+    let plugins = [
+        "authentication",
+        "coprocessor",
+        "headers",
+        "telemetry",
+        "tls",
+        "traffic_shaping",
+        "apq",
+        "batching",
+    ];
     for plugin in plugins {
         let msg = format!("plugin `{plugin}` is enabled for connector-enabled subgraphs, which is not yet supported");
         router.assert_log_contains(&msg).await;

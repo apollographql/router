@@ -140,22 +140,42 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
     // nice to extract them from the plugins themselves...
     let incompatible_prefixes = [
         ("authentication", ["subgraph"].as_slice()),
-        ("batching", &["subgraph"]),
         ("coprocessor", &["subgraph"]),
         ("headers", &[]),
+        ("preview_entity_cache", &["subgraph"]),
+        ("telemetry", &["apollo", "errors", "subgraph"]),
         (
             "telemetry",
             &["exporters", "metrics", "common", "attributes", "subgraph"],
         ),
-        ("preview_entity_cache", &["subgraph"]),
-        ("telemetry", &["apollo", "errors", "subgraph"]),
+        ("tls", &["subgraph"]),
         ("traffic_shaping", &[]),
     ];
+
+    // Note: Some of the incopmpatible plugins are hoisted up into individual
+    // properties on the config object, so we operate on the actual yaml to
+    // consolidate how we handle core features vs arbitrary plugins.
+    //
+    // Note: Execution of this entire chain of validation methods won't happen
+    // if the configuration is invalid, but we add a check just in case for
+    // debug builds.
+    let Some(raw_config) = config
+        .validated_yaml
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+    else {
+        debug_assert!(
+            false,
+            "configuration was invalid, which should not have happened"
+        );
+
+        return;
+    };
 
     for (plugin_name, prefix) in incompatible_prefixes {
         // Plugin configuration is only populated if the user has specified it,
         // so we can skip any that are missing.
-        let Some(plugin_config) = config.apollo_plugins.plugins.get(plugin_name) else {
+        let Some(plugin_config) = raw_config.get(plugin_name) else {
             continue;
         };
 
@@ -195,7 +215,7 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
         }
     }
 
-    // Lastly, there are a few plugins which influence all subgraphs, regardless
+    // There are a few plugins which influence all subgraphs, regardless
     // of configuration, so we warn about these statically here if we have
     // any connector-enabled subgraphs.
     let incompatible_plugins = ["demand_control", "rhai"];
@@ -204,6 +224,61 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
             tracing::warn!(
                 subgraphs = connector_enabled_subgraphs.iter().join(","),
                 message = msg(plugin_name)
+            );
+        }
+    }
+
+    // Some plugins allow for the operator to enable each feature at each subgraph
+    // and for all subgraphs at once. Unlike the features above, disabling a feature
+    // for all subgraphs can be overridden for arbitrary subgraphs and thus requires
+    // extra filtering logic.
+    macro_rules! warn_core_feature {
+        ($plugin_name:literal, $all_enabled:expr, $subgraphs:expr) => {{
+            let (enabled, disabled): (HashSet<&String>, HashSet<&String>) = $subgraphs
+                .iter()
+                .partition_map(|(name, sub)| match sub.enabled {
+                    true => itertools::Either::Left(name),
+                    false => itertools::Either::Right(name),
+                });
+
+            // Note: We need to collect here because we need to know if the iterator
+            // is empty or not when printing the warning message.
+            let incompatible = if $all_enabled {
+                // If all are enabled, then we can subtract out those which are disabled explicitly
+                connector_enabled_subgraphs
+                    .difference(&disabled)
+                    .copied()
+                    .collect::<HashSet<&String>>()
+            } else {
+                // Otherwise, then we only care about those explicitly enabled
+                enabled
+                    .intersection(&connector_enabled_subgraphs)
+                    .copied()
+                    .collect::<HashSet<&String>>()
+            };
+
+            if !incompatible.is_empty() {
+                tracing::warn!(
+                    subgraphs = incompatible.iter().join(","),
+                    message = msg($plugin_name)
+                );
+            }
+        }};
+    }
+
+    if config.apq.enabled {
+        warn_core_feature!(
+            "apq",
+            config.apq.subgraph.all.enabled,
+            config.apq.subgraph.subgraphs
+        );
+    }
+    if config.batching.enabled {
+        if let Some(subgraph_config) = config.batching.subgraph.as_ref() {
+            warn_core_feature!(
+                "batching",
+                subgraph_config.all.enabled,
+                subgraph_config.subgraphs
             );
         }
     }

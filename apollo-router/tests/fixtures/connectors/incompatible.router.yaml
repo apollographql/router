@@ -3,6 +3,26 @@
 
 apq:
   subgraph:
+    all:
+      enabled: true
+authentication:
+  subgraph:
+    all:
+      aws_sig_v4:
+        default_chain:
+          profile_name: "my-test-profile"
+          region: "us-east-1"
+          service_name: "lambda"
+          assume_role:
+            role_arn: "test-arn"
+            session_name: "test-session"
+            external_id: "test-id"
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    all:
+      enabled: false
     subgraphs:
       connectors:
         enabled: true
@@ -26,6 +46,10 @@ telemetry:
         all:
           send: true
           redact: false
+tls:
+  subgraph:
+    all:
+      certificate_authorities: "${file./nonsense/path.crt}"
 traffic_shaping:
   subgraphs:
     connectors:
