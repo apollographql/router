@@ -234,19 +234,19 @@ This guidance applies if you are:
  - Creating a native Rust plugin
  - Creating a custom binary
 
-## Instrumenting and observing the request lifecycle
+## Observability of the request lifecycle
 
-To understand the state and health of your router as it services requests, you can add instrumentation in the Router, Supergraph, and Subgraph services and export the collected data to your APM or metrics backend.
+To understand the state and health of your router as it services requests, you can add instrumentation to request lifecycle services and collect telemetry. The router's telemetry is based on [OpenTelemetry](https://opentelemetry.io/docs/what-is-opentelemetry/), and you can configure your router's YAML configuration to add traces, metrics, and logs. 
 
-Supported instruments include:
+You can instrument the Router, Supergraph, and Subgraph services with [events](/router/configuration/telemetry/instrumentation/events) to capture data points along the request lifecycle. You can customize your events by setting [conditions](/router/configuration/telemetry/instrumentation/conditions) to control when events are triggered, and you can set [attributes](/router/configuration/telemetry/instrumentation/events#attributes) and [selectors](/router/configuration/telemetry/instrumentation/selectors) to specify the data attached to events.
 
-* Standard OpenTelemetry instrumentation 
-* Standard router request lifecycle instruments
-* Custom instruments
+To learn more about router observability with telemetry, go to [Router Telemetry](/graphos/routing/observability/telemetry).
 
-## Customizing the request lifecycle
+## Router customizations along the request lifecycle
 
-Each service can have a set of customizable plugins that can be executed before or after the service: 
+You can create customizations for the router to extend its functionality. Customizations intervene at specific points of the request lifecycle, where each point is represented by a specific service with its own request and response objects.
+
+Customizations are implemented as plugins. Each service of the request lifecycle can have a set of customizable plugins that can be executed before or after the service: 
 
 - For requests, the router executes plugins _before_ the service.
 
@@ -273,6 +273,6 @@ Plugin1["Plugin 1"] -->|response| Client
 NextService["Next service"] -->|response| coreService
 ```
 
-Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. (A plugin can be called at multiple steps of the request lifecycle.)
+Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. A plugin can be called at multiple steps of the request lifecycle.
 
-To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](/graphos/routing/customization/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.
+To learn how to hook in to the various lifecycle stages, including examples customizations, start with the [router customization overview](/graphos/routing/customization/overview), then refer to the [Rhai scripts](/graphos/routing/customization/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.

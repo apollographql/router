@@ -32,6 +32,14 @@ Customizations intervene at specific points of the [request lifecycle](/graphos/
 
 <RequestLifecycleOverviewDiagram />
 
+<Tip>
+
+Understand the entire request lifecycle by following flowcharts of its [request path](/graphos/routing/request-lifecycle#request-path) and [response path](/graphos/routing/request-lifecycle#response-path), starting from a client request all the way to your subgraphs, and all the way back from subgraph responses to a client response.
+
+</Tip>
+
+### Request lifecycle plugins 
+
 Each service can have a set of plugins. For requests, the router executes plugins _before_ the service.
 
 ```mermaid
@@ -59,12 +67,6 @@ NextService["Next service"] -->|response| coreService
 
 Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. (A plugin can be called at multiple steps of the request lifecycle.)
 
-<Tip>
-
-To learn more details about the entire request lifecycle, follow the [request path](/graphos/routing/request-lifecycle#request-path) and [response path](/graphos/routing/request-lifecycle#response-path), starting from a client request all the way to your subgraphs, and all the way back from subgraph responses to a client response.
-
-</Tip>
-
 ### Request and Response buffering
 
 The router expects to execute on a stream of data. In order to work correctly and provide high performance, the following expectations must be met:
@@ -79,6 +81,6 @@ This guidance applies if you are:
  - Creating a native Rust plugin
  - Creating a custom binary
 
-## Customization creation
+## Creating customizations
 
 To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](/graphos/routing/customization/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.
