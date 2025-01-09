@@ -142,7 +142,7 @@ struct HttpServer {
     concurrency_limit: Option<usize>,
 
     /// Enable global rate limiting
-    rate_limit: Option<RateLimitConf>,
+    global_rate_limit: Option<RateLimitConf>,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
@@ -259,7 +259,7 @@ impl Plugin for TrafficShaping {
                 }
             })
             .load_shed()
-            .option_layer(self.config.router.rate_limit.as_ref().map(|limit| {
+            .option_layer(self.config.router.global_rate_limit.as_ref().map(|limit| {
                 tower::limit::RateLimitLayer::new(limit.capacity.into(), limit.interval)
             }))
             .map_result(|result: Result<RouterResponse, BoxError>| {
@@ -434,8 +434,8 @@ mod test {
 
     use super::*;
     use crate::json_ext::Object;
+    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::query_planner::BridgeQueryPlannerPool;
     use crate::router_factory::create_plugins;
@@ -445,8 +445,9 @@ mod test {
     use crate::services::router::service::RouterCreator;
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::RouterRequest;
+    use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
-    use crate::services::SupergraphResponse;
     use crate::spec::Schema;
     use crate::Configuration;
 
@@ -776,7 +777,7 @@ mod test {
             graphql::Request::default() => graphql::Response::default()
         });
 
-        assert!(&plugin
+        assert!(plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
@@ -840,58 +841,64 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let mut mock_service = MockSupergraphService::new();
+        let mut mock_service = MockRouterService::new();
         mock_service.expect_clone().returning(|| {
-            let mut mock_service = MockSupergraphService::new();
+            let mut mock_service = MockRouterService::new();
 
-            mock_service.expect_call().times(0..2).returning(move |_| {
-                Ok(SupergraphResponse::fake_builder()
+            mock_service.expect_call().times(0..3).returning(move |_| {
+                Ok(RouterResponse::fake_builder()
                     .data(json!({ "test": 1234_u32 }))
                     .build()
                     .unwrap())
             });
             mock_service
                 .expect_clone()
-                .returning(MockSupergraphService::new);
+                .returning(MockRouterService::new);
             mock_service
         });
 
-        assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .supergraph_service_internal(mock_service.clone())
-            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap()
-            .errors
-            .is_empty());
+        let mut svc = plugin.router_service(mock_service.clone().boxed());
 
-        let err = plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .supergraph_service_internal(mock_service.clone())
-            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
+        let response: router::Response = svc
+            .ready()
             .await
-            .unwrap_err();
-        assert!(err.is::<RateLimited>());
+            .expect("it is ready")
+            .call(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap()
+            .into();
+        assert_eq!(StatusCode::OK, response.response.status());
+
+        let response: router::Response = svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap()
+            .into();
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+        let j: serde_json::Value = serde_json::from_slice(
+            &crate::services::router::body::into_bytes(response.response)
+                .await
+                .expect("we have a body"),
+        )
+        .expect("our body is valid json");
+        assert_eq!(
+            "rate limited",
+            j["data"]["errors"][0]["extensions"]["reason"]
+        );
+
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .supergraph_service_internal(mock_service.clone())
-            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
+
+        let response: router::Response = svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(RouterRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
-            .next_response()
-            .await
-            .unwrap()
-            .errors
-            .is_empty());
+            .into();
+        assert_eq!(StatusCode::OK, response.response.status());
     }
 }
