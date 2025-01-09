@@ -155,7 +155,7 @@ struct HttpServer {
 /// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
-    http_server: HttpServer,
+    router: HttpServer,
     /// Applied on all subgraphs
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
@@ -225,7 +225,7 @@ impl Plugin for TrafficShaping {
                 }
             })
             .load_shed()
-            .option_layer(self.config.http_server.concurrency_limit.as_ref().map(|limit| {
+            .option_layer(self.config.router.concurrency_limit.as_ref().map(|limit| {
                 tower::limit::ConcurrencyLimitLayer::new(*limit)
             }))
             .map_result(|result: Result<RouterResponse, BoxError>| {
@@ -247,7 +247,7 @@ impl Plugin for TrafficShaping {
                 }
             })
             .load_shed()
-            .option_layer(self.config.http_server.rate_limit.as_ref().map(|limit| {
+            .option_layer(self.config.router.rate_limit.as_ref().map(|limit| {
                 tower::limit::RateLimitLayer::new(limit.capacity.into(), limit.interval)
             }))
             .map_result(|result: Result<RouterResponse, BoxError>| {
@@ -265,7 +265,7 @@ impl Plugin for TrafficShaping {
                     Err(err) => {Err(err)}
                 }
             })
-            .option_layer(self.config.http_server.timeout.as_ref().map(|timeout| {
+            .option_layer(self.config.router.timeout.as_ref().map(|timeout| {
                 tower::timeout::TimeoutLayer::new(*timeout)
             }))
             .service(service)
