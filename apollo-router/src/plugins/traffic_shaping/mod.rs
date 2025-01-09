@@ -22,9 +22,11 @@ use http::HeaderValue;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::json;
 use tower::util::future::EitherResponseFuture;
 use tower::util::Either;
 use tower::BoxError;
+use tower::load_shed::error::Overloaded;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -35,15 +37,14 @@ use self::rate::RateLimited;
 use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
-use crate::error::ConfigurationError;
-use crate::graphql;
+use crate::{graphql, Context};
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::http::service::Compression;
-use crate::services::subgraph;
-use crate::services::supergraph;
+use crate::services::router::BoxService;
+use crate::services::{subgraph, RouterResponse};
 use crate::services::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -132,11 +133,15 @@ impl Merge for SubgraphShaping {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
-struct RouterShaping {
+struct HttpServer {
+
+    /// The global concurrency limit
+    concurrency_limit: Option<usize>,
+
     /// Enable global rate limiting
-    global_rate_limit: Option<RateLimitConf>,
+    rate_limit: Option<RateLimitConf>,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
@@ -150,7 +155,7 @@ struct RouterShaping {
 /// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
-    router: Option<RouterShaping>,
+    http_server: HttpServer,
     /// Applied on all subgraphs
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
@@ -186,7 +191,6 @@ impl Merge for RateLimitConf {
 // Remove this once the configuration yml changes.
 pub(crate) struct TrafficShaping {
     config: Config,
-    rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
 }
 
@@ -195,36 +199,77 @@ impl Plugin for TrafficShaping {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let rate_limit_router = init
-            .config
-            .router
-            .as_ref()
-            .and_then(|r| r.global_rate_limit.as_ref())
-            .map(|router_rate_limit_conf| {
-                if router_rate_limit_conf.interval.as_millis() > u64::MAX as u128 {
-                    Err(ConfigurationError::InvalidConfiguration {
-                        message: "bad configuration for traffic_shaping plugin",
-                        error: format!(
-                            "cannot set an interval for the rate limit greater than {} ms",
-                            u64::MAX
-                        ),
-                    })
-                } else {
-                    Ok(RateLimitLayer::new(
-                        router_rate_limit_conf.capacity,
-                        router_rate_limit_conf.interval,
-                    ))
+        Ok(Self {
+            config: init.config,
+            rate_limit_subgraphs: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn router_service(&self, service: BoxService) -> BoxService {
+
+        ServiceBuilder::new()
+            .map_result(|result: Result<RouterResponse, BoxError>| {
+                match result {
+                    Ok(ok) => {Ok(ok)}
+                    Err(err) if err.is::<Overloaded>() => {
+                        // TODO add metrics
+                        let error = graphql::Error::builder()
+                            .message(StatusCode::SERVICE_UNAVAILABLE.as_str())
+                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.as_str())
+                            .extension("reason", "concurrency limited")
+                            .build();
+                        Ok(RouterResponse::builder().context(Context::default()).status_code(StatusCode::SERVICE_UNAVAILABLE).data(json!(graphql::Response::builder().error(error).build())).build().expect("should build overloaded response"))
+
+                    },
+                    Err(err) => {Err(err)}
                 }
             })
-            .transpose()?;
+            .load_shed()
+            .option_layer(self.config.http_server.concurrency_limit.as_ref().map(|limit| {
+                tower::limit::ConcurrencyLimitLayer::new(*limit)
+            }))
+            .map_result(|result: Result<RouterResponse, BoxError>| {
+                match result {
+                    Ok(ok) => {Ok(ok)}
+                    Err(err) if err.is::<Overloaded>() => {
+                        // TODO add metrics
+                        // This intentionally doesn't include an error message as this could represent leakage of internal information.
+                        // The error message is logged above.
+                        let error = graphql::Error::builder()
+                            .message(StatusCode::SERVICE_UNAVAILABLE.as_str())
+                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.as_str())
+                            .extension("reason", "rate limited")
+                            .build();
+                        Ok(RouterResponse::builder().context(Context::default()).status_code(StatusCode::SERVICE_UNAVAILABLE).data(json!(graphql::Response::builder().error(error).build())).build().expect("should build overloaded response"))
 
-        {
-            Ok(Self {
-                config: init.config,
-                rate_limit_router,
-                rate_limit_subgraphs: Mutex::new(HashMap::new()),
+                    },
+                    Err(err) => {Err(err)}
+                }
             })
-        }
+            .load_shed()
+            .option_layer(self.config.http_server.rate_limit.as_ref().map(|limit| {
+                tower::limit::RateLimitLayer::new(limit.capacity.into(), limit.interval)
+            }))
+            .map_result(|result: Result<RouterResponse, BoxError>| {
+                match result {
+                    Ok(ok) => {Ok(ok)}
+                    Err(err) if err.is::<Elapsed>() => {
+                        // TODO add metrics
+                        let error = graphql::Error::builder()
+                            .message(StatusCode::GATEWAY_TIMEOUT.as_str())
+                            .extension_code(StatusCode::GATEWAY_TIMEOUT.as_str())
+                            .build();
+                        Ok(RouterResponse::builder().context(Context::default()).status_code(StatusCode::GATEWAY_TIMEOUT).data(json!(graphql::Response::builder().error(error).build())).build().expect("should build overloaded response"))
+
+                    },
+                    Err(err) => {Err(err)}
+                }
+            })
+            .option_layer(self.config.http_server.timeout.as_ref().map(|timeout| {
+                tower::timeout::TimeoutLayer::new(*timeout)
+            }))
+            .service(service)
+            .boxed()
     }
 }
 
@@ -245,64 +290,6 @@ impl TrafficShaping {
         merged_subgraph_config.or_else(|| all_config.cloned())
     }
 
-    pub(crate) fn supergraph_service_internal<S>(
-        &self,
-        service: S,
-    ) -> impl Service<
-        supergraph::Request,
-        Response = supergraph::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, Result<supergraph::Response, BoxError>>,
-    > + Clone
-           + Send
-           + Sync
-           + 'static
-    where
-        S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-        <S as Service<supergraph::Request>>::Future: std::marker::Send,
-    {
-        ServiceBuilder::new()
-            .map_future_with_request_data(
-                |req: &supergraph::Request| req.context.clone(),
-                move |ctx, future| {
-                    async {
-                        let response: Result<supergraph::Response, BoxError> = future.await;
-                        match response {
-                            Err(error) if error.is::<Elapsed>() => {
-                                supergraph::Response::error_builder()
-                                    .status_code(StatusCode::GATEWAY_TIMEOUT)
-                                    .error::<graphql::Error>(Elapsed::new().into())
-                                    .context(ctx)
-                                    .build()
-                            }
-                            Err(error) if error.is::<RateLimited>() => {
-                                supergraph::Response::error_builder()
-                                    .status_code(StatusCode::TOO_MANY_REQUESTS)
-                                    .error::<graphql::Error>(RateLimited::new().into())
-                                    .context(ctx)
-                                    .build()
-                            }
-                            _ => response,
-                        }
-                    }
-                    .boxed()
-                },
-            )
-            .load_shed()
-            .layer(TimeoutLayer::new(
-                self.config
-                    .router
-                    .as_ref()
-                    .and_then(|r| r.timeout)
-                    .unwrap_or(DEFAULT_TIMEOUT),
-            ))
-            .option_layer(self.rate_limit_router.clone())
-            .service(service)
-    }
 
     pub(crate) fn subgraph_service_internal<S>(
         &self,

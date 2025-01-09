@@ -43,8 +43,6 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use crate::plugins::traffic_shaping::TrafficShaping;
-use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
@@ -978,15 +976,8 @@ impl SupergraphCreator {
             .notify(self.config.notify.clone())
             .build();
 
-        let shaping = self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-            .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
-            .expect("traffic shaping should always be part of the plugin list");
-
         let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
-            .layer(shaping.supergraph_service_internal(supergraph_service));
+            .layer(supergraph_service);
 
         ServiceBuilder::new()
             .layer(content_negotiation::SupergraphLayer::default())

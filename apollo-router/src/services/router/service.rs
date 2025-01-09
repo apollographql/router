@@ -943,12 +943,9 @@ impl RouterCreator {
             // Note: Alternative solutions here. Either we use the little loadshedder for adaptive
             // load shedding or we use timeout, concurrency limits and rate limits to achieve the
             // same thing.
-            .load_shed()
-            .concurrency_limit(10_000)
-            .timeout(std::time::Duration::from_secs(30))
             .buffer(50_000)
             .layer(static_page.clone())
-            .rate_limit(50_000, std::time::Duration::from_secs(1))
+
             .service(
                 supergraph_creator
                     .plugins()
