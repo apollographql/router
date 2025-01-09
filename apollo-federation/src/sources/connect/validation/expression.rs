@@ -223,6 +223,7 @@ mod tests {
     #[case::bool("$(true)")]
     #[case::string("$(\"hello\")")]
     #[case::null("$(null)")]
+    #[case::property_of_object("$({\"a\": 1}).a")]
     fn allowed_literals(#[case] selection: &str) {
         let schema = Schema::parse(SCHEMA, "schema").unwrap();
         let connect = name!("connect");
@@ -235,6 +236,7 @@ mod tests {
     #[rstest]
     #[case::array("$([])")]
     #[case::object("$({\"a\": 1})")]
+    // #[case::missing_property_of_object("$({\"a\": 1}).b")]  // TODO: catch this error
     fn disallowed_literals(#[case] selection: &str) {
         let schema = Schema::parse(SCHEMA, "schema").unwrap();
         let connect = name!("connect");
