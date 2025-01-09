@@ -32,6 +32,13 @@ coprocessor:
     all:
       request:
         headers: true
+demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 1000
 headers:
   all:
     request:
@@ -39,6 +46,13 @@ headers:
           matching: ^upstream-header-.*
       - remove:
           named: "x-legacy-account-id"
+preview_entity_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+rhai:
+  scripts: "/rhai/scripts/directory"
 telemetry:
   apollo:
     errors:

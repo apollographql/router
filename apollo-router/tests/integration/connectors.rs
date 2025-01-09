@@ -34,14 +34,18 @@ async fn test_incompatible_plugin_warnings() -> Result<(), BoxError> {
     // Note: This order is sadly required since asserting that logs exist consume
     // previous statements...
     let plugins = [
+        "apq",
         "authentication",
+        "batching",
         "coprocessor",
         "headers",
+        "preview_entity_cache",
         "telemetry",
         "tls",
         "traffic_shaping",
-        "apq",
-        "batching",
+        // These must be at the end
+        "demand_control",
+        "rhai",
     ];
     for plugin in plugins {
         let msg = format!(

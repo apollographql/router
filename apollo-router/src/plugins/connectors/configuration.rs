@@ -138,18 +138,88 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
     // TODO: Each of these config options come from a corresponding plugin which
     // is identified by its name. These are currently hardcoded here, so it'd be
     // nice to extract them from the plugins themselves...
+    //
+    // Note: Some of these also allow for enabling / disabling (and overriding
+    // global options), so we need to know if that is the case when collecting
+    // which subgraphs might trigger incompatibilities.
+    struct IncompatiblePlugin {
+        enabled: bool,
+        /// If the configuration allows for overriding on a subgraph-level whether
+        /// to enable or disable a feature.
+        subgraph_can_override: bool,
+        /// The name of the plugin
+        plugin: &'static str,
+        /// The set of keys needed to drill through to reach the subgraph
+        /// configuration.
+        drill_prefix: &'static [&'static str],
+    }
     let incompatible_prefixes = [
-        ("authentication", ["subgraph"].as_slice()),
-        ("coprocessor", &["subgraph"]),
-        ("headers", &[]),
-        ("preview_entity_cache", &["subgraph"]),
-        ("telemetry", &["apollo", "errors", "subgraph"]),
-        (
-            "telemetry",
-            &["exporters", "metrics", "common", "attributes", "subgraph"],
-        ),
-        ("tls", &["subgraph"]),
-        ("traffic_shaping", &[]),
+        IncompatiblePlugin {
+            enabled: config.apq.enabled,
+            subgraph_can_override: true,
+            plugin: "apq",
+            drill_prefix: &["subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: true,
+            subgraph_can_override: false,
+            plugin: "authentication",
+            drill_prefix: &["subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: config.batching.enabled,
+            subgraph_can_override: true,
+            plugin: "batching",
+            drill_prefix: &["subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: true,
+            subgraph_can_override: false,
+            plugin: "coprocessor",
+            drill_prefix: &["subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: true,
+            subgraph_can_override: false,
+            plugin: "headers",
+            drill_prefix: &[],
+        },
+        IncompatiblePlugin {
+            enabled: config
+                .apollo_plugins
+                .plugins
+                .get("preview_entity_cache")
+                .and_then(|p| p.get("enabled"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or_default(),
+            subgraph_can_override: true,
+            plugin: "preview_entity_cache",
+            drill_prefix: &["subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: true,
+            subgraph_can_override: false,
+            plugin: "telemetry",
+            drill_prefix: &["apollo", "errors", "subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: true,
+            subgraph_can_override: false,
+            plugin: "telemetry",
+            drill_prefix: &["exporters", "metrics", "common", "attributes", "subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: true,
+            subgraph_can_override: false,
+            plugin: "tls",
+            drill_prefix: &["subgraph"],
+        },
+        IncompatiblePlugin {
+            enabled: true,
+            subgraph_can_override: false,
+            plugin: "traffic_shaping",
+            drill_prefix: &[],
+        },
     ];
 
     // Note: Some of the incopmpatible plugins are hoisted up into individual
@@ -172,45 +242,91 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
         return;
     };
 
-    for (plugin_name, prefix) in incompatible_prefixes {
+    for IncompatiblePlugin {
+        enabled,
+        subgraph_can_override,
+        plugin,
+        drill_prefix,
+    } in incompatible_prefixes
+    {
+        // If the plugin is not enabled, no need to process it
+        if !enabled {
+            continue;
+        }
+
         // Plugin configuration is only populated if the user has specified it,
         // so we can skip any that are missing.
-        let Some(plugin_config) = raw_config.get(plugin_name) else {
+        let Some(plugin_config) = raw_config.get(plugin) else {
             continue;
         };
 
         // Drill into the prefix
-        let Some(prefixed_config) = prefix
+        let Some(prefixed_config) = drill_prefix
             .iter()
             .try_fold(plugin_config, |acc, next| acc.get(next))
         else {
             continue;
         };
 
-        // Check if any of the connector enabled subgraphs are targeted
-        let incompatible_subgraphs = if prefixed_config.get("all").is_some() {
-            // If all is configured, then all connector-enabled subgraphs are affected.
-            &connector_enabled_subgraphs
-        } else if let Some(subgraphs) = prefixed_config.get("subgraphs") {
-            // Otherwise, we'll need to do a set intersection between the list of connector-enabled
-            // subgraphs and configured subgraphs to see which, if any, are affected.
-            let configured = subgraphs
-                .as_object()
-                .map(|o| o.keys().collect())
-                .unwrap_or(HashSet::new());
+        // Grab all of the configured subgraphs for this plugin
+        // Note: If the plugin supports overriding on a per-subgraph level, then
+        // we'll need to partition based on an enabled flag per subgraph.
+        let empty = serde_json::Map::new();
+        let configured = prefixed_config
+            .get("subgraphs")
+            .and_then(serde_json::Value::as_object)
+            .unwrap_or(&empty);
 
-            &configured
-                .intersection(&connector_enabled_subgraphs)
-                .copied()
-                .collect()
+        let (enabled, disabled): (HashSet<&String>, HashSet<&String>) =
+            configured.iter().partition_map(|(name, subgraph_conf)| {
+                if subgraph_can_override {
+                    let enabled = subgraph_conf
+                        .get("enabled")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or_default();
+                    match enabled {
+                        true => itertools::Either::Left(name),
+                        false => itertools::Either::Right(name),
+                    }
+                } else {
+                    itertools::Either::Left(name)
+                }
+            });
+
+        // If a plugin allows for overriding enablement, then it also allows
+        // for enabling / disabling on `all`. Otherwise, just the presence of the
+        // `all` key is enough to signal that all should be targeted.
+        let all_enabled = if subgraph_can_override {
+            prefixed_config
+                .get("all")
+                .and_then(|a| a.get("enabled"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or_default()
         } else {
-            &HashSet::new()
+            prefixed_config.get("all").is_some()
         };
 
-        if !incompatible_subgraphs.is_empty() {
+        // Now actually calculate which are incompatible
+        // Note: We need to collect here because we need to know if the iterator
+        // is empty or not when printing the warning message.
+        let incompatible = if all_enabled {
+            // If all are enabled, then we can subtract out those which are disabled explicitly
+            connector_enabled_subgraphs
+                .difference(&disabled)
+                .copied()
+                .collect::<HashSet<&String>>()
+        } else {
+            // Otherwise, then we only care about those explicitly enabled
+            enabled
+                .intersection(&connector_enabled_subgraphs)
+                .copied()
+                .collect::<HashSet<&String>>()
+        };
+
+        if !incompatible.is_empty() {
             tracing::warn!(
-                subgraphs = incompatible_subgraphs.iter().join(","),
-                message = msg(plugin_name)
+                subgraphs = incompatible.iter().join(","),
+                message = msg(plugin)
             );
         }
     }
@@ -224,61 +340,6 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
             tracing::warn!(
                 subgraphs = connector_enabled_subgraphs.iter().join(","),
                 message = msg(plugin_name)
-            );
-        }
-    }
-
-    // Some plugins allow for the operator to enable each feature at each subgraph
-    // and for all subgraphs at once. Unlike the features above, disabling a feature
-    // for all subgraphs can be overridden for arbitrary subgraphs and thus requires
-    // extra filtering logic.
-    macro_rules! warn_core_feature {
-        ($plugin_name:literal, $all_enabled:expr, $subgraphs:expr) => {{
-            let (enabled, disabled): (HashSet<&String>, HashSet<&String>) = $subgraphs
-                .iter()
-                .partition_map(|(name, sub)| match sub.enabled {
-                    true => itertools::Either::Left(name),
-                    false => itertools::Either::Right(name),
-                });
-
-            // Note: We need to collect here because we need to know if the iterator
-            // is empty or not when printing the warning message.
-            let incompatible = if $all_enabled {
-                // If all are enabled, then we can subtract out those which are disabled explicitly
-                connector_enabled_subgraphs
-                    .difference(&disabled)
-                    .copied()
-                    .collect::<HashSet<&String>>()
-            } else {
-                // Otherwise, then we only care about those explicitly enabled
-                enabled
-                    .intersection(&connector_enabled_subgraphs)
-                    .copied()
-                    .collect::<HashSet<&String>>()
-            };
-
-            if !incompatible.is_empty() {
-                tracing::warn!(
-                    subgraphs = incompatible.iter().join(","),
-                    message = msg($plugin_name)
-                );
-            }
-        }};
-    }
-
-    if config.apq.enabled {
-        warn_core_feature!(
-            "apq",
-            config.apq.subgraph.all.enabled,
-            config.apq.subgraph.subgraphs
-        );
-    }
-    if config.batching.enabled {
-        if let Some(subgraph_config) = config.batching.subgraph.as_ref() {
-            warn_core_feature!(
-                "batching",
-                subgraph_config.all.enabled,
-                subgraph_config.subgraphs
             );
         }
     }
