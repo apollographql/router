@@ -263,19 +263,31 @@ fn check_seen_fields(
                 return None;
             }
             let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
+
+            // ignore all fields on objects marked @external
+            if extended_type
+                .directives()
+                .iter()
+                .any(|dir| &dir.name == external_directive_name)
+            {
+                return None;
+            }
+
             match extended_type {
-                ExtendedType::Object(object) => Some(
-                    // ignore @external fields
-                    object
-                        .fields
-                        .iter()
-                        .filter(|(_, def)| {
-                            !def.directives
-                                .iter()
-                                .any(|dir| &dir.name == external_directive_name)
-                        })
-                        .map(coord),
-                ),
+                ExtendedType::Object(object) => {
+                    // ignore fields marked @external
+                    Some(
+                        object
+                            .fields
+                            .iter()
+                            .filter(|(_, def)| {
+                                !def.directives
+                                    .iter()
+                                    .any(|dir| &dir.name == external_directive_name)
+                            })
+                            .map(coord),
+                    )
+                }
                 ExtendedType::Interface(_) => None, // TODO: when interfaces are supported (probably should include fields from implementing/member types as well)
                 _ => None,
             }

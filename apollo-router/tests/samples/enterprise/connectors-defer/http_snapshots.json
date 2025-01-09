@@ -21,7 +21,7 @@
   {
     "request": {
       "method": "GET",
-      "path": "/e/2",
+      "path": "e/2",
       "body": null
     },
     "response": {
