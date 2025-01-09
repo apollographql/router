@@ -644,6 +644,7 @@ mod tests {
                             range: Some(
                                 0..1,
                             ),
+                            output_shape: None,
                         },
                     ),
                     inputs: RequestInputs {
@@ -682,6 +683,7 @@ mod tests {
                             range: Some(
                                 0..1,
                             ),
+                            output_shape: None,
                         },
                     ),
                     inputs: RequestInputs {
@@ -1146,8 +1148,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1158,7 +1160,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1195,7 +1198,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1234,6 +1237,7 @@ mod tests {
                         range: Some(
                             0..5,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -1253,8 +1257,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1265,7 +1269,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1302,7 +1307,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1341,6 +1346,7 @@ mod tests {
                         range: Some(
                             0..5,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -1462,8 +1468,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1474,7 +1480,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1511,7 +1518,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1550,6 +1557,7 @@ mod tests {
                         range: Some(
                             0..5,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -1569,8 +1577,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1581,7 +1589,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1618,7 +1627,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1657,6 +1666,7 @@ mod tests {
                         range: Some(
                             0..5,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -1788,6 +1798,7 @@ mod tests {
                                         range: Some(
                                             6..15,
                                         ),
+                                        output_shape: None,
                                     },
                                 ),
                             ),
@@ -1795,6 +1806,7 @@ mod tests {
                         range: Some(
                             0..15,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -1850,6 +1862,7 @@ mod tests {
                                         range: Some(
                                             6..15,
                                         ),
+                                        output_shape: None,
                                     },
                                 ),
                             ),
@@ -1857,6 +1870,7 @@ mod tests {
                         range: Some(
                             0..15,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -1998,6 +2012,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2041,6 +2056,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2084,6 +2100,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2127,6 +2144,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2276,6 +2294,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2319,6 +2338,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2362,6 +2382,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2405,6 +2426,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2549,6 +2571,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
@@ -2590,6 +2613,7 @@ mod tests {
                         range: Some(
                             0..8,
                         ),
+                        output_shape: None,
                     },
                 ),
                 inputs: RequestInputs {
