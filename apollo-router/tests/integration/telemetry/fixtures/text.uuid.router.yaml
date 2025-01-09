@@ -9,15 +9,6 @@ telemetry:
         response: info
         error: info
   exporters:
-    tracing:
-      propagation:
-        trace_context: true
-        jaeger: true
-      otlp:
-        enabled: true
-        batch_processor:
-          scheduled_delay: 100ms
-        endpoint: default
     logging:
       stdout:
         format:
