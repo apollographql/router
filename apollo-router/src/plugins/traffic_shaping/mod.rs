@@ -23,10 +23,10 @@ use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
+use tower::load_shed::error::Overloaded;
 use tower::util::future::EitherResponseFuture;
 use tower::util::Either;
 use tower::BoxError;
-use tower::load_shed::error::Overloaded;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -37,15 +37,17 @@ use self::rate::RateLimited;
 use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
-use crate::{graphql, Context};
+use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::http::service::Compression;
 use crate::services::router::BoxService;
-use crate::services::{subgraph, RouterResponse};
+use crate::services::subgraph;
+use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
+use crate::Context;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -136,7 +138,6 @@ impl Merge for SubgraphShaping {
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 struct HttpServer {
-
     /// The global concurrency limit
     concurrency_limit: Option<usize>,
 
@@ -206,11 +207,10 @@ impl Plugin for TrafficShaping {
     }
 
     fn router_service(&self, service: BoxService) -> BoxService {
-
         ServiceBuilder::new()
             .map_result(|result: Result<RouterResponse, BoxError>| {
                 match result {
-                    Ok(ok) => {Ok(ok)}
+                    Ok(ok) => Ok(ok),
                     Err(err) if err.is::<Overloaded>() => {
                         // TODO add metrics
                         let error = graphql::Error::builder()
@@ -218,19 +218,27 @@ impl Plugin for TrafficShaping {
                             .extension_code(StatusCode::SERVICE_UNAVAILABLE.as_str())
                             .extension("reason", "concurrency limited")
                             .build();
-                        Ok(RouterResponse::builder().context(Context::default()).status_code(StatusCode::SERVICE_UNAVAILABLE).data(json!(graphql::Response::builder().error(error).build())).build().expect("should build overloaded response"))
-
-                    },
-                    Err(err) => {Err(err)}
+                        Ok(RouterResponse::builder()
+                            .context(Context::default())
+                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                            .data(json!(graphql::Response::builder().error(error).build()))
+                            .build()
+                            .expect("should build overloaded response"))
+                    }
+                    Err(err) => Err(err),
                 }
             })
             .load_shed()
-            .option_layer(self.config.router.concurrency_limit.as_ref().map(|limit| {
-                tower::limit::ConcurrencyLimitLayer::new(*limit)
-            }))
+            .option_layer(
+                self.config
+                    .router
+                    .concurrency_limit
+                    .as_ref()
+                    .map(|limit| tower::limit::ConcurrencyLimitLayer::new(*limit)),
+            )
             .map_result(|result: Result<RouterResponse, BoxError>| {
                 match result {
-                    Ok(ok) => {Ok(ok)}
+                    Ok(ok) => Ok(ok),
                     Err(err) if err.is::<Overloaded>() => {
                         // TODO add metrics
                         // This intentionally doesn't include an error message as this could represent leakage of internal information.
@@ -240,10 +248,14 @@ impl Plugin for TrafficShaping {
                             .extension_code(StatusCode::SERVICE_UNAVAILABLE.as_str())
                             .extension("reason", "rate limited")
                             .build();
-                        Ok(RouterResponse::builder().context(Context::default()).status_code(StatusCode::SERVICE_UNAVAILABLE).data(json!(graphql::Response::builder().error(error).build())).build().expect("should build overloaded response"))
-
-                    },
-                    Err(err) => {Err(err)}
+                        Ok(RouterResponse::builder()
+                            .context(Context::default())
+                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                            .data(json!(graphql::Response::builder().error(error).build()))
+                            .build()
+                            .expect("should build overloaded response"))
+                    }
+                    Err(err) => Err(err),
                 }
             })
             .load_shed()
@@ -252,22 +264,30 @@ impl Plugin for TrafficShaping {
             }))
             .map_result(|result: Result<RouterResponse, BoxError>| {
                 match result {
-                    Ok(ok) => {Ok(ok)}
+                    Ok(ok) => Ok(ok),
                     Err(err) if err.is::<Elapsed>() => {
                         // TODO add metrics
                         let error = graphql::Error::builder()
                             .message(StatusCode::GATEWAY_TIMEOUT.as_str())
                             .extension_code(StatusCode::GATEWAY_TIMEOUT.as_str())
                             .build();
-                        Ok(RouterResponse::builder().context(Context::default()).status_code(StatusCode::GATEWAY_TIMEOUT).data(json!(graphql::Response::builder().error(error).build())).build().expect("should build overloaded response"))
-
-                    },
-                    Err(err) => {Err(err)}
+                        Ok(RouterResponse::builder()
+                            .context(Context::default())
+                            .status_code(StatusCode::GATEWAY_TIMEOUT)
+                            .data(json!(graphql::Response::builder().error(error).build()))
+                            .build()
+                            .expect("should build overloaded response"))
+                    }
+                    Err(err) => Err(err),
                 }
             })
-            .option_layer(self.config.router.timeout.as_ref().map(|timeout| {
-                tower::timeout::TimeoutLayer::new(*timeout)
-            }))
+            .option_layer(
+                self.config
+                    .router
+                    .timeout
+                    .as_ref()
+                    .map(|timeout| tower::timeout::TimeoutLayer::new(*timeout)),
+            )
             .service(service)
             .boxed()
     }
@@ -289,7 +309,6 @@ impl TrafficShaping {
         let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
         merged_subgraph_config.or_else(|| all_config.cloned())
     }
-
 
     pub(crate) fn subgraph_service_internal<S>(
         &self,

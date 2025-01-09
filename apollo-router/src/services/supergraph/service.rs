@@ -976,8 +976,8 @@ impl SupergraphCreator {
             .notify(self.config.notify.clone())
             .build();
 
-        let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
-            .layer(supergraph_service);
+        let supergraph_service =
+            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
         ServiceBuilder::new()
             .layer(content_negotiation::SupergraphLayer::default())

@@ -945,7 +945,6 @@ impl RouterCreator {
             // same thing.
             .buffer(50_000)
             .layer(static_page.clone())
-
             .service(
                 supergraph_creator
                     .plugins()
