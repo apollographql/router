@@ -59,7 +59,7 @@ mod compute_job;
 mod configuration;
 mod context;
 mod error;
-mod executable;
+pub mod executable;
 mod files;
 pub mod graphql;
 mod http_ext;
