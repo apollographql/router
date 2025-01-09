@@ -44,7 +44,9 @@ async fn test_incompatible_plugin_warnings() -> Result<(), BoxError> {
         "batching",
     ];
     for plugin in plugins {
-        let msg = format!("plugin `{plugin}` is enabled for connector-enabled subgraphs, which is not yet supported");
+        let msg = format!(
+            r#""subgraphs":"connectors","message":"plugin `{plugin}` is enabled for connector-enabled subgraphs, which is currently unsupported"#
+        );
         router.assert_log_contains(&msg).await;
     }
 

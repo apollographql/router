@@ -114,7 +114,7 @@ pub(crate) fn apply_config(
 fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
     /// Generate a consistent warning message for a specified plugin
     fn msg(plugin_name: &str) -> String {
-        format!("plugin `{}` is enabled for connector-enabled subgraphs, which is not yet supported. See https://go.apollo.dev/INSERT_DOCS_LINK for more info", plugin_name)
+        format!("plugin `{}` is enabled for connector-enabled subgraphs, which is currently unsupported. See https://go.apollo.dev/connectors/incompat for more info", plugin_name)
     }
 
     let connector_enabled_subgraphs: HashSet<&String> = connectors
