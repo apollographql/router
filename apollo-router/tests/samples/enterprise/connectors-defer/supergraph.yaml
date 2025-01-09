@@ -1,7 +1,7 @@
 # rover supergraph compose --config apollo-router/tests/samples/enterprise/connectors-defer/supergraph.yaml > apollo-router/tests/samples/enterprise/connectors-defer/supergraph.graphql
 federation_version: =2.10.0-preview.3
 subgraphs:
-  one:
+  connectors: # required for snapshot overrides
     routing_url: http://none
     schema:
       sdl: |
