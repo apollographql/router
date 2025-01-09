@@ -15,6 +15,7 @@ use futures::prelude::*;
 use hyper::server::conn::Http;
 use multimap::MultiMap;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::KeyValue;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -33,21 +34,57 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
 
-static TOTAL_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
-struct TotalSessionCountGuard;
+/// Implements the `apollo_router_session_count_total` metric.
+///
+/// Creating an instance with [TotalSessionCountInstrument::register] registers the metric with otel.
+/// Instances can then be cheaply cloned to extend the lifetime of the instrument.
+#[derive(Clone)]
+struct TotalSessionCountInstrument {
+    value: Arc<AtomicU64>,
+    _instrument: ObservableGauge<u64>,
+}
 
-impl TotalSessionCountGuard {
-    fn start() -> Self {
-        TOTAL_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
-        Self
+impl TotalSessionCountInstrument {
+    /// Create a new instrument with the given attributes.
+    fn register(listener_address: String) -> Self {
+        let value = Arc::new(AtomicU64::new(0));
+        let value_for_observation = Arc::clone(&value);
+
+        let instrument = meter_provider()
+            .meter("apollo/router")
+            .u64_observable_gauge("apollo_router_session_count_total")
+            .with_description("Number of currently connected clients")
+            .with_callback(move |gauge| {
+                gauge.observe(
+                    value_for_observation.load(Ordering::Relaxed),
+                    &[KeyValue::new("listener", listener_address.clone())],
+                );
+            })
+            .init();
+
+        Self {
+            value,
+            _instrument: instrument,
+        }
+    }
+
+    /// Return a guard that increments the session count, and extends the instrument's lifetime
+    /// to ensure it continues to report on lingering sessions even after the server listener is detached.
+    ///
+    /// Care must be taken to keep the guard alive for the duration of the session, by moving it
+    /// into tokio tasks etc used to process requests.
+    fn start(&self) -> TotalSessionCountGuard {
+        self.value.fetch_add(1, Ordering::Acquire);
+        TotalSessionCountGuard(self.clone())
     }
 }
 
+struct TotalSessionCountGuard(TotalSessionCountInstrument);
 impl Drop for TotalSessionCountGuard {
     fn drop(&mut self) {
-        TOTAL_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
+        self.0.value.fetch_sub(1, Ordering::Acquire);
     }
 }
 
@@ -232,17 +269,8 @@ pub(super) fn serve_router_on_listen_addr(
     let server = async move {
         tokio::pin!(shutdown_receiver);
 
-        let _total_session_count_instrument = meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo_router_session_count_total")
-            .with_description("Number of currently connected clients")
-            .with_callback(move |gauge| {
-                gauge.observe(
-                    TOTAL_SESSION_COUNT.load(Ordering::Relaxed),
-                    &[KeyValue::new("listener", address.to_string())],
-                );
-            })
-            .init();
+        let total_session_count_instrument =
+            TotalSessionCountInstrument::register(address.to_string());
 
         let connection_shutdown = Arc::new(Notify::new());
 
@@ -264,12 +292,13 @@ pub(super) fn serve_router_on_listen_addr(
                             }
 
                             // We only want to recognise sessions if we are the main graphql port.
-                            let _guard = main_graphql_port.then(TotalSessionCountGuard::start);
+                            let session_count_guard = main_graphql_port.then(|| total_session_count_instrument.start());
 
                             let mut http_config = http_config.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
+                                let _session_count_guard = session_count_guard;
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
