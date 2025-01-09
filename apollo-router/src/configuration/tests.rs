@@ -677,7 +677,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g{:supergraph_route}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/graphql/g*").build())
@@ -687,7 +687,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(
         &conf.supergraph.sanitized_path(),
-        "/graphql/g:supergraph_route"
+        "/graphql/g{:supergraph_route}"
     );
 
     let conf = Configuration::builder()
@@ -696,7 +696,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/{*router_extra_path}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/test").build())

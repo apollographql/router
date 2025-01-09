@@ -41,6 +41,7 @@ pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
+use crate::axum_factory::rewrite_path_for_axum_0_8;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
@@ -734,11 +735,11 @@ impl Supergraph {
             path = format!("{}router_extra_path", self.path);
         } else if SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.path) {
             let new_path = SUPERGRAPH_ENDPOINT_REGEX
-                .replace(&self.path, "${first_path}${sub_path}:supergraph_route");
+                .replace(&self.path, "${first_path}${sub_path}{:supergraph_route}");
             path = new_path.to_string();
         }
 
-        path
+        rewrite_path_for_axum_0_8(path.as_str())
     }
 }
 
