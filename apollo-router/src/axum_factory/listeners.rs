@@ -48,7 +48,7 @@ struct TotalSessionCountInstrument {
 
 impl TotalSessionCountInstrument {
     /// Create a new instrument with the given attributes.
-    fn register(listener_address: String) -> Self {
+    fn register(listener_address: String, schema_id: String) -> Self {
         let value = Arc::new(AtomicU64::new(0));
         let value_for_observation = Arc::clone(&value);
 
@@ -59,7 +59,10 @@ impl TotalSessionCountInstrument {
             .with_callback(move |gauge| {
                 gauge.observe(
                     value_for_observation.load(Ordering::Relaxed),
-                    &[KeyValue::new("listener", listener_address.clone())],
+                    &[
+                        KeyValue::new("listener", listener_address.clone()),
+                        KeyValue::new("schema_id", schema_id.clone()),
+                    ],
                 );
             })
             .init();
@@ -256,6 +259,7 @@ pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     address: ListenAddr,
     router: axum::Router,
+    schema_id: String,
     main_graphql_port: bool,
     http_config: Http,
     all_connections_stopped_sender: mpsc::Sender<()>,
@@ -270,7 +274,7 @@ pub(super) fn serve_router_on_listen_addr(
         tokio::pin!(shutdown_receiver);
 
         let total_session_count_instrument =
-            TotalSessionCountInstrument::register(address.to_string());
+            TotalSessionCountInstrument::register(address.to_string(), schema_id);
 
         let connection_shutdown = Arc::new(Notify::new());
 

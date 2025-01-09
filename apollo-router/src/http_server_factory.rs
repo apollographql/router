@@ -28,6 +28,7 @@ pub(crate) trait HttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
+        schema_id: String,
         main_listener: Option<Listener>,
         previous_listeners: ExtraListeners,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
@@ -122,6 +123,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
+        schema_id: String,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
         license: LicenseState,
     ) -> Result<Self, ApolloRouterError>
@@ -144,6 +146,7 @@ impl HttpServerHandle {
             .create(
                 router,
                 configuration,
+                schema_id,
                 Some(main_listener),
                 extra_listeners,
                 web_endpoints,

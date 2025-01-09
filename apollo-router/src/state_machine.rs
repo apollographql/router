@@ -358,6 +358,10 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             license
         };
 
+        // We want to give the schema ID to the HTTP server factory so it can be reported in
+        // session count metrics.
+        let schema_id = schema.schema_id.clone();
+
         let router_service_factory = state_machine
             .router_configurator
             .create(
@@ -383,6 +387,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     .create(
                         router_service_factory.clone(),
                         configuration.clone(),
+                        schema_id.to_string(),
                         Default::default(),
                         Default::default(),
                         web_endpoints,
@@ -397,6 +402,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         &state_machine.http_server_factory,
                         router_service_factory.clone(),
                         configuration.clone(),
+                        schema_id.to_string(),
                         web_endpoints,
                         effective_license,
                     )
@@ -1194,6 +1200,7 @@ mod tests {
             &self,
             _service_factory: RF,
             configuration: Arc<Configuration>,
+            _schema_id: String,
             main_listener: Option<Listener>,
             _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,

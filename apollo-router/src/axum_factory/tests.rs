@@ -214,6 +214,7 @@ async fn init(
                     .build()
                     .unwrap(),
             ),
+            "test_schema_id".into(),
             None,
             vec![],
             MultiMap::new(),
@@ -272,6 +273,7 @@ pub(super) async fn init_with_config(
                 inner: service.into_inner(),
             },
             conf,
+            "test_schema_id".into(),
             None,
             vec![],
             web_endpoints,
@@ -339,6 +341,7 @@ async fn init_unix(
                     .build()
                     .unwrap(),
             ),
+            "test_schema_id".into(),
             None,
             vec![],
             MultiMap::new(),
@@ -1770,6 +1773,7 @@ async fn it_supports_server_restart() {
         .create(
             supergraph_service_factory.clone(),
             configuration,
+            "test_schema_id".into(),
             None,
             vec![],
             MultiMap::new(),
@@ -1801,6 +1805,7 @@ async fn it_supports_server_restart() {
             &server_factory,
             supergraph_service_factory,
             new_configuration,
+            "test_schema_id".into(),
             MultiMap::new(),
             LicenseState::default(),
         )
