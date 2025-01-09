@@ -112,6 +112,11 @@ pub(crate) fn apply_config(
 /// features, so we need to inform the user when those features are
 /// detected as being enabled.
 fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
+    /// Generate a consistent warning message for a specified plugin
+    fn msg(plugin_name: &str) -> String {
+        format!("plugin `{}` is enabled for connector-enabled subgraphs, which is not yet supported. See https://go.apollo.dev/INSERT_DOCS_LINK for more info", plugin_name)
+    }
+
     let connector_enabled_subgraphs: HashSet<&String> = connectors
         .by_service_name
         .values()
@@ -134,8 +139,7 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
     // is identified by its name. These are currently hardcoded here, so it'd be
     // nice to extract them from the plugins themselves...
     let incompatible_prefixes = [
-        ("apq", ["subgraph"].as_slice()),
-        ("authentication", &["subgraph"]),
+        ("authentication", ["subgraph"].as_slice()),
         ("batching", &["subgraph"]),
         ("coprocessor", &["subgraph"]),
         ("headers", &[]),
@@ -186,7 +190,7 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
         if !incompatible_subgraphs.is_empty() {
             tracing::warn!(
                 subgraphs = incompatible_subgraphs.iter().join(","),
-                "plugin `{plugin_name}` is enabled for connector-enabled subgraphs, which is not yet supported. See https://go.apollo.dev/INSERT_DOCS_LINK for more info"
+                message = msg(plugin_name)
             );
         }
     }
@@ -195,11 +199,11 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
     // of configuration, so we warn about these statically here if we have
     // any connector-enabled subgraphs.
     let incompatible_plugins = ["demand_control", "rhai"];
-    for plugin in incompatible_plugins {
-        if config.apollo_plugins.plugins.get(plugin).is_some() {
+    for plugin_name in incompatible_plugins {
+        if config.apollo_plugins.plugins.get(plugin_name).is_some() {
             tracing::warn!(
                 subgraphs = connector_enabled_subgraphs.iter().join(","),
-                "plugin `{plugin}` is enabled for connector-enabled subgraphs, which is not yet supported. See https://go.apollo.dev/INSERT_DOCS_LINK for more info"
+                message = msg(plugin_name)
             );
         }
     }
