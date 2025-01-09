@@ -48,7 +48,7 @@ struct TotalSessionCountInstrument {
 
 impl TotalSessionCountInstrument {
     /// Create a new instrument with the given attributes.
-    fn register(listener_address: String, schema_id: String) -> Self {
+    fn register(listener_address: String, config_hash: String, schema_id: String) -> Self {
         let value = Arc::new(AtomicU64::new(0));
         let value_for_observation = Arc::clone(&value);
 
@@ -61,6 +61,7 @@ impl TotalSessionCountInstrument {
                     value_for_observation.load(Ordering::Relaxed),
                     &[
                         KeyValue::new("listener", listener_address.clone()),
+                        KeyValue::new("config_hash", config_hash.clone()),
                         KeyValue::new("schema_id", schema_id.clone()),
                     ],
                 );
@@ -255,10 +256,13 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
+// clippy's not wrong, but it's not clear that it would be improved by using a structure
+#[allow(clippy::too_many_arguments)]
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     address: ListenAddr,
     router: axum::Router,
+    config_hash: String,
     schema_id: String,
     main_graphql_port: bool,
     http_config: Http,
@@ -274,7 +278,7 @@ pub(super) fn serve_router_on_listen_addr(
         tokio::pin!(shutdown_receiver);
 
         let total_session_count_instrument =
-            TotalSessionCountInstrument::register(address.to_string(), schema_id);
+            TotalSessionCountInstrument::register(address.to_string(), config_hash, schema_id);
 
         let connection_shutdown = Arc::new(Notify::new());
 

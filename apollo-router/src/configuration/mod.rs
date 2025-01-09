@@ -118,7 +118,7 @@ pub enum ConfigurationError {
 #[derivative(Debug)]
 // We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
 pub struct Configuration {
-    /// The raw configuration string.
+    /// The configuration object as a dynamic JSON value.
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 

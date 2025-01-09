@@ -33,6 +33,8 @@ use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use serde::Serialize;
 use serde_json::json;
+use sha1::Digest as _;
+use sha2::Sha256;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -327,10 +329,18 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 http_config.max_buf_size(max_buf_size.as_u64() as usize);
             }
 
+            let config_hash = {
+                let mut hasher = Sha256::new();
+                serde_json::to_writer(&mut hasher, &configuration)
+                    .expect("write to hasher can't fail");
+                format!("{:x}", hasher.finalize())
+            };
+
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 main_listener,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
+                config_hash.clone(),
                 schema_id.clone(),
                 true,
                 http_config.clone(),
@@ -372,6 +382,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             listen_addr.clone(),
                             router,
+                            config_hash.clone(),
                             schema_id.clone(),
                             false,
                             http_config.clone(),
