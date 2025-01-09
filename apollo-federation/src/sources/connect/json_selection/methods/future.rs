@@ -57,7 +57,7 @@ fn typeof_shape(
     _named_var_shapes: &IndexMap<&str, Shape>,
 ) -> Shape {
     // TODO Compute this union type once and clone it here.
-    Shape::one(&[
+    Shape::one([
         Shape::string_value("null"),
         Shape::string_value("boolean"),
         Shape::string_value("number"),
@@ -168,7 +168,7 @@ fn then_shape(
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         match args.len() {
-            1 => Shape::one(&[
+            1 => Shape::one([
                 args[0].compute_output_shape(
                     input_shape.clone(),
                     dollar_shape.clone(),
@@ -176,7 +176,7 @@ fn then_shape(
                 ),
                 Shape::none(),
             ]),
-            2 => Shape::one(&[
+            2 => Shape::one([
                 args[0].compute_output_shape(
                     input_shape.clone(),
                     dollar_shape.clone(),
@@ -736,7 +736,7 @@ fn get_shape(
                             value_shapes.push(rest.clone());
                         }
                         value_shapes.push(Shape::none());
-                        Shape::one(&value_shapes)
+                        Shape::one(value_shapes)
                     }
                     ShapeCase::Array { .. } => Shape::error_with_range(
                         format!(
@@ -766,7 +766,7 @@ fn get_shape(
                                 }
                             }
                             // If tail.is_none(), this will simplify to Shape::none().
-                            Shape::one(&[tail.clone(), Shape::none()])
+                            Shape::one([tail.clone(), Shape::none()])
                         }
 
                         ShapeCase::String(Some(s)) => {
@@ -778,10 +778,10 @@ fn get_shape(
                                     Shape::none()
                                 }
                             } else {
-                                Shape::one(&[Shape::string(), Shape::none()])
+                                Shape::one([Shape::string(), Shape::none()])
                             }
                         }
-                        ShapeCase::String(None) => Shape::one(&[Shape::string(), Shape::none()]),
+                        ShapeCase::String(None) => Shape::one([Shape::string(), Shape::none()]),
 
                         ShapeCase::Object { .. } => Shape::error_with_range(
                             format!(
@@ -875,7 +875,7 @@ fn keys_shape(
                 .collect::<Vec<_>>();
 
             Shape::array(
-                &keys_vec,
+                keys_vec,
                 // Since we're collecting key shapes, we want String for the
                 // rest shape when it's not None.
                 if rest.is_none() {
@@ -940,8 +940,7 @@ fn values_shape(
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
-            let values_vec = fields.values().cloned().collect::<Vec<_>>();
-            Shape::array(&values_vec, rest.clone())
+            Shape::array(fields.values().cloned(), rest.clone())
         }
         _ => Shape::error("Method ->values requires an object input"),
     }

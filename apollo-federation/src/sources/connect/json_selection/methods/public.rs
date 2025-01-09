@@ -143,7 +143,7 @@ fn map_shape(
                     dollar_shape.clone(),
                     named_var_shapes,
                 );
-                Shape::array(&new_prefix, new_tail)
+                Shape::array(new_prefix, new_tail)
             }
             ShapeCase::Name(_name, _subpath) => {
                 // Since we do not know if a named shape is an array or a
@@ -277,7 +277,7 @@ pub(super) fn match_shape(
                 ),
             )
         } else {
-            Shape::one(&result_union)
+            Shape::one(result_union)
         }
     } else {
         Shape::error_with_range(
@@ -359,7 +359,7 @@ fn first_shape(
             } else if tail.is_none() {
                 Shape::none()
             } else {
-                Shape::one(&[tail.clone(), Shape::none()])
+                Shape::one([tail.clone(), Shape::none()])
             }
         }
         // When there is no obvious first element, ->first gives us the input
@@ -436,7 +436,7 @@ fn last_shape(
                 Shape::none()
             }
         }
-        ShapeCase::String(None) => Shape::one(&[Shape::string(), Shape::none()]),
+        ShapeCase::String(None) => Shape::one([Shape::string(), Shape::none()]),
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 if let Some(last) = prefix.last() {
@@ -445,9 +445,9 @@ fn last_shape(
                     Shape::none()
                 }
             } else if let Some(last) = prefix.last() {
-                Shape::one(&[last.clone(), tail.clone(), Shape::none()])
+                Shape::one([last.clone(), tail.clone(), Shape::none()])
             } else {
-                Shape::one(&[tail.clone(), Shape::none()])
+                Shape::one([tail.clone(), Shape::none()])
             }
         }
         // When there is no obvious last element, ->last gives us the input
@@ -564,7 +564,7 @@ fn slice_shape(
             if !tail.is_none() {
                 one_shapes.push(tail.clone());
             }
-            Shape::array(&[], Shape::one(&one_shapes))
+            Shape::array([], Shape::one(one_shapes))
         }
         ShapeCase::String(_) => Shape::string(),
         _ => Shape::error_with_range(
@@ -753,13 +753,13 @@ fn entries_shape(
                 .collect::<Vec<_>>();
 
             if rest.is_none() {
-                Shape::array(&entry_shapes, rest.clone())
+                Shape::array(entry_shapes, rest.clone())
             } else {
                 let mut tail_key_value_pair = Shape::empty_map();
                 tail_key_value_pair.insert("key".to_string(), Shape::string());
                 tail_key_value_pair.insert("value".to_string(), rest.clone());
                 Shape::array(
-                    &entry_shapes,
+                    entry_shapes,
                     Shape::object(tail_key_value_pair, Shape::none()),
                 )
             }
