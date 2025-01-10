@@ -230,8 +230,7 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
     let (_, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
     let response = response.text().await?;
-    // Note: For some reason this is now SUBREQUEST_HTTP_ERROR
-    // assert!(response.contains("REQUEST_RATE_LIMITED"));
+    assert!(response.contains("REQUEST_RATE_LIMITED"));
     assert_yaml_snapshot!(response);
 
     router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_RATE_LIMITED",otel_scope_name="apollo/router"} 1"#, None).await;

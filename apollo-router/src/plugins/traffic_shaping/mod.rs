@@ -22,7 +22,6 @@ use http::HeaderValue;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::json;
 use tower::load_shed::error::Overloaded;
 use tower::util::future::EitherResponseFuture;
 use tower::util::Either;
@@ -209,19 +208,18 @@ impl Plugin for TrafficShaping {
     fn router_service(&self, service: BoxService) -> BoxService {
         ServiceBuilder::new()
             .map_result(|result: Result<RouterResponse, BoxError>| {
-                println!("TIMEOUT RESULT: {result:?}");
                 match result {
                     Ok(ok) => Ok(ok),
-                    Err(err) if err.is::<Elapsed>() => {
+                    Err(err) if err.is::<tower::timeout::error::Elapsed>() => {
                         // TODO add metrics
                         let error = graphql::Error::builder()
-                            .message(StatusCode::GATEWAY_TIMEOUT.as_str())
-                            .extension_code(StatusCode::GATEWAY_TIMEOUT.as_str())
+                            .message("Your request has been timed out")
+                            .extension_code("GATEWAY_TIMEOUT")
                             .build();
                         Ok(RouterResponse::builder()
                             .context(Context::default())
                             .status_code(StatusCode::GATEWAY_TIMEOUT)
-                            .data(json!(graphql::Response::builder().error(error).build()))
+                            .error(error)
                             .build()
                             .expect("should build overloaded response"))
                     }
@@ -230,10 +228,10 @@ impl Plugin for TrafficShaping {
             })
             .load_shed()
             .option_layer(self.config.router.as_ref().and_then(|router| {
-                router.timeout.as_ref().map(|timeout| {
-                    println!("setting timeout: {timeout:?}");
-                    tower::timeout::TimeoutLayer::new(*timeout)
-                })
+                router
+                    .timeout
+                    .as_ref()
+                    .map(|timeout| tower::timeout::TimeoutLayer::new(*timeout))
             }))
             .map_result(|result: Result<RouterResponse, BoxError>| {
                 match result {
@@ -241,14 +239,13 @@ impl Plugin for TrafficShaping {
                     Err(err) if err.is::<Overloaded>() => {
                         // TODO add metrics
                         let error = graphql::Error::builder()
-                            .message(StatusCode::SERVICE_UNAVAILABLE.as_str())
-                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.as_str())
-                            .extension("reason", "concurrency limited")
+                            .message("Your request has been concurrency limited")
+                            .extension_code("REQUEST_CONCURRENCY_LIMITED")
                             .build();
                         Ok(RouterResponse::builder()
                             .context(Context::default())
                             .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                            .data(json!(graphql::Response::builder().error(error).build()))
+                            .error(error)
                             .build()
                             .expect("should build overloaded response"))
                     }
@@ -267,17 +264,14 @@ impl Plugin for TrafficShaping {
                     Ok(ok) => Ok(ok),
                     Err(err) if err.is::<Overloaded>() => {
                         // TODO add metrics
-                        // This intentionally doesn't include an error message as this could represent leakage of internal information.
-                        // The error message is logged above.
                         let error = graphql::Error::builder()
-                            .message(StatusCode::SERVICE_UNAVAILABLE.as_str())
-                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.as_str())
-                            .extension("reason", "rate limited")
+                            .message("Your request has been rate limited")
+                            .extension_code("REQUEST_RATE_LIMITED")
                             .build();
                         Ok(RouterResponse::builder()
                             .context(Context::default())
                             .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                            .data(json!(graphql::Response::builder().error(error).build()))
+                            .error(error)
                             .build()
                             .expect("should build overloaded response"))
                     }
@@ -887,8 +881,8 @@ mod test {
         )
         .expect("our body is valid json");
         assert_eq!(
-            "rate limited",
-            j["data"]["errors"][0]["extensions"]["reason"]
+            "Your request has been rate limited",
+            j["errors"][0]["message"]
         );
 
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -915,19 +909,19 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let mut mock_service = MockRouterService::new();
-        mock_service.expect_call().times(0..5).returning(|_| {
-            println!("ABOUT TO SLEEP");
-            // tokio::time::sleep(Duration::from_millis(300)).await;
-            Ok(RouterResponse::fake_builder()
-                .data(json!({ "test": 1234_u32 }))
-                .build()
-                .unwrap())
-        });
 
-        let mut svc = plugin.router_service(mock_service.boxed());
+        let svc = ServiceBuilder::new()
+            .service_fn(move |_req: router::Request| async {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                RouterResponse::fake_builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .build()
+            })
+            .boxed();
 
-        let response: router::Response = svc
+        let mut rs = plugin.router_service(svc);
+
+        let response: router::Response = rs
             .ready()
             .await
             .expect("it is ready")
@@ -935,7 +929,6 @@ mod test {
             .await
             .unwrap()
             .into();
-        dbg!(&response);
         assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
             &crate::services::router::body::into_bytes(response.response)
@@ -943,9 +936,6 @@ mod test {
                 .expect("we have a body"),
         )
         .expect("our body is valid json");
-        assert_eq!(
-            "rate limited",
-            j["data"]["errors"][0]["extensions"]["reason"]
-        );
+        assert_eq!("Your request has been timed out", j["errors"][0]["message"]);
     }
 }
