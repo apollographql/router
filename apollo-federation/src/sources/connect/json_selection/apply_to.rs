@@ -72,44 +72,6 @@ impl JSONSelection {
 
         (value, errors.into_iter().collect())
     }
-
-    pub fn shape(&self) -> Shape {
-        self.compute_output_shape(
-            // If we don't know anything about the shape of the input data, we
-            // can represent the data symbolically using the $root variable
-            // shape. Subproperties needed from this shape will show up as
-            // subpaths like $root.books.4.isbn in the output shape.
-            //
-            // While we do not currently have a $root variable available as a
-            // KnownVariable during apply_to_path execution, we might consider
-            // adding it, since it would align with the way we process other
-            // variable shapes. For now, $root exists only as a shape name that
-            // we are inventing right here.
-            Shape::name("$root"),
-            // If we wanted to specify anything about the shape of the $root
-            // variable, we could define a shape for "$root" in this map.
-            &IndexMap::default(),
-        )
-    }
-
-    pub fn compute_output_shape(
-        &self,
-        input_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
-        match self {
-            Self::Named(selection) => selection.compute_output_shape(
-                input_shape.clone(),
-                input_shape.clone(),
-                named_shapes,
-            ),
-            Self::Path(path_selection) => path_selection.compute_output_shape(
-                input_shape.clone(),
-                input_shape.clone(),
-                named_shapes,
-            ),
-        }
-    }
 }
 
 pub(super) trait ApplyToInternal {

@@ -84,7 +84,10 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
         expression,
         location,
     } = expression;
-    let shape = expression.shape();
+    let shaped_selection = expression.shaped_selection();
+    // TODO Refine shaped_selection with additional named shapes to eliminate
+    // errors and Unknown shapes from the computed output shape.
+    let shape = shaped_selection.output_shape();
     let errors: Vec<Error> = shape
         .errors()
         .map(|err| Error {
@@ -100,7 +103,7 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
         return Err(errors);
     }
 
-    validate_shape(&shape, context).map_err(|message| {
+    validate_shape(shape, context).map_err(|message| {
         vec![Error {
             message,
             location: location.clone(),
