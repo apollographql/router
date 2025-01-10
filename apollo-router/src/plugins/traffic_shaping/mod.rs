@@ -861,8 +861,7 @@ mod test {
             .expect("it is ready")
             .call(RouterRequest::fake_builder().build().unwrap())
             .await
-            .unwrap()
-            .into();
+            .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
 
         let response: router::Response = svc
@@ -871,8 +870,7 @@ mod test {
             .expect("it is ready")
             .call(RouterRequest::fake_builder().build().unwrap())
             .await
-            .unwrap()
-            .into();
+            .unwrap();
         assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
             &crate::services::router::body::into_bytes(response.response)
@@ -893,8 +891,7 @@ mod test {
             .expect("it is ready")
             .call(RouterRequest::fake_builder().build().unwrap())
             .await
-            .unwrap()
-            .into();
+            .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
     }
 
@@ -927,8 +924,7 @@ mod test {
             .expect("it is ready")
             .call(RouterRequest::fake_builder().build().unwrap())
             .await
-            .unwrap()
-            .into();
+            .unwrap();
         assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
             &crate::services::router::body::into_bytes(response.response)
