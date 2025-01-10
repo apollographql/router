@@ -1,6 +1,7 @@
 mod apply_to;
 mod helpers;
 mod immutable;
+mod input_shape;
 mod known_var;
 mod lit_expr;
 mod location;
