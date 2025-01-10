@@ -14,6 +14,7 @@ use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::subgraph;
+use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use bench::BenchOutput;
 use clap::Parser;
@@ -323,8 +324,10 @@ fn cmd_expand(
     filter_prefix: Option<&str>,
 ) -> Result<(), FederationError> {
     let original_supergraph = load_supergraph_file(file_path)?;
-    let ExpansionResult::Expanded { raw_sdl, .. } =
-        expand_connectors(&original_supergraph.schema.schema().serialize().to_string())?
+    let ExpansionResult::Expanded { raw_sdl, .. } = expand_connectors(
+        &original_supergraph.schema.schema().serialize().to_string(),
+        &ApiSchemaOptions::default(),
+    )?
     else {
         return Err(FederationError::internal(
             "supplied supergraph has no connectors to expand",

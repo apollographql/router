@@ -1,9 +1,10 @@
 ---
-source: apollo-federation/src/merge.rs
+source: apollo-federation/src/merge/tests.rs
 expression: schema.serialize()
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
+  mutation: Mutation
 }
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
@@ -85,4 +86,13 @@ type Y @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
 
 input YInput @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
   z: ID @join__field(graph: BASIC_1, type: "ID") @join__field(graph: BASIC_2, type: "ID")
+}
+
+type Mutation @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  m: M @join__field(graph: BASIC_1, type: "M")
+  m2(x: ID, y: YInput): M @join__field(graph: BASIC_2, type: "M")
+}
+
+type M @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  n: String @join__field(graph: BASIC_1, type: "String") @join__field(graph: BASIC_2, type: "String")
 }

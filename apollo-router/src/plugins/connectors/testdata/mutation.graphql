@@ -25,6 +25,13 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
+type CreateUserPayload
+  @join__type(graph: CONNECTORS)
+{
+  success: Boolean!
+  user: User!
+}
+
 input join__ContextArgument {
   name: String!
   type: String!
@@ -59,13 +66,14 @@ enum link__Purpose {
 type Mutation
   @join__type(graph: CONNECTORS)
 {
-  createUser(name: String!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {POST: "/user", body: "username: $args.name"}, selection: "id\nname: username"})
+  createUser(name: String!): CreateUserPayload! @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {POST: "/user", body: "username: $args.name"}, selection: "success: $(true)\nuser: {\n  id\n  name: username\n}"})
 }
 
 type Query
   @join__type(graph: CONNECTORS)
 {
   users: [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id name"})
+  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id name email", entity: true})
 }
 
 type User
@@ -73,4 +81,5 @@ type User
 {
   id: ID!
   name: String
+  email: String
 }

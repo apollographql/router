@@ -1,6 +1,7 @@
 //! Connectors error types.
 
 use apollo_federation::sources::connect::Connector;
+use tower::BoxError;
 
 use crate::graphql;
 use crate::graphql::ErrorExtension;
@@ -12,6 +13,9 @@ use crate::json_ext::Path;
 pub(crate) enum Error {
     /// Request limit exceeded
     RequestLimitExceeded,
+
+    /// {0}
+    HTTPClientError(#[from] BoxError),
 }
 
 impl Error {
@@ -47,6 +51,7 @@ impl ErrorExtension for Error {
     fn extension_code(&self) -> String {
         match self {
             Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
+            Self::HTTPClientError(_) => "HTTP_CLIENT_ERROR",
         }
         .to_string()
     }

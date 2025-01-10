@@ -9,6 +9,7 @@ use mime::APPLICATION_JSON;
 use mockall::mock;
 use mockall::predicate::eq;
 use req_asserts::Matcher;
+use serde_json::Value;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 use tracing_core::span::Attributes;
@@ -515,6 +516,49 @@ async fn basic_errors() {
 }
 
 #[tokio::test]
+async fn basic_connection_errors() {
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        "http://localhost:9999",
+        "{ users { id } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    assert_eq!(response.get("data").unwrap(), &Value::Null);
+    assert_eq!(response.get("errors").unwrap().as_array().unwrap().len(), 1);
+    let err = response
+        .get("errors")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .first()
+        .unwrap();
+    // Different OSes have different codes at the end of the message so we have to assert on the parts separately
+    let msg = err.get("message").unwrap().as_str().unwrap();
+    assert!(
+        msg.starts_with(
+            "HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+        ),
+        "got message: {}",
+        msg
+    );
+    assert_eq!(err.get("path").unwrap(), &serde_json::json!(["users"]));
+    assert_eq!(
+        err.get("extensions").unwrap(),
+        &serde_json::json!({
+          "service": "connectors",
+          "connector": {
+            "coordinate": "connectors:Query.users@connect[0]"
+          },
+          "code": "HTTP_CLIENT_ERROR"
+        })
+    );
+}
+
+#[tokio::test]
 async fn test_headers() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
@@ -757,8 +801,11 @@ async fn test_mutation() {
         &mock_server.uri(),
         "mutation CreateUser($name: String!) {
             createUser(name: $name) {
-                id
-                name
+                success
+                user {
+                  id
+                  name
+                }
             }
         }",
         serde_json_bytes::json!({ "name": "New User" })
@@ -774,8 +821,11 @@ async fn test_mutation() {
     {
       "data": {
         "createUser": {
-          "id": 3,
-          "name": "New User"
+          "success": true,
+          "user": {
+            "id": 3,
+            "name": "New User"
+          }
         }
       }
     }
@@ -1529,6 +1579,7 @@ mod quickstart_tests {
             true,
             false,
             Some(vec![CONTENT_TYPE.to_string()]),
+            None,
         )
         .await;
 

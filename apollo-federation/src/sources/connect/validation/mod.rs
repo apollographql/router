@@ -73,18 +73,36 @@ use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 
+// The result of a validation pass on a subgraph
+#[derive(Debug)]
+pub struct ValidationResult {
+    /// All validation errors encountered.
+    pub errors: Vec<Message>,
+
+    /// Whether or not the validated subgraph contained connector directives
+    pub has_connectors: bool,
+
+    /// The parsed (and potentially invalid) schema of the subgraph
+    pub schema: Schema,
+}
+
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
-pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
+pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
     // TODO: Use parse_and_validate (adding in directives as needed)
     // TODO: Handle schema errors rather than relying on JavaScript to catch it later
     let schema = Schema::parse(source_text, file_name)
         .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
     let connect_identity = ConnectSpec::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
-        return Vec::new(); // There are no connectors-related directives to validate
+        // There are no connectors-related directives to validate
+        return ValidationResult {
+            errors: Vec::new(),
+            has_connectors: false,
+            schema,
+        };
     };
 
     let federation = Link::for_identity(&schema, &Identity::federation_identity());
@@ -181,7 +199,11 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
         };
     }
 
-    messages
+    ValidationResult {
+        errors: messages,
+        has_connectors: true,
+        schema,
+    }
 }
 
 fn advanced_validations(
@@ -241,19 +263,31 @@ fn check_seen_fields(
                 return None;
             }
             let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
+
+            // ignore all fields on objects marked @external
+            if extended_type
+                .directives()
+                .iter()
+                .any(|dir| &dir.name == external_directive_name)
+            {
+                return None;
+            }
+
             match extended_type {
-                ExtendedType::Object(object) => Some(
-                    // ignore @external fields
-                    object
-                        .fields
-                        .iter()
-                        .filter(|(_, def)| {
-                            !def.directives
-                                .iter()
-                                .any(|dir| &dir.name == external_directive_name)
-                        })
-                        .map(coord),
-                ),
+                ExtendedType::Object(object) => {
+                    // ignore fields marked @external
+                    Some(
+                        object
+                            .fields
+                            .iter()
+                            .filter(|(_, def)| {
+                                !def.directives
+                                    .iter()
+                                    .any(|dir| &dir.name == external_directive_name)
+                            })
+                            .map(coord),
+                    )
+                }
                 ExtendedType::Interface(_) => None, // TODO: when interfaces are supported (probably should include fields from implementing/member types as well)
                 _ => None,
             }
@@ -470,7 +504,7 @@ fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Direct
 
 type DirectiveName = Name;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Message {
     /// A unique, per-error code to allow consuming tools to take specific actions. These codes
     /// should not change once stabilized.
@@ -602,8 +636,8 @@ mod test_validate_source {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
-                let errors = validate(&schema, path.to_str().unwrap());
-                assert_snapshot!(format!("{:#?}", errors));
+                let result = validate(&schema, path.to_str().unwrap());
+                assert_snapshot!(format!("{:#?}", result.errors));
             });
         });
     }

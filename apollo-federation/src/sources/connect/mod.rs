@@ -58,6 +58,11 @@ impl ConnectId {
         )
     }
 
+    pub fn subgraph_source(&self) -> String {
+        let source = format!(".{}", self.source_name.as_deref().unwrap_or(""));
+        format!("{}{}", self.subgraph_name, source)
+    }
+
     pub fn coordinate(&self) -> String {
         format!(
             "{}:{}.{}@connect[{}]",
