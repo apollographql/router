@@ -154,3 +154,77 @@ The available basic conditions:
 | `any`    | A list of conditions of which at least one must be true  |
 
 You can create complex conditions by using these basic conditions as building blocks.
+
+## Example condition configurations
+
+Some example configuration of common use cases for conditions.
+
+### Event for a specific subgraph
+
+You can trigger an event for a specific subgraph by configuring a condition with the subgraph's name. 
+
+The example below uses the [`subgraph_name`](/router/configuration/telemetry/instrumentation/selectors#subgraph) selector to log subgraph responses for the subgraph named "products":
+
+```yaml title=router.yaml
+telemetry:
+  instrumentation:
+    events:
+      subgraph:
+        response:
+          level: info
+          condition:
+            eq:
+            - subgraph_name: true
+            - "products"
+```
+
+### On GraphQL error
+
+You can use the [`on_graphql_error`](/router/configuration/telemetry/instrumentation/selectors#supergraph) selector to create a condition based on whether or not a GraphQL error is present.
+
+The example configuration below uses `on_graphql_error` to log only supergraph responses that contain GraphQL errors:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      router:
+        request:
+          level: info
+          condition: # Only log the router request if you sent `x-log-request` with the value `enabled`
+            eq:
+            - request_header: x-log-request
+            - "enabled"
+        response: off
+        error: error
+      supergraph:
+        response:
+          level: info
+          condition: # Only log supergraph response containing GraphQL errors
+            eq:
+            - on_graphql_error: true
+            - true
+        error: error
+```
+
+### On large payloads
+
+For observability of large payloads, you can set attributes using conditions that indicate whether the length of a request or response exceeds a threshold.
+
+The example below sets a custom attribute to `true` if the length of a request is greater than 100:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          trace_id: true
+          payload_is_to_big: # Set this attribute to true if the value of content-length header is > than 100
+            static: true
+            condition:
+              gt:
+              - request_header: "content-length"
+              - 100
+```
