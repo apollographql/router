@@ -32,7 +32,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::BridgeQueryPlannerPool;
+use crate::query_planner::QueryPlannerService;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -340,7 +340,7 @@ where
     }
 }
 
-impl CachingQueryPlanner<BridgeQueryPlannerPool> {
+impl CachingQueryPlanner<QueryPlannerService> {
     pub(crate) fn subgraph_schemas(
         &self,
     ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
