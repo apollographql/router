@@ -5,16 +5,21 @@ pull_request_rules:
     actions:
       backport:
         branches:
-          - "1.x"
+          - 1.x
         assignees:
           - "{{ author }}"
-
   - name: backport 2.x
     conditions:
       - label = backport-2.x
     actions:
       backport:
         branches:
-          - "2.x"
+          - 2.x
         assignees:
           - "{{ author }}"
+merge_protections:
+  - name: Linear history
+    if:
+      - base = dev
+    success_conditions:
+      - linear-history
