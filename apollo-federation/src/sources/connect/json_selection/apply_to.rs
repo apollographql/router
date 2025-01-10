@@ -609,20 +609,30 @@ impl ApplyToInternal for WithRange<PathList> {
                 tail.compute_output_shape(var_shape, dollar_shape, named_var_shapes)
             }
 
-            PathList::Key(key, rest) => {
-                // If this is the first key in the path,
-                // PathSelection::compute_output_shape will have set our
-                // input_shape equal to its dollar_shape, thereby ensuring that
-                // some.nested.path is equivalent to $.some.nested.path.
-                if input_shape.is_none() {
-                    // Following WithRange<PathList>::apply_to_path, we do not
-                    // want to call rest.compute_output_shape recursively with
-                    // an input data shape corresponding to missing data, though
-                    // it might do the right thing.
-                    return input_shape;
-                }
+            // For the first key in a path, PathSelection::compute_output_shape
+            // will have set our input_shape equal to its dollar_shape, thereby
+            // ensuring that some.nested.path is equivalent to
+            // $.some.nested.path.
+            PathList::Key(key, rest) => match input_shape.case() {
+                // At runtime we abandon evaluating the PathList when we
+                // encounter None, so we do not want to call
+                // rest.compute_output_shape recursively when the
+                // input_shape.is_none(), and we also want to pass through None
+                // as a member of any Shape::one input unions.
+                ShapeCase::None => input_shape,
+                ShapeCase::One(cases) => Shape::one(cases.iter().map(|case| {
+                    if case.is_none() {
+                        case.clone()
+                    } else {
+                        rest.compute_output_shape(
+                            case.field(key.as_str()),
+                            dollar_shape.clone(),
+                            named_var_shapes,
+                        )
+                    }
+                })),
 
-                if let ShapeCase::Array { prefix, tail } = input_shape.case() {
+                ShapeCase::Array { prefix, tail } => {
                     // Map rest.compute_output_shape over the prefix and rest
                     // elements of the array shape, so we don't have to map
                     // array shapes for the other PathList variants.
@@ -652,14 +662,14 @@ impl ApplyToInternal for WithRange<PathList> {
                     };
 
                     Shape::array(mapped_prefix, mapped_rest)
-                } else {
-                    rest.compute_output_shape(
-                        input_shape.field(key.as_str()),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                    )
                 }
-            }
+
+                _ => rest.compute_output_shape(
+                    input_shape.field(key.as_str()),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                ),
+            },
 
             PathList::Expr(expr, tail) => tail.compute_output_shape(
                 expr.compute_output_shape(input_shape, dollar_shape.clone(), named_var_shapes),
@@ -675,22 +685,33 @@ impl ApplyToInternal for WithRange<PathList> {
                 }
 
                 if let Some(method) = ArrowMethod::lookup(method_name) {
-                    let method_result_shape = if let ShapeCase::One(cases) = input_shape.case() {
-                        Shape::one(cases.iter().map(|case| {
-                            self.compute_output_shape(
-                                case.clone(),
-                                dollar_shape.clone(),
-                                named_var_shapes,
-                            )
-                        }))
-                    } else {
-                        method.shape(
+                    let method_result_shape = match input_shape.case() {
+                        // At runtime we never invoke an arrow method with an
+                        // input_shape of None, so we avoid calling method.shape
+                        // when the input_shape is None, or for None members of
+                        // Shape::one unions (though the None member is passed
+                        // through to the resulting Shape::one union).
+                        ShapeCase::None => input_shape,
+                        ShapeCase::One(cases) => Shape::one(cases.iter().map(|case| {
+                            if case.is_none() {
+                                case.clone()
+                            } else {
+                                method.shape(
+                                    method_name,
+                                    method_args.as_ref(),
+                                    case.clone(),
+                                    dollar_shape.clone(),
+                                    named_var_shapes,
+                                )
+                            }
+                        })),
+                        _ => method.shape(
                             method_name,
                             method_args.as_ref(),
                             input_shape,
                             dollar_shape.clone(),
                             named_var_shapes,
-                        )
+                        ),
                     };
 
                     if method_result_shape.is_none() {
