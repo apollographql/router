@@ -43,7 +43,6 @@ pub(crate) enum LitExpr {
 
 impl LitExpr {
     // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
-    // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
         alt((
@@ -57,6 +56,7 @@ impl LitExpr {
         ))(input)
     }
 
+    // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
     fn parse_primitive(input: Span) -> ParseResult<WithRange<Self>> {
         alt((
             map(parse_string_literal, |s| s.take_as(Self::String)),
