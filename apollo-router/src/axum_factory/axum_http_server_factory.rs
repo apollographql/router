@@ -34,6 +34,7 @@ use tokio_rustls::TlsAcceptor;
 use tower::layer::layer_fn;
 use tower::load_shed::error::Overloaded;
 use tower::service_fn;
+use tower::timeout::error::Elapsed;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
@@ -666,6 +667,8 @@ where
 
     let code = if err.is::<Overloaded>() {
         StatusCode::SERVICE_UNAVAILABLE
+    } else if err.is::<Elapsed>() {
+        StatusCode::GATEWAY_TIMEOUT
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
     };

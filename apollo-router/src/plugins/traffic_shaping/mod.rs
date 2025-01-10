@@ -137,7 +137,7 @@ impl Merge for SubgraphShaping {
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
-struct HttpServer {
+struct RouterShaping {
     /// The global concurrency limit
     concurrency_limit: Option<usize>,
 
@@ -156,7 +156,7 @@ struct HttpServer {
 /// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
-    router: HttpServer,
+    router: Option<RouterShaping>,
     /// Applied on all subgraphs
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
@@ -209,6 +209,33 @@ impl Plugin for TrafficShaping {
     fn router_service(&self, service: BoxService) -> BoxService {
         ServiceBuilder::new()
             .map_result(|result: Result<RouterResponse, BoxError>| {
+                println!("TIMEOUT RESULT: {result:?}");
+                match result {
+                    Ok(ok) => Ok(ok),
+                    Err(err) if err.is::<Elapsed>() => {
+                        // TODO add metrics
+                        let error = graphql::Error::builder()
+                            .message(StatusCode::GATEWAY_TIMEOUT.as_str())
+                            .extension_code(StatusCode::GATEWAY_TIMEOUT.as_str())
+                            .build();
+                        Ok(RouterResponse::builder()
+                            .context(Context::default())
+                            .status_code(StatusCode::GATEWAY_TIMEOUT)
+                            .data(json!(graphql::Response::builder().error(error).build()))
+                            .build()
+                            .expect("should build overloaded response"))
+                    }
+                    Err(err) => Err(err),
+                }
+            })
+            .load_shed()
+            .option_layer(self.config.router.as_ref().and_then(|router| {
+                router.timeout.as_ref().map(|timeout| {
+                    println!("setting timeout: {timeout:?}");
+                    tower::timeout::TimeoutLayer::new(*timeout)
+                })
+            }))
+            .map_result(|result: Result<RouterResponse, BoxError>| {
                 match result {
                     Ok(ok) => Ok(ok),
                     Err(err) if err.is::<Overloaded>() => {
@@ -229,13 +256,12 @@ impl Plugin for TrafficShaping {
                 }
             })
             .load_shed()
-            .option_layer(
-                self.config
-                    .router
+            .option_layer(self.config.router.as_ref().and_then(|router| {
+                router
                     .concurrency_limit
                     .as_ref()
-                    .map(|limit| tower::limit::ConcurrencyLimitLayer::new(*limit)),
-            )
+                    .map(|limit| tower::limit::ConcurrencyLimitLayer::new(*limit))
+            }))
             .map_result(|result: Result<RouterResponse, BoxError>| {
                 match result {
                     Ok(ok) => Ok(ok),
@@ -259,35 +285,11 @@ impl Plugin for TrafficShaping {
                 }
             })
             .load_shed()
-            .option_layer(self.config.router.global_rate_limit.as_ref().map(|limit| {
-                tower::limit::RateLimitLayer::new(limit.capacity.into(), limit.interval)
+            .option_layer(self.config.router.as_ref().and_then(|router| {
+                router.global_rate_limit.as_ref().map(|limit| {
+                    tower::limit::RateLimitLayer::new(limit.capacity.into(), limit.interval)
+                })
             }))
-            .map_result(|result: Result<RouterResponse, BoxError>| {
-                match result {
-                    Ok(ok) => Ok(ok),
-                    Err(err) if err.is::<Elapsed>() => {
-                        // TODO add metrics
-                        let error = graphql::Error::builder()
-                            .message(StatusCode::GATEWAY_TIMEOUT.as_str())
-                            .extension_code(StatusCode::GATEWAY_TIMEOUT.as_str())
-                            .build();
-                        Ok(RouterResponse::builder()
-                            .context(Context::default())
-                            .status_code(StatusCode::GATEWAY_TIMEOUT)
-                            .data(json!(graphql::Response::builder().error(error).build()))
-                            .build()
-                            .expect("should build overloaded response"))
-                    }
-                    Err(err) => Err(err),
-                }
-            })
-            .option_layer(
-                self.config
-                    .router
-                    .timeout
-                    .as_ref()
-                    .map(|timeout| tower::timeout::TimeoutLayer::new(*timeout)),
-            )
             .service(service)
             .boxed()
     }
@@ -845,7 +847,7 @@ mod test {
         mock_service.expect_clone().returning(|| {
             let mut mock_service = MockRouterService::new();
 
-            mock_service.expect_call().times(0..3).returning(move |_| {
+            mock_service.expect_call().times(0..3).returning(|_| {
                 Ok(RouterResponse::fake_builder()
                     .data(json!({ "test": 1234_u32 }))
                     .build()
@@ -900,5 +902,50 @@ mod test {
             .unwrap()
             .into();
         assert_eq!(StatusCode::OK, response.response.status());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_timeout_router_requests() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        router:
+            timeout: 1ns
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let mut mock_service = MockRouterService::new();
+        mock_service.expect_call().times(0..5).returning(|_| {
+            println!("ABOUT TO SLEEP");
+            // tokio::time::sleep(Duration::from_millis(300)).await;
+            Ok(RouterResponse::fake_builder()
+                .data(json!({ "test": 1234_u32 }))
+                .build()
+                .unwrap())
+        });
+
+        let mut svc = plugin.router_service(mock_service.boxed());
+
+        let response: router::Response = svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap()
+            .into();
+        dbg!(&response);
+        assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.response.status());
+        let j: serde_json::Value = serde_json::from_slice(
+            &crate::services::router::body::into_bytes(response.response)
+                .await
+                .expect("we have a body"),
+        )
+        .expect("our body is valid json");
+        assert_eq!(
+            "rate limited",
+            j["data"]["errors"][0]["extensions"]["reason"]
+        );
     }
 }

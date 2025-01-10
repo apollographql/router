@@ -561,7 +561,6 @@ impl IntegrationTest {
             let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                println!("{line}");
                 // Extract the bind address from a log line that looks like this: GraphQL endpoint exposed at http://127.0.0.1:51087/
                 if let Some(captures) = bind_address_regex.captures(&line) {
                     let address = captures.name("address").unwrap().as_str();
@@ -577,7 +576,7 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
-                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    let log = serde_json::from_str::<Log>(&line).expect("line: '{line}' isn't JSON, might you have some debug output in the logging?");
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
                         collected.push(format!(
