@@ -1,3 +1,6 @@
+//! This module is all about validating [`Expression`]s for a given context. This isn't done at
+//! runtime, _only_ during composition because it could be expensive.
+
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
@@ -19,6 +22,7 @@ pub(super) struct Context<'schema> {
 }
 
 impl<'schema> Context<'schema> {
+    /// Create a context valid for expressions within the URI or headers of a `@connect` directive
     pub(super) fn for_connect_request(
         schema: &'schema SchemaInfo,
         coordinate: ConnectDirectiveCoordinate,
