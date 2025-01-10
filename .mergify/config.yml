@@ -17,9 +17,6 @@ pull_request_rules:
           - 2.x
         assignees:
           - "{{ author }}"
-merge_protections:
-  - name: Linear history
-    if:
-      - base = dev
-    success_conditions:
-      - linear-history
+queue_rules:
+  - merge_method: squash
+    name: Squash
