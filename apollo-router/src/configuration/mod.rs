@@ -41,7 +41,6 @@ pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
-use crate::axum_factory::rewrite_path_for_axum_0_8;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
@@ -739,7 +738,7 @@ impl Supergraph {
             path = new_path.to_string();
         }
 
-        rewrite_path_for_axum_0_8(path.as_str())
+        path
     }
 }
 

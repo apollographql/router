@@ -17,7 +17,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use crate::axum_factory::rewrite_path_for_axum_0_8;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
@@ -90,10 +89,7 @@ impl Endpoint {
                     .into_response())
             }
         };
-        axum::Router::new().route_service(
-            rewrite_path_for_axum_0_8(self.path.as_str()).as_str(),
-            service_fn(handler),
-        )
+        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
     }
 }
 /// Factory for creating a RouterService
