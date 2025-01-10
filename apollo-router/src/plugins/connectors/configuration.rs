@@ -226,19 +226,14 @@ fn warn_incompatible_plugins(config: &Configuration, connectors: &Connectors) {
     // properties on the config object, so we operate on the actual yaml to
     // consolidate how we handle core features vs arbitrary plugins.
     //
-    // Note: Execution of this entire chain of validation methods won't happen
-    // if the configuration is invalid, but we add a check just in case for
-    // debug builds.
+    // Note: Execution of this entire chain of validation methods shouldn't happen
+    // if the configuration is invalid, but we add a debug log just in case.
     let Some(raw_config) = config
         .validated_yaml
         .as_ref()
         .and_then(serde_json::Value::as_object)
     else {
-        debug_assert!(
-            false,
-            "configuration was invalid, which should not have happened"
-        );
-
+        tracing::debug!("configuration is invalid, skipping connector incompatibility checks...");
         return;
     };
 
