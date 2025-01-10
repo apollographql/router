@@ -1,0 +1,20 @@
+pull_request_rules:
+  - name: backport 1.x
+    conditions:
+      - label = backport-1.x
+    actions:
+      backport:
+        branches:
+          - "1.x"
+        assignees:
+          - "{{ author }}"
+
+  - name: backport 2.x
+    conditions:
+      - label = backport-2.x
+    actions:
+      backport:
+        branches:
+          - "2.x"
+        assignees:
+          - "{{ author }}"
