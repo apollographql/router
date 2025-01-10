@@ -236,9 +236,9 @@ This guidance applies if you are:
 
 ## Observability of the request lifecycle
 
-To understand the state and health of your router as it services requests, you can add instrumentation to request lifecycle services and collect telemetry. The router's telemetry is based on [OpenTelemetry](https://opentelemetry.io/docs/what-is-opentelemetry/), and you can configure your router's YAML configuration to add traces, metrics, and logs. 
+To understand the state and health of your router as it services requests, you can add instrumentation to request lifecycle services and collect telemetry. The router's telemetry is based on [OpenTelemetry](https://opentelemetry.io/docs/what-is-opentelemetry/), so you can configure your router's YAML configuration to add traces, metrics, and logs. 
 
-You can instrument the Router, Supergraph, and Subgraph services with [events](/router/configuration/telemetry/instrumentation/events) to capture data points along the request lifecycle. You can customize your events by setting [conditions](/router/configuration/telemetry/instrumentation/conditions) to control when events are triggered, and you can set [attributes](/router/configuration/telemetry/instrumentation/events#attributes) and [selectors](/router/configuration/telemetry/instrumentation/selectors) to specify the data attached to events.
+You can instrument the Router, Supergraph, and Subgraph services with [events](/router/configuration/telemetry/instrumentation/events) to capture data points along the request lifecycle. To customize events, you can set[conditions](/router/configuration/telemetry/instrumentation/conditions) to control when events are triggered, and [attributes](/router/configuration/telemetry/instrumentation/events#attributes) and [selectors](/router/configuration/telemetry/instrumentation/selectors) to specify the data attached to events.
 
 To learn more about router observability with telemetry, go to [Router Telemetry](/graphos/routing/observability/telemetry).
 
