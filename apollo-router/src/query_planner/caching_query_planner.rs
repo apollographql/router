@@ -189,6 +189,8 @@ where
             None => Vec::new(),
         };
 
+        cache_keys.shuffle(&mut thread_rng());
+
         let should_warm_with_pqs = (experimental_pql_prewarm.on_startup
             && previous_cache.is_none())
             || (experimental_pql_prewarm.on_reload && previous_cache.is_some());
@@ -229,8 +231,9 @@ where
             }
         }
 
-        all_cache_keys.extend(cache_keys.into_iter());
         all_cache_keys.shuffle(&mut thread_rng());
+
+        all_cache_keys.extend(cache_keys.into_iter());
 
         let mut count = 0usize;
         let mut reused = 0usize;
