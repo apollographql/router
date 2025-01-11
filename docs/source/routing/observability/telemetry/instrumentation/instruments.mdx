@@ -482,3 +482,43 @@ telemetry:
 | `description`               |                                                                                |            | The description of the custom instrument.     |
 | `value`                     | `unit` \| `duration` \| `<custom>` \| `event_unit` \| `event_duration` \| `event_custom` |            | The value of the instrument.                  |
 
+### Production instrumentation example
+
+At minimum, observability of a router running in production requires knowing about errors that arise from operations and subgraphs.
+
+The example configuration below adds instruments with both standard OpenTelemetry attributes and custom attributes to extract information about erring operations:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.duration:
+          # Adding subgraph name, response status code from the router and the operation name
+          attributes:
+            http.response.status_code: true
+            graphql.operation.name:
+              operation_name: string
+            # This attribute will be set to true if the response contains graphql errors
+            graphql.errors:
+              on_graphql_error: true
+        http.server.response.body.size:
+          attributes:
+            graphql.operation.name:
+              operation_name: string
+      subgraph:
+        # Adding subgraph name, response status code from the subgraph and original operation name from the supergraph
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+            http.response.status_code:
+              subgraph_response_status: code
+            graphql.operation.name:
+              supergraph_operation_name: string
+            # This attribute will be set to true if the response contains graphql errors
+            graphql.errors:
+              subgraph_on_graphql_error: true
+        http.client.request.body.size:
+          attributes:
+            subgraph.name: true
+```
