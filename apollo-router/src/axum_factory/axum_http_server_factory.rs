@@ -24,8 +24,10 @@ use http::HeaderValue;
 use http::Request;
 use itertools::Itertools;
 use multimap::MultiMap;
+use once_cell::sync::Lazy;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
+use regex::Regex;
 use serde::Serialize;
 use serde_json::json;
 #[cfg(unix)]
@@ -68,6 +70,9 @@ use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::Context;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
+});
 
 fn session_count_instrument() -> ObservableGauge<u64> {
     let meter = meter_provider().meter("apollo/router");
@@ -563,7 +568,7 @@ where
         get(handle_graphql::<RF>).post(handle_graphql::<RF>),
     );
 
-    if configuration.supergraph.path == "/*" {
+    if BARE_WILDCARD_PATH_REGEX.is_match(configuration.supergraph.path.as_str()) {
         router = router.route("/", get(handle_graphql::<RF>).post(handle_graphql::<RF>));
     }
 

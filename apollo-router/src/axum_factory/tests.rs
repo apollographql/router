@@ -713,7 +713,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/*"))
+                .path(String::from("/{*rest}"))
                 .build(),
         )
         .build()
@@ -863,7 +863,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/:my_prefix/graphql"))
+                .path(String::from("/{my_prefix}/graphql"))
                 .build(),
         )
         .build()
@@ -928,7 +928,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql/*"))
+                .path(String::from("/graphql/{*rest}"))
                 .build(),
         )
         .build()
