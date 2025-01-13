@@ -313,7 +313,7 @@ impl PluginPrivate for FleetDetector {
                                 u64_counter!(
                                     "apollo.router.operations.fetch.request_size",
                                     "Total number of request bytes for subgraph fetches",
-                                    upper as u64,
+                                    upper,
                                     subgraph.name = sn.to_string()
                                 );
                                 return body;
