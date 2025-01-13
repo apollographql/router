@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
@@ -344,12 +343,12 @@ where
                 ClientMessage::CloseWebsocket => {
                     future::ready(Ok(Message::Close(Some(CloseFrame{
                         code: CloseCode::Normal,
-                        reason: Cow::default(),
+                        reason: Default::default(),
                     }))))
                 },
                 message => {
                     future::ready(match serde_json::to_string(&message) {
-                        Ok(client_message_str) => Ok(Message::Text(client_message_str)),
+                        Ok(client_message_str) => Ok(Message::text(client_message_str)),
                         Err(err) => Err(Error::SerdeError(err)),
                     })
                 },
@@ -718,7 +717,7 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::Text(
+                        .send(AxumWsMessage::text(
                             serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                         ))
                         .await
@@ -729,7 +728,7 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
@@ -752,9 +751,7 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
-                        "coucou".to_string(),
-                    ))
+                    .send(AxumWsMessage::text("coucou"))
                     .await
                     .unwrap();
 
@@ -767,7 +764,7 @@ mod tests {
 
                    tokio::time::sleep(duration).await;
                    let ping_message = socket.next().await.unwrap().unwrap();
-                   assert_eq!(ping_message, AxumWsMessage::Text(
+                   assert_eq!(ping_message, AxumWsMessage::text(
                        serde_json::to_string(&ClientMessage::Ping { payload: None }).unwrap(),
                    ));
 
@@ -779,38 +776,38 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Text(
+                assert_eq!(pong_message, AxumWsMessage::text(
                     serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
                 ));
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Text(
+                assert_eq!(pong_message, AxumWsMessage::text(
                     serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
                 ));
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Complete { id: client_id.unwrap() }).unwrap(),
                     ))
                     .await
@@ -849,7 +846,7 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::Text(
+                        .send(AxumWsMessage::text(
                             serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                         ))
                         .await
@@ -859,13 +856,13 @@ mod tests {
                     assert!(matches!(pong_message, ClientMessage::Pong { payload: None }));
                 }
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
                     .unwrap();
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
                     ))
                     .await
@@ -888,20 +885,18 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
-                        "coucou".to_string(),
-                    ))
+                    .send(AxumWsMessage::text("coucou"))
                     .await
                     .unwrap();
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
                     ))
                     .await

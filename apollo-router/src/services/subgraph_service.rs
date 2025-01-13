@@ -2173,7 +2173,7 @@ mod tests {
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
                 socket
-                    .send(Message::Text(
+                    .send(Message::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
@@ -2195,7 +2195,7 @@ mod tests {
                 };
 
                 socket
-                    .send(Message::Text(
+                    .send(Message::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await

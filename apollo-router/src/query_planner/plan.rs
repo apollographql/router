@@ -355,7 +355,8 @@ impl PlanNode {
                     }
                 }
             }
-            PlanNode::Subscription { primary: _, rest } => {
+            PlanNode::Subscription { primary, rest } => {
+                primary.init_parsed_operation(subgraph_schemas)?;
                 if let Some(node) = rest.as_mut() {
                     node.init_parsed_operations(subgraph_schemas)?;
                 }

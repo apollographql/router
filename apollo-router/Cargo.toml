@@ -71,8 +71,8 @@ async-compression = { version = "0.4.6", features = [
     "deflate",
 ] }
 async-trait.workspace = true
-axum = { version = "0.7.9", features = ["http2"] }
-axum-extra = { version = "0.9.6", features = [ "typed-header" ] }
+axum = { version = "0.8.1", features = ["http2"] }
+axum-extra = { version = "0.10.0", features = [ "typed-header" ] }
 axum-server = {  version = "0.7.1", optional = true }
 base64 = "0.22.0"
 bloomfilter = "1.0.13"
@@ -85,7 +85,7 @@ clap = { version = "4.5.8", default-features = false, features = [
     "help",
 ] }
 cookie = { version = "0.18.0", default-features = false }
-crossbeam-channel = "0.5"
+crossbeam-channel = "0.5.14"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
 dashmap = { version = "5.5.3", features = ["serde"] }
 derivative = "2.2.0"
@@ -250,7 +250,7 @@ uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.5.22"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.24.0", features = [
+tokio-tungstenite = { version = "0.26.1", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = "0.26.0"
@@ -298,7 +298,7 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 tikv-jemallocator = "0.6.0"
 
 [dev-dependencies]
-axum = { version = "0.7.9", features = ["http2", "ws"] }
+axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "9.4.0", features = ["enable-rustls", "mocks", "i-cluster"] }

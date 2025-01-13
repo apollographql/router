@@ -295,7 +295,7 @@ impl Plugin for Subscription {
                 .clone()
                 .expect("cannot run subscription in callback mode without a hmac key");
             let endpoint = Endpoint::from_router_service(
-                format!("{path}/:callback"),
+                format!("{path}/{{callback}}"),
                 CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
                     .boxed(),
             );
