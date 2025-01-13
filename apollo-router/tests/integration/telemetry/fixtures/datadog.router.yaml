@@ -5,14 +5,12 @@ telemetry:
         enabled: true
         header_name: apollo-custom-trace-id
         format: datadog
-      propagation:
-        trace_context: true
-        jaeger: true
       common:
         service_name: router
         resource:
           env: local1
           service.version: router_version_override
+        preview_datadog_agent_sampling: true
       datadog:
         enabled: true
         batch_processor:
