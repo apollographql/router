@@ -18,7 +18,7 @@ use tower::ServiceBuilder;
 use super::query_analysis::ParsedDocument;
 use crate::graphql::Error;
 use crate::json_ext::Object;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointService;
+use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::layers::ServiceBuilderExt;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -34,7 +34,7 @@ where
         + 'static,
     <S as Service<SupergraphRequest>>::Future: Send + 'static,
 {
-    type Service = OneShotAsyncCheckpointService<
+    type Service = AsyncCheckpointService<
         S,
         BoxFuture<'static, Result<ControlFlow<SupergraphResponse, SupergraphRequest>, BoxError>>,
         SupergraphRequest,
@@ -42,7 +42,7 @@ where
 
     fn layer(&self, service: S) -> Self::Service {
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: SupergraphRequest| {
+            .checkpoint_async(|req: SupergraphRequest| {
                 Box::pin(async {
                     if req.supergraph_request.method() == Method::POST {
                         return Ok(ControlFlow::Continue(req));
