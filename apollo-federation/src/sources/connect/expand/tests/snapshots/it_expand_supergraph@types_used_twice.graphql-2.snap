@@ -38,7 +38,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
             connect_template: URLTemplate {
                 base: None,
                 path: [],
-                query: {},
+                query: [],
             },
             method: Get,
             headers: {},

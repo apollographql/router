@@ -9,6 +9,7 @@ mod header;
 mod json_selection;
 mod models;
 pub(crate) mod spec;
+mod string_template;
 mod url_template;
 pub mod validation;
 pub(crate) mod variable;

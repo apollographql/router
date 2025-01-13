@@ -395,7 +395,7 @@ impl SnapshotServer {
         .expect("can create a HttpService");
         let app = Router::new()
             .route("/", any(root_handler))
-            .route("/*path", any(handler)) // won't match root, so we need the root handler above
+            .route("/{*path}", any(handler)) // won't match root, so we need the root handler above
             .with_state(SnapshotServerState {
                 client: http_service,
                 base_url: base_url.clone(),

@@ -6,47 +6,87 @@ Ok(
     URLTemplate {
         base: None,
         path: [
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "users",
+                    Constant(
+                        Constant {
+                            value: "users",
+                            location: 1..6,
+                        },
                     ),
                 ],
             },
-            Component {
+            StringTemplate {
                 parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $config,
-                                location: 8..15,
-                            },
-                            path: [
-                                VariablePathPart {
-                                    part: "user_id",
-                                    location: 16..23,
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $config,
+                                                range: Some(
+                                                    0..7,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "user_id",
+                                                        ),
+                                                        range: Some(
+                                                            8..15,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            15..15,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    7..15,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..15,
+                                        ),
+                                    },
                                 },
-                            ],
+                            ),
                             location: 8..23,
                         },
                     ),
                 ],
             },
         ],
-        query: {
-            Component {
-                parts: [
-                    Text(
-                        "a",
-                    ),
-                ],
-            }: Component {
-                parts: [
-                    Text(
-                        "b",
-                    ),
-                ],
-            },
-        },
+        query: [
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "a",
+                                location: 25..26,
+                            },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "b",
+                                location: 27..28,
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ],
     },
 )

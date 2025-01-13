@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::fmt::Display;
 
 use apollo_compiler::collections::IndexSet;
@@ -788,7 +787,7 @@ impl PathList {
         match self {
             Self::Key(key, rest) => {
                 let mut parts = vec![VariablePathPart {
-                    part: Cow::from(key.as_str()),
+                    part: key.as_str(),
                     location: key.range().unwrap_or_default(),
                 }];
                 parts.extend(rest.variable_path_parts());
@@ -3044,15 +3043,15 @@ mod tests {
                 },
                 path: vec![
                     VariablePathPart {
-                        part: Cow::from("a"),
+                        part: "a",
                         location: 6..7,
                     },
                     VariablePathPart {
-                        part: Cow::from("b"),
+                        part: "b",
                         location: 8..9,
                     },
                     VariablePathPart {
-                        part: Cow::from("c"),
+                        part: "c",
                         location: 10..11,
                     },
                 ],
@@ -3075,15 +3074,15 @@ mod tests {
                 },
                 path: vec![
                     VariablePathPart {
-                        part: Cow::from("x"),
+                        part: "x",
                         location: 15..16,
                     },
                     VariablePathPart {
-                        part: Cow::from("y"),
+                        part: "y",
                         location: 17..18,
                     },
                     VariablePathPart {
-                        part: Cow::from("z"),
+                        part: "z",
                         location: 19..20,
                     },
                 ],

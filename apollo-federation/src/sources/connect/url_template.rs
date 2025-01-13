@@ -1,66 +1,47 @@
 use std::fmt::Display;
-use std::ops::Range;
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use serde_json_bytes::Value as JSON;
 use url::Url;
 
-use crate::sources::connect::variable::Namespace;
-use crate::sources::connect::variable::VariableError;
-use crate::sources::connect::variable::VariableReference;
+use crate::sources::connect::string_template::Error;
+use crate::sources::connect::string_template::Expression;
+use crate::sources::connect::string_template::StringTemplate;
 
 /// A parser accepting URLTemplate syntax, which is useful both for
 /// generating new URL paths from provided variables and for extracting variable
 /// values from concrete URL paths.
+///
+// TODO: In the future, when we add RFC 6570 features, this could contain one big
+//     `StringTemplate`, but for now we have to store pieces independently so we can leverage
+//     `Url` to do percent-encoding for us.
 #[derive(Debug, Clone, Default)]
 pub struct URLTemplate {
     /// Scheme + host if this is an absolute URL
     pub base: Option<Url>,
-    path: Vec<Component>,
-    query: IndexMap<Component, Component>,
-}
-
-/// A single component of a path, like `/<component>` or a single query parameter, like `?<something>`.
-/// Each component can consist of multiple parts, which are either text or variables.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct Component {
-    /// The parts, which together, make up the single path component or query parameter.
-    parts: Vec<ValuePart>,
-}
-
-/// A piece of a path or query parameter, which is either static text or a variable.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum ValuePart {
-    Text(String),
-    Var(VariableReference<'static, Namespace>),
+    path: Vec<StringTemplate>,
+    query: Vec<(StringTemplate, StringTemplate)>,
 }
 
 impl URLTemplate {
-    pub(crate) fn path_variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
-        self.path.iter().flat_map(Component::variables)
+    pub(crate) fn path_expressions(&self) -> impl Iterator<Item = &Expression> {
+        self.path.iter().flat_map(StringTemplate::expressions)
     }
 
-    pub(crate) fn query_variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
+    pub(crate) fn query_expressions(&self) -> impl Iterator<Item = &Expression> {
         self.query
-            .keys()
-            .chain(self.query.values())
-            .flat_map(Component::variables)
+            .iter()
+            .flat_map(|(key, value)| key.expressions().chain(value.expressions()))
     }
     /// Return all variables in the template in the order they appeared
-    pub(crate) fn variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
-        self.path_variables().chain(self.query_variables())
+    pub(crate) fn expressions(&self) -> impl Iterator<Item = &Expression> {
+        self.path_expressions().chain(self.query_expressions())
     }
 
-    pub fn interpolate_path(
-        &self,
-        vars: &Map<ByteString, JSON>,
-    ) -> Result<Vec<String>, &'static str> {
+    pub fn interpolate_path(&self, vars: &IndexMap<String, Value>) -> Result<Vec<String>, Error> {
         self.path
             .iter()
             .map(|param_value| param_value.interpolate(vars))
@@ -69,53 +50,12 @@ impl URLTemplate {
 
     pub fn interpolate_query(
         &self,
-        vars: &Map<ByteString, JSON>,
-    ) -> Result<Vec<(String, String)>, &'static str> {
+        vars: &IndexMap<String, Value>,
+    ) -> Result<Vec<(String, String)>, Error> {
         self.query
             .iter()
             .map(|(key, param_value)| Ok((key.interpolate(vars)?, param_value.interpolate(vars)?)))
             .collect()
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Error {
-    InvalidVariableNamespace {
-        namespace: String,
-        location: Range<usize>,
-    },
-    ParseError {
-        message: String,
-        location: Option<Range<usize>>,
-    },
-}
-
-impl Error {
-    pub(crate) fn message(&self) -> String {
-        match self {
-            Error::InvalidVariableNamespace { namespace, .. } => {
-                format!("Invalid variable: {namespace}")
-            }
-            Error::ParseError { message, .. } => message.clone(),
-        }
-    }
-}
-
-impl From<VariableError> for Error {
-    fn from(value: VariableError) -> Self {
-        match value {
-            VariableError::InvalidNamespace {
-                namespace,
-                location,
-            } => Self::InvalidVariableNamespace {
-                namespace,
-                location,
-            },
-            VariableError::ParseError { message, location } => Self::ParseError {
-                message,
-                location: Some(location),
-            },
-        }
     }
 }
 
@@ -144,9 +84,9 @@ impl FromStr for URLTemplate {
         };
         let base = raw_base
             .map(|raw_base| {
-                Url::parse(raw_base).map_err(|err| Error::ParseError {
+                Url::parse(raw_base).map_err(|err| Error {
                     message: err.to_string(),
-                    location: Some(0..raw_base.len()),
+                    location: 0..raw_base.len(),
                 })
             })
             .transpose()?;
@@ -159,24 +99,32 @@ impl FromStr for URLTemplate {
             .into_iter()
             .flat_map(|path_prefix| path_prefix.split('/'))
             .filter(|path_part| !path_part.is_empty())
-            .map(|path_part| Component::parse(path_part, input))
+            .map(|path_part| {
+                StringTemplate::parse(
+                    path_part,
+                    path_part.as_ptr() as usize - input.as_ptr() as usize,
+                )
+            })
             .try_collect()?;
 
         let query = query_suffix
             .into_iter()
             .flat_map(|query_suffix| query_suffix.split('&'))
             .map(|query_part| {
+                let offset = query_part.as_ptr() as usize - input.as_ptr() as usize;
                 let (key, value) = query_part.split_once('=').ok_or_else(|| {
-                    let start = query_part.as_ptr() as usize - input.as_ptr() as usize;
-                    let end = start + query_part.len();
-                    Error::ParseError {
+                    let end = offset + query_part.len();
+                    Error {
                         message: format!("Query parameter {query_part} must have a value"),
-                        location: Some(start..end),
+                        location: offset..end,
                     }
                 })?;
-                let key = Component::parse(key, input)?;
-                let value = Component::parse(value, input)?;
-                Ok::<(Component, Component), Self::Err>((key, value))
+                let key = StringTemplate::parse(key, offset)?;
+                let value = StringTemplate::parse(
+                    value,
+                    value.as_ptr() as usize - input.as_ptr() as usize,
+                )?;
+                Ok::<(StringTemplate, StringTemplate), Self::Err>((key, value))
             })
             .try_collect()?;
 
@@ -220,208 +168,11 @@ impl Serialize for URLTemplate {
     }
 }
 
-impl Component {
-    /// Parse `input` as a single path component or query parameter. `url_template` is the entire
-    /// string of the URL Template for calculating the position of the variable in the template.
-    fn parse(input: &str, url_template: &str) -> Result<Self, Error> {
-        // Split the text around any {...} variable expressions, which must be
-        // separated by nonempty text.
-        let mut parts = vec![];
-        let mut remaining = input;
-
-        while let Some((prefix, suffix)) = remaining.split_once('{') {
-            if !prefix.is_empty() {
-                parts.push(ValuePart::Text(prefix.to_string()));
-            }
-            remaining = suffix;
-
-            if let Some((var, suffix)) = remaining.split_once('}') {
-                let start_offset = var.as_ptr() as usize - url_template.as_ptr() as usize;
-                let reference: VariableReference<'static, Namespace> =
-                    VariableReference::parse(var, start_offset)
-                        .map_err(|e| match e {
-                            VariableError::ParseError { .. } => Error::ParseError {
-                                message: format!("Invalid variable reference `{{{var}}}`"),
-                                location: Some(start_offset..start_offset + var.len()),
-                            },
-                            _ => e.into(),
-                        })?
-                        .into_owned();
-                parts.push(ValuePart::Var(reference));
-                remaining = suffix;
-            } else {
-                return Err(Error::ParseError {
-                    message: format!(
-                        "Missing closing brace in URL suffix {} of path {}",
-                        remaining, input
-                    ),
-                    location: None,
-                });
-            }
-        }
-
-        if !remaining.is_empty() {
-            parts.push(ValuePart::Text(remaining.to_string()));
-        }
-
-        Ok(Component { parts })
-    }
-
-    fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<String, &'static str> {
-        let mut value = String::new();
-
-        for part in &self.parts {
-            match part {
-                ValuePart::Text(text) => {
-                    value.push_str(text);
-                }
-                ValuePart::Var(var) => {
-                    // TODO: Allow some difference between explicit `null` and omitted value.
-                    let var_value = vars.get(var.to_string().as_str()).unwrap_or(&JSON::Null);
-                    match var_value {
-                        // Remove extra quotes from strings
-                        JSON::String(string) => value.push_str(string.as_str()),
-                        JSON::Null => {}
-                        JSON::Number(_) | JSON::Bool(_) => value.push_str(&var_value.to_string()),
-                        // TODO: Update these to include JSONSelection or RFC 6570 recommendation
-                        Value::Array(_) => return Err("Arrays are not supported in URI templates"),
-                        Value::Object(_) => {
-                            return Err("Objects are not supported in URI templates")
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(value)
-    }
-
-    #[allow(unused)]
-    fn extract_vars(&self, concrete_value: &Component) -> Result<Map<ByteString, JSON>, String> {
-        let mut concrete_text = String::new();
-        for part in &concrete_value.parts {
-            concrete_text.push_str(match part {
-                ValuePart::Text(text) => text,
-                ValuePart::Var(var) => {
-                    return Err(format!("Unexpected variable expression {{{}}}", var));
-                }
-            });
-        }
-
-        let mut concrete_suffix = concrete_text.as_str();
-        let mut pending_var: Option<&VariableReference<Namespace>> = None;
-        let mut output = Map::new();
-
-        fn add_var_value(
-            var: &VariableReference<Namespace>,
-            value: &str,
-            output: &mut Map<ByteString, JSON>,
-        ) {
-            let key = ByteString::from(var.to_string());
-            if !value.is_empty() {
-                output.insert(key, JSON::String(ByteString::from(value)));
-            }
-        }
-
-        for part in &self.parts {
-            match part {
-                ValuePart::Text(text) => {
-                    if let Some(var) = pending_var {
-                        if let Some(start) = concrete_suffix.find(text) {
-                            add_var_value(var, &concrete_suffix[..start], &mut output);
-                            concrete_suffix = &concrete_suffix[start..];
-                        } else {
-                            add_var_value(var, concrete_suffix, &mut output);
-                            concrete_suffix = "";
-                        }
-                        pending_var = None;
-                    }
-
-                    if concrete_suffix.starts_with(text) {
-                        concrete_suffix = &concrete_suffix[text.len()..];
-                    } else {
-                        return Err(format!(
-                            "Constant text {} not found in {}",
-                            text, concrete_text
-                        ));
-                    }
-                }
-                ValuePart::Var(var) => {
-                    if let Some(pending) = pending_var {
-                        return Err(format!(
-                            "Ambiguous adjacent variable expressions {} and {} in parameter value {}",
-                            pending, var, concrete_text
-                        ));
-                    } else {
-                        // This variable's value will be extracted from the
-                        // concrete URL by the ValuePart::Text branch above, on
-                        // the next iteration of the for loop.
-                        pending_var = Some(var);
-                    }
-                }
-            }
-        }
-
-        if let Some(var) = pending_var {
-            add_var_value(var, concrete_suffix, &mut output);
-        }
-
-        Ok(output)
-    }
-
-    fn variables(&self) -> impl Iterator<Item = &VariableReference<Namespace>> {
-        self.parts.iter().filter_map(|part| match part {
-            ValuePart::Text(_) => None,
-            ValuePart::Var(var) => Some(var),
-        })
-    }
-}
-
-impl Display for Component {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for part in &self.parts {
-            part.fmt(f)?;
-        }
-        Ok(())
-    }
-}
-
-impl Serialize for Component {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
-
-impl Serialize for ValuePart {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
-
-impl Display for ValuePart {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ValuePart::Text(text) => {
-                f.write_str(text)?;
-            }
-            ValuePart::Var(var) => {
-                f.write_str("{")?;
-                var.fmt(f)?;
-                f.write_str("}")?;
-            }
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod test_parse {
     use insta::assert_debug_snapshot;
-    use pretty_assertions::assert_eq;
 
     use super::*;
-
-    // TODO: test invalid variable names / expressions
 
     #[test]
     fn test_path_list() {
@@ -447,30 +198,6 @@ mod test_parse {
         ));
 
         assert_debug_snapshot!(URLTemplate::from_str("/location/{$this.lat},{$this.lon}"));
-    }
-
-    #[test]
-    fn test_invalid_variable_name() {
-        let err = URLTemplate::from_str("/something/{$blah.stuff}/more").unwrap_err();
-        assert_eq!(
-            err,
-            Error::InvalidVariableNamespace {
-                namespace: "$blah".into(),
-                location: 12..17
-            }
-        );
-    }
-
-    #[test]
-    fn test_variable_with_extra_text() {
-        let err = URLTemplate::from_str("/something/{$this.stuff->foo}/more").unwrap_err();
-        assert_eq!(
-            err,
-            Error::ParseError {
-                message: "Invalid variable reference `{$this.stuff->foo}`".into(),
-                location: Some(12..28),
-            }
-        );
     }
 
     #[test]
@@ -504,6 +231,16 @@ mod test_parse {
             "?{$args.filter.field}={$args.filter.value}"
         ));
     }
+
+    #[test]
+    fn nested_braces_in_expression() {
+        assert_debug_snapshot!(URLTemplate::from_str("/position/xz/{$this { x { y } } }"));
+    }
+
+    #[test]
+    fn expression_missing_closing_bracket() {
+        assert_debug_snapshot!(URLTemplate::from_str("{$this { x: { y } }"));
+    }
 }
 
 #[cfg(test)]
@@ -522,6 +259,7 @@ fn test_display_trait(#[case] template: &str) {
 #[cfg(test)]
 mod test_interpolate {
     use pretty_assertions::assert_eq;
+    use serde_json_bytes::json;
 
     use super::*;
 
@@ -531,7 +269,7 @@ mod test_interpolate {
             "/something/{$args.id}/blah?{$args.filter.field}={$args.filter.value}",
         )
         .unwrap();
-        let vars = Map::new();
+        let vars = IndexMap::default();
         assert_eq!(
             template.interpolate_query(&vars).unwrap(),
             &[("".to_string(), "".to_string())],
@@ -548,9 +286,11 @@ mod test_interpolate {
             "/something/{$args.id}/blah?{$args.filter.field}={$args.filter.value}",
         )
         .unwrap();
-        let mut vars = Map::new();
-        vars.insert(ByteString::from("$args.filter.field"), JSON::Null);
-        vars.insert(ByteString::from("$args.id"), JSON::Null);
+        let mut vars = IndexMap::default();
+        vars.insert(
+            String::from("$args"),
+            json!({"filter": {"field": null}, "id": null}),
+        );
         assert_eq!(
             template.interpolate_query(&vars).unwrap(),
             &[("".to_string(), "".to_string())],
@@ -563,19 +303,12 @@ mod test_interpolate {
 
     #[test]
     fn interpolate_path() {
-        let template = URLTemplate::from_str("/something/{$args.id}/blah").unwrap();
-        let mut vars = Map::new();
-        vars.insert(
-            ByteString::from("$args.id"),
-            JSON::String(ByteString::from("value")),
-        );
+        let template = URLTemplate::from_str("/something/{$args.id->first}/blah").unwrap();
+        let mut vars = IndexMap::default();
+        vars.insert(String::from("$args"), json!({"id": "value"}));
         assert_eq!(
             template.interpolate_path(&vars).unwrap(),
-            &[
-                "something".to_string(),
-                "value".to_string(),
-                "blah".to_string()
-            ],
+            &["something".to_string(), "v".to_string(), "blah".to_string()],
             "Path parameter interpolated"
         );
     }
@@ -586,19 +319,18 @@ mod test_interpolate {
             "/something/{$args.id}/blah?{$args.filter.field}={$args.filter.value}",
         )
         .unwrap();
-        let mut vars = Map::new();
+        let mut vars = IndexMap::default();
         vars.insert(
-            ByteString::from("$args.filter.field"),
-            JSON::String(ByteString::from("name")),
+            String::from("$args"),
+            json!({"filter": {"field": "name", "value": "value"}}),
         );
         vars.insert(
-            ByteString::from("$args.filter.value"),
-            JSON::String(ByteString::from("value")),
+            String::from("$args.filter.value"),
+            json!({"filter": { "value": "value"}}),
         );
         assert_eq!(
             template.interpolate_query(&vars).unwrap(),
             &[("name".to_string(), "value".to_string())],
-            "Query parameter interpolated"
         );
     }
 }

@@ -20,7 +20,7 @@ The router v2.x introduces some new features that can impact the configuration f
 
 The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
 
-Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's off by default. 
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's off by default.
 
 Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default.
 
@@ -36,6 +36,7 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 ## Removed features in GraphOS Router v2.x
 
 ### Support for Scaffold
+
 <!-- PR: https://github.com/apollographql/router/pull/6274 -->
 
 In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
@@ -43,6 +44,7 @@ In Router v1.x Scaffold could be used to generate boilerplate source code for a 
 Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
 
 ### `--apollo-uplink-poll-interval`
+
 <!-- PR: https://github.com/apollographql/router/pull/6268 -->
 
 The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
@@ -57,11 +59,11 @@ If your router v1.x is configured with `experimental_otlp_tracing_sampler`, rena
 
 To [report operation usage metrics to GraphOS via OTLP](#apollo-operation-usage-reporting-via-otlp), you can either remove your configuration of `otlp_tracing_sampler` and use its default value, or you can explicitly enable it by setting it to [`always_on` or a sampling ratio](/router/configuration/telemetry/apollo-telemetry#configuring-usage-reporting-via-otlp).
 
-Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`. 
+Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`.
 
 ### Configure metrics reporting defaults
 
-If you plan to use the [new metrics reporting defaults](#metrics-reporting-defaults), then no changes are required. 
+If you plan to use the [new metrics reporting defaults](#metrics-reporting-defaults), then no changes are required.
 
 Otherwise, to use the defaults from v1.x, set the following:
 
@@ -72,7 +74,30 @@ telemetry:
     metrics_reference_mode: standard
 ```
 
+### Configure supergraph endpoint path
+
+If you use the default endpoint path or your path has no matched parameters or wildcards, then no changes are required.
+
+If your path uses named parameters, it is now bound with a braces syntax instead of a colon:
+
+```yaml
+supergraph:
+  # Previously:
+  # path: /foo/:bar/baz
+  path: /foo/{bar}/baz
+```
+
+If your path uses a wildcard, it must be wrapped in braces and must bind a name:
+
+```yaml
+supergraph:
+  # Previously:
+  # path: /foo/*
+  path: /foo/{*rest}
+```
+
 ### Logging
+
 <!-- PR: https://github.com/apollographql/router/pull/6285 -->
 
 If you used the `experimental_when_header` feature previously like this for example:
@@ -100,56 +125,56 @@ telemetry:
           level: info
           condition:
             eq:
-            - request_header: apollo-router-log-request
-            - my_client
+              - request_header: apollo-router-log-request
+              - my_client
         response: # Display router response log
           level: info
           condition:
             eq:
-            - request_header: apollo-router-log-request
-            - my_client
+              - request_header: apollo-router-log-request
+              - my_client
       supergraph:
         request: # Display supergraph request log
           level: info
           condition:
             eq:
-            - request_header: apollo-router-log-request
-            - my_client
+              - request_header: apollo-router-log-request
+              - my_client
         response:
           level: info
           condition:
             eq:
-            - request_header: apollo-router-log-request
-            - my_client
+              - request_header: apollo-router-log-request
+              - my_client
       subgraph:
         request: # Display subgraph request log
           level: info
           condition:
             eq:
-            - supergraph_request_header: apollo-router-log-request
-            - my_client
+              - supergraph_request_header: apollo-router-log-request
+              - my_client
         response: # Display subgraph response log
           level: info
           condition:
             eq:
-            - supergraph_request_header: apollo-router-log-request
-            - my_client
+              - supergraph_request_header: apollo-router-log-request
+              - my_client
 ```
 
 ### Metrics
 
-+ `apollo_router_http_request_retry_total` has been removed and will be supported now by `http.client.request.duration` metrics 
-with the `http.request.resend_count` attribute which is automatically set when `default_requirement_level` is set to `recommended`.
+- `apollo_router_http_request_retry_total` has been removed and will be supported now by `http.client.request.duration` metrics
+  with the `http.request.resend_count` attribute which is automatically set when `default_requirement_level` is set to `recommended`.
 
-+ `apollo_router_timeout` has been removed. This metric conflated timed-out requests from client to the router, and requests from the router to subgraphs.
-Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests,
-and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
+- `apollo_router_timeout` has been removed. This metric conflated timed-out requests from client to the router, and requests from the router to subgraphs.
+  Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests,
+  and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
 
-+ `apollo_router_http_requests_total` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+- `apollo_router_http_requests_total` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
 
-+ `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+- `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
 
-+ `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
+- `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
 
 ### Check CORS configuration
 
@@ -160,7 +185,7 @@ With v2.x it will end up with an error and it won't start at all to avoid confus
 
 Make sure that you are referencing the correct router release: **v2.0.0-preview.0**
 
-During upgrade, carefully monitor logs and resource consumption to ensure that your router has successfully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the steps above and decide if you want to change your configuration. 
+During upgrade, carefully monitor logs and resource consumption to ensure that your router has successfully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the steps above and decide if you want to change your configuration.
 
 For example, you may decide that you wish to change the way in which you sample OTLP traces in this new release and not simply preserve your existing configuration.
 

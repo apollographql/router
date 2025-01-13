@@ -448,13 +448,18 @@ mod tests {
                             "x-auth-token",
                         ),
                         "user-agent": Value(
-                            HeaderValue {
-                                parts: [
-                                    Constant(
-                                        "Firefox",
-                                    ),
-                                ],
-                            },
+                            HeaderValue(
+                                StringTemplate {
+                                    parts: [
+                                        Constant(
+                                            Constant {
+                                                value: "Firefox",
+                                                location: 0..7,
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ),
                         ),
                     },
                 },
