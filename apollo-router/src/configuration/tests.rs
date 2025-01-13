@@ -691,12 +691,12 @@ fn test_configuration_validate_and_sanitize() {
     );
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/{*anything}").build())
+        .supergraph(Supergraph::builder().path("/{*rest}").build())
         .build()
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/{*anything}");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/{*rest}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/test").build())
