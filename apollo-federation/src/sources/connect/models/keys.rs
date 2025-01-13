@@ -22,6 +22,7 @@ pub(crate) fn make_key_field_set_from_variables<'a>(
     variables: impl Iterator<Item = VariableReference<'a, Namespace>>,
     resolver: EntityResolver,
 ) -> Result<Option<Valid<FieldSet>>, WithErrors<FieldSet>> {
+    // TODO: does this work with subselections like $this { something }?
     let params = variables
         .filter(|var| match resolver {
             EntityResolver::Explicit => var.namespace.namespace == Namespace::Args,
@@ -82,7 +83,7 @@ mod tests {
 
     use super::make_key_field_set_from_variables;
     use super::TrieNode;
-    use super::VariableReference;
+    use crate::sources::connect::PathSelection;
 
     #[test]
     fn test_trie() {
@@ -102,12 +103,12 @@ mod tests {
             &Schema::parse_and_validate("type Query { t: T } type T { a: A b: ID } type A { b: B c: ID d: ID } type B { c: ID d: ID e: ID }", "").unwrap(),
             &name!("T"),
             vec![
-                VariableReference::parse("$args.a.b.c", 0).unwrap(),
-                VariableReference::parse("$args.a.b.d", 0).unwrap(),
-                VariableReference::parse("$args.a.b.e", 0).unwrap(),
-                VariableReference::parse("$args.a.c", 0).unwrap(),
-                VariableReference::parse("$args.a.d", 0).unwrap(),
-                VariableReference::parse("$args.b", 0).unwrap()
+                PathSelection::parse("$args.a.b.c".into()).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse("$args.a.b.d".into()).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse("$args.a.b.e".into()).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse("$args.a.c".into()).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse("$args.a.d".into()).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse("$args.b".into()).unwrap().1.variable_reference().unwrap(),
             ].into_iter(),
             super::EntityResolver::Explicit,
         )
