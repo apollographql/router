@@ -206,6 +206,7 @@ mod tests {
             customScalar: CustomScalar
             object: InputObject
             array: [InputObject]
+            multiLevel: MultiLevelInput
           ): AnObject  @connect(source: "v2")
           something: String
         }
@@ -218,6 +219,14 @@ mod tests {
         
         type AnObject {
           bool: Boolean
+        }
+        
+        input MultiLevelInput {
+            inner: MultiLevel
+        }
+        
+        type MultiLevel {
+            nested: String
         }
     "#;
 
@@ -303,6 +312,7 @@ mod tests {
     #[case::size("$args.array->size")]
     #[case::first("$args.array->first.bool")]
     #[case::last("$args.array->last.bool")]
+    #[case::multi_level_input("$args.multiLevel.inner.nested")]
     fn valid_after_args_resolution(#[case] selection: &str) {
         let schema = Schema::parse(SCHEMA, "schema").unwrap();
         let connect = name!("connect");
@@ -324,6 +334,7 @@ mod tests {
     #[case::arg_is_array("$args.array")]
     #[case::arg_is_object("$args.object")]
     #[case::unknown_field_on_object("$args.object.unknown")]
+    #[case::nested_unknown_property("$args.multiLevel.inner.unknown")]
     // #[case::map_array("$args.array->map(@)")]  // TODO: check for this error once we improve ->map type checking
     #[case::slice_array("$args.array->slice(0, 2)")]
     #[case::entries_scalar("$args.int->entries")]
