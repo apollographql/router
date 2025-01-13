@@ -1945,7 +1945,7 @@ mod tests {
     #[tokio::test]
     async fn introspection_mixed_with_authenticated_fields() {
         // Note: in https://github.com/apollographql/router/pull/5952/ we moved introspection handling
-        // before authorization filtering in bridge_query_planner.rs, relying on the fact that queries
+        // before authorization filtering in query_planner_service.rs, relying on the fact that queries
         // mixing introspection and concrete fields are not supported, so introspection answers right
         // away. If this ever changes, we should make sure that unauthorized fields are still properly
         // filtered out
