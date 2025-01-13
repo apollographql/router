@@ -920,29 +920,11 @@ impl RouterCreator {
             configuration.batching.clone(),
         ));
 
-        // NOTE: This is very important code. This is where the client request load management
-        // ability of the router pipeline is provided.
+        // NOTE: This is the start of the router pipeline (router_service)
         let sb = ServiceBuilder::new()
-            /*
-            .map_result(|result_arg| match result_arg {
-                Ok(arg) => match arg {
-                    // Note: It might be interesting to look at the result and see if the bridge
-                    // pool is full.
-                    little_loadshedder::LoadShedResponse::Inner(inner) => Ok(inner),
-                    little_loadshedder::LoadShedResponse::Overload => Err(BoxError::from(
-                        tower::load_shed::error::Overloaded::default(),
-                    )),
-                },
-                Err(err) => Err(err),
-            })
-            .layer(little_loadshedder::LoadShedLayer::new(
-                0.90,
-                std::time::Duration::from_millis(2_500),
-            ))
-            */
-            // Note: Alternative solutions here. Either we use the little loadshedder for adaptive
-            // load shedding or we use timeout, concurrency limits and rate limits to achieve the
-            // same thing.
+            // NOTE: Buffer is required because the static_page service is not Clone.
+            // The buffer should be >= concurrency as per the advice
+            // at: https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound
             .buffer(50_000)
             .layer(static_page.clone())
             .service(
