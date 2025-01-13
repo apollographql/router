@@ -80,16 +80,16 @@ fn session_count_instrument() -> ObservableGauge<u64> {
         .init()
 }
 
-struct SessionCountGuard;
+struct ActiveSessionCountGuard;
 
-impl SessionCountGuard {
+impl ActiveSessionCountGuard {
     fn start() -> Self {
         ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
         Self
     }
 }
 
-impl Drop for SessionCountGuard {
+impl Drop for ActiveSessionCountGuard {
     fn drop(&mut self) {
         ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
     }
@@ -587,7 +587,7 @@ async fn handle_graphql<RF: RouterFactory>(
     Extension(service_factory): Extension<RF>,
     http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
-    let _guard = SessionCountGuard::start();
+    let _guard = ActiveSessionCountGuard::start();
 
     let HandlerOptions {
         early_cancel,
