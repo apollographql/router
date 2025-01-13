@@ -121,6 +121,9 @@ pub(crate) struct Config {
 pub(crate) struct ErrorsConfiguration {
     /// Handling of errors coming from subgraph
     pub(crate) subgraph: SubgraphErrorConfig,
+
+    /// Configuration for storing and sending error metrics via OTLP
+    pub(crate) experimental_otlp_error_metrics: OtlpErrorMetricsMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -158,6 +161,17 @@ impl SubgraphErrorConfig {
             &self.all
         }
     }
+}
+
+/// Open Telemetry error metrics mode
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum OtlpErrorMetricsMode {
+    /// Do not store OTLP error metrics
+    #[default]
+    Disabled,
+    /// Send OTLP error metrics to Apollo Studio
+    Enabled,
 }
 
 const fn default_field_level_instrumentation_sampler() -> SamplerOption {
