@@ -14,17 +14,47 @@ use crate::schema::ValidFederationSchema;
 use crate::FederationError;
 
 //==================================================================================================
+// CheckFailure
+
+pub struct CheckFailure {
+    description: String,
+}
+
+impl CheckFailure {
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn new(description: String) -> CheckFailure {
+        CheckFailure { description }
+    }
+
+    fn add_description(self: CheckFailure, description: &str) -> CheckFailure {
+        CheckFailure {
+            description: format!("{}\n{}", self.description, description),
+        }
+    }
+}
+
+//==================================================================================================
 // check_plan
 
 pub fn check_plan(
     schema: &ValidFederationSchema,
     operation_doc: &Valid<ExecutableDocument>,
     plan: &QueryPlan,
-) -> Result<Option<response_shape_compare::MatchFailure>, FederationError> {
+) -> Result<Option<CheckFailure>, FederationError> {
     let op_rs = response_shape::compute_response_shape_for_operation(operation_doc, schema)?;
 
     let root_type = response_shape::compute_the_root_type_condition_for_operation(operation_doc)?;
-    let plan_rs = query_plan_analysis::interpret_query_plan(schema, &root_type, plan)?;
+    let plan_rs = match query_plan_analysis::interpret_query_plan(schema, &root_type, plan) {
+        Ok(rs) => rs,
+        Err(e) => {
+            return Ok(Some(CheckFailure::new(format!(
+                "Failed to compute the response shape from query plan:\n{e}"
+            ))));
+        }
+    };
 
     match response_shape_compare::compare_response_shapes(&op_rs, &plan_rs) {
         Ok(_) => Ok(None),

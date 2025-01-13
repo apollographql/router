@@ -10,28 +10,8 @@ use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
+use super::CheckFailure;
 use crate::utils::FallibleIterator;
-
-#[derive(Debug)]
-pub struct MatchFailure {
-    description: String,
-}
-
-impl MatchFailure {
-    pub fn description(&self) -> &str {
-        &self.description
-    }
-
-    fn new(description: String) -> MatchFailure {
-        MatchFailure { description }
-    }
-
-    fn add_description(self: MatchFailure, description: &str) -> MatchFailure {
-        MatchFailure {
-            description: format!("{}\n{}", self.description, description),
-        }
-    }
-}
 
 macro_rules! check_match_eq {
     ($a:expr, $b:expr) => {
@@ -43,7 +23,7 @@ macro_rules! check_match_eq {
                 $a,
                 $b,
             );
-            return Err(MatchFailure::new(message));
+            return Err(CheckFailure::new(message));
         }
     };
 }
@@ -52,13 +32,13 @@ macro_rules! check_match_eq {
 pub fn compare_response_shapes(
     this: &ResponseShape,
     other: &ResponseShape,
-) -> Result<(), MatchFailure> {
+) -> Result<(), CheckFailure> {
     // Note: `default_type_condition` is for display.
     //       Only response key and definitions are compared.
     this.iter().try_for_each(|(key, this_def)| {
         let other_def = other
             .get(key)
-            .ok_or_else(|| MatchFailure::new(format!("missing response key: {key}")))?;
+            .ok_or_else(|| CheckFailure::new(format!("missing response key: {key}")))?;
         compare_possible_definitions(this_def, other_def)
             .map_err(|e| e.add_description(&format!("mismatch for response key: {key}")))
     })
@@ -68,7 +48,7 @@ pub fn compare_response_shapes(
 fn merge_definitions_for_type_condition(
     defs: &PossibleDefinitions,
     filter_cond: &NormalizedTypeCondition,
-) -> Result<PossibleDefinitionsPerTypeCondition, MatchFailure> {
+) -> Result<PossibleDefinitionsPerTypeCondition, CheckFailure> {
     let mut result: Option<PossibleDefinitionsPerTypeCondition> = None;
     for (type_cond, def) in defs.iter() {
         if filter_cond.implies(type_cond) {
@@ -77,7 +57,7 @@ fn merge_definitions_for_type_condition(
                 .iter()
                 .try_for_each(|variant| result.insert_variant(variant.clone()))
                 .map_err(|e| {
-                    MatchFailure::new(format!(
+                    CheckFailure::new(format!(
                         "merge_definitions_for_type_condition failed for {filter_cond}\ntype_cond: {type_cond}\nerror: {e}",
                     ))
                 })?;
@@ -86,7 +66,7 @@ fn merge_definitions_for_type_condition(
     if let Some(result) = result {
         Ok(result)
     } else {
-        Err(MatchFailure::new(format!(
+        Err(CheckFailure::new(format!(
             "no definitions found for type condition: {filter_cond}"
         )))
     }
@@ -95,7 +75,7 @@ fn merge_definitions_for_type_condition(
 fn compare_possible_definitions(
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
-) -> Result<(), MatchFailure> {
+) -> Result<(), CheckFailure> {
     this.iter().try_for_each(|(this_cond, this_def)| {
         if let Some(other_def) = other.get(this_cond) {
             let result = compare_possible_definitions_per_type_condition(this_def, other_def);
@@ -105,7 +85,7 @@ fn compare_possible_definitions(
                     // See if `this_cond` is an object (or non-abstract) type.
                     if this_cond.ground_set().len() == 1 {
                         // Concrete types can't be type blasted.
-                        return Err(MatchFailure::new(format!(
+                        return Err(CheckFailure::new(format!(
                             "mismatch for type condition: {this_cond}\n{}",
                             err.description()
                         )));
@@ -136,7 +116,7 @@ fn compare_possible_definitions(
 fn compare_possible_definitions_per_type_condition(
     this: &PossibleDefinitionsPerTypeCondition,
     other: &PossibleDefinitionsPerTypeCondition,
-) -> Result<(), MatchFailure> {
+) -> Result<(), CheckFailure> {
     compare_field_selection_key(this.field_selection_key(), other.field_selection_key()).map_err(
         |e| {
             e.add_description(
@@ -160,7 +140,7 @@ fn compare_possible_definitions_per_type_condition(
                     }
                 })?;
             if !found {
-                Err(MatchFailure::new(
+                Err(CheckFailure::new(
                     format!("mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition:\n expected clause: {}\ntarget definition: {:?}",
                             this_def.boolean_clause(),
                             other.conditional_variants(),
@@ -175,7 +155,7 @@ fn compare_possible_definitions_per_type_condition(
 fn compare_definition_variant(
     this: &DefinitionVariant,
     other: &DefinitionVariant,
-) -> Result<(), MatchFailure> {
+) -> Result<(), CheckFailure> {
     compare_representative_field(this.representative_field(), other.representative_field())
         .map_err(|e| e.add_description("mismatch in field display under definition variant"))?;
     check_match_eq!(this.boolean_clause(), other.boolean_clause());
@@ -193,7 +173,7 @@ fn compare_definition_variant(
                 ))
             })
         }
-        _ => Err(MatchFailure::new(
+        _ => Err(CheckFailure::new(
             "mismatch in compare_definition_variant".to_string(),
         )),
     }
@@ -202,24 +182,24 @@ fn compare_definition_variant(
 fn compare_field_selection_key(
     this: &FieldSelectionKey,
     other: &FieldSelectionKey,
-) -> Result<(), MatchFailure> {
+) -> Result<(), CheckFailure> {
     check_match_eq!(this.name, other.name);
     // Note: Arguments are expected to be normalized.
     check_match_eq!(this.arguments, other.arguments);
     Ok(())
 }
 
-fn compare_representative_field(this: &Field, other: &Field) -> Result<(), MatchFailure> {
+fn compare_representative_field(this: &Field, other: &Field) -> Result<(), CheckFailure> {
     check_match_eq!(this.name, other.name);
     // Note: Arguments and directives are NOT normalized.
     if !same_ast_arguments(&this.arguments, &other.arguments) {
-        return Err(MatchFailure::new(format!(
+        return Err(CheckFailure::new(format!(
             "mismatch in representative field arguments: {:?} vs {:?}",
             this.arguments, other.arguments
         )));
     }
     if !same_directives(&this.directives, &other.directives) {
-        return Err(MatchFailure::new(format!(
+        return Err(CheckFailure::new(format!(
             "mismatch in representative field directives: {:?} vs {:?}",
             this.directives, other.directives
         )));

@@ -9,9 +9,6 @@ use super::response_shape::Literal;
 use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::ResponseShape;
-use crate::bail;
-use crate::ensure;
-use crate::internal_error;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
@@ -24,6 +21,7 @@ use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
 use crate::schema::ValidFederationSchema;
 use crate::FederationError;
+use crate::SingleFederationError;
 
 //==================================================================================================
 // ResponseShape extra methods to support query plan analysis
@@ -116,11 +114,21 @@ impl ResponseShape {
 //==================================================================================================
 // Interpretation of QueryPlan
 
+fn format_federation_error(e: FederationError) -> String {
+    match e {
+        FederationError::SingleFederationError(e) => match e {
+            SingleFederationError::Internal { message } => message,
+            _ => e.to_string(),
+        },
+        _ => e.to_string(),
+    }
+}
+
 pub fn interpret_query_plan(
     schema: &ValidFederationSchema,
     root_type: &Name,
     plan: &QueryPlan,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     let state = ResponseShape::new(root_type.clone());
     let Some(plan_node) = &plan.node else {
         // empty plan
@@ -133,7 +141,7 @@ fn interpret_top_level_plan_node(
     schema: &ValidFederationSchema,
     state: &ResponseShape,
     node: &TopLevelPlanNode,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     let conditions = vec![];
     match node {
         TopLevelPlanNode::Fetch(fetch) => interpret_fetch_node(schema, state, &conditions, fetch),
@@ -149,13 +157,18 @@ fn interpret_top_level_plan_node(
         TopLevelPlanNode::Condition(condition) => {
             interpret_condition_node(schema, state, &conditions, condition)
         }
-        TopLevelPlanNode::Defer(_defer) => bail!("todo: defer (top-level)"),
+        TopLevelPlanNode::Defer(_defer) => Err("todo: defer (top-level)".to_string()),
         TopLevelPlanNode::Subscription(subscription) => {
             let mut result =
                 interpret_fetch_node(schema, state, &conditions, &subscription.primary)?;
             if let Some(rest) = &subscription.rest {
                 let rest = interpret_plan_node(schema, state, &conditions, rest)?;
-                result.merge_with(&rest)?;
+                result.merge_with(&rest).map_err(|e| {
+                    format!(
+                        "Failed to merge response shapes in subscription node: {}\nrest: {rest}",
+                        format_federation_error(e),
+                    )
+                })?;
             }
             Ok(result)
         }
@@ -168,7 +181,7 @@ fn interpret_plan_node(
     state: &ResponseShape,
     conditions: &[Literal],
     node: &PlanNode,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     match node {
         PlanNode::Fetch(fetch) => interpret_fetch_node(schema, state, conditions, fetch),
         PlanNode::Sequence(sequence) => {
@@ -181,7 +194,7 @@ fn interpret_plan_node(
         PlanNode::Condition(condition) => {
             interpret_condition_node(schema, state, conditions, condition)
         }
-        PlanNode::Defer(_defer) => bail!("todo: defer"),
+        PlanNode::Defer(_defer) => Err("todo: defer".to_string()),
     }
 }
 
@@ -193,13 +206,15 @@ fn rename_at_path(
     type_filter: Option<Name>,
     path: &[FetchDataPathElement],
     new_name: Name,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     let Some((first, rest)) = path.split_first() else {
-        bail!("rename_at_path: unexpected empty path")
+        return Err("rename_at_path: unexpected empty path".to_string());
     };
     match first {
         FetchDataPathElement::Key(name, _conditions) => {
-            ensure!(_conditions.is_none(), "not implemented yet"); // TODO
+            if _conditions.is_some() {
+                return Err("not implemented yet".to_string()); // TODO
+            }
             let Some(defs) = state.get(name) else {
                 // If some sub-states don't have the name, skip it and return the same state.
                 return Ok(state.clone());
@@ -211,7 +226,13 @@ fn rename_at_path(
             for (type_cond, defs_per_type_cond) in defs.iter() {
                 if let Some(type_filter) = &type_filter {
                     let type_filter =
-                        NormalizedTypeCondition::from_type_name(type_filter.clone(), schema)?;
+                        NormalizedTypeCondition::from_type_name(type_filter.clone(), schema)
+                            .map_err(|e| {
+                                format!(
+                            "Failed to create a normalized type condition for {type_filter}: {}",
+                            format_federation_error(e),
+                        )
+                            })?;
                     if !type_filter.implies(type_cond) {
                         // Not applicable => same as before
                         updated_defs.insert(type_cond.clone(), defs_per_type_cond.clone());
@@ -231,7 +252,7 @@ fn rename_at_path(
                         .iter()
                         .map(|variant| {
                             let Some(sub_state) = variant.sub_selection_response_shape() else {
-                                return Err(internal_error!(
+                                return Err(format!(
                                     "No sub-selection at path: {}",
                                     path.iter()
                                         .map(|p| p.to_string())
@@ -267,7 +288,7 @@ fn rename_at_path(
                             let existed =
                                 merged_defs.insert(type_cond.clone(), defs_per_type_cond.clone());
                             if existed {
-                                bail!("rename_at_path: new name/type already exists: {new_name} on {type_cond}")
+                                return Err(format!("rename_at_path: new name/type already exists: {new_name} on {type_cond}"));
                             }
                         }
                         result.insert(new_name, merged_defs);
@@ -277,16 +298,16 @@ fn rename_at_path(
             Ok(result)
         }
         FetchDataPathElement::AnyIndex(_conditions) => {
-            ensure!(_conditions.is_none(), "not implemented yet"); // TODO
+            if _conditions.is_some() {
+                return Err("not implemented yet".to_string()); // TODO
+            }
             rename_at_path(schema, state, type_filter, rest, new_name)
         }
         FetchDataPathElement::TypenameEquals(type_name) => {
             let type_filter = Some(type_name.clone());
             rename_at_path(schema, state, type_filter, rest, new_name)
         }
-        FetchDataPathElement::Parent => {
-            bail!("todo: Parent")
-        }
+        FetchDataPathElement::Parent => Err("todo: Parent".to_string()),
     }
 }
 
@@ -294,7 +315,7 @@ fn apply_rewrites(
     schema: &ValidFederationSchema,
     state: &ResponseShape,
     rewrite: &FetchDataRewrite,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     match rewrite {
         FetchDataRewrite::ValueSetter(_) => todo!(),
         FetchDataRewrite::KeyRenamer(renamer) => rename_at_path(
@@ -312,7 +333,7 @@ fn interpret_fetch_node(
     _state: &ResponseShape,
     conditions: &[Literal],
     fetch: &FetchNode,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     let mut result = if let Some(_requires) = &fetch.requires {
         // for required_selection in requires {
         //     let Selection::InlineFragment(inline) = required_selection else {
@@ -335,7 +356,13 @@ fn interpret_fetch_node(
     } else {
         compute_response_shape_for_operation(&fetch.operation_document, schema)
             .map(|rs| rs.add_boolean_conditions(conditions))
-    }?;
+    }
+    .map_err(|e| {
+        format!(
+            "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
+            format_federation_error(e),
+        )
+    })?;
     for rewrite in &fetch.output_rewrites {
         result = apply_rewrites(schema, &result, rewrite)?;
     }
@@ -354,12 +381,10 @@ fn interpret_condition_node(
     state: &ResponseShape,
     conditions: &[Literal],
     condition: &ConditionNode,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     let condition_variable = &condition.condition_variable;
     match (&condition.if_clause, &condition.else_clause) {
-        (None, None) => Err(internal_error!(
-            "Condition node must have either if or else clause"
-        )),
+        (None, None) => Err("Condition node must have either if or else clause".to_string()),
         (Some(if_clause), None) => {
             let literal = Literal::Pos(condition_variable.clone());
             let sub_conditions = append_literal(conditions, literal);
@@ -388,7 +413,12 @@ fn interpret_condition_node(
             let if_val = interpret_plan_node(schema, state, &sub_conditions_pos, if_clause)?;
             let else_val = interpret_plan_node(schema, state, &sub_conditions_neg, else_clause)?;
             let mut result = if_val;
-            result.merge_with(&else_val)?;
+            result.merge_with(&else_val).map_err(|e| {
+                format!(
+                    "Failed to merge response shapes from then and else clauses:\n{}",
+                    format_federation_error(e),
+                )
+            })?;
             Ok(result)
         }
     }
@@ -400,13 +430,15 @@ fn interpret_plan_node_at_path(
     conditions: &[Literal],
     path: &[FetchDataPathElement],
     node: &PlanNode,
-) -> Result<Option<ResponseShape>, FederationError> {
+) -> Result<Option<ResponseShape>, String> {
     let Some((first, rest)) = path.split_first() else {
         return Ok(Some(interpret_plan_node(schema, state, conditions, node)?));
     };
     match first {
         FetchDataPathElement::Key(name, _conditions) => {
-            ensure!(_conditions.is_none(), "not implemented yet"); // TODO
+            if _conditions.is_some() {
+                return Err("not implemented yet".to_string()); // TODO
+            }
             let Some(defs) = state.get(name) else {
                 // If some sub-states don't have the name, skip it and return None.
                 // However, one of the `defs` must have one sub-state that has the name (see below).
@@ -421,7 +453,7 @@ fn interpret_plan_node_at_path(
                         .iter()
                         .filter_map(|variant| {
                             let Some(sub_state) = variant.sub_selection_response_shape() else {
-                                return Some(Err(internal_error!(
+                                return Some(Err(format!(
                                     "No sub-selection at path: {}",
                                     path.iter()
                                         .map(|p| p.to_string())
@@ -467,15 +499,13 @@ fn interpret_plan_node_at_path(
             Ok(Some(result))
         }
         FetchDataPathElement::AnyIndex(_conditions) => {
-            ensure!(_conditions.is_none(), "not implemented yet"); // TODO
+            if _conditions.is_some() {
+                return Err("not implemented yet".to_string()); // TODO
+            }
             interpret_plan_node_at_path(schema, state, conditions, rest, node)
         }
-        FetchDataPathElement::TypenameEquals(_type_name) => {
-            bail!("todo: TypenameEquals")
-        }
-        FetchDataPathElement::Parent => {
-            bail!("todo: Parent")
-        }
+        FetchDataPathElement::TypenameEquals(_type_name) => Err("todo: TypenameEquals".to_string()),
+        FetchDataPathElement::Parent => Err("todo: Parent".to_string()),
     }
 }
 
@@ -484,7 +514,7 @@ fn interpret_flatten_node(
     state: &ResponseShape,
     conditions: &[Literal],
     flatten: &FlattenNode,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     // println!("interpret_flatten_node: {flatten}\nstate: {state}\n");
     let result =
         interpret_plan_node_at_path(schema, state, conditions, &flatten.path, &flatten.node)?;
@@ -505,11 +535,16 @@ fn interpret_sequence_node(
     state: &ResponseShape,
     conditions: &[Literal],
     sequence: &SequenceNode,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     let mut response_shape = state.clone();
     for node in &sequence.nodes {
         let node_rs = interpret_plan_node(schema, &response_shape, conditions, node)?;
-        response_shape.merge_with(&node_rs)?;
+        response_shape.merge_with(&node_rs).map_err(|e| {
+            format!(
+                "Failed to merge response shapes in sequence node: {}\nnode: {node}",
+                format_federation_error(e),
+            )
+        })?;
     }
     Ok(response_shape)
 }
@@ -519,12 +554,17 @@ fn interpret_parallel_node(
     state: &ResponseShape,
     conditions: &[Literal],
     parallel: &ParallelNode,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<ResponseShape, String> {
     let mut response_shape = state.clone();
     for node in &parallel.nodes {
         // Note: Use the same original state for each parallel node
         let node_rs = interpret_plan_node(schema, state, conditions, node)?;
-        response_shape.merge_with(&node_rs)?;
+        response_shape.merge_with(&node_rs).map_err(|e| {
+            format!(
+                "Failed to merge response shapes in parallel node: {}\nnode: {node}",
+                format_federation_error(e),
+            )
+        })?;
     }
     Ok(response_shape)
 }

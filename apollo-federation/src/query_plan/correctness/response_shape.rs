@@ -775,10 +775,13 @@ impl PossibleDefinitions {
             indexmap::map::Entry::Occupied(mut e) => {
                 // GraphQL invariant: per_type_cond.field_selection_key must be the same
                 //                    as the given field_selection_key.
-                ensure!(
-                    eq_field_selection_key(&e.get().field_selection_key, &field_selection_key),
-                    "field_selection_key was expected to be the same"
-                );
+                if !eq_field_selection_key(&e.get().field_selection_key, &field_selection_key) {
+                    return Err(internal_error!(
+                        "field_selection_key was expected to be the same\nexisting: {}\nadding: {}",
+                        e.get().field_selection_key,
+                        field_selection_key,
+                    ));
+                }
                 insert_variant(e.get_mut())?;
             }
         };
