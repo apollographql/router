@@ -312,7 +312,12 @@ impl SnapshotServer {
         offline: bool,
         update: bool,
         include_headers: Option<Vec<String>>,
+        port: Option<u16>,
     ) -> Self {
+        let listener = port.map(|port| {
+            TcpListener::bind(format!("127.0.0.1:{port}"))
+                .expect("Failed to bind an OS port for snapshot server")
+        });
         Self::inner_start(
             snapshot_path,
             base_url,
@@ -320,7 +325,7 @@ impl SnapshotServer {
             offline,
             update,
             include_headers,
-            None,
+            listener,
         )
         .await
     }
@@ -390,7 +395,7 @@ impl SnapshotServer {
         .expect("can create a HttpService");
         let app = Router::new()
             .route("/", any(root_handler))
-            .route("/*path", any(handler)) // won't match root, so we need the root handler above
+            .route("/{*path}", any(handler)) // won't match root, so we need the root handler above
             .with_state(SnapshotServerState {
                 client: http_service,
                 base_url: base_url.clone(),

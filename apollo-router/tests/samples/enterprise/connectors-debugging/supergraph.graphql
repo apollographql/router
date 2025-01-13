@@ -3,10 +3,9 @@ schema
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
   @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
   @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
-  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {baseURL: "https://jsonplaceholder.typicode.com/"}})
+  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "jsonPlaceholder", http: {baseURL: "https://jsonplaceholder.typicode.com/", headers: [{name: "x-from", from: "x-test-from"}]}})
 {
   query: Query
-  mutation: Mutation
 }
 
 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
@@ -25,13 +24,6 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type CreateUserPayload
-  @join__type(graph: CONNECTORS)
-{
-  success: Boolean!
-  user: User!
-}
-
 input join__ContextArgument {
   name: String!
   type: String!
@@ -46,7 +38,7 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  CONNECTORS @join__graph(name: "connectors", url: "none")
+  CONNECTORS @join__graph(name: "connectors", url: "http://none")
 }
 
 scalar link__Import
@@ -63,17 +55,21 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Mutation
+type Post
   @join__type(graph: CONNECTORS)
 {
-  createUser(name: String!): CreateUserPayload! @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {POST: "/user", body: "username: $args.name"}, selection: "success: $(true)\nuser: {\n  id\n  name: username\n}"})
+  id: ID!
+  body: String
+  title: String
+  author: User
 }
 
 type Query
   @join__type(graph: CONNECTORS)
 {
-  users: [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id name"})
-  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id name email", entity: true})
+  posts: [Post] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/posts"}, selection: "id title body author: { id: userId }"})
+  post(id: ID!): Post @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/posts/{$args.id}"}, selection: "id title: postTitle body author: { id: userId }", entity: true})
+  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/users/{$args.id}"}, selection: "id name username", entity: true})
 }
 
 type User
@@ -81,5 +77,6 @@ type User
 {
   id: ID!
   name: String
-  email: String
+  username: String
+  posts: [Post] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/users/{$this.id}/posts"}, selection: "id title body"})
 }

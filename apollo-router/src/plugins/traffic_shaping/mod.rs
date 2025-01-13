@@ -433,7 +433,7 @@ mod test {
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlannerPool;
+    use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -533,7 +533,7 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = BridgeQueryPlannerPool::new(schema.clone(), config.clone())
+        let planner = QueryPlannerService::new(schema.clone(), config.clone())
             .await
             .unwrap();
         let subgraph_schemas = planner.subgraph_schemas();

@@ -135,7 +135,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlannerPool;
+    use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -244,7 +244,7 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Schema::parse(schema, &configuration).unwrap();
 
-        let planner = BridgeQueryPlannerPool::new(schema.into(), Arc::clone(&configuration))
+        let planner = QueryPlannerService::new(schema.into(), Arc::clone(&configuration))
             .await
             .unwrap();
         let schema = planner.schema();

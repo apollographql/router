@@ -801,8 +801,11 @@ async fn test_mutation() {
         &mock_server.uri(),
         "mutation CreateUser($name: String!) {
             createUser(name: $name) {
-                id
-                name
+                success
+                user {
+                  id
+                  name
+                }
             }
         }",
         serde_json_bytes::json!({ "name": "New User" })
@@ -818,8 +821,11 @@ async fn test_mutation() {
     {
       "data": {
         "createUser": {
-          "id": 3,
-          "name": "New User"
+          "success": true,
+          "user": {
+            "id": 3,
+            "name": "New User"
+          }
         }
       }
     }
@@ -1573,6 +1579,7 @@ mod quickstart_tests {
             true,
             false,
             Some(vec![CONTENT_TYPE.to_string()]),
+            None,
         )
         .await;
 

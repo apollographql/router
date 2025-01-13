@@ -54,7 +54,13 @@ impl Schema {
     ) -> Result<Self, SchemaError> {
         let start = Instant::now();
 
-        let expansion = expand_connectors(&raw_sdl.sdl).map_err(SchemaError::Connector)?;
+        let api_schema_options = ApiSchemaOptions {
+            include_defer: config.supergraph.defer_support,
+            ..Default::default()
+        };
+
+        let expansion =
+            expand_connectors(&raw_sdl.sdl, &api_schema_options).map_err(SchemaError::Connector)?;
         let preserved_launch_id = raw_sdl.launch_id.clone();
         let (raw_sdl, api_schema, connectors) = match expansion {
             ExpansionResult::Expanded {
@@ -149,16 +155,11 @@ impl Schema {
         let schema_id = Arc::new(Schema::schema_id(&raw_sdl.sdl));
 
         let api_schema = api_schema.map(Ok).unwrap_or_else(|| {
-            supergraph
-                .to_api_schema(ApiSchemaOptions {
-                    include_defer: config.supergraph.defer_support,
-                    ..Default::default()
-                })
-                .map_err(|e| {
-                    SchemaError::Api(format!(
-                        "The supergraph schema failed to produce a valid API schema: {e}"
-                    ))
-                })
+            supergraph.to_api_schema(api_schema_options).map_err(|e| {
+                SchemaError::Api(format!(
+                    "The supergraph schema failed to produce a valid API schema: {e}"
+                ))
+            })
         })?;
 
         Ok(Schema {

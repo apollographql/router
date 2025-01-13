@@ -734,7 +734,7 @@ impl Supergraph {
             path = format!("{}router_extra_path", self.path);
         } else if SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.path) {
             let new_path = SUPERGRAPH_ENDPOINT_REGEX
-                .replace(&self.path, "${first_path}${sub_path}:supergraph_route");
+                .replace(&self.path, "${first_path}${sub_path}{supergraph_route}");
             path = new_path.to_string();
         }
 

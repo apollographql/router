@@ -4,7 +4,7 @@ subgraphs:
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.7")
+          @link(url: "https://specs.apollo.dev/federation/v2.10")
           @link(
             url: "https://specs.apollo.dev/connect/v0.1"
             import: ["@connect", "@source"]
@@ -19,15 +19,23 @@ subgraphs:
         type User {
           id: ID!
           name: String
+          email: String
         }
 
         type Query {
           users: [User]
             @connect(source: "json", http: { GET: "/users" }, selection: "id name")
+          user(id: ID!): User
+            @connect(
+              source: "json"
+              http: { GET: "/users/{$$args.id}" }
+              selection: "id name email"
+              entity: true
+            )
         }
 
         type Mutation {
-          createUser(name: String!): User
+          createUser(name: String!): CreateUserPayload!
             @connect(
               source: "json"
               http: {
@@ -37,8 +45,16 @@ subgraphs:
                 """
               }
               selection: """
-                id
-                name: username
+                success: $(true)
+                user: {
+                  id
+                  name: username
+                }
               """
             )
+        }
+
+        type CreateUserPayload {
+          success: Boolean!
+          user: User!
         }
