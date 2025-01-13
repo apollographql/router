@@ -568,6 +568,96 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
 }
 
 #[tokio::test]
+async fn unsupported_compression() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let mut encoder = GzipEncoder::new(Vec::new());
+    encoder
+        .write_all(original_body.to_string().as_bytes())
+        .await
+        .unwrap();
+    encoder.shutdown().await.unwrap();
+    let compressed_body = encoder.into_inner();
+    let expected_response = graphql::Response::builder()
+        .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
+        .build();
+    let example_response = expected_response.clone();
+    let router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let example_response = example_response.clone();
+        assert_eq!(
+            req.supergraph_request.into_body().query.unwrap(),
+            "query { me { name } }"
+        );
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
+    })
+    .await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    // Post query
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a compression algorithm it can't decompress
+        .header(CONTENT_ENCODING, HeaderValue::from_static("unsupported"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let mut encoder = GzipEncoder::new(Vec::new());
+    encoder
+        .write_all(original_body.to_string().as_bytes())
+        .await
+        .unwrap();
+    encoder.shutdown().await.unwrap();
+    let compressed_body = encoder.into_inner();
+    let expected_response = graphql::Response::builder()
+        .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
+        .build();
+    let example_response = expected_response.clone();
+    let router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let example_response = example_response.clone();
+        assert_eq!(
+            req.supergraph_request.into_body().query.unwrap(),
+            "query { me { name } }"
+        );
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
+    })
+    .await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    // Post query
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a different (valid) compression algorithm than the one we actually used
+        .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn malformed_request() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router::service::empty().await).await;
 
