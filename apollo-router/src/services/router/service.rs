@@ -993,7 +993,7 @@ impl RouterCreator {
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
             self.batching.clone(),
-            self.oltp_error_metrics_mode.clone(),
+            self.oltp_error_metrics_mode,
         ));
 
         ServiceBuilder::new()
