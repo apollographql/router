@@ -5,8 +5,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use super::fetch::SubgraphSchemas;
 use super::rewrites;
 use super::OperationKind;
+use crate::error::ValidationErrors;
 use crate::services::SubscriptionTaskParams;
 
 pub(crate) const SUBSCRIPTION_EVENT_SPAN_NAME: &str = "subscription_event";
@@ -60,4 +62,15 @@ pub(crate) struct SubscriptionNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a subscription (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+}
+
+impl SubscriptionNode {
+    pub(crate) fn init_parsed_operation(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+    ) -> Result<(), ValidationErrors> {
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
+        self.operation.init_parsed(schema)?;
+        Ok(())
+    }
 }

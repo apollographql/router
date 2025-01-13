@@ -68,7 +68,7 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::plugin::test::MockSubgraph;
-use crate::query_planner::BridgeQueryPlannerPool;
+use crate::query_planner::QueryPlannerService;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -2373,7 +2373,7 @@ async fn test_supergraph_timeout() {
 
     let schema = include_str!("..//testdata/minimal_supergraph.graphql");
     let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
-    let planner = BridgeQueryPlannerPool::new(schema.clone(), conf.clone())
+    let planner = QueryPlannerService::new(schema.clone(), conf.clone())
         .await
         .unwrap();
 
