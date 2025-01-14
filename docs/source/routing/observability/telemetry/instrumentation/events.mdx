@@ -198,9 +198,25 @@ telemetry:
               response_header: "x-my-header"
 ```
 
-## Event configuration example
+## Event configuration reference
 
-For example, the router service can be configured with standard events (`request`, `response`, `error`), and a custom event (`my.event`) with a condition:
+| Option             | Values                                                                       | Default | Description                                                 |
+|--------------------|------------------------------------------------------------------------------|---------|-------------------------------------------------------------|
+| `<attribute-name>` |                                                                              |         | The name of the custom attribute.                           |
+| `attributes`       | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors)     |         | The attributes of the custom log event.                     |
+| `condition`        | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                   |         | The condition that must be met for the event to be emitted. |
+| `error`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the error log event.                           |
+| `level`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the custom log event.                          |
+| `message`          |                                                                              |         | The message of the custom log event.                        |
+| `on`               | `request`\|`response`\|`error`                                               |         | When to trigger the event.                                  |
+| `request`          | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the request log event.                         |
+| `response`         | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the response log event.                        |
+
+## Event configuration examples
+
+### Standard and custom events
+
+You can use both standard events and custom events in the same configuration. The example below has all the standard events (`request`, `response`, `error`) and one custom event (`my.event`) with a condition:
 
 ```yaml title="future.router.yaml"
 telemetry:
@@ -231,17 +247,34 @@ telemetry:
           # Custom event configuration for subgraph service ...
 ```
 
-## Event configuration reference
+### Debugging subscriptions
 
-| Option             | Values                                                                       | Default | Description                                                 |
-|--------------------|------------------------------------------------------------------------------|---------|-------------------------------------------------------------|
-| `<attribute-name>` |                                                                              |         | The name of the custom attribute.                           |
-| `attributes`       | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors)     |         | The attributes of the custom log event.                     |
-| `condition`        | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                   |         | The condition that must be met for the event to be emitted. |
-| `error`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the error log event.                           |
-| `level`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the custom log event.                          |
-| `message`          |                                                                              |         | The message of the custom log event.                        |
-| `on`               | `request`\|`response`\|`error`                                               |         | When to trigger the event.                                  |
-| `request`          | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the request log event.                         |
-| `response`         | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the response log event.                        |
+When developing and debugging the router, you might want to log all subscription events. The example configuration below logs all subscription events for both errors and data.
 
+<Note>
+
+Logs of all subscription errors and data may contain personally identifiable information (PII), so make sure not to log PII in your production environments and only enable it for development.
+
+</Note>
+
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        subscription.event:
+          message: subscription event
+          on: event_response # on every subscription event
+          level: info
+          # Only display event if it's a subscription event
+          condition:
+            eq:
+            - operation_kind: string
+            - subscription
+          attributes:
+            response.data:
+              response_data: $ # Display all the response data payload
+            response.errors:
+              response_errors: $ # Display all the response errors payload
+```
