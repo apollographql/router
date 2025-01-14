@@ -22,6 +22,6 @@ Ok(
             },
         ),
         path: [],
-        query: {},
+        query: [],
     },
 )

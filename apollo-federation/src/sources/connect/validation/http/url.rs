@@ -5,15 +5,15 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::Node;
 use url::Url;
 
-use crate::sources::connect::url_template;
+use crate::sources::connect::string_template;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::selection::validate_selection_variables;
 use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::variable::ConnectorsContext;
-use crate::sources::connect::variable::ExpressionContext;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::URLTemplate;
@@ -22,10 +22,7 @@ pub(crate) fn validate_template(
     coordinate: HttpMethodCoordinate,
     schema: &SchemaInfo,
 ) -> Result<URLTemplate, Vec<Message>> {
-    let expression_context =
-        ConnectorsContext::new(coordinate.connect.into(), Phase::Request, Target::Url);
-    let (template, str_value) = match parse_template(coordinate, schema, expression_context.clone())
-    {
+    let (template, str_value) = match parse_template(coordinate, schema) {
         Ok(tuple) => tuple,
         Err(message) => return Err(vec![message]),
     };
@@ -35,46 +32,21 @@ pub(crate) fn validate_template(
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
 
+    let expression_context =
+        ConnectorsContext::new(coordinate.connect.into(), Phase::Request, Target::Url);
     let variable_resolver = VariableResolver::new(expression_context, schema);
-    for variable in template.variables() {
-        match variable_resolver.resolve(variable, str_value) {
-            Err(message) => messages.push(Message {
-                code: message.code,
-                message: format!(
-                    "{coordinate} contains an invalid expression `{{{variable}}}` - {message}",
-                    message = message.message
-                ),
-                locations: message.locations,
-            }),
-            Ok(Some(ty)) => {
-                if ty.is_list() {
-                    messages.push(Message {
-                        code: Code::InvalidUrl,
-                        message: format!("{coordinate} contains an invalid expression `{{{variable}}}` - URI templates can't contain lists.", variable = variable),
-                        locations: str_value
-                            .line_col_for_subslice(variable.location.clone(), schema)
-                            .into_iter()
-                            .collect(),
-                    })
-                }
-                if schema.schema.get_object(ty.inner_named_type()).is_some()
-                    || schema
-                        .schema
-                        .get_input_object(ty.inner_named_type())
-                        .is_some()
-                {
-                    messages.push(Message {
-                        code: Code::InvalidUrl,
-                        message: format!("{coordinate} contains an invalid expression `{{{variable}}}` - URI templates can't contain objects.", variable = variable),
-                        locations: str_value
-                            .line_col_for_subslice(variable.location.clone(), schema)
-                            .into_iter()
-                            .collect(),
-                    })
-                }
-            }
-            Ok(_) => {} // Type cannot be resolved
-        }
+    for expression in template.expressions() {
+        messages.extend(
+            validate_selection_variables(
+                &variable_resolver,
+                coordinate,
+                &expression.expression,
+                str_value,
+                expression.location.start,
+            )
+            .err(),
+        );
+        // TODO: type check the expression. It can't resolve to a list or object.
     }
 
     if messages.is_empty() {
@@ -87,7 +59,6 @@ pub(crate) fn validate_template(
 fn parse_template<'schema>(
     coordinate: HttpMethodCoordinate<'schema>,
     schema: &'schema SchemaInfo,
-    expression_context: ConnectorsContext<'schema>,
 ) -> Result<(URLTemplate, GraphQLString<'schema>), Message> {
     let str_value = GraphQLString::new(coordinate.node, &schema.sources).map_err(|_| Message {
         code: Code::GraphQLError,
@@ -99,30 +70,14 @@ fn parse_template<'schema>(
             .collect(),
     })?;
     let template = URLTemplate::from_str(str_value.as_str()).map_err(
-        |e: url_template::Error| match e {
-            url_template::Error::InvalidVariableNamespace { namespace, location } => {
-                Message {
-                    code: Code::InvalidUrl,
-                    message: format!(
-                        "{coordinate} must be a valid URL template. Invalid variable `{namespace}`,  must be one of {available}",
-                        available = expression_context.namespaces_joined(),
-                    ),
-                    locations: str_value
-                        .line_col_for_subslice(location, schema)
-                        .into_iter()
-                        .collect(),
-                }
-            }
-            url_template::Error::ParseError { message, location } =>
-                Message {
-                    code: Code::InvalidUrl,
-                    message: format!("{coordinate} must be a valid URL template. {message}"),
-                    locations: location
-                    .and_then(|location| str_value.line_col_for_subslice(location, schema))
-                    .into_iter()
-                    .collect(),
-                },
-        }
+        |string_template::Error { message, location }| Message {
+            code: Code::InvalidUrl,
+            message: format!("In {coordinate}: {message}"),
+            locations: str_value
+                .line_col_for_subslice(location, schema)
+                .into_iter()
+                .collect(),
+        },
     )?;
     Ok((template, str_value))
 }

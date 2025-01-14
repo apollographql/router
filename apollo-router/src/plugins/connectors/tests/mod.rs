@@ -1469,7 +1469,7 @@ async fn test_variables() {
     let response = execute(
         &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
         &uri,
-        "{ f(arg: \"A\") { arg context config sibling status extra f(arg: \"A\") { arg context config sibling status } } }",
+        "{ f(arg: \"arg\") { arg context config sibling status extra f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
           "preview_connectors": {
@@ -1498,19 +1498,19 @@ async fn test_variables() {
     {
       "data": {
         "f": {
-          "arg": "A",
+          "arg": "arg",
           "context": "B",
           "config": "C",
           "sibling": "D",
           "status": 200,
           "extra": {
-            "arg": "A",
+            "arg": "arg",
             "context": "B",
             "config": "C",
             "status": 200
           },
           "f": {
-            "arg": "A",
+            "arg": "arg",
             "context": "B",
             "config": "C",
             "sibling": "D",
@@ -1528,25 +1528,25 @@ async fn test_variables() {
             Matcher::new()
                 .method("POST")
                 .path("/f")
-                .query("arg=A&context=B&config=C")
+                .query("arg=rg&context=B&config=C")
                 .header("x-source-context".into(), "B".try_into().unwrap())
                 .header("x-source-config".into(), "C".try_into().unwrap())
-                .header("x-connect-arg".into(), "A".try_into().unwrap())
+                .header("x-connect-arg".into(), "g".try_into().unwrap())
                 .header("x-connect-context".into(), "B".try_into().unwrap())
                 .header("x-connect-config".into(), "C".try_into().unwrap())
-                .body(serde_json::json!({ "arg": "A", "context": "B", "config": "C" }))
+                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C" }))
                 ,
             Matcher::new()
                 .method("POST")
                 .path("/f")
-                .query("arg=A&context=B&config=C&sibling=D")
+                .query("arg=g&context=B&config=C&sibling=D")
                 .header("x-source-context".into(), "B".try_into().unwrap())
                 .header("x-source-config".into(), "C".try_into().unwrap())
-                .header("x-connect-arg".into(), "A".try_into().unwrap())
+                .header("x-connect-arg".into(), "a".try_into().unwrap())
                 .header("x-connect-context".into(), "B".try_into().unwrap())
                 .header("x-connect-config".into(), "C".try_into().unwrap())
                 .header("x-connect-sibling".into(), "D".try_into().unwrap())
-                .body(serde_json::json!({ "arg": "A", "context": "B", "config": "C", "sibling": "D" }))
+                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "sibling": "D" }))
                 ,
         ],
     );
