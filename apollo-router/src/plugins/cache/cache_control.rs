@@ -434,6 +434,23 @@ mod tests {
     }
 
     #[test]
+    fn remove_conflicts() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            created: now,
+            max_age: Some(40),
+            no_store: true,
+            must_revalidate: true,
+            no_cache: true,
+            private: true,
+            ..Default::default()
+        };
+        let cache_control_header = first.to_cache_control_header().unwrap();
+        assert_eq!(cache_control_header, "no-store".to_string());
+    }
+
+    #[test]
     fn merge_public_private() {
         let now = now_epoch_seconds();
 
