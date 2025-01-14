@@ -141,9 +141,9 @@ fn compare_possible_definitions_per_type_condition(
                 })?;
             if !found {
                 Err(CheckFailure::new(
-                    format!("mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition:\n expected clause: {}\ntarget definition: {:?}",
+                    format!("mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition:\n expected clause: {}\ntarget definitions:\n{}",
                             this_def.boolean_clause(),
-                            other.conditional_variants(),
+                            other,
                     ),
                 ))
             } else {

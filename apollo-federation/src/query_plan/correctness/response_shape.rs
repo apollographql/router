@@ -1218,6 +1218,29 @@ impl fmt::Display for Clause {
     }
 }
 
+impl DefinitionVariant {
+    fn write_indented(&self, state: &mut display_helpers::State<'_, '_>) -> fmt::Result {
+        let field_display = &self.representative_field;
+        let boolean_str = if !self.boolean_clause.is_always_true() {
+            format!(" if {}", self.boolean_clause)
+        } else {
+            "".to_string()
+        };
+        state.write(format_args!("{field_display} (on <type>){boolean_str}"))?;
+        if let Some(sub_selection_response_shape) = &self.sub_selection_response_shape {
+            state.write(" ")?;
+            sub_selection_response_shape.write_indented(state)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for DefinitionVariant {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.write_indented(&mut display_helpers::State::new(f))
+    }
+}
+
 impl PossibleDefinitionsPerTypeCondition {
     fn has_boolean_conditions(&self) -> bool {
         self.conditional_variants.len() > 1
@@ -1225,6 +1248,22 @@ impl PossibleDefinitionsPerTypeCondition {
                 .conditional_variants
                 .first()
                 .is_some_and(|variant| !variant.boolean_clause.is_always_true())
+    }
+
+    fn write_indented(&self, state: &mut display_helpers::State<'_, '_>) -> fmt::Result {
+        for (i, variant) in self.conditional_variants.iter().enumerate() {
+            if i > 0 {
+                state.new_line()?;
+            }
+            variant.write_indented(state)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for PossibleDefinitionsPerTypeCondition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.write_indented(&mut display_helpers::State::new(f))
     }
 }
 
@@ -1245,6 +1284,45 @@ impl PossibleDefinitions {
                 .0
                 .first()
                 .is_some_and(|(_, per_type_cond)| per_type_cond.has_boolean_conditions())
+    }
+
+    fn write_indented(&self, state: &mut display_helpers::State<'_, '_>) -> fmt::Result {
+        let arrow_sym = if self.has_multiple_definitions() {
+            "-may->"
+        } else {
+            "----->"
+        };
+        let mut is_first = true;
+        for (type_condition, per_type_cond) in &self.0 {
+            for variant in &per_type_cond.conditional_variants {
+                let field_display = &variant.representative_field;
+                let type_cond_str = format!(" on {}", type_condition);
+                let boolean_str = if !variant.boolean_clause.is_always_true() {
+                    format!(" if {}", variant.boolean_clause)
+                } else {
+                    "".to_string()
+                };
+                if is_first {
+                    is_first = false;
+                } else {
+                    state.new_line()?;
+                }
+                state.write(format_args!(
+                    "{arrow_sym} {field_display}{type_cond_str}{boolean_str}"
+                ))?;
+                if let Some(sub_selection_response_shape) = &variant.sub_selection_response_shape {
+                    state.write(" ")?;
+                    sub_selection_response_shape.write_indented(state)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for PossibleDefinitions {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.write_indented(&mut display_helpers::State::new(f))
     }
 }
 
