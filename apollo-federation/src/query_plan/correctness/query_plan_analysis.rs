@@ -19,6 +19,7 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::FederationError;
 use crate::SingleFederationError;
@@ -213,7 +214,7 @@ fn rename_at_path(
     match first {
         FetchDataPathElement::Key(name, _conditions) => {
             if _conditions.is_some() {
-                return Err("not implemented yet".to_string()); // TODO
+                return Err("rename_at_path: unexpected key conditions".to_string());
             }
             let Some(defs) = state.get(name) else {
                 // If some sub-states don't have the name, skip it and return the same state.
@@ -229,9 +230,10 @@ fn rename_at_path(
                         NormalizedTypeCondition::from_type_name(type_filter.clone(), schema)
                             .map_err(|e| {
                                 format!(
-                            "Failed to create a normalized type condition for {type_filter}: {}",
-                            format_federation_error(e),
-                        )
+                                    "Failed to create a normalized type condition for {}: {}",
+                                    type_filter,
+                                    format_federation_error(e),
+                                )
                             })?;
                     if !type_filter.implies(type_cond) {
                         // Not applicable => same as before
@@ -299,7 +301,7 @@ fn rename_at_path(
         }
         FetchDataPathElement::AnyIndex(_conditions) => {
             if _conditions.is_some() {
-                return Err("not implemented yet".to_string()); // TODO
+                return Err("rename_at_path: unexpected index conditions".to_string());
             }
             rename_at_path(schema, state, type_filter, rest, new_name)
         }
@@ -307,7 +309,9 @@ fn rename_at_path(
             let type_filter = Some(type_name.clone());
             rename_at_path(schema, state, type_filter, rest, new_name)
         }
-        FetchDataPathElement::Parent => Err("todo: Parent".to_string()),
+        FetchDataPathElement::Parent => {
+            Err("rename_at_path: unexpected parent path element".to_string())
+        }
     }
 }
 
@@ -317,7 +321,9 @@ fn apply_rewrites(
     rewrite: &FetchDataRewrite,
 ) -> Result<ResponseShape, String> {
     match rewrite {
-        FetchDataRewrite::ValueSetter(_) => todo!(),
+        FetchDataRewrite::ValueSetter(_) => {
+            Err("apply_rewrites: unexpected value setter".to_string())
+        }
         FetchDataRewrite::KeyRenamer(renamer) => rename_at_path(
             schema,
             state,
@@ -428,6 +434,7 @@ fn interpret_plan_node_at_path(
     schema: &ValidFederationSchema,
     state: &ResponseShape,
     conditions: &[Literal],
+    type_condition: Option<&Vec<Name>>,
     path: &[FetchDataPathElement],
     node: &PlanNode,
 ) -> Result<Option<ResponseShape>, String> {
@@ -435,10 +442,24 @@ fn interpret_plan_node_at_path(
         return Ok(Some(interpret_plan_node(schema, state, conditions, node)?));
     };
     match first {
-        FetchDataPathElement::Key(name, _conditions) => {
-            if _conditions.is_some() {
-                return Err("not implemented yet".to_string()); // TODO
-            }
+        FetchDataPathElement::Key(name, next_type_conditions) => {
+            // Note: `next_type_conditions` is applied to the next key down the path.
+            let filter_type_cond = type_condition
+                .map(|cond| {
+                    let obj_types: Result<Vec<ObjectTypeDefinitionPosition>, FederationError> =
+                        cond.iter()
+                            .map(|name| {
+                                let ty: ObjectTypeDefinitionPosition =
+                                    schema.get_type(name.clone())?.try_into()?;
+                                Ok(ty)
+                            })
+                            .collect();
+                    let obj_types = obj_types.map_err(format_federation_error)?;
+                    NormalizedTypeCondition::from_object_types(obj_types.into_iter()).map_err(|e| {
+                        format!("Failed to create a normalized type condition for {first}: {e}",)
+                    })
+                })
+                .transpose()?;
             let Some(defs) = state.get(name) else {
                 // If some sub-states don't have the name, skip it and return None.
                 // However, one of the `defs` must have one sub-state that has the name (see below).
@@ -447,6 +468,13 @@ fn interpret_plan_node_at_path(
             // Interpret the node in every matching sub-state.
             let mut updated_defs = PossibleDefinitions::default();
             for (type_cond, defs_per_type_cond) in defs.iter() {
+                if let Some(filter_type_cond) = &filter_type_cond {
+                    if !filter_type_cond.implies(type_cond) {
+                        // Not applicable => same as before
+                        updated_defs.insert(type_cond.clone(), defs_per_type_cond.clone());
+                        continue;
+                    }
+                }
                 let updated_variants =
                     defs_per_type_cond
                         .conditional_variants()
@@ -469,7 +497,12 @@ fn interpret_plan_node_at_path(
                             // );
                             // println!("state: {state}\npath: {path:?}\nnode: {node}");
                             let updated_sub_state = interpret_plan_node_at_path(
-                                schema, sub_state, conditions, rest, node,
+                                schema,
+                                sub_state,
+                                conditions,
+                                next_type_conditions.as_ref(),
+                                rest,
+                                node,
                             );
                             match updated_sub_state {
                                 Err(e) => Some(Err(e)),
@@ -498,14 +531,14 @@ fn interpret_plan_node_at_path(
             result.insert(name.clone(), updated_defs);
             Ok(Some(result))
         }
-        FetchDataPathElement::AnyIndex(_conditions) => {
-            if _conditions.is_some() {
-                return Err("not implemented yet".to_string()); // TODO
-            }
-            interpret_plan_node_at_path(schema, state, conditions, rest, node)
+        FetchDataPathElement::AnyIndex(type_conditions) => {
+            let type_conditions = type_conditions.as_ref();
+            interpret_plan_node_at_path(schema, state, conditions, type_conditions, rest, node)
         }
-        FetchDataPathElement::TypenameEquals(_type_name) => Err("todo: TypenameEquals".to_string()),
-        FetchDataPathElement::Parent => Err("todo: Parent".to_string()),
+        FetchDataPathElement::TypenameEquals(_type_name) => {
+            Err("flatten: unexpected TypenameEquals variant".to_string())
+        }
+        FetchDataPathElement::Parent => Err("flatten: unexpected Parent variant".to_string()),
     }
 }
 
@@ -516,8 +549,14 @@ fn interpret_flatten_node(
     flatten: &FlattenNode,
 ) -> Result<ResponseShape, String> {
     // println!("interpret_flatten_node: {flatten}\nstate: {state}\n");
-    let result =
-        interpret_plan_node_at_path(schema, state, conditions, &flatten.path, &flatten.node)?;
+    let result = interpret_plan_node_at_path(
+        schema,
+        state,
+        conditions,
+        None, // no type condition at the top level
+        &flatten.path,
+        &flatten.node,
+    )?;
     let Some(result) = result else {
         // `flatten.path` is addressing a non-existing response object.
         // Ideally, this should not happen, but QP may try to fetch infeasible selections.
