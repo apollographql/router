@@ -5,8 +5,8 @@ expression: "format!(\"{:#?}\", parsed)"
 Named(
     SubSelection {
         selections: [
-            Path(
-                Some(
+            Path {
+                alias: Some(
                     Alias {
                         name: WithRange {
                             node: Field(
@@ -21,7 +21,8 @@ Named(
                         ),
                     },
                 ),
-                PathSelection {
+                inline: false,
+                path: PathSelection {
                     path: WithRange {
                         node: Key(
                             WithRange {
@@ -126,7 +127,7 @@ Named(
                         ),
                     },
                 },
-            ),
+            },
             Field(
                 Some(
                     Alias {
@@ -154,8 +155,8 @@ Named(
                 Some(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -170,7 +171,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -221,9 +223,9 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
-                            Path(
-                                Some(
+                            },
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -238,7 +240,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -325,7 +328,7 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
+                            },
                             Group(
                                 Alias {
                                     name: WithRange {
@@ -384,8 +387,8 @@ Named(
                                     ),
                                 },
                             ),
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -400,7 +403,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -436,7 +440,7 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
