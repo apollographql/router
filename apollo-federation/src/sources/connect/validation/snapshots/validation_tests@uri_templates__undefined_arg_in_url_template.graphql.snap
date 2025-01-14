@@ -5,17 +5,17 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
 ---
 [
     Message {
-        code: UndefinedArgument,
-        message: "In `GET` in `@connect(http:)` on `Query.resources`: `resources` does not have an argument named `blah`",
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.resources`: `$args` doesn't have a field named `blah`",
         locations: [
-            10:45..10:49,
+            10:39..10:49,
         ],
     },
     Message {
-        code: UndefinedArgument,
-        message: "In `GET` in `@connect(http:)` on `Query.resources`: `resources` does not have an argument named `something`",
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.resources`: `$args` doesn't have a field named `something`",
         locations: [
-            10:68..10:77,
+            10:62..10:77,
         ],
     },
 ]

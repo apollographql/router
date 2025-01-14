@@ -2,6 +2,7 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
+use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -146,18 +147,10 @@ fn map_shape(
                 Shape::array(new_prefix, new_tail)
             }
             ShapeCase::Name(_name, _subpath) => {
-                // Since we do not know if a named shape is an array or a
-                // non-array, we hedge the input shape using a .* subpath
-                // wildcard, which denotes the union of all array element shapes
-                // for arrays, or the shape itself (no union) for non-arrays.
-                let any_subshape = input_shape.any_item();
-                first_arg.compute_output_shape(
-                    // When we ->map, the @ variable gets rebound to each
-                    // element visited, but the $ variable stays the same.
-                    any_subshape.clone(),
-                    dollar_shape.clone(),
-                    named_var_shapes,
-                )
+                // We don't have a way to tell if this is an array, where map is applied to each
+                // element, or a different value where map is applied to just one. So for now we
+                // erase the type (until we add more sophisticated resolution in the future).
+                Shape::unknown()
             }
             _ => first_arg.compute_output_shape(
                 input_shape.clone(),
@@ -362,6 +355,7 @@ fn first_shape(
                 Shape::one([tail.clone(), Shape::none()])
             }
         }
+        ShapeCase::Name(_, _) => input_shape.child(&NamedShapePathKey::Index(0)),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.
         _ => input_shape.clone(),
@@ -450,6 +444,7 @@ fn last_shape(
                 Shape::one([tail.clone(), Shape::none()])
             }
         }
+        ShapeCase::Name(_, _) => input_shape.any_item(),
         // When there is no obvious last element, ->last gives us the input
         // value itself, which has input_shape.
         _ => input_shape.clone(),
@@ -567,6 +562,7 @@ fn slice_shape(
             Shape::array([], Shape::one(one_shapes))
         }
         ShapeCase::String(_) => Shape::string(),
+        ShapeCase::Name(_, _) => input_shape, // TODO: add a way to validate inputs after name resolution
         _ => Shape::error_with_range(
             format!(
                 "Method ->{} requires an array or string input",
@@ -649,6 +645,7 @@ fn size_shape(
     match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::int_value(value.len() as i64),
         ShapeCase::String(None) => Shape::int(),
+        ShapeCase::Name(_, _) => Shape::int(), // TODO: catch errors after name resolution
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 Shape::int_value(prefix.len() as i64)
@@ -763,6 +760,12 @@ fn entries_shape(
                     Shape::object(tail_key_value_pair, Shape::none()),
                 )
             }
+        }
+        ShapeCase::Name(_, _) => {
+            let mut entries = Shape::empty_map();
+            entries.insert("key".to_string(), Shape::string());
+            entries.insert("value".to_string(), input_shape.any_field());
+            Shape::list(Shape::object(entries, Shape::none()))
         }
         _ => Shape::error_with_range(
             format!("Method ->{} requires an object input", method_name.as_ref()),
