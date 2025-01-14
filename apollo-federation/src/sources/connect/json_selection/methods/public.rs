@@ -773,3 +773,56 @@ fn entries_shape(
         ),
     }
 }
+
+impl_arrow_method!(
+    JsonStringifyMethod,
+    json_stringify_method,
+    json_stringify_shape
+);
+fn json_stringify_method(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    data: &JSON,
+    _vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    _tail: &WithRange<PathList>,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    if method_args.is_some() {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
+    }
+
+    match serde_json::to_string(data) {
+        Ok(val) => (Some(JSON::String(val.into())), vec![]),
+        Err(err) => (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} failed to serialize JSON: {}",
+                    method_name.as_ref(),
+                    err
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        ),
+    }
+}
+fn json_stringify_shape(
+    _method_name: &WithRange<String>,
+    _method_args: Option<&MethodArgs>,
+    _input_shape: Shape,
+    _dollar_shape: Shape,
+    _named_var_shapes: &IndexMap<&str, Shape>,
+) -> Shape {
+    Shape::string()
+}
