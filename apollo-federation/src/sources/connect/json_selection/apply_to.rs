@@ -95,18 +95,18 @@ impl JSONSelection {
     pub fn compute_output_shape(
         &self,
         input_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
         match self {
             Self::Named(selection) => selection.compute_output_shape(
                 input_shape.clone(),
                 input_shape.clone(),
-                named_var_shapes,
+                named_shapes,
             ),
             Self::Path(path_selection) => path_selection.compute_output_shape(
                 input_shape.clone(),
                 input_shape.clone(),
-                named_var_shapes,
+                named_shapes,
             ),
         }
     }
@@ -162,7 +162,7 @@ pub(super) trait ApplyToInternal {
         // including the initial `$` character. This map typically does not
         // change during the compute_output_shape recursion, and so can be
         // passed down by immutable reference.
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape;
 }
 
@@ -279,14 +279,14 @@ impl ApplyToInternal for JSONSelection {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
         match self {
             Self::Named(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
             }
             Self::Path(path_selection) => {
-                path_selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
+                path_selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
             }
         }
     }
@@ -390,7 +390,7 @@ impl ApplyToInternal for NamedSelection {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
         let mut output = Shape::empty_map();
 
@@ -403,15 +403,14 @@ impl ApplyToInternal for NamedSelection {
                 output.insert(
                     output_key.to_string(),
                     if let Some(selection) = selection {
-                        selection.compute_output_shape(field_shape, dollar_shape, named_var_shapes)
+                        selection.compute_output_shape(field_shape, dollar_shape, named_shapes)
                     } else {
                         field_shape
                     },
                 );
             }
             Self::Path { alias, path, .. } => {
-                let path_shape =
-                    path.compute_output_shape(input_shape, dollar_shape, named_var_shapes);
+                let path_shape = path.compute_output_shape(input_shape, dollar_shape, named_shapes);
                 if let Some(alias) = alias {
                     output.insert(alias.name().to_string(), path_shape);
                 } else {
@@ -421,7 +420,7 @@ impl ApplyToInternal for NamedSelection {
             Self::Group(alias, sub_selection) => {
                 output.insert(
                     alias.name().to_string(),
-                    sub_selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes),
+                    sub_selection.compute_output_shape(input_shape, dollar_shape, named_shapes),
                 );
             }
         };
@@ -459,7 +458,7 @@ impl ApplyToInternal for PathSelection {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
         match self.path.as_ref() {
             PathList::Key(_, _) => {
@@ -469,14 +468,14 @@ impl ApplyToInternal for PathSelection {
                 self.path.compute_output_shape(
                     dollar_shape.clone(),
                     dollar_shape.clone(),
-                    named_var_shapes,
+                    named_shapes,
                 )
             }
             // If this is not a KeyPath, keep evaluating against input_shape.
             // This logic parallels PathSelection::apply_to_path (above).
             _ => self
                 .path
-                .compute_output_shape(input_shape, dollar_shape, named_var_shapes),
+                .compute_output_shape(input_shape, dollar_shape, named_shapes),
         }
     }
 }
@@ -592,7 +591,7 @@ impl ApplyToInternal for WithRange<PathList> {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
         match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
@@ -601,12 +600,12 @@ impl ApplyToInternal for WithRange<PathList> {
                     input_shape
                 } else if var_name == &KnownVariable::Dollar {
                     dollar_shape.clone()
-                } else if let Some(shape) = named_var_shapes.get(var_name.as_str()) {
+                } else if let Some(shape) = named_shapes.get(var_name.as_str()) {
                     shape.clone()
                 } else {
                     Shape::name(var_name.as_str())
                 };
-                tail.compute_output_shape(var_shape, dollar_shape, named_var_shapes)
+                tail.compute_output_shape(var_shape, dollar_shape, named_shapes)
             }
 
             // For the first key in a path, PathSelection::compute_output_shape
@@ -627,7 +626,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         rest.compute_output_shape(
                             case.field(key.as_str()),
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            named_shapes,
                         )
                     }
                 })),
@@ -645,7 +644,7 @@ impl ApplyToInternal for WithRange<PathList> {
                                 rest.compute_output_shape(
                                     shape.field(key.as_str()),
                                     dollar_shape.clone(),
-                                    named_var_shapes,
+                                    named_shapes,
                                 )
                             }
                         })
@@ -657,7 +656,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         rest.compute_output_shape(
                             tail.field(key.as_str()),
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            named_shapes,
                         )
                     };
 
@@ -667,14 +666,14 @@ impl ApplyToInternal for WithRange<PathList> {
                 _ => rest.compute_output_shape(
                     input_shape.field(key.as_str()),
                     dollar_shape.clone(),
-                    named_var_shapes,
+                    named_shapes,
                 ),
             },
 
             PathList::Expr(expr, tail) => tail.compute_output_shape(
-                expr.compute_output_shape(input_shape, dollar_shape.clone(), named_var_shapes),
+                expr.compute_output_shape(input_shape, dollar_shape.clone(), named_shapes),
                 dollar_shape.clone(),
-                named_var_shapes,
+                named_shapes,
             ),
 
             PathList::Method(method_name, method_args, tail) => {
@@ -701,7 +700,7 @@ impl ApplyToInternal for WithRange<PathList> {
                                     method_args.as_ref(),
                                     case.clone(),
                                     dollar_shape.clone(),
-                                    named_var_shapes,
+                                    named_shapes,
                                 )
                             }
                         })),
@@ -710,7 +709,7 @@ impl ApplyToInternal for WithRange<PathList> {
                             method_args.as_ref(),
                             input_shape,
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            named_shapes,
                         ),
                     };
 
@@ -720,7 +719,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.compute_output_shape(
                             method_result_shape,
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            named_shapes,
                         )
                     }
                 } else {
@@ -730,7 +729,7 @@ impl ApplyToInternal for WithRange<PathList> {
             }
 
             PathList::Selection(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
             }
 
             PathList::Empty => input_shape,
@@ -780,7 +779,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
         &self,
         input_shape: Shape,
         dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
         match self.as_ref() {
             LitExpr::Null => Shape::null(),
@@ -805,7 +804,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                         value.compute_output_shape(
                             input_shape.clone(),
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            named_shapes,
                         ),
                     );
                 }
@@ -818,14 +817,14 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     shapes.push(value.compute_output_shape(
                         input_shape.clone(),
                         dollar_shape.clone(),
-                        named_var_shapes,
+                        named_shapes,
                     ));
                 }
                 Shape::array(shapes, Shape::none())
             }
 
             LitExpr::Path(path) => {
-                path.compute_output_shape(input_shape, dollar_shape, named_var_shapes)
+                path.compute_output_shape(input_shape, dollar_shape, named_shapes)
             }
         }
     }
@@ -889,7 +888,7 @@ impl ApplyToInternal for SubSelection {
         &self,
         input_shape: Shape,
         _previous_dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
@@ -897,15 +896,13 @@ impl ApplyToInternal for SubSelection {
         if let ShapeCase::Array { prefix, tail } = input_shape.case() {
             let new_prefix = prefix
                 .iter()
-                .map(|shape| {
-                    self.compute_output_shape(shape.clone(), shape.clone(), named_var_shapes)
-                })
+                .map(|shape| self.compute_output_shape(shape.clone(), shape.clone(), named_shapes))
                 .collect::<Vec<_>>();
 
             let new_tail = if tail.is_none() {
                 tail.clone()
             } else {
-                self.compute_output_shape(tail.clone(), tail.clone(), named_var_shapes)
+                self.compute_output_shape(tail.clone(), tail.clone(), named_shapes)
             };
 
             return Shape::array(new_prefix, new_tail);
@@ -934,7 +931,7 @@ impl ApplyToInternal for SubSelection {
                 named_selection.compute_output_shape(
                     input_shape.clone(),
                     dollar_shape.clone(),
-                    named_var_shapes,
+                    named_shapes,
                 ),
             ]);
 

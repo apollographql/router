@@ -78,14 +78,14 @@ macro_rules! impl_arrow_method {
                 method_args: Option<&MethodArgs>,
                 input_shape: Shape,
                 dollar_shape: Shape,
-                named_var_shapes: &IndexMap<&str, Shape>,
+                named_shapes: &IndexMap<String, Shape>,
             ) -> Shape {
                 $shape_fn_name(
                     method_name,
                     method_args,
                     input_shape,
                     dollar_shape,
-                    named_var_shapes,
+                    named_shapes,
                 )
             }
         }
@@ -123,7 +123,7 @@ pub(super) trait ArrowMethodImpl {
         // Other variable shapes may also be provided here, though in general
         // variables and their subproperties can be represented abstractly using
         // $var.nested.property ShapeCase::Name shapes.
-        named_var_shapes: &IndexMap<&str, Shape>,
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape;
 }
 
