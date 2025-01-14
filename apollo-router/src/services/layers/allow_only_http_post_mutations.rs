@@ -145,7 +145,7 @@ mod forbid_http_get_mutations_tests {
 
         mock_service
             .expect_clone()
-            .returning(|| MockSupergraphService::new());
+            .returning(MockSupergraphService::new);
 
         mock_service
             .expect_call()
@@ -172,7 +172,7 @@ mod forbid_http_get_mutations_tests {
 
         mock_service
             .expect_clone()
-            .returning(|| MockSupergraphService::new());
+            .returning(MockSupergraphService::new);
 
         mock_service
             .expect_call()
@@ -199,7 +199,7 @@ mod forbid_http_get_mutations_tests {
 
         mock_service
             .expect_clone()
-            .returning(|| MockSupergraphService::new());
+            .returning(MockSupergraphService::new);
 
         mock_service
             .expect_call()
@@ -254,7 +254,7 @@ mod forbid_http_get_mutations_tests {
 
             mock_service
                 .expect_clone()
-                .returning(|| MockSupergraphService::new());
+                .returning(MockSupergraphService::new);
 
             let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
             let services = service_stack.ready().await.unwrap();

@@ -282,7 +282,7 @@ mod async_checkpoint_tests {
 
         execution_service
             .expect_clone()
-            .return_once(move || MockExecutionService::new());
+            .return_once(MockExecutionService::new);
 
         execution_service
             .expect_call()
@@ -321,7 +321,7 @@ mod async_checkpoint_tests {
 
         router_service
             .expect_clone()
-            .return_once(move || MockExecutionService::new());
+            .return_once(MockExecutionService::new);
 
         router_service
             .expect_call()
