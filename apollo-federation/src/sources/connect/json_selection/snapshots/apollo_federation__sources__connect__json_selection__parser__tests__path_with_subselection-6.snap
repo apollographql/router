@@ -6,9 +6,10 @@ Ok(
     Named(
         SubSelection {
             selections: [
-                Path(
-                    None,
-                    PathSelection {
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -49,10 +50,11 @@ Ok(
                             ),
                         },
                     },
-                ),
-                Path(
-                    None,
-                    PathSelection {
+                },
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -65,9 +67,10 @@ Ok(
                                     node: Selection(
                                         SubSelection {
                                             selections: [
-                                                Path(
-                                                    None,
-                                                    PathSelection {
+                                                Path {
+                                                    alias: None,
+                                                    inline: true,
+                                                    path: PathSelection {
                                                         path: WithRange {
                                                             node: Var(
                                                                 WithRange {
@@ -135,7 +138,7 @@ Ok(
                                                             ),
                                                         },
                                                     },
-                                                ),
+                                                },
                                             ],
                                             range: Some(
                                                 44..70,
@@ -152,7 +155,7 @@ Ok(
                             ),
                         },
                     },
-                ),
+                },
             ],
             range: Some(
                 13..70,

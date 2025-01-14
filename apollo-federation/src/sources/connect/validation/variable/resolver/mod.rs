@@ -15,14 +15,13 @@ use crate::sources::connect::variable::VariableReference;
 pub(super) mod args;
 pub(super) mod this;
 
-/// Resolves variables with a specific namespace
+/// Checks that the variables are valid within a specific namespace
 pub(crate) trait NamespaceResolver {
-    fn resolve(
+    fn check(
         &self,
         reference: &VariableReference<Namespace>,
         expression: GraphQLString,
         schema: &SchemaInfo,
-        location_offset: usize,
     ) -> Result<(), Message>;
 }
 
@@ -52,7 +51,6 @@ fn resolve_path(
     expression: GraphQLString,
     field_type: &Type,
     field: &Component<FieldDefinition>,
-    location_offset: usize,
 ) -> Result<(), Message> {
     let mut variable_type = field_type.clone();
     for nested_field_name in reference.path.clone().iter().skip(1) {
@@ -86,7 +84,7 @@ fn resolve_path(
                             "`{variable_type}` does not have a field named `{nested_field_name}`."
                         ),
                         locations: expression.line_col_for_subslice(
-                            path_component_range.start+location_offset..path_component_range.end+location_offset,
+                            path_component_range.start..path_component_range.end,
                             schema
                         ).into_iter().collect(),
                     })

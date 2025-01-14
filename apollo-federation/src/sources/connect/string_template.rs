@@ -1,5 +1,8 @@
 //! A [`StringTemplate`] is a string containing one or more [`Expression`]s.
 //! These are used in connector URIs and headers.
+//!
+//! Parsing (this module) is done by both the router at startup and composition. Validation
+//! (in [`crate::sources::connect::validation`]) is done only by composition.
 
 use std::fmt::Display;
 use std::ops::Range;
@@ -12,6 +15,9 @@ use serde_json_bytes::Value;
 use crate::sources::connect::JSONSelection;
 
 /// A parsed string template, containing a series of [`Part`]s.
+///
+/// The `Const` generic allows consumers to validate constant pieces of the string with a type of
+/// their choice. This is specifically just [`http::HeaderValue`] for headers right now.
 #[derive(Clone, Debug)]
 pub struct StringTemplate<Const = String> {
     pub(crate) parts: Vec<Part<Const>>,
@@ -50,7 +56,7 @@ impl<Const: FromStr> StringTemplate<Const> {
                     let start_of_parse_error = offset + err.offset;
                     Error {
                         message: err.message,
-                        location: start_of_parse_error..(start_of_parse_error + expression.len()),
+                        location: start_of_parse_error..(offset + expression.len()),
                     }
                 })?;
                 parts.push(Part::Expression(Expression {
@@ -77,6 +83,8 @@ impl<Const: FromStr> StringTemplate<Const> {
         Ok(Self { parts })
     }
 
+    /// Get all the dynamic [`Expression`] pieces of the template for validation. If interpolating
+    /// the entire template, use [`Self::interpolate`] instead.
     pub(crate) fn expressions(&self) -> impl Iterator<Item = &Expression> {
         self.parts.iter().filter_map(|part| {
             if let Part::Expression(expression) = part {
@@ -89,6 +97,9 @@ impl<Const: FromStr> StringTemplate<Const> {
 }
 
 impl StringTemplate<String> {
+    /// Interpolation for when the constant type is a string. This can't be implemented for
+    /// arbitrary generic types, so non-string consumers (headers) implement this themselves with
+    /// any additional validations/transformations they need.
     pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
         self.parts
             .iter()
@@ -97,6 +108,8 @@ impl StringTemplate<String> {
     }
 }
 
+/// Expressions should be written the same as they were originally, even though we don't keep the
+/// original source around. So constants are written as-is and expressions are surrounded with `{ }`.
 impl<Const: Display> Display for StringTemplate<Const> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for part in &self.parts {
@@ -109,9 +122,14 @@ impl<Const: Display> Display for StringTemplate<Const> {
     }
 }
 
+/// A general-purpose error type which includes both a description of the problem and the offset span
+/// within the original expression where the problem occurred. Used for both parsing and interpolation.
 #[derive(Debug, PartialEq)]
 pub struct Error {
+    /// A human-readable description of the issue.
     pub message: String,
+    /// The string offsets to the original [`StringTemplate`] (not just the part) where the issue
+    /// occurred. As per usual, the end of the range is exclusive.
     pub(crate) location: Range<usize>,
 }
 
@@ -133,6 +151,8 @@ pub(crate) enum Part<Const> {
 }
 
 impl<T> Part<T> {
+    /// Get the original location of the part from the string which was parsed to form the
+    /// [`StringTemplate`].
     fn location(&self) -> Range<usize> {
         match self {
             Self::Constant(c) => c.location.clone(),
@@ -141,6 +161,20 @@ impl<T> Part<T> {
     }
 }
 
+/// These generics are a bit of a mess, but what they're saying is given a generic `Const` type,
+/// which again is `String` for the main use case but specialized occasionally (like [`http::HeaderValue`] for headers),
+/// we can interpolate the value of the part into that type.
+///
+/// For [`Constant`]s this is easy, just clone the value (thus `Const: Clone`).
+///
+/// For [`Expression`]s, we first need to interpolate the expression as normal (with [`ApplyTo`]),
+/// and then convert the resulting [`Value`] into the `Const` type. For that we require both
+/// `Const: FromStr` and `Const: TryFrom<String>` so we don't have to clone all `&str` into `String`s,
+/// nor borrow `String` just for them to be re-allocated. The `FromStrErr` and `TryFromStringError`
+/// are then required to capture the error types of those two conversion methods.
+///
+/// So for `Const = String` these are actually all no-ops with infallible conversions, but we allow
+/// for [`http::HeaderValue`] to fail.
 impl<Const, FromStrErr, TryFromStringError> Part<Const>
 where
     Const: Clone,

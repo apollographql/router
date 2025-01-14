@@ -6,9 +6,10 @@ Ok(
     Named(
         SubSelection {
             selections: [
-                Path(
-                    None,
-                    PathSelection {
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -49,10 +50,11 @@ Ok(
                             ),
                         },
                     },
-                ),
-                Path(
-                    None,
-                    PathSelection {
+                },
+                Path {
+                    alias: None,
+                    inline: true,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -65,8 +67,8 @@ Ok(
                                     node: Selection(
                                         SubSelection {
                                             selections: [
-                                                Path(
-                                                    Some(
+                                                Path {
+                                                    alias: Some(
                                                         Alias {
                                                             name: WithRange {
                                                                 node: Field(
@@ -81,7 +83,8 @@ Ok(
                                                             ),
                                                         },
                                                     ),
-                                                    PathSelection {
+                                                    inline: false,
+                                                    path: PathSelection {
                                                         path: WithRange {
                                                             node: Expr(
                                                                 WithRange {
@@ -104,10 +107,11 @@ Ok(
                                                             ),
                                                         },
                                                     },
-                                                ),
-                                                Path(
-                                                    None,
-                                                    PathSelection {
+                                                },
+                                                Path {
+                                                    alias: None,
+                                                    inline: true,
+                                                    path: PathSelection {
                                                         path: WithRange {
                                                             node: Var(
                                                                 WithRange {
@@ -175,7 +179,7 @@ Ok(
                                                             ),
                                                         },
                                                     },
-                                                ),
+                                                },
                                                 Field(
                                                     None,
                                                     WithRange {
@@ -204,9 +208,9 @@ Ok(
                             ),
                         },
                     },
-                ),
-                Path(
-                    Some(
+                },
+                Path {
+                    alias: Some(
                         Alias {
                             name: WithRange {
                                 node: Field(
@@ -221,7 +225,8 @@ Ok(
                             ),
                         },
                     ),
-                    PathSelection {
+                    inline: false,
+                    path: PathSelection {
                         path: WithRange {
                             node: Var(
                                 WithRange {
@@ -257,7 +262,7 @@ Ok(
                             ),
                         },
                     },
-                ),
+                },
             ],
             range: Some(
                 54..362,

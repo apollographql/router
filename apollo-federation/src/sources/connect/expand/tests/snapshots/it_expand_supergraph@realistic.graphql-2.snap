@@ -365,8 +365,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -381,7 +381,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -417,7 +418,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         ),
                                     },
                                 },
-                            ),
+                            },
                         ],
                         range: Some(
                             0..24,

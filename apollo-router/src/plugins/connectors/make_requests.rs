@@ -1146,8 +1146,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1158,7 +1158,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1195,7 +1196,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1253,8 +1254,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1265,7 +1266,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1302,7 +1304,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1462,8 +1464,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1474,7 +1476,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1511,7 +1514,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1569,8 +1572,8 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -1581,7 +1584,8 @@ mod tests {
                                         range: None,
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Var(
                                             WithRange {
@@ -1618,7 +1622,7 @@ mod tests {
                                         range: None,
                                     },
                                 },
-                            ),
+                            },
                             Field(
                                 None,
                                 WithRange {
