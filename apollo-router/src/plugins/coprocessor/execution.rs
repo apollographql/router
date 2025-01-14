@@ -12,7 +12,7 @@ use tower_service::Service;
 
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
@@ -85,7 +85,7 @@ impl ExecutionStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
+            AsyncCheckpointLayer::new(move |request: execution::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -176,6 +176,7 @@ impl ExecutionStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffer(50_000)
             .service(service)
             .boxed()
     }

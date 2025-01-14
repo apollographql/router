@@ -63,7 +63,7 @@ where
     fn layer(&self, service: S) -> Self::Service {
         AsyncCheckpointService {
             checkpoint_fn: Arc::clone(&self.checkpoint_fn),
-            inner: service,
+            service,
         }
     }
 }
@@ -153,7 +153,7 @@ where
     <S as Service<Request>>::Future: Send + 'static,
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
 {
-    inner: S,
+    service: S,
     checkpoint_fn: Arc<Pin<Box<dyn Fn(Request) -> Fut + Send + Sync + 'static>>>,
 }
 
@@ -172,7 +172,7 @@ where
     {
         Self {
             checkpoint_fn: Arc::new(Box::pin(checkpoint_fn)),
-            inner: service,
+            service,
         }
     }
 }
@@ -197,16 +197,18 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        self.service.poll_ready(cx)
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
         let checkpoint_fn = Arc::clone(&self.checkpoint_fn);
-        let inner = self.inner.clone();
+        let service = self.service.clone();
+        let mut inner = std::mem::replace(&mut self.service, service);
+
         Box::pin(async move {
             match (checkpoint_fn)(req).await {
                 Ok(ControlFlow::Break(response)) => Ok(response),
-                Ok(ControlFlow::Continue(request)) => inner.oneshot(request).await,
+                Ok(ControlFlow::Continue(request)) => inner.call(request).await,
                 Err(error) => Err(error),
             }
         })
@@ -277,21 +279,21 @@ mod async_checkpoint_tests {
         let expected_label = "from_mock_service";
 
         let mut execution_service = MockExecutionService::new();
-        execution_service.expect_clone().return_once(move || {
-            let mut execution_service = MockExecutionService::new();
-            execution_service
-                .expect_call()
-                .times(1)
-                .returning(move |req: ExecutionRequest| {
-                    Ok(ExecutionResponse::fake_builder()
-                        .label(expected_label.to_string())
-                        .context(req.context)
-                        .build()
-                        .unwrap())
-                });
 
-            execution_service
-        });
+        execution_service
+            .expect_clone()
+            .return_once(MockExecutionService::new);
+
+        execution_service
+            .expect_call()
+            .times(1)
+            .returning(move |req| {
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
 
         let service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
@@ -317,20 +319,19 @@ mod async_checkpoint_tests {
         let expected_label = "from_mock_service";
         let mut router_service = MockExecutionService::new();
 
-        router_service.expect_clone().return_once(move || {
-            let mut router_service = MockExecutionService::new();
-            router_service
-                .expect_call()
-                .times(1)
-                .returning(move |_req| {
-                    Ok(ExecutionResponse::fake_builder()
-                        .label(expected_label.to_string())
-                        .build()
-                        .unwrap())
-                });
-            router_service
-        });
+        router_service
+            .expect_clone()
+            .return_once(MockExecutionService::new);
 
+        router_service
+            .expect_call()
+            .times(1)
+            .returning(move |_req| {
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .build()
+                    .unwrap())
+            });
         let service_stack =
             AsyncCheckpointLayer::new(|req| async { Ok(ControlFlow::Continue(req)) })
                 .layer(router_service);

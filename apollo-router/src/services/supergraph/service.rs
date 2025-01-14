@@ -898,12 +898,40 @@ impl PluggableSupergraphServiceBuilder {
             )),
         ));
 
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(query_planner_service.clone())
+            .execution_service_factory(ExecutionServiceFactory {
+                schema: schema.clone(),
+                subgraph_schemas: query_planner_service.subgraph_schemas(),
+                plugins: self.plugins.clone(),
+                fetch_service_factory,
+            })
+            .schema(schema.clone())
+            .notify(configuration.notify.clone())
+            .build();
+
+        let supergraph_service =
+            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
+
+        let sb = ServiceBuilder::new()
+            .buffer(50_000)
+            .layer(content_negotiation::SupergraphLayer::default())
+            .service(
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                        e.supergraph_service(acc)
+                    }),
+            )
+            .boxed_clone();
+
         Ok(SupergraphCreator {
             query_planner_service,
-            fetch_service_factory,
             schema,
             plugins: self.plugins,
             config: configuration,
+            sb: Arc::new(parking_lot::Mutex::new(sb)),
         })
     }
 }
@@ -912,10 +940,10 @@ impl PluggableSupergraphServiceBuilder {
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
-    fetch_service_factory: Arc<FetchServiceFactory>,
     schema: Arc<Schema>,
     config: Arc<Configuration>,
     plugins: Arc<Plugins>,
+    sb: Arc<parking_lot::Mutex<supergraph::BoxCloneService>>,
 }
 
 pub(crate) trait HasPlugins {
@@ -964,31 +992,7 @@ impl SupergraphCreator {
         Error = BoxError,
         Future = BoxFuture<'static, supergraph::ServiceResult>,
     > + Send {
-        let supergraph_service = SupergraphService::builder()
-            .query_planner_service(self.query_planner_service.clone())
-            .execution_service_factory(ExecutionServiceFactory {
-                schema: self.schema.clone(),
-                subgraph_schemas: self.query_planner_service.subgraph_schemas(),
-                plugins: self.plugins.clone(),
-                fetch_service_factory: self.fetch_service_factory.clone(),
-            })
-            .schema(self.schema.clone())
-            .notify(self.config.notify.clone())
-            .build();
-
-        let supergraph_service =
-            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
-
-        ServiceBuilder::new()
-            .layer(content_negotiation::SupergraphLayer::default())
-            .service(
-                self.plugins
-                    .iter()
-                    .rev()
-                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
-                        e.supergraph_service(acc)
-                    }),
-            )
+        self.sb.lock().clone()
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {

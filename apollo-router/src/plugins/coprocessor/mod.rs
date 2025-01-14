@@ -34,7 +34,7 @@ use tower::ServiceExt;
 use crate::configuration::shared::Client;
 use crate::error::Error;
 use crate::graphql;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -397,7 +397,7 @@ impl RouterStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            OneShotAsyncCheckpointLayer::new(move |request: router::Request| {
+            AsyncCheckpointLayer::new(move |request: router::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -485,6 +485,7 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffer(50_000)
             .service(service)
             .boxed()
     }
@@ -534,7 +535,7 @@ impl SubgraphStage {
             let http_client = http_client.clone();
             let coprocessor_url = coprocessor_url.clone();
             let service_name = service_name.clone();
-            OneShotAsyncCheckpointLayer::new(move |request: subgraph::Request| {
+            AsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let service_name = service_name.clone();
@@ -623,6 +624,7 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffer(50_000)
             .service(service)
             .boxed()
     }
