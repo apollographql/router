@@ -30,7 +30,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::query_planner::BridgeQueryPlannerPool;
+use crate::query_planner::QueryPlannerService;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
@@ -280,10 +280,9 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            BridgeQueryPlannerPool::new(schema.clone(), configuration.clone())
-                .instrument(query_planner_span)
-                .await?;
+        let planner = QueryPlannerService::new(schema.clone(), configuration.clone())
+            .instrument(query_planner_span)
+            .await?;
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
@@ -302,7 +301,7 @@ impl YamlRouterFactory {
         let schema_span = tracing::info_span!("schema");
         let _guard = schema_span.enter();
 
-        let schema = bridge_query_planner.schema();
+        let schema = planner.schema();
         if schema_changed {
             configuration.notify.broadcast_schema(schema.clone());
         }
@@ -316,7 +315,7 @@ impl YamlRouterFactory {
             create_plugins(
                 &configuration,
                 &schema,
-                bridge_query_planner.subgraph_schemas(),
+                planner.subgraph_schemas(),
                 initial_telemetry_plugin,
                 extra_plugins,
             )
@@ -327,7 +326,7 @@ impl YamlRouterFactory {
         );
 
         async {
-            let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+            let mut builder = PluggableSupergraphServiceBuilder::new(planner);
             builder = builder.with_configuration(configuration.clone());
             let http_service_factory =
                 create_http_services(&plugins, &schema, &configuration).await?;

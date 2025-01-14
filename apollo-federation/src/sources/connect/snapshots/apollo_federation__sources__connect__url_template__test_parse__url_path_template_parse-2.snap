@@ -6,113 +6,257 @@ Ok(
     URLTemplate {
         base: None,
         path: [
-            Component {
+            StringTemplate {
                 parts: [
-                    Text(
-                        "users",
+                    Constant(
+                        Constant {
+                            value: "users",
+                            location: 1..6,
+                        },
                     ),
                 ],
             },
-            Component {
+            StringTemplate {
                 parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $this,
-                                location: 8..13,
-                            },
-                            path: [
-                                VariablePathPart {
-                                    part: "user_id",
-                                    location: 14..21,
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "user_id",
+                                                        ),
+                                                        range: Some(
+                                                            6..13,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            13..13,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..13,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..13,
+                                        ),
+                                    },
                                 },
-                            ],
+                            ),
                             location: 8..21,
                         },
                     ),
                 ],
             },
         ],
-        query: {
-            Component {
-                parts: [
-                    Text(
-                        "a",
-                    ),
-                ],
-            }: Component {
-                parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $args,
-                                location: 26..31,
+        query: [
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "a",
+                                location: 23..24,
                             },
-                            path: [
-                                VariablePathPart {
-                                    part: "b",
-                                    location: 32..33,
-                                },
-                            ],
-                            location: 26..33,
-                        },
-                    ),
-                ],
-            },
-            Component {
-                parts: [
-                    Text(
-                        "c",
-                    ),
-                ],
-            }: Component {
-                parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $args,
-                                location: 38..43,
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "b",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                7..7,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..7,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..7,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 26..33,
                             },
-                            path: [
-                                VariablePathPart {
-                                    part: "d",
-                                    location: 44..45,
-                                },
-                            ],
-                            location: 38..45,
-                        },
-                    ),
-                ],
-            },
-            Component {
-                parts: [
-                    Text(
-                        "e",
-                    ),
-                ],
-            }: Component {
-                parts: [
-                    Var(
-                        VariableReference {
-                            namespace: VariableNamespace {
-                                namespace: $args,
-                                location: 50..55,
+                        ),
+                    ],
+                },
+            ),
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "c",
+                                location: 35..36,
                             },
-                            path: [
-                                VariablePathPart {
-                                    part: "f",
-                                    location: 56..57,
-                                },
-                                VariablePathPart {
-                                    part: "g",
-                                    location: 58..59,
-                                },
-                            ],
-                            location: 50..59,
-                        },
-                    ),
-                ],
-            },
-        },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "d",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                7..7,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..7,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..7,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 38..45,
+                            },
+                        ),
+                    ],
+                },
+            ),
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "e",
+                                location: 47..48,
+                            },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "f",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "g",
+                                                                    ),
+                                                                    range: Some(
+                                                                        8..9,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        9..9,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                7..9,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..9,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..9,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 50..59,
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ],
     },
 )

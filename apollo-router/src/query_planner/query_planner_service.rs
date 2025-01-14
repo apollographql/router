@@ -1,9 +1,11 @@
-//! Calls out to nodejs query planner
+//! Calls out to the apollo-federation crate
 
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::task::Poll;
 use std::time::Instant;
 
 use apollo_compiler::ast;
@@ -17,7 +19,6 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
-use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -59,25 +60,20 @@ pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
-#[derive(Clone)]
-/// A query planner that calls out to the nodejs router-bridge query planner.
+/// A query planner that calls out to the apollo-federation crate.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
-pub(crate) struct BridgeQueryPlanner {
-    planner: PlannerMode,
+#[derive(Clone)]
+pub(crate) struct QueryPlannerService {
+    planner: Arc<QueryPlanner>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
+    compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
     introspection: Arc<IntrospectionCache>,
-}
-
-// TODO: inline into parent struct
-#[derive(Clone)]
-pub(crate) enum PlannerMode {
-    Rust(Arc<QueryPlanner>),
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -96,8 +92,8 @@ fn federation_version_instrument(federation_version: Option<i64>) -> ObservableG
         .init()
 }
 
-impl PlannerMode {
-    fn rust(
+impl QueryPlannerService {
+    fn create_planner(
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
@@ -124,7 +120,7 @@ impl PlannerMode {
         Ok(Arc::new(result.map_err(ServiceBuildError::QpInitError)?))
     }
 
-    async fn plan(
+    async fn plan_inner(
         &self,
         doc: &ParsedDocument,
         operation: Option<String>,
@@ -134,89 +130,70 @@ impl PlannerMode {
         // for "both" mode.
         init_query_plan_root_node: impl Fn(&mut PlanNode) -> Result<(), ValidationErrors>,
     ) -> Result<QueryPlanResult, QueryPlannerError> {
-        match self {
-            PlannerMode::Rust(rust_planner) => {
-                let doc = doc.clone();
-                let rust_planner = rust_planner.clone();
-                let priority = compute_job::Priority::P8; // High priority
-                let (plan, mut root_node) = compute_job::execute(priority, move || {
-                    let start = Instant::now();
+        let doc = doc.clone();
+        let rust_planner = self.planner.clone();
+        let priority = compute_job::Priority::P8; // High priority
+        let (plan, mut root_node) = compute_job::execute(priority, move || {
+            let start = Instant::now();
 
-                    let query_plan_options = QueryPlanOptions {
-                        override_conditions: plan_options.override_conditions,
-                    };
+            let query_plan_options = QueryPlanOptions {
+                override_conditions: plan_options.override_conditions,
+            };
 
-                    let result = operation
-                        .as_deref()
-                        .map(|n| Name::new(n).map_err(FederationError::from))
-                        .transpose()
-                        .and_then(|operation| {
-                            rust_planner.build_query_plan(
-                                &doc.executable,
-                                operation,
-                                query_plan_options,
-                            )
-                        });
-                    if let Err(FederationError::SingleFederationError(
-                        SingleFederationError::InternalUnmergeableFields { .. },
-                    )) = &result
-                    {
-                        u64_counter!(
-                            "apollo.router.operations.query_planner.unmergeable_fields",
-                            "Query planner caught attempting to merge unmergeable fields",
-                            1
-                        );
-                    }
-                    let result = result.map_err(FederationErrorBridge::from);
-
-                    let elapsed = start.elapsed().as_secs_f64();
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
-
-                    result.map(|plan| {
-                        let root_node = convert_root_query_plan_node(&plan);
-                        (plan, root_node)
-                    })
-                })
-                .await
-                .expect("query planner panicked")?;
-                if let Some(node) = &mut root_node {
-                    init_query_plan_root_node(node)?;
-                }
-
-                Ok(QueryPlanResult {
-                    formatted_query_plan: Some(Arc::new(plan.to_string())),
-                    query_plan: QueryPlan {
-                        node: root_node.map(Arc::new),
-                    },
-                    evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner()
-                        as u64,
-                })
+            let result = operation
+                .as_deref()
+                .map(|n| Name::new(n).map_err(FederationError::from))
+                .transpose()
+                .and_then(|operation| {
+                    rust_planner.build_query_plan(&doc.executable, operation, query_plan_options)
+                });
+            if let Err(FederationError::SingleFederationError(
+                SingleFederationError::InternalUnmergeableFields { .. },
+            )) = &result
+            {
+                u64_counter!(
+                    "apollo.router.operations.query_planner.unmergeable_fields",
+                    "Query planner caught attempting to merge unmergeable fields",
+                    1
+                );
             }
+            let result = result.map_err(FederationErrorBridge::from);
+
+            let elapsed = start.elapsed().as_secs_f64();
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+
+            result.map(|plan| {
+                let root_node = convert_root_query_plan_node(&plan);
+                (plan, root_node)
+            })
+        })
+        .await
+        .expect("query planner panicked")?;
+        if let Some(node) = &mut root_node {
+            init_query_plan_root_node(node)?;
         }
+
+        Ok(QueryPlanResult {
+            formatted_query_plan: Some(Arc::new(plan.to_string())),
+            query_plan_root_node: root_node.map(Arc::new),
+            evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
+        })
     }
 
-    async fn subgraphs(
-        &self,
-    ) -> Result<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>, ServiceBuildError> {
-        match self {
-            PlannerMode::Rust(rust) => Ok(rust
-                .subgraph_schemas()
-                .iter()
-                .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
-                .collect()),
-        }
-    }
-}
-
-impl BridgeQueryPlanner {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
-        introspection_cache: Arc<IntrospectionCache>,
     ) -> Result<Self, ServiceBuildError> {
-        let planner = PlannerMode::Rust(PlannerMode::rust(&schema, &configuration)?);
+        let introspection = Arc::new(IntrospectionCache::new(&configuration));
+        let planner = Self::create_planner(&schema, &configuration)?;
 
-        let subgraph_schemas = Arc::new(planner.subgraphs().await?);
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
+                .collect(),
+        );
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
@@ -231,12 +208,12 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
+            compute_jobs_queue_size_gauge: Default::default(),
             signature_normalization_algorithm,
-            introspection: introspection_cache,
+            introspection,
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
     }
@@ -301,8 +278,7 @@ impl BridgeQueryPlanner {
         query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let plan_result = self
-            .planner
-            .plan(doc, operation.clone(), plan_options, |root_node| {
+            .plan_inner(doc, operation.clone(), plan_options, |root_node| {
                 root_node.init_parsed_operations_and_hash_subqueries(
                     &self.subgraph_schemas,
                     &self.schema.raw_sdl,
@@ -312,7 +288,7 @@ impl BridgeQueryPlanner {
             })
             .await?;
         let QueryPlanResult {
-            query_plan: QueryPlan { node },
+            query_plan_root_node,
             formatted_query_plan,
             evaluated_plan_count,
         } = plan_result;
@@ -339,7 +315,7 @@ impl BridgeQueryPlanner {
             &self.signature_normalization_algorithm,
         );
 
-        if let Some(node) = node {
+        if let Some(node) = query_plan_root_node {
             u64_histogram!(
                 "apollo.router.query_planning.plan.evaluated_plans",
                 "Number of query plans evaluated for a query before choosing the best one",
@@ -363,21 +339,23 @@ impl BridgeQueryPlanner {
     }
 }
 
-impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
+impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Response = QueryPlannerResponse;
 
     type Error = QueryPlannerError;
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if crate::compute_job::is_full() {
+            Poll::Pending
+        } else {
+            Poll::Ready(Ok(()))
+        }
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
+        let start = Instant::now();
         let QueryPlannerRequest {
             query: original_query,
             operation_name,
@@ -431,6 +409,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 )
                 .await;
 
+            f64_histogram!(
+                "apollo.router.query_planning.total.duration",
+                "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
+                start.elapsed().as_secs_f64()
+            );
+
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
                     .content(query_planner_content)
@@ -447,7 +431,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 // Appease clippy::type_complexity
 pub(crate) type FilteredQuery = (Vec<Path>, ast::Document);
 
-impl BridgeQueryPlanner {
+impl QueryPlannerService {
     async fn get(
         &self,
         mut key: QueryKey,
@@ -562,24 +546,23 @@ impl BridgeQueryPlanner {
         )
         .await
     }
+
+    pub(super) fn activate(&self) {
+        // Gauges MUST be initialized after a meter provider is created.
+        // When a hot reload happens this means that the gauges must be re-initialized.
+        *self
+            .compute_jobs_queue_size_gauge
+            .lock()
+            .expect("lock poisoned") = Some(crate::compute_job::create_queue_size_gauge());
+        self.introspection.activate();
+    }
 }
 
-/// Data coming from the `plan` method on the router_bridge
-// Note: Reexported under `apollo_router::_private`
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
-    pub(super) query_plan: QueryPlan,
+    pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// The root query plan container.
-pub(super) struct QueryPlan {
-    /// The hierarchical nodes that make up the query plan
-    pub(super) node: Option<Arc<PlanNode>>,
 }
 
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
@@ -612,7 +595,6 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use test_log::test;
     use tower::ServiceExt;
 
@@ -647,21 +629,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn empty_query_plan() {
-        serde_json::from_value::<QueryPlan>(json!({ "plan": { "kind": "QueryPlan"} } )).expect(
-            "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
-                 Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
-        );
-    }
-
     #[test(tokio::test)]
     async fn federation_versions() {
         let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
         let config = Arc::default();
         let schema = Schema::parse(sdl, &config).unwrap();
-        let introspection = Arc::new(IntrospectionCache::new(&config));
-        let error = BridgeQueryPlanner::new(schema.into(), config, introspection)
+        let error = QueryPlannerService::new(schema.into(), config)
             .await
             .err()
             .expect("expected error for fed1 supergraph");
@@ -671,8 +644,7 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let introspection = Arc::new(IntrospectionCache::new(&config));
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, introspection)
+            let _planner = QueryPlannerService::new(schema.into(), config)
                 .await
                 .unwrap();
 
@@ -692,13 +664,9 @@ mod tests {
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
-        let planner = BridgeQueryPlanner::new(
-            schema.clone(),
-            Default::default(),
-            Arc::new(IntrospectionCache::new(&config)),
-        )
-        .await
-        .unwrap();
+        let planner = QueryPlannerService::new(schema.clone(), Default::default())
+            .await
+            .unwrap();
 
         let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
@@ -797,13 +765,9 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(
-            schema.into(),
-            configuration.clone(),
-            Arc::new(IntrospectionCache::new(&configuration)),
-        )
-        .await
-        .unwrap();
+        let planner = QueryPlannerService::new(schema.into(), configuration.clone())
+            .await
+            .unwrap();
 
         macro_rules! s {
             ($query: expr) => {
@@ -945,7 +909,7 @@ mod tests {
         }}"#);
     }
 
-    async fn subselections_keys(query: &str, planner: &BridgeQueryPlanner) -> String {
+    async fn subselections_keys(query: &str, planner: &QueryPlannerService) -> String {
         fn check_query_plan_coverage(
             node: &PlanNode,
             parent_label: Option<&str>,
@@ -1109,13 +1073,9 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(schema, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(
-            schema.into(),
-            configuration.clone(),
-            Arc::new(IntrospectionCache::new(&configuration)),
-        )
-        .await
-        .unwrap();
+        let planner = QueryPlannerService::new(schema.into(), configuration.clone())
+            .await
+            .unwrap();
 
         let doc = Query::parse_document(
             original_query,

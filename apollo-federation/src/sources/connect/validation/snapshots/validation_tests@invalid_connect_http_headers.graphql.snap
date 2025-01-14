@@ -50,7 +50,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_c
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.resources` invalid HTTP header value `  Value with 😊 emoji and newline  \n `",
+        message: "In `@connect(http.headers:)` on `Query.resources` invalid value `  Value with 😊 emoji and newline  \n `",
         locations: [
             21:21..21:58,
         ],

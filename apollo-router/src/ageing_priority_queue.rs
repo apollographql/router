@@ -74,7 +74,7 @@ where
     }
 
     pub(crate) fn receiver(&self) -> Receiver<'_, T> {
-        let mut select = crossbeam_channel::Select::new();
+        let mut select = crossbeam_channel::Select::new_biased();
         for (_, inner_receiver) in &self.inner_queues {
             select.recv(inner_receiver);
         }
@@ -90,20 +90,16 @@ where
     T: Send + 'static,
 {
     pub(crate) fn blocking_recv(&mut self) -> T {
-        loop {
-            // Block until something is ready.
-            // Ignore the returned index because it is "random" when multiple operations are ready.
-            self.select.ready();
-            // Check inner channels in priority order instead:
-            for (index, (_, inner_receiver)) in self.shared.inner_queues.iter().enumerate() {
-                if let Ok(message) = inner_receiver.try_recv() {
-                    self.shared.queued_count.fetch_sub(1, Ordering::Relaxed);
-                    self.age(index);
-                    return message;
-                }
-            }
-            // Another thread raced us to it or `ready()` returned spuriously, try again
-        }
+        // Because we used `Select::new_biased` above,
+        // `select()` will not shuffle receivers as it would with `Select::new` (for fairness)
+        // but instead will try each one in priority order.
+        let selected = self.select.select();
+        let index = selected.index();
+        let (_tx, rx) = &self.shared.inner_queues[index];
+        let item = selected.recv(rx).expect("disconnected channel");
+        self.shared.queued_count.fetch_sub(1, Ordering::Relaxed);
+        self.age(index);
+        item
     }
 
     // Promote some messages from priorities lower (higher indices) than `message_consumed_at_index`

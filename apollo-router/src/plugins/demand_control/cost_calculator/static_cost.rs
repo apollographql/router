@@ -633,9 +633,8 @@ mod tests {
     use tower::Service;
 
     use super::*;
-    use crate::introspection::IntrospectionCache;
     use crate::plugins::authorization::CacheKeyMetadata;
-    use crate::query_planner::BridgeQueryPlanner;
+    use crate::query_planner::QueryPlannerService;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::query_planner::PlanOptions;
     use crate::services::QueryPlannerContent;
@@ -722,13 +721,9 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = BridgeQueryPlanner::new(
-            schema.into(),
-            config.clone(),
-            Arc::new(IntrospectionCache::new(&config)),
-        )
-        .await
-        .unwrap();
+        let mut planner = QueryPlannerService::new(schema.into(), config.clone())
+            .await
+            .unwrap();
 
         let ctx = Context::new();
         ctx.extensions()
@@ -1142,5 +1137,16 @@ mod tests {
         "#;
 
         assert_eq!(estimated_cost(schema, query, variables), 1.0);
+    }
+
+    #[test(tokio::test)]
+    async fn subscription_request() {
+        let schema = include_str!("./fixtures/subscription_schema.graphql");
+        let query = include_str!("./fixtures/subscription_query.graphql");
+        let variables = "{}";
+
+        assert_eq!(estimated_cost(schema, query, variables), 1.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 1.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 1.0);
     }
 }
