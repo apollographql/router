@@ -575,20 +575,8 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
 async fn unsupported_compression() -> Result<(), ApolloRouterError> {
     let original_body = json!({ "query": "query { me { name } }" });
     let compressed_body = gzip(original_body).await;
-    let expected_response = graphql::Response::builder()
-        .data(json!({"response": ""}))
-        .build();
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        assert_eq!(
-            req.supergraph_request.into_body().query.unwrap(),
-            "query { me { name } }"
-        );
-        Ok(SupergraphResponse::new_from_graphql_response(
-            expected_response.clone(),
-            req.context,
-        ))
-    })
-    .await;
+
+    let router_service = router::service::empty().await;
     let (server, client) = init(router_service).await;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
@@ -611,20 +599,8 @@ async fn unsupported_compression() -> Result<(), ApolloRouterError> {
 async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
     let original_body = json!({ "query": "query { me { name } }" });
     let compressed_body = gzip(original_body).await;
-    let expected_response = graphql::Response::builder()
-        .data(json!({"response": ""}))
-        .build();
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        assert_eq!(
-            req.supergraph_request.into_body().query.unwrap(),
-            "query { me { name } }"
-        );
-        Ok(SupergraphResponse::new_from_graphql_response(
-            expected_response.clone(),
-            req.context,
-        ))
-    })
-    .await;
+
+    let router_service = router::service::empty().await;
     let (server, client) = init(router_service).await;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
