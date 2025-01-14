@@ -144,6 +144,10 @@ mod forbid_http_get_mutations_tests {
         let mut mock_service = MockSupergraphService::new();
 
         mock_service
+            .expect_clone()
+            .returning(|| MockSupergraphService::new());
+
+        mock_service
             .expect_call()
             .times(1)
             .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
@@ -167,6 +171,10 @@ mod forbid_http_get_mutations_tests {
         let mut mock_service = MockSupergraphService::new();
 
         mock_service
+            .expect_clone()
+            .returning(|| MockSupergraphService::new());
+
+        mock_service
             .expect_call()
             .times(1)
             .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
@@ -188,6 +196,10 @@ mod forbid_http_get_mutations_tests {
     #[tokio::test]
     async fn it_lets_http_get_queries_pass_through() {
         let mut mock_service = MockSupergraphService::new();
+
+        mock_service
+            .expect_clone()
+            .returning(|| MockSupergraphService::new());
 
         mock_service
             .expect_call()
@@ -238,7 +250,12 @@ mod forbid_http_get_mutations_tests {
         .map(|method| create_request(method, OperationKind::Mutation));
 
         for request in forbidden_requests {
-            let mock_service = MockSupergraphService::new();
+            let mut mock_service = MockSupergraphService::new();
+
+            mock_service
+                .expect_clone()
+                .returning(|| MockSupergraphService::new());
+
             let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
             let services = service_stack.ready().await.unwrap();
 
