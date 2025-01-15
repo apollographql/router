@@ -137,6 +137,7 @@ use crate::router_factory::Endpoint;
 use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
 use crate::services::execution;
 use crate::services::http::HttpRequest;
+use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -171,8 +172,8 @@ pub(crate) mod tracing;
 pub(crate) mod utils;
 
 // Tracing consts
-pub(crate) const CLIENT_NAME: &str = "apollo_telemetry::client_name";
-const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
+const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
@@ -1359,7 +1360,7 @@ impl Telemetry {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
-                .get::<_, bool>("persisted_query_hit")
+                .get::<_, bool>(PERSISTED_QUERY_CACHE_HIT)
                 .unwrap_or_default();
 
             if context

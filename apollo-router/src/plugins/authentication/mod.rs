@@ -67,7 +67,7 @@ pub(crate) mod subgraph;
 mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
-pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication::JWT::claims";
+pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo::authentication::jwt_claims";
 const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
