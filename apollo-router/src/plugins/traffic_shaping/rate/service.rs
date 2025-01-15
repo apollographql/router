@@ -14,6 +14,7 @@ use super::future::ResponseFuture;
 use super::Rate;
 use crate::plugins::traffic_shaping::rate::error::RateLimited;
 
+// FIXME: better name
 #[derive(Debug, Clone)]
 pub(crate) enum RateLimiting<T> {
     Apollo(RateLimit<T>),

@@ -10,7 +10,6 @@ pub(crate) mod service;
 pub(crate) use self::error::RateLimited;
 pub(crate) use self::layer::ConfiguredBy;
 pub(crate) use self::layer::RateLimitLayer;
-pub(crate) use self::layer::RateLimitingLayer;
 pub(crate) use self::rate::Rate;
 pub(crate) use self::service::RateLimit;
 pub(crate) use self::service::RateLimiting;

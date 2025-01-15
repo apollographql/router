@@ -32,7 +32,6 @@ use tower::ServiceExt;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 use self::rate::RateLimited;
-use self::rate::RateLimitingLayer;
 pub(crate) use self::retry::RetryPolicy;
 use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
@@ -65,6 +64,8 @@ struct Shaping {
     compression: Option<Compression>,
     /// Enable global rate limiting
     global_rate_limit: Option<RateLimitConf>,
+    /// Enable TPS rate limiting
+    tps_rate_limit: Option<RateLimitConf>,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
@@ -102,6 +103,11 @@ impl Merge for Shaping {
                     .global_rate_limit
                     .as_ref()
                     .or(fallback.global_rate_limit.as_ref())
+                    .cloned(),
+                tps_rate_limit: self
+                    .tps_rate_limit
+                    .as_ref()
+                    .or(fallback.tps_rate_limit.as_ref())
                     .cloned(),
                 experimental_retry: self
                     .experimental_retry
@@ -232,8 +238,8 @@ impl Merge for RateLimitConf {
 // Remove this once the configuration yml changes.
 pub(crate) struct TrafficShaping {
     config: Config,
-    rate_limit_router: Option<RateLimitingLayer>,
-    rate_limit_subgraphs: Mutex<HashMap<String, RateLimitingLayer>>,
+    rate_limit_router: Option<RateLimitLayer>,
+    rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
 }
 
 #[async_trait::async_trait]
@@ -256,7 +262,7 @@ impl Plugin for TrafficShaping {
                         ),
                     })
                 } else {
-                    Ok(RateLimitingLayer::new(
+                    Ok(RateLimitLayer::new(
                         router_rate_limit_conf.capacity,
                         router_rate_limit_conf.interval,
                         rate::ConfiguredBy::User,
@@ -377,9 +383,29 @@ impl TrafficShaping {
         let final_config = Self::merge_config(all_config, subgraph_config);
 
         if let Some(config) = final_config {
-            let rate_limit = config
+            let user_rate_limit =
+                config
+                    .shaping
+                    .global_rate_limit
+                    .as_ref()
+                    .map(|rate_limit_conf| {
+                        self.rate_limit_subgraphs
+                            .lock()
+                            .unwrap()
+                            .entry(name.to_string())
+                            .or_insert_with(|| {
+                                RateLimitLayer::new(
+                                    rate_limit_conf.capacity,
+                                    rate_limit_conf.interval,
+                                    rate::ConfiguredBy::User,
+                                )
+                            })
+                            .clone()
+                    });
+
+            let tps_rate_limit = config
                 .shaping
-                .global_rate_limit
+                .tps_rate_limit
                 .as_ref()
                 .map(|rate_limit_conf| {
                     self.rate_limit_subgraphs
@@ -387,10 +413,10 @@ impl TrafficShaping {
                         .unwrap()
                         .entry(name.to_string())
                         .or_insert_with(|| {
-                            RateLimitingLayer::new(
+                            RateLimitLayer::new(
                                 rate_limit_conf.capacity,
                                 rate_limit_conf.interval,
-                                rate::ConfiguredBy::User,
+                                rate::ConfiguredBy::Apollo,
                             )
                         })
                         .clone()
@@ -442,7 +468,8 @@ impl TrafficShaping {
                         .unwrap_or(DEFAULT_TIMEOUT),
                     ))
                     .option_layer(retry)
-                    .option_layer(rate_limit)
+                    .option_layer(user_rate_limit)
+                    .option_layer(tps_rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.shaping.compression {
