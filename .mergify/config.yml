@@ -19,7 +19,9 @@ pull_request_rules:
           - "{{ author }}"
 queue_rules:
   - merge_method: squash
-    name: Dev
+    name: dev
+  - merge_method: squash
+    name: 1.x
     queue_conditions:
       - and:
-          - base = dev
+          - base = 1.x
