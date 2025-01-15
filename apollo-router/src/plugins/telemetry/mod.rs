@@ -1099,14 +1099,14 @@ impl Telemetry {
         // http_requests_total - the total number of HTTP requests received
         u64_counter!(
             "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
+            "Total number of HTTP requests made. (deprecated)",
             1,
             metric_attrs
         );
 
         f64_histogram!(
             "apollo_router_http_request_duration_seconds",
-            "Duration of HTTP requests.",
+            "Duration of HTTP requests. (deprecated)",
             request_duration.as_secs_f64(),
             metric_attrs
         );
@@ -1272,7 +1272,7 @@ impl Telemetry {
 
                 u64_counter!(
                     "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
+                    "Total number of HTTP requests made. (deprecated)",
                     1,
                     metric_attrs
                 );
@@ -1289,7 +1289,7 @@ impl Telemetry {
 
                 u64_counter!(
                     "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
+                    "Total number of HTTP requests made. (deprecated)",
                     1,
                     metric_attrs
                 );
@@ -1297,7 +1297,7 @@ impl Telemetry {
         }
         f64_histogram!(
             "apollo_router_http_request_duration_seconds",
-            "Duration of HTTP requests.",
+            "Duration of HTTP requests. (deprecated)",
             now.elapsed().as_secs_f64(),
             metric_attrs
         );
@@ -1348,7 +1348,7 @@ impl Telemetry {
 
                 u64_counter!(
                     "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
+                    "Total number of HTTP requests made. (deprecated)",
                     1,
                     metric_attrs
                 );

@@ -10,22 +10,10 @@ GraphOS Router and Apollo Router Core provide a set of non-configurable metric i
 
 These instruments can be consumed by configuring a [metrics exporter](/router/configuration/telemetry/exporters/metrics/overview).
 
-### HTTP
-
-- `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
-- `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
-  - `subgraph`: (Optional) The subgraph being queried
-- `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status
-
 ### GraphQL
 
 - `apollo.router.graphql_error` - counts GraphQL errors in responses, attributes:
   - `code`: error code
-
-### Session
-
-- `apollo_router_session_count_total` - Number of currently connected clients
-- `apollo_router_session_count_active` - Number of in-flight GraphQL requests
 
 ### Cache
 
@@ -127,4 +115,8 @@ The following metrics have been deprecated and should not be used.
 - `apollo_authentication_success_count` - **Deprecated**: use the `apollo.router.operations.authentication.jwt` metric instead. If the `authentication.jwt.failed` attribute is *absent* or `false`, the authentication succeeded.
 - `apollo_require_authentication_failure_count` - **Deprecated**: use the `http.server.request.duration` metric's `http.response.status_code` attribute. Requests with authentication failures have HTTP status code 401.
 - `apollo_router_timeout` - **Deprecated**: this metric conflates timed-out requests from client to the router, and requests from the router to subgraphs. Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests, and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
-- `apollo_router_http_request_retry_total` **Deprecated**: use the `http.client.request.duration` metric's `http.request.resend_count` attribute. Requests with retries will contains `http.request.resend_count` set with the number of retries.
+- `apollo_router_session_count_active` - **Deprecated**: Number of in-flight GraphQL requests
+- `apollo_router_http_requests_total` - **Deprecated**: Total number of HTTP requests by HTTP status
+- `apollo_router_http_request_duration_seconds_bucket` - **Deprecated**: HTTP router request duration
+- `apollo_router_http_request_duration_seconds_bucket` - **Deprecated**: HTTP subgraph request duration, attributes:
+  - `subgraph`: (Optional) The subgraph being queried

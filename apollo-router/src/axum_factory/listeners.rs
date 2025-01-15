@@ -235,7 +235,7 @@ pub(super) fn serve_router_on_listen_addr(
         let _total_session_count_instrument = meter_provider()
             .meter("apollo/router")
             .u64_observable_gauge("apollo_router_session_count_total")
-            .with_description("Number of currently connected clients")
+            .with_description("Number of currently connected clients (deprecated)")
             .with_callback(move |gauge| {
                 gauge.observe(
                     TOTAL_SESSION_COUNT.load(Ordering::Relaxed),

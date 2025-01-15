@@ -81,7 +81,7 @@ fn session_count_instrument() -> ObservableGauge<u64> {
     let meter = meter_provider().meter("apollo/router");
     meter
         .u64_observable_gauge("apollo_router_session_count_active")
-        .with_description("Amount of in-flight sessions")
+        .with_description("Amount of in-flight sessions (deprecated)")
         .with_callback(|gauge| {
             gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
         })

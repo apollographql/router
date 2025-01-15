@@ -120,7 +120,7 @@ impl QueryAnalysisLayer {
                 .build()];
             u64_counter!(
                 "apollo_router_http_requests_total",
-                "Total number of HTTP requests made.",
+                "Total number of HTTP requests made. (deprecated)",
                 1,
                 status = StatusCode::BAD_REQUEST.as_u16() as i64,
                 error = "Must provide query string"
