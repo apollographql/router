@@ -237,6 +237,7 @@ commands:
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
                     mkdir $HOME/.deb
+                    sudo apt-get update
                     sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev
                   fi
                   sudo dpkg -i $HOME/.deb/*.deb
