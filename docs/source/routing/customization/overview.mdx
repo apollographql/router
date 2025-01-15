@@ -11,10 +11,10 @@ You can create **customizations** for the GraphOS Router or Apollo Router Core t
 The GraphOS Router supports the following customization types:
 
 - [**Rhai scripts**](/graphos/routing/customization/rhai/)
-    - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
+  - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
 - [**External co-processing**](/router/customizations/coprocessor/) ([Enterprise feature](/router/enterprise-features/))
-    - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
-    - The router calls your custom code via HTTP, passing it the details of each incoming client request.
+  - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
+  - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 
 The Apollo Router Core supports customization only through [Rhai scripts](/graphos/routing/customization/rhai/).
 
@@ -49,7 +49,7 @@ flowchart RL
       api1("subgraph A");
       api2("subgraph B");
       api3("subgraph C");
-      api1 --- api2 --- api3 
+      api1 --- api2 --- api3
 
     end
 
@@ -76,7 +76,7 @@ For responses, the router executes the plugins _after_ the service.
 ```mermaid
 flowchart RL
   subgraph Service
-    coreService["Core <br/>service"] -->|response| Plugin2["Plugin 2"]  -->|response| Plugin1["Plugin 1"]   
+    coreService["Core <br/>service"] -->|response| Plugin2["Plugin 2"]  -->|response| Plugin1["Plugin 1"]
   end
 
 Plugin1["Plugin 1"] -->|response| Client
@@ -106,8 +106,8 @@ flowchart TB;
             end
             queryPlanner("Query Planner");
         end
-        
-        
+
+
         subgraph executionService["Execution Service"]
             executionPlugins[[Execution plugins]];
         end
@@ -118,7 +118,7 @@ flowchart TB;
             end
             subgraph service2["Subgraph Service B"]
             subgraphPlugins2[[Subgraph plugins]];
-            end            
+            end
         end
     end;
 subgraphA[Subgraph A];
@@ -138,7 +138,7 @@ service1 --"8a. HTTP request"--> subgraphA;
 service2 --"8b. HTTP request"--> subgraphB;
 ```
 
-1. The router receives a client request at an HTTP server. 
+1. The router receives a client request at an HTTP server.
 2. The HTTP server transforms the HTTP request into a `RouterRequest` containing HTTP headers and the request body as a stream of byte arrays.
 3. The router service receives the `RouterRequest`. It handles Automatic Persisted Queries (APQ), parses the GraphQL request from JSON, and calls the supergraph service with the resulting `SupergraphRequest`.
 4. The supergraph service calls the query planner with the GraphQL query from the `SupergraphRequest`.
@@ -146,10 +146,10 @@ service2 --"8b. HTTP request"--> subgraphB;
 6. The supergraph service calls the execution service with an `ExecutionRequest`, made up of `SupergraphRequest` and the query plan.
 7. For each fetch node of the query plan, the execution service creates a `SubgraphRequest` and then calls the respective subgraph service.
 8. Each subgraph has its own subgraph service, and each service can have its own subgraph plugin configuration. The subgraph service transforms the `SubgraphRequest` into an HTTP request to its subgraph. The `SubgraphRequest` contains:
-    - the (read-only) `SupergraphRequest`
-    - HTTP headers
-    - the subgraph request's operation type (query, mutation, or subscription)
-    - a GraphQL request object as the request body
+   - the (read-only) `SupergraphRequest`
+   - HTTP headers
+   - the subgraph request's operation type (query, mutation, or subscription)
+   - a GraphQL request object as the request body
 
 Once your subgraphs provide a response, the response follows the path outlined below.
 
@@ -170,8 +170,8 @@ flowchart BT;
             end
             queryPlanner("QueryPlanner");
         end
-        
-        
+
+
         subgraph executionService["Execution Service"]
             executionPlugins[[Execution plugins]];
         end
@@ -182,7 +182,7 @@ flowchart BT;
             end
             subgraph service2["Subgraph Service B"]
             subgraphPlugins2[[Subgraph plugins]];
-            end            
+            end
         end
     end;
 subgraph1[Subgraph A];
@@ -211,7 +211,7 @@ For simplicity's sake, the preceding diagrams show the request and response side
 
 For example, `SubgraphRequest`s can happen both in parallel _and_ in sequence: one subgraph's response may be necessary for another's `SubgraphRequest`. (The query planner decides which requests can happen in parallel vs. which need to happen in sequence). To match subgraph requests to responses in customizations, the router exposes a `subgraph_request_id` field that will hold the same value in paired requests and responses.
 
-##### Requests run in parallel 
+##### Requests run in parallel
 
 ```mermaid
 flowchart LR;
@@ -226,7 +226,7 @@ flowchart LR;
             end
             subgraph service2["Subgraph Service B"]
             subgraphPlugins2[[Subgraph plugins]];
-            end            
+            end
         end
 
 
@@ -259,7 +259,7 @@ flowchart LR;
             end
             subgraph service2["Subgraph Service B"]
             subgraphPlugins2[[Subgraph plugins]];
-            end            
+            end
         end
 
 
@@ -283,15 +283,43 @@ Additionally, some requests and responses may happen multiple times for the same
 
 The router expects to execute on a stream of data. In order to work correctly and provide high performance, the following expectations must be met:
 
-* **Request Path**: No buffering before the end of the `router_service` processing step
-* **Response Path**: No buffering
+- **Request Path**: No buffering before the end of the `router_service` processing step
+- **Response Path**: No buffering
 
 > In general, it's best to avoid buffering where possible. If necessary, it is ok to do so on the request path once the `router_service` step is complete.
 
 This guidance applies if you are:
- - Modifying the router
- - Creating a native Rust plugin
- - Creating a custom binary
+
+- Modifying the router
+- Creating a native Rust plugin
+- Creating a custom binary
+
+### Request Context
+
+The router makes several values available in the request context, which is shared across stages of the processing pipeline.
+
+- `apollo_authorization::authenticated::required`: true if the query covers type of fields marked with `@authenticated`
+- `apollo_authentication::JWT::claims`: claims extracted from a JWT if present in the request
+- `apollo_authorization::policies::required`: if the query covers type of fields marked with `@policy`, it contains a map of `policy name -> Option<bool>`. A coprocessor or rhai script can edit this map to mark `true` on authorization policies that succeed or `false` on ones that fail
+- `apollo_authorization::scopes::required`: if the query covers type of fields marked with `@requiresScopes`, it contains the list of scopes used by those directive applications
+- `apollo::entity_cache::cached_keys_status`: a map of cache control statuses for cached entities, keyed by subgraph request id; populated by the entity caching plugin when `expose_keys_in_context` is turned on in the router configuration
+- `apollo_operation_id`: contains the usage reporting stats report key
+- `apollo_override::labels_to_override`: used in progressive override, list of labels for which we need an override
+- `apollo_override::unresolved_labels`: used in progressive override, contains the list of unresolved labels
+- `apollo_router::supergraph::first_event`: false if the current response chunk is not the first response in the stream, nonexistent otherwise
+- `apollo_telemetry::client_name`: client name extracted from the client name header
+- `apollo_telemetry::client_version`: client version extracted from the client version header
+- `apollo::telemetry::contains_graphql_error`: true if the response contains at least one error
+- `cost.actual`: calculated cost of the responses returned by the subgraphs; populated by the demand control plugin
+- `cost.estimated`: estimated cost of the requests to be sent to the subgraphs; populated by the demand control plugin
+- `cost.result`: `COST_OK` if allowed, and `COST_TOO_EXPENSIVE` if rejected due to cost limits; populated by the demand control plugin
+- `cost.strategy`: the name of the cost calculation strategy used by the demand control plugin
+- `experimental::expose_query_plan.plan`: contains the query plan serialized as JSON (editing it has no effect on execution)
+- `experimental::expose_query_plan.formatted_plan`: query plan formatted as text
+- `operation_name`: name of the operation (according to the query and the operation_name field in the request)
+- `operation_kind`: can be `Query`, `Mutation` or `Subscription`
+- `persisted_query_hit`: present if the request used APQ, true if we got a cache hit for the query id, false otherwise
+- `persisted_query_register`: true if the request registered a query in APQ
 
 ## Customization creation
 
