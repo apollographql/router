@@ -7,21 +7,18 @@ use url::Url;
 
 use crate::sources::connect::string_template;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
+use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::selection::validate_selection_variables;
-use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::variable::ConnectorsContext;
-use crate::sources::connect::variable::Phase;
-use crate::sources::connect::variable::Target;
 use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
     coordinate: HttpMethodCoordinate,
-    schema: &SchemaInfo,
+    expression_context: &expression::Context,
 ) -> Result<URLTemplate, Vec<Message>> {
+    let schema = expression_context.schema;
     let (template, str_value) = match parse_template(coordinate, schema) {
         Ok(tuple) => tuple,
         Err(message) => return Err(vec![message]),
@@ -31,22 +28,23 @@ pub(crate) fn validate_template(
         messages
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
+    let expression_context = expression::Context::for_connect_request(schema, coordinate.connect);
 
-    let expression_context =
-        ConnectorsContext::new(coordinate.connect.into(), Phase::Request, Target::Url);
-    let variable_resolver = VariableResolver::new(expression_context, schema);
     for expression in template.expressions() {
         messages.extend(
-            validate_selection_variables(
-                &variable_resolver,
-                coordinate,
-                &expression.expression,
-                str_value,
-                expression.location.start,
-            )
-            .err(),
+            expression::validate(expression, &expression_context)
+                .err()
+                .into_iter()
+                .flatten()
+                .map(|err| Message {
+                    code: Code::InvalidUrl,
+                    message: format!("In {coordinate}: {}", err.message),
+                    locations: str_value
+                        .line_col_for_subslice(err.location, schema)
+                        .into_iter()
+                        .collect(),
+                }),
         );
-        // TODO: type check the expression. It can't resolve to a list or object.
     }
 
     if messages.is_empty() {

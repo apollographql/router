@@ -29,9 +29,10 @@ Named(
                 },
                 None,
             ),
-            Path(
-                None,
-                PathSelection {
+            Path {
+                alias: None,
+                inline: true,
+                path: PathSelection {
                     path: WithRange {
                         node: Key(
                             WithRange {
@@ -115,7 +116,7 @@ Named(
                         ),
                     },
                 },
-            ),
+            },
             Field(
                 None,
                 WithRange {
@@ -128,9 +129,10 @@ Named(
                 },
                 None,
             ),
-            Path(
-                None,
-                PathSelection {
+            Path {
+                alias: None,
+                inline: true,
+                path: PathSelection {
                     path: WithRange {
                         node: Key(
                             WithRange {
@@ -216,7 +218,7 @@ Named(
                         ),
                     },
                 },
-            ),
+            },
         ],
         range: Some(
             13..164,

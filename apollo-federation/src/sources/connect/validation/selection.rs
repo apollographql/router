@@ -28,9 +28,9 @@ use crate::sources::connect::validation::coordinates::connect_directive_http_bod
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::variable::VariableResolver;
-use crate::sources::connect::variable::ConnectorsContext;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
+use crate::sources::connect::variable::VariableContext;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
@@ -43,13 +43,17 @@ pub(super) fn validate_selection(
 
     validate_selection_variables(
         &VariableResolver::new(
-            ConnectorsContext::new(coordinate.into(), Phase::Response, Target::Body),
+            VariableContext::new(
+                coordinate.field_coordinate.object,
+                coordinate.field_coordinate.field,
+                Phase::Response,
+                Target::Body,
+            ),
             schema,
         ),
         selection_arg.coordinate,
         &json_selection,
         selection_arg.value,
-        0,
     )?;
 
     let field = coordinate.field_coordinate.field;
@@ -120,17 +124,19 @@ pub(super) fn validate_body_selection(
         });
     }
 
-    // TODO: validate JSONSelection
-
     validate_selection_variables(
         &VariableResolver::new(
-            ConnectorsContext::new(connect_coordinate.into(), Phase::Request, Target::Body),
+            VariableContext::new(
+                connect_coordinate.field_coordinate.object,
+                connect_coordinate.field_coordinate.field,
+                Phase::Request,
+                Target::Body,
+            ),
             schema,
         ),
         coordinate,
         &selection,
         selection_str,
-        0,
     )
 }
 
@@ -140,7 +146,6 @@ pub(super) fn validate_selection_variables(
     coordinate: impl Display,
     selection: &JSONSelection,
     selection_str: GraphQLString,
-    location_offset: usize,
 ) -> Result<(), Message> {
     for reference in selection
         .external_var_paths()
@@ -148,7 +153,7 @@ pub(super) fn validate_selection_variables(
         .flat_map(|var_path| var_path.variable_reference())
     {
         variable_resolver
-            .resolve(&reference, selection_str, location_offset)
+            .resolve(&reference, selection_str)
             .map_err(|mut err| {
                 err.message = format!("In {coordinate}: {message}", message = err.message);
                 err
@@ -262,9 +267,9 @@ impl SelectionValidator<'_, '_> {
         Ok(())
     }
 
-    fn get_selection_location<T>(
+    fn get_selection_location(
         &self,
-        selection: &impl Ranged<T>,
+        selection: &impl Ranged,
     ) -> impl Iterator<Item = Range<LineColumn>> {
         selection
             .range()

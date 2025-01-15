@@ -5,8 +5,8 @@ expression: "selection!(\" suffix : results -> slice ( $( - 1 ) -> mul ( $args .
 Named(
     SubSelection {
         selections: [
-            Path(
-                Some(
+            Path {
+                alias: Some(
                     Alias {
                         name: WithRange {
                             node: Field(
@@ -21,7 +21,8 @@ Named(
                         ),
                     },
                 ),
-                PathSelection {
+                inline: false,
+                path: PathSelection {
                     path: WithRange {
                         node: Key(
                             WithRange {
@@ -161,7 +162,7 @@ Named(
                         ),
                     },
                 },
-            ),
+            },
         ],
         range: Some(
             1..71,
