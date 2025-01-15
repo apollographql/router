@@ -214,11 +214,19 @@ impl NormalizedTypeCondition {
 
     /// is this type condition represented by a single named type?
     pub fn is_named_type(&self, type_name: &Name) -> bool {
-        let mut it = self.for_display.0.iter();
-        let Some(first) = it.next() else {
+        // Check the display type first.
+        let Some((first, rest)) = self.for_display.0.split_first() else {
             return false;
         };
-        it.next().is_none() && first.type_name() == type_name
+        if rest.is_empty() && first.type_name() == type_name {
+            return true;
+        }
+
+        // Check the ground set.
+        let Some((first, rest)) = self.ground_set.split_first() else {
+            return false;
+        };
+        rest.is_empty() && first.type_name == *type_name
     }
 }
 
