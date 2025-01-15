@@ -97,7 +97,13 @@ fn map_method(
 
                 return (Some(JSON::Array(output)), errors);
             } else {
-                return first_arg.apply_to_path(data, vars, input_path);
+                // Return a singleton array wrapping the value of applying the
+                // ->map method the non-array input data.
+                return first_arg
+                    .apply_to_path(data, vars, input_path)
+                    .and_then_collecting_errors(|value| {
+                        tail.apply_to_path(&JSON::Array(vec![value.clone()]), vars, input_path)
+                    });
             }
         } else {
             return (
@@ -146,17 +152,11 @@ fn map_shape(
                 );
                 Shape::array(new_prefix, new_tail)
             }
-            ShapeCase::Name(_name, _subpath) => {
-                // We don't have a way to tell if this is an array, where map is applied to each
-                // element, or a different value where map is applied to just one. So for now we
-                // erase the type (until we add more sophisticated resolution in the future).
-                Shape::unknown()
-            }
-            _ => first_arg.compute_output_shape(
-                input_shape.clone(),
+            _ => Shape::list(first_arg.compute_output_shape(
+                input_shape.any_item(),
                 dollar_shape.clone(),
                 named_var_shapes,
-            ),
+            )),
         }
     } else {
         Shape::error_with_range(

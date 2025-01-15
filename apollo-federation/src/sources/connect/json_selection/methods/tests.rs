@@ -199,7 +199,7 @@ fn test_map_method() {
         selection!("singleValue->map(@->mul(10))").apply_to(&json!({
             "singleValue": 123,
         })),
-        (Some(json!(1230)), vec![]),
+        (Some(json!([1230])), vec![]),
     );
 }
 
