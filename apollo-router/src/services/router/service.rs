@@ -245,6 +245,9 @@ impl RouterService {
         &self,
         supergraph_request: SupergraphRequest,
     ) -> Result<router::Response, BoxError> {
+        // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
+        // layers with various ifs and matches, but *really*, we are calling each layer in order
+        // and handling short-circuiting.
         let mut request_res = self
             .persisted_query_layer
             .supergraph_request(supergraph_request);

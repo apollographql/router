@@ -47,7 +47,7 @@ impl PersistedQuery {
     }
 }
 
-/// [`Layer`] for APQ implementation.
+/// A layer-like type implementing Automatic Persisted Queries.
 #[derive(Clone)]
 pub(crate) struct APQLayer {
     /// set to None if APQ is disabled
@@ -73,6 +73,12 @@ impl APQLayer {
 
     /// Supergraph service implementation for Automatic Persisted Queries.
     ///
+    /// If APQ is disabled, it rejects requests that try to use a persisted query hash.
+    /// If APQ is enabled, requests using APQ will populate the cache and use the cache as needed,
+    /// see [`apq_request`] for details.
+    ///
+    /// This must happen before GraphQL query parsing.
+    ///
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
@@ -87,6 +93,15 @@ impl APQLayer {
     }
 }
 
+/// Used when APQ is enabled.
+///
+/// If the request contains a hash and a query string, that query is added to the APQ cache.
+/// Then, the client can submit only the hash and not the query string on subsequent requests.
+/// The request is rejected if the hash does not match the query string.
+///
+/// If the request contains only a hash, attempts to read the query from the APQ cache, and
+/// populates the query string in the request body.
+/// The request is rejected if the hash is not present in the cache.
 async fn apq_request(
     cache: &DeduplicatingCache<String, String>,
     mut request: SupergraphRequest,
@@ -185,6 +200,7 @@ pub(crate) fn calculate_hash_for_query(query: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Used when APQ is disabled. Rejects requests that try to use a persisted query hash anyways.
 async fn disabled_apq_request(
     request: SupergraphRequest,
 ) -> Result<SupergraphRequest, SupergraphResponse> {
