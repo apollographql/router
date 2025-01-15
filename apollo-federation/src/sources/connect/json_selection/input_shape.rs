@@ -114,8 +114,12 @@ impl InputShape for NamedSelection {
                     .as_ref()
                     .map(|s| s.compute_input_shape(trie, path.as_slice()));
             }
-            NamedSelection::Path(_, path_selection) => {
-                path_selection.compute_input_shape(trie, context)
+            NamedSelection::Path {
+                alias: _,
+                inline: _,
+                path,
+            } => {
+                path.compute_input_shape(trie, context);
             }
             NamedSelection::Group(_, sub_selection) => {
                 sub_selection.compute_input_shape(trie, context)
@@ -288,6 +292,8 @@ impl InputShape for LitExpr {
 
 #[cfg(test)]
 mod tests {
+    use insta::assert_debug_snapshot;
+
     use super::JSONSelection;
 
     #[test]
@@ -328,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn text_contextual_vars() {
+    fn test_contextual_vars() {
         let s = JSONSelection::parse(
             "
             $.a {
@@ -370,7 +376,7 @@ mod tests {
         let schema = apollo_compiler::Schema::parse_and_validate(
             "
         type Query {
-            f(a: Int, b: BInput): T
+            f(a: Int, b: BInput, e: Float!, f: BInput!): T
         }
 
         type T {
@@ -379,6 +385,7 @@ mod tests {
 
         input BInput {
             c: String
+            c2: String!
         }
         ",
             "path",
@@ -387,12 +394,18 @@ mod tests {
         let field_shapes =
             super::shapes_for_field(&schema, schema.type_field("Query", "f").unwrap(), None);
 
-        let input_shape = JSONSelection::parse("$args { a b { c } }")
+        let input_shape = JSONSelection::parse("$args { a b { c } e f { c2 } }")
             .unwrap()
             .input_shape();
 
-        dbg!(&field_shapes);
-        dbg!(super::reconcile_input_shapes(&input_shape, &field_shapes));
+        assert_debug_snapshot!(
+            super::reconcile_input_shapes(&input_shape, &field_shapes),
+            @r###"
+        {
+            "$args": { a: One<Int, null>, b: One<{ c: One<String, null> }, null>, e: Float, f: { c2: String } },
+        }
+        "###
+        );
     }
 
     #[test]
@@ -400,21 +413,23 @@ mod tests {
         let schema = apollo_compiler::Schema::parse_and_validate(
             "
         type Query {
-            f(a: Int, b: BInput): T
+            f(a: Int): T
         }
 
         type T {
-            d: Boolean
+            b: B
+            d: Boolean!
             e(f: Int): String
         }
 
-        input BInput {
-            c: String
+        type B {
+            c: String!
         }
         ",
             "path",
         )
         .unwrap();
+
         let field_shapes = super::shapes_for_field(
             &schema,
             schema.type_field("T", "e").unwrap(),
@@ -424,17 +439,64 @@ mod tests {
             }),
         );
 
-        let input_shape = JSONSelection::parse("$args { f } $this { d }")
+        let input_shape = JSONSelection::parse("$args { f } $this { b { c } d }")
             .unwrap()
             .input_shape();
 
-        dbg!(&field_shapes);
-        dbg!(super::reconcile_input_shapes(&input_shape, &field_shapes));
+        assert_debug_snapshot!(
+            super::reconcile_input_shapes(&input_shape, &field_shapes),
+            @r###"
+        {
+            "$args": { f: One<Int, null> },
+            "$this": { b: One<{ c: String }, null>, d: Bool },
+        }
+        "###
+        );
+    }
+
+    #[test]
+    fn shapes_errors() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            "
+        type Query {
+            f(a: Int, b: BInput): T
+        }
+
+        type T {
+            f: String
+        }
+
+        input BInput {
+            c: String!
+        }
+        ",
+            "path",
+        )
+        .unwrap();
+
+        let field_shapes =
+            super::shapes_for_field(&schema, schema.type_field("Query", "f").unwrap(), None);
+
+        let input_shape = JSONSelection::parse("$args { a { x } b c }")
+            .unwrap()
+            .input_shape();
+
+        assert_debug_snapshot!(
+            super::reconcile_input_shapes(&input_shape, &field_shapes),
+            @r###"
+        {
+            "$args": { a: One<Error<"`TODO` does not have a field named `TODO`">, null>, b: One<Error<"`TODO` is an object, so TODO must select fields within the object with `TODO`{}", { c: String }>, null>, c: Error<"`TODO` does not have a field named `c`"> },
+        }
+        "###
+        );
     }
 }
 
 #[allow(unused)]
-fn reconcile_input_shapes(trie: &UnresolvedShape, field_shapes: &IndexMap<&str, Shape>) -> Shape {
+fn reconcile_input_shapes(
+    trie: &UnresolvedShape,
+    field_shapes: &IndexMap<&str, Shape>,
+) -> IndexMap<String, Shape> {
     fn reconcile(
         field_shapes: &IndexMap<&str, Shape>,
         trie: &UnresolvedShape,
@@ -447,7 +509,11 @@ fn reconcile_input_shapes(trie: &UnresolvedShape, field_shapes: &IndexMap<&str, 
             }
             shape::ShapeCase::Object { fields, rest: _ } => {
                 if trie.0.is_empty() {
-                    return shape.clone(); // no fields to reconcile? error here?
+                    return Shape::error_with_range_and_partial(
+                        format!("`{}` is an object, so {} must select fields within the object with `{}`{{}}", "TODO", "TODO", "TODO"),
+                        trie.1.first().cloned(),
+                        shape.clone()
+                    );
                 }
 
                 let mut new_fields = IndexMap::default();
@@ -459,7 +525,7 @@ fn reconcile_input_shapes(trie: &UnresolvedShape, field_shapes: &IndexMap<&str, 
                         new_fields.insert(
                             key.to_string(),
                             Shape::error_with_range(
-                                "missing field for key".to_string(),
+                                format!("`{}` does not have a field named `{}`", "TODO", key),
                                 trie.1.first().cloned(),
                             ),
                         );
@@ -490,7 +556,7 @@ fn reconcile_input_shapes(trie: &UnresolvedShape, field_shapes: &IndexMap<&str, 
                     shape.clone()
                 } else {
                     Shape::error_with_range(
-                        "expected scalar, has fields".to_string(),
+                        format!("`{}` does not have a field named `{}`", "TODO", "TODO"),
                         trie.1.first().cloned(),
                     )
                 }
@@ -506,7 +572,7 @@ fn reconcile_input_shapes(trie: &UnresolvedShape, field_shapes: &IndexMap<&str, 
         new_fields.insert(key.to_string(), value);
     }
 
-    Shape::record(indexmap::IndexMap::from_iter(new_fields))
+    new_fields
 }
 
 #[allow(unused)]
