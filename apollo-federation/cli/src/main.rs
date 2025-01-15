@@ -279,8 +279,15 @@ fn cmd_plan(
     println!("{query_plan}");
     // Use the supergraph schema, not the API schema, for correctness check,
     // since the plan may access hidden fields.
+    let subgraphs_by_name = supergraph
+        .extract_subgraphs()
+        .unwrap()
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
     let result = apollo_federation::query_plan::correctness::check_plan(
         &supergraph.schema,
+        &subgraphs_by_name,
         &query_doc,
         &query_plan,
     )?;

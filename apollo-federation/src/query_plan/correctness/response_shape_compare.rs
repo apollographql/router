@@ -11,6 +11,7 @@ use super::response_shape::PossibleDefinitions;
 use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
 use super::CheckFailure;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
 macro_rules! check_match_eq {
@@ -28,18 +29,41 @@ macro_rules! check_match_eq {
     };
 }
 
+// Path-specific type constraints on top of GraphQL type conditions.
+pub(crate) trait PathConstraint<'a>
+where
+    Self: Sized,
+{
+    /// Returns a new path constraint under the given type condition.
+    fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self;
+
+    /// Returns a new path constraint for field's response shape.
+    fn for_field(&self, representative_field: &Field) -> Result<Self, CheckFailure>;
+
+    /// Is `ty` allowed under the path constraint?
+    fn allows(&self, _ty: &ObjectTypeDefinitionPosition) -> bool;
+
+    /// Is `defs` feasible under the path constraint?
+    fn allows_any(&self, _defs: &PossibleDefinitions) -> bool;
+}
+
 // Check if `this` is a subset of `other`.
-pub fn compare_response_shapes(
+pub(crate) fn compare_response_shapes<'a, T: PathConstraint<'a>>(
+    path_constraint: &T,
     this: &ResponseShape,
     other: &ResponseShape,
 ) -> Result<(), CheckFailure> {
     // Note: `default_type_condition` is for display.
     //       Only response key and definitions are compared.
     this.iter().try_for_each(|(key, this_def)| {
-        let other_def = other
-            .get(key)
-            .ok_or_else(|| CheckFailure::new(format!("missing response key: {key}")))?;
-        compare_possible_definitions(this_def, other_def)
+        let Some(other_def) = other.get(key) else {
+            // check this_def's type conditions are feasible under the path constraint.
+            if !path_constraint.allows_any(this_def) {
+                return Ok(());
+            }
+            return Err(CheckFailure::new(format!("missing response key: {key}")));
+        };
+        compare_possible_definitions(path_constraint, this_def, other_def)
             .map_err(|e| e.add_description(&format!("mismatch for response key: {key}")))
     })
 }
@@ -72,13 +96,20 @@ fn merge_definitions_for_type_condition(
     }
 }
 
-fn compare_possible_definitions(
+fn compare_possible_definitions<'a, T: PathConstraint<'a>>(
+    path_constraint: &T,
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
 ) -> Result<(), CheckFailure> {
     this.iter().try_for_each(|(this_cond, this_def)| {
         if let Some(other_def) = other.get(this_cond) {
-            let result = compare_possible_definitions_per_type_condition(this_def, other_def);
+            // TODO: Consider the intersection of path_constraint and this_cond?
+            let updated_constraint = path_constraint.under_type_condition(this_cond);
+            let result = compare_possible_definitions_per_type_condition(
+                &updated_constraint,
+                this_def,
+                other_def,
+            );
             match result {
                 Ok(result) => return Ok(result),
                 Err(err) => {
@@ -96,7 +127,9 @@ fn compare_possible_definitions(
         }
 
         // If there is no exact match for `this_cond`, try individual ground types.
-        this_cond.ground_set().iter().try_for_each(|ground_ty| {
+        let ground_set_iter = this_cond.ground_set().iter();
+        let mut ground_set_iter = ground_set_iter.filter(|ty| path_constraint.allows(ty));
+        ground_set_iter.try_for_each(|ground_ty| {
             let filter_cond = NormalizedTypeCondition::from_ground_type(ground_ty);
             let other_def =
                 merge_definitions_for_type_condition(other, &filter_cond).map_err(|e| {
@@ -104,7 +137,13 @@ fn compare_possible_definitions(
                         "missing type condition: {this_cond} ({ground_ty})"
                     ))
                 })?;
-            compare_possible_definitions_per_type_condition(this_def, &other_def).map_err(|e| {
+            let updated_constraint = path_constraint.under_type_condition(&filter_cond);
+            compare_possible_definitions_per_type_condition(
+                &updated_constraint,
+                this_def,
+                &other_def,
+            )
+            .map_err(|e| {
                 e.add_description(&format!(
                     "mismatch for type condition: {this_cond} ({ground_ty})"
                 ))
@@ -113,7 +152,8 @@ fn compare_possible_definitions(
     })
 }
 
-fn compare_possible_definitions_per_type_condition(
+fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint<'a>>(
+    path_constraint: &T,
     this: &PossibleDefinitionsPerTypeCondition,
     other: &PossibleDefinitionsPerTypeCondition,
 ) -> Result<(), CheckFailure> {
@@ -135,7 +175,7 @@ fn compare_possible_definitions_per_type_condition(
                     if this_def.boolean_clause() != other_def.boolean_clause() {
                         Ok(false)
                     } else {
-                        compare_definition_variant(this_def, other_def)?;
+                        compare_definition_variant(path_constraint, this_def, other_def)?;
                         Ok(true)
                     }
                 })?;
@@ -152,7 +192,8 @@ fn compare_possible_definitions_per_type_condition(
         })
 }
 
-fn compare_definition_variant(
+fn compare_definition_variant<'a, T: PathConstraint<'a>>(
+    path_constraint: &T,
     this: &DefinitionVariant,
     other: &DefinitionVariant,
 ) -> Result<(), CheckFailure> {
@@ -165,7 +206,8 @@ fn compare_definition_variant(
     ) {
         (None, None) => Ok(()),
         (Some(this_sub), Some(other_sub)) => {
-            compare_response_shapes(this_sub, other_sub).map_err(|e| {
+            let field_constraint = path_constraint.for_field(this.representative_field())?;
+            compare_response_shapes(&field_constraint, this_sub, other_sub).map_err(|e| {
                 e.add_description(&format!(
                     "mismatch in response shape under definition variant: ---> {} if {}",
                     this.representative_field(),

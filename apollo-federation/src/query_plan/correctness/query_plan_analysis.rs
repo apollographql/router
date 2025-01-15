@@ -548,7 +548,10 @@ fn interpret_flatten_node(
     conditions: &[Literal],
     flatten: &FlattenNode,
 ) -> Result<ResponseShape, String> {
-    // println!("interpret_flatten_node: {flatten}\nstate: {state}\n");
+    // println!(
+    //     "interpret_flatten_node: path: {:?}\nstate: {state}\n",
+    //     flatten.path
+    // );
     let result = interpret_plan_node_at_path(
         schema,
         state,

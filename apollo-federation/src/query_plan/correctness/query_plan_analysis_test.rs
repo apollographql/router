@@ -89,7 +89,16 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
         response_shape::compute_response_shape_for_operation(&op, correctness_schema).unwrap();
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&op).unwrap();
     let plan_rs = interpret_query_plan(correctness_schema, &root_type, &query_plan).unwrap();
-    assert!(response_shape_compare::compare_response_shapes(&op_rs, &plan_rs).is_ok());
+    let subgraphs_by_name = supergraph
+        .extract_subgraphs()
+        .unwrap()
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+    let root_constraint = subgraph_constraint::SubgraphConstraint::at_root(&subgraphs_by_name);
+    assert!(
+        response_shape_compare::compare_response_shapes(&root_constraint, &op_rs, &plan_rs).is_ok()
+    );
 
     plan_rs
 }

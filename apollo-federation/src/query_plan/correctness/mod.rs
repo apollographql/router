@@ -5,7 +5,11 @@ pub mod response_shape;
 pub mod response_shape_compare;
 #[cfg(test)]
 pub mod response_shape_test;
+mod subgraph_constraint;
 
+use std::sync::Arc;
+
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 
@@ -41,6 +45,7 @@ impl CheckFailure {
 
 pub fn check_plan(
     schema: &ValidFederationSchema,
+    subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
     operation_doc: &Valid<ExecutableDocument>,
     plan: &QueryPlan,
 ) -> Result<Option<CheckFailure>, FederationError> {
@@ -56,7 +61,8 @@ pub fn check_plan(
         }
     };
 
-    match response_shape_compare::compare_response_shapes(&op_rs, &plan_rs) {
+    let root_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
+    match response_shape_compare::compare_response_shapes(&root_constraint, &op_rs, &plan_rs) {
         Ok(_) => Ok(None),
         Err(e) => Ok(Some(e)),
     }

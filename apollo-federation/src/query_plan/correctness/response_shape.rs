@@ -197,6 +197,7 @@ impl std::hash::Hash for NormalizedTypeCondition {
 
 // Public accessors
 impl NormalizedTypeCondition {
+    /// precondition: `self` and `other` are not empty.
     pub fn implies(&self, other: &Self) -> bool {
         self.ground_set.iter().all(|t| other.ground_set.contains(t))
     }
@@ -294,11 +295,12 @@ impl NormalizedTypeCondition {
         }
     }
 
-    /// Special constructor for the `_Entity` type.
-    fn for_entity() -> Self {
+    /// Special constructor with empty conditions (logically contains *all* types).
+    /// - Used for the `_Entity` type.
+    pub(crate) fn unconstrained() -> Self {
         NormalizedTypeCondition {
             ground_set: Vec::new(),
-            for_display: AppliedTypeCondition(Vec::new()),
+            for_display: AppliedTypeCondition::deduced(),
         }
     }
 
@@ -1127,7 +1129,7 @@ pub fn compute_response_shape_for_entity_fetch_operation(
     // Start a new root context and process the `_entities` selection set.
     // - Not using `process_selection_set` because there is no parent context.
     let parent_type = crate::subgraph::spec::ENTITY_UNION_NAME.clone();
-    let type_condition = NormalizedTypeCondition::for_entity();
+    let type_condition = NormalizedTypeCondition::unconstrained();
     let context = ResponseShapeContext {
         schema: schema.clone(),
         fragment_defs,
@@ -1188,7 +1190,7 @@ impl fmt::Display for AppliedTypeCondition {
 impl fmt::Display for NormalizedTypeCondition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.ground_set.is_empty() {
-            write!(f, "{}", crate::subgraph::spec::ENTITY_UNION_NAME)?;
+            write!(f, "<any>")?;
             return Ok(());
         }
 

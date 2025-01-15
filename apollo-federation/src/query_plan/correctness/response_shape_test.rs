@@ -2,6 +2,7 @@ use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
 
 use super::*;
+use crate::ValidFederationSchema;
 
 // The schema used in these tests.
 const SCHEMA_STR: &str = r#"
