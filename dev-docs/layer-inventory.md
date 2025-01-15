@@ -1,4 +1,9 @@
+# Layer Inventory
+This document is an investigation and overview of our tower layers, and layer-like things, before 2.0. It describes the order and the purpose of each layer, and whether it is Clone (which is roughly a stand-in for being "backpressured pipeline-ready").
+
 This is ordered from the point of view of a request to the router, starting at the outer boundary and going "deeper" into the layer onion.
+
+Still missing are the execution and subgraph client parts of the onion, and layers added by plugins.
 
 ## Router service
 The router service consists of some layers in "front" of the service "proper", and of several layers *inside the router service*, which we appear to call manually.
@@ -10,7 +15,7 @@ Front (`RouterCreator`):
   - If configured, responds to any request that accepts a "text/html" response (*at all*, regardless of preference), with a fixed HTML response.
   - It is Clone!
   - This must occur before content negotiation, which rejects "Accept: text/html" requests.
-- **content negotiation**: RouterLayer
+- Content negotiation: Request-side
   - It is Clone!
   - This layer rejects requests with invalid Accept or Content-Type headers.
 
@@ -44,12 +49,20 @@ Proper (`RouterService`):
   - It adjusts the status code to 499 if the request was canceled.
   - It does various JSON serialization bits.
   - It does various telemetry bits such as counting errors.
-  - It appears to do the *exact same thing* as the content negotiation SupergraphLayer to populate the Content-Type header.
+  - It appears to do the *exact same thing* as "Content negotiation: Response-side" to populate the Content-Type header.
 
 ## Supergraph service
+The supergraph service consists of some layers in "front" of the service "proper", and several interacting services *inside* the supergraph service.
 
-- **content negotiation**: SupergraphLayer
+The implementation of those interactions is more complicated than in the router service, but I think many things could probably be implemented as a normal tower service stack, and we could benefit from doing that.
+
+Front (`SupergraphCreator`):
+- Content negotiation: Response-side
   - It is Clone!
   - This layer sets the Content-Type header on the response.
 - AllowOnlyHttpPostMutationsLayer is the final step before going into the supergraph service proper.
   - **It is not Clone** today but it can trivially be derived.
+
+Plugin layers happen here or in between somewhere, TBD.
+
+The bulk of the "Proper" `SupergraphService` is doing query planning, and then handing things off to the execution service. This probably could be conceptualised as 2 layers, or 3 if there is also one to handle subscriptions.
