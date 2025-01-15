@@ -3,9 +3,9 @@ This is ordered from the point of view of a request to the router, starting at t
 ## Router service
 The router service consists of some layers in "front" of the service "proper", and of several layers *inside the router service*, which we appear to call manually.
 
-I suspect that this is bad and that we should try to make these layers part of a normal tower service stack.
+I suspect that this is bad and that we should try to make all these layers part of a straightforward tower service stack.
 
-Front (RouterCreator):
+Front (`RouterCreator`):
 - StaticPageLayer
   - If configured, responds to any request that accepts a "text/html" response (*at all*, regardless of preference), with a fixed HTML response.
   - It is Clone!
@@ -14,25 +14,33 @@ Front (RouterCreator):
   - It is Clone!
   - This layer rejects requests with invalid Accept or Content-Type headers.
 
-Proper (RouterService):
+Plugin layers happen here or in between somewhere, TBD.
+
+Proper (`RouterService`):
 - Batching
-  - This is not a layer but the code can sort of be understood conceptually like one.
+  - This is not a layer but the code can sort of be understood conceptually like one. Maybe it could, should be a layer?
   - Splits apart the incoming request into multiple requests that go through the rest of the pipeline, and puts the responses back together.
-- Persisted queries, part 1
+- Persisted queries: Expansion
+  - This expands requests that use persisted query IDs, and rejects freeform GraphQL requests if not allowed per router configuration.
+  - This is *not* a real layer right now. I suspect it should be.
 - APQs
+  - This is *not* a real layer right now. I suspect it should be.
+  - TODO(@goto-bus-stop) document what this does and what it needs
 - Query analysis
   - This does query parsing and validation and schema-aware hashing,
     and field/enum usage tracking for apollo studio.
   - This is *not* a real layer right now. I suspect it should be.
   - This includes an explicit call to the AuthorizationPlugin. I suspect the AuthorizationPlugin should instead add its own layer for this, but chances are there was a good reason to do it this way, like not having precise enough hook-points. Still, maybe it can be a separate layer that we add manually.
   - Query analysis also exposes a method that is used by the query planner service, which could just as well be a standalone function in my opinion.
-- Persisted queries, part 2
-- Straggler bits, not part of sub-layers:
+- Persisted queries: Safelisting
+  - This is *not* a real layer right now. I suspect it should be.
+  - For requests *not* using persisted queries, this layer checks incoming GraphQL documents against the "free-form GraphQL behaviour" configuration (essentially: safelisting), and rejects requests that are not allowed.
+- Straggler bits, not part of sub-layers. I think some of these should be normal layers, and some of them should be just a `.map_response()` layer in the service stack.
   - It does something with the `Vary` header.
   - It adjusts the status code to 499 if the request was canceled.
   - It does various JSON serialization bits.
   - It does various telemetry bits such as counting errors.
-  - It appears to do the exact same thing as the content negotiation SupergraphLayer to populate the Content-Type header. **We should definitely get rid of this**.
+  - It appears to do the *exact same thing* as the content negotiation SupergraphLayer to populate the Content-Type header.
 
 ## Supergraph service
 

@@ -1,7 +1,7 @@
-//!  (A)utomatic (P)ersisted (Q)ueries cache.
+//! (A)utomatic (P)ersisted (Q)ueries cache.
 //!
-//!  For more information on APQ see:
-//!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
+//! For more information on APQ see:
+//! <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
@@ -71,6 +71,11 @@ impl APQLayer {
         Self { cache: None }
     }
 
+    /// Supergraph service implementation for Automatic Persisted Queries.
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
