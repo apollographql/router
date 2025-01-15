@@ -19,4 +19,4 @@ pull_request_rules:
           - "{{ author }}"
 queue_rules:
   - merge_method: squash
-    name: Squash
+    name: Dev
