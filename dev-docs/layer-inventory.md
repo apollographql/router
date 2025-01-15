@@ -5,6 +5,30 @@ This is ordered from the point of view of a request to the router, starting at t
 
 Still missing are the execution and subgraph client parts of the onion, and layers added by plugins.
 
+## Axum
+Before entering the router service, we have some layers on our axum Router. These are already functioning properly in the tower service stack.
+
+- "Metrics handler"
+  - It only implements the `apollo.router.operations` metric.
+  - This is using `axum::middleware::from_fn`, so it is functioning properly as a tower layer.
+- TraceLayer
+  - This one is from `tower-http`!
+- CorsLayer
+  - This one is from `tower-http`!
+- "License handler"
+  - Logs a warning if the commercial licence is expired
+  - Rejects requests if the commercial licence is "halted" (expired + a grace period)
+  - This is using `axum::middleware::from_fn`, so it is functioning properly as a tower layer.
+- RequestDecompressionLayer
+  - This one is from `tower-http`!
+
+Now, we enter `handle_graphql`.
+
+- Compression
+  - This is manually written inside `handle_graphql`, but could conceptually be considered a layer.
+  - I don't see an obvious reason for why this could not use a standard tower-http compression layer.
+- Then we create a router service and oneshot it.
+
 ## Router service
 The router service consists of some layers in "front" of the service "proper", and of several layers *inside the router service*, which we appear to call manually.
 
