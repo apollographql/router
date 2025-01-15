@@ -222,6 +222,8 @@ impl Service<RouterRequest> for RouterService {
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         // This service eventually calls `QueryAnalysisLayer::parse_document()`
         // which calls `compute_job::execute()`
+        // XXX(@goto-bus-stop): this reads to me like we should propagate `poll_ready` calls down to
+        // QueryAnalysisLayer :)
         if crate::compute_job::is_full() {
             return Poll::Pending;
         }
@@ -266,6 +268,9 @@ impl RouterService {
             },
         };
 
+        // XXX(@goto-bus-stop): *all* of the code using these `accepts_` variables looks like it
+        // duplicates what the content_negotiation::SupergraphLayer is doing. We should delete one
+        // or the other, and absolutely not do it inline here.
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
@@ -275,6 +280,8 @@ impl RouterService {
             .extensions()
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
+
+        // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
         let display_router_response: DisplayRouterResponse = context
             .extensions()
             .with_lock(|lock| lock.get().cloned())
