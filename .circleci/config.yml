@@ -12,18 +12,18 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: small
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
       - image: cimg/redis:7.4.1
       - image: jaegertracing/all-in-one:1.54.0
       - image: openzipkin/zipkin:3.4.3
@@ -929,7 +929,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: small
     environment:
       <<: *common_job_environment
