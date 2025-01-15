@@ -162,7 +162,7 @@ fn interpret_top_level_plan_node(
             let mut result =
                 interpret_fetch_node(schema, state, &conditions, &subscription.primary)?;
             if let Some(rest) = &subscription.rest {
-                let rest = interpret_plan_node(schema, state, &conditions, rest)?;
+                let rest = interpret_plan_node(schema, &result, &conditions, rest)?;
                 result.merge_with(&rest).map_err(|e| {
                     format!(
                         "Failed to merge response shapes in subscription node: {}\nrest: {rest}",
