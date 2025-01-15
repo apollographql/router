@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.0.0-preview.3"
+version = "2.0.0-preview.4"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -229,6 +229,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "sha1",
+ "shape",
  "strum 0.26.3",
  "strum_macros 0.26.4",
  "tempfile",
@@ -263,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.0.0-preview.3"
+version = "2.0.0-preview.4"
 dependencies = [
  "access-json",
  "ahash",
@@ -441,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.0.0-preview.3"
+version = "2.0.0-preview.4"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -6470,6 +6471,19 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shape"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70179a0773695f4fc0b3e8e59f356064ed1532492e52bcf7e0dfef42934ec4c5"
+dependencies = [
+ "apollo-compiler",
+ "indexmap 2.7.0",
+ "lazy_static",
+ "serde_json",
+ "serde_json_bytes",
 ]
 
 [[package]]

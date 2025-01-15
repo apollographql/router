@@ -518,16 +518,20 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     Ok(())
 }
 
-#[tokio::test]
-async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
-    let original_body = json!({ "query": "query { me { name } }" });
+async fn gzip(json: serde_json::Value) -> Vec<u8> {
     let mut encoder = GzipEncoder::new(Vec::new());
     encoder
-        .write_all(original_body.to_string().as_bytes())
+        .write_all(json.to_string().as_bytes())
         .await
         .unwrap();
     encoder.shutdown().await.unwrap();
-    let compressed_body = encoder.into_inner();
+    encoder.into_inner()
+}
+
+#[tokio::test]
+async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
     let expected_response = graphql::Response::builder()
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
@@ -562,6 +566,54 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
         response.json::<graphql::Response>().await.unwrap(),
         expected_response,
     );
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unsupported_compression() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
+
+    let router_service = router::service::empty().await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a compression algorithm it can't decompress
+        .header(CONTENT_ENCODING, HeaderValue::from_static("unsupported"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
+
+    let router_service = router::service::empty().await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a different (valid) compression algorithm than the one we actually used
+        .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
     server.shutdown().await?;
     Ok(())

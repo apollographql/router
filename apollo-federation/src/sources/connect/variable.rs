@@ -11,48 +11,38 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use itertools::Itertools;
 
-/// The context of an expression containing variable references. The context determines what
-/// variable namespaces are available for use in the expression.
-pub(crate) trait ExpressionContext<N: FromStr + ToString> {
-    /// Get the variable namespaces that are available in this context
-    fn available_namespaces(&self) -> impl Iterator<Item = N>;
-
-    /// Get the list of namespaces joined as a comma separated list
-    fn namespaces_joined(&self) -> String {
-        self.available_namespaces()
-            .map(|s| s.to_string())
-            .sorted()
-            .join(", ")
-    }
-}
-
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
 /// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
 #[derive(Clone, PartialEq)]
-pub(crate) struct ConnectorsContext<'schema> {
-    pub(super) directive: Directive<'schema>,
+pub(crate) struct VariableContext<'schema> {
+    /// The object type containing the field the directive is on
+    pub(crate) object: &'schema Node<ObjectType>,
+
+    /// The field definition of the field the directive is on
+    pub(crate) field: &'schema Component<FieldDefinition>,
     pub(super) phase: Phase,
     pub(super) target: Target,
 }
 
-impl<'schema> ConnectorsContext<'schema> {
-    pub(crate) fn new(directive: Directive<'schema>, phase: Phase, target: Target) -> Self {
+impl<'schema> VariableContext<'schema> {
+    pub(crate) fn new(
+        object: &'schema Node<ObjectType>,
+        field: &'schema Component<FieldDefinition>,
+        phase: Phase,
+        target: Target,
+    ) -> Self {
         Self {
-            directive,
+            object,
+            field,
             phase,
             target,
         }
     }
-}
 
-impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
-    fn available_namespaces(&self) -> impl Iterator<Item = Namespace> {
-        match (&self.directive, &self.phase, &self.target) {
-            (Directive::Source, Phase::Response, _) => {
-                vec![Namespace::Config, Namespace::Context, Namespace::Status]
-            }
-            (Directive::Source, _, _) => vec![Namespace::Config, Namespace::Context],
-            (Directive::Connect { .. }, Phase::Response, _) => {
+    /// Get the variable namespaces that are available in this context
+    pub(crate) fn available_namespaces(&self) -> impl Iterator<Item = Namespace> {
+        match &self.phase {
+            Phase::Response => {
                 vec![
                     Namespace::Args,
                     Namespace::Config,
@@ -61,7 +51,7 @@ impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
                     Namespace::This,
                 ]
             }
-            (Directive::Connect { .. }, _, _) => {
+            Phase::Request => {
                 vec![
                     Namespace::Config,
                     Namespace::Context,
@@ -72,26 +62,17 @@ impl<'schema> ExpressionContext<Namespace> for ConnectorsContext<'schema> {
         }
         .into_iter()
     }
-}
 
-/// An Apollo Connectors directive in a schema
-#[derive(Clone, PartialEq)]
-pub(crate) enum Directive<'schema> {
-    /// A `@source` directive
-    Source,
-
-    /// A `@connect` directive
-    Connect {
-        /// The object type containing the field the directive is on
-        object: &'schema Node<ObjectType>,
-
-        /// The field definition of the field the directive is on
-        field: &'schema Component<FieldDefinition>,
-    },
+    /// Get the list of namespaces joined as a comma separated list
+    pub(crate) fn namespaces_joined(&self) -> String {
+        self.available_namespaces()
+            .map(|s| s.to_string())
+            .sorted()
+            .join(", ")
+    }
 }
 
 /// The phase an expression is associated with
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Phase {
     /// The request phase
@@ -214,38 +195,5 @@ impl Display for VariablePathPart<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.part.to_string().as_str())?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_available_namespaces() {
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Url)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context,]
-        );
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Header)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context,]
-        );
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Request, Target::Body)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context,]
-        );
-        assert_eq!(
-            ConnectorsContext::new(Directive::Source, Phase::Response, Target::Header)
-                .available_namespaces()
-                .collect::<Vec<_>>(),
-            vec![Namespace::Config, Namespace::Context, Namespace::Status,]
-        );
     }
 }
