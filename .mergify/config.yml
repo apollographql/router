@@ -20,3 +20,6 @@ pull_request_rules:
 queue_rules:
   - merge_method: squash
     name: Dev
+    queue_conditions:
+      - and:
+          - base = dev
