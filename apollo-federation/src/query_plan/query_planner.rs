@@ -32,6 +32,7 @@ use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
+use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -349,29 +350,15 @@ impl QueryPlanner {
             &self.interface_types_with_interface_objects,
         )?;
 
-        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
-            if self.config.incremental_delivery.enable_defer {
-                let NormalizedDefer {
-                    operation,
-                    assigned_defer_labels,
-                    defer_conditions,
-                    has_defers,
-                } = normalized_operation.with_normalized_defer()?;
-                if has_defers && is_subscription {
-                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
-                }
-                (
-                    operation,
-                    Some(assigned_defer_labels),
-                    Some(defer_conditions),
-                    has_defers,
-                )
-            } else {
-                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
-                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
-                // to end up passing through a @defer to a subgraph by mistake).
-                (normalized_operation.without_defer()?, None, None, false)
-            };
+        let NormalizedDefer {
+            operation: normalized_operation,
+            assigned_defer_labels,
+            defer_conditions,
+            has_defers,
+        } = normalized_operation.with_normalized_defer()?;
+        if has_defers && is_subscription {
+            return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+        }
 
         if normalized_operation.selection_set.is_empty() {
             return Ok(QueryPlan::default());
@@ -430,16 +417,11 @@ impl QueryPlanner {
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
         };
 
-        let root_node = match defer_conditions {
-            Some(defer_conditions) if !defer_conditions.is_empty() => {
-                compute_plan_for_defer_conditionals(
-                    &mut parameters,
-                    &mut processor,
-                    defer_conditions,
-                )?
-            }
-            _ => compute_plan_internal(&mut parameters, &mut processor, has_defers)?,
-        };
+        let root_node = if !defer_conditions.is_empty() {
+            compute_plan_for_defer_conditionals(&mut parameters, &mut processor, defer_conditions)
+        } else {
+            compute_plan_internal(&mut parameters, &mut processor, has_defers)
+        }?;
 
         let root_node = match root_node {
             // If this is a subscription, we want to make sure that we return a SubscriptionNode rather than a PlanNode
@@ -563,6 +545,7 @@ fn compute_root_serial_dependency_graph(
             );
             compute_root_fetch_groups(
                 operation.root_kind,
+                federated_query_graph,
                 &mut fetch_dependency_graph,
                 &prev_path,
                 parameters.config.type_conditioned_fetching,
@@ -600,6 +583,7 @@ fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<Arc<str>, Federati
 )]
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
+    federated_query_graph: &QueryGraph,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
     type_conditioned_fetching_enabled: bool,
@@ -635,6 +619,12 @@ pub(crate) fn compute_root_fetch_groups(
             dependency_graph.to_dot(),
             "tree_with_root_node"
         );
+        let subgraph_schema = federated_query_graph.schema_by_source(subgraph_name)?;
+        let supergraph_root_type = convert_type_from_subgraph(
+            root_type,
+            subgraph_schema,
+            &dependency_graph.supergraph_schema,
+        )?;
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -642,7 +632,7 @@ pub(crate) fn compute_root_fetch_groups(
             FetchDependencyGraphNodePath::new(
                 dependency_graph.supergraph_schema.clone(),
                 type_conditioned_fetching_enabled,
-                root_type,
+                supergraph_root_type,
             )?,
             Default::default(),
             &Default::default(),

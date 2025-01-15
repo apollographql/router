@@ -2,6 +2,7 @@ use serde_json::json;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 const CONFIG: &str = r#"
@@ -21,7 +22,9 @@ async fn test_subgraph_returning_data_null() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = "{ __typename topProducts { name } }";
-    let (_trace_id, response) = router.execute_query(&json!({ "query":  query })).await;
+    let (_trace_id, response) = router
+        .execute_query(Query::builder().body(json!({ "query":  query })).build())
+        .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
         response.json::<serde_json::Value>().await?,
@@ -64,7 +67,9 @@ async fn test_subgraph_returning_different_typename_on_query_root() -> Result<()
             inside_fragment: __typename
         }
     "#;
-    let (_trace_id, response) = router.execute_query(&json!({ "query":  query })).await;
+    let (_trace_id, response) = router
+        .execute_query(Query::builder().body(json!({ "query":  query })).build())
+        .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
         response.json::<serde_json::Value>().await?,
@@ -99,7 +104,11 @@ async fn test_valid_extensions_service_for_subgraph_error() -> Result<(), BoxErr
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -141,7 +150,11 @@ async fn test_valid_extensions_service_is_preserved_for_subgraph_error() -> Resu
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -174,7 +187,11 @@ async fn test_valid_extensions_service_for_invalid_subgraph_response() -> Result
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -222,7 +239,11 @@ async fn test_valid_error_locations() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -264,7 +285,11 @@ async fn test_empty_error_locations() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -302,7 +327,11 @@ async fn test_invalid_error_locations() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -345,7 +374,11 @@ async fn test_invalid_error_locations_with_single_negative_one_location() -> Res
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -387,7 +420,11 @@ async fn test_invalid_error_locations_contains_negative_one_location() -> Result
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({ "query": "{ topProducts { name } }" }))
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query": "{ topProducts { name } }" }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -402,6 +439,114 @@ async fn test_invalid_error_locations_contains_negative_one_location() -> Result
                 ],
                 "path":["topProducts"],
                 "extensions": { "service": "products" }
+            }]
+        })
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_valid_error_path() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(CONFIG)
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "topProducts": null },
+            "errors": [{
+                "message": "Some error on subgraph",
+                "path": ["topProducts"]
+            }]
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_query(Query::default()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({
+            "data": { "topProducts": null },
+            "errors": [{
+                "message":"Some error on subgraph",
+                "path":["topProducts"],
+                "extensions": { "service": "products" }
+            }]
+        })
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_invalid_error_path() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(CONFIG)
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "topProducts": null },
+            "errors": [{
+                "message": "Some error on subgraph",
+                "path": ["some","path", 42]
+            }]
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_query(Query::default()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({
+            "data": { "topProducts": null },
+            "errors": [{
+                "message":"Some error on subgraph",
+                "extensions": {
+                   "service": "products"
+                }
+            }]
+        })
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_partially_valid_error_path() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(CONFIG)
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "topProducts": null },
+            "errors": [{
+                "message": "Some error on subgraph",
+                "path": ["topProducts","invalid", 42]
+            }]
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_query(Query::default()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({
+            "data": { "topProducts": null },
+            "errors": [{
+                "message": "Some error on subgraph",
+                "path": ["topProducts"],
+                "extensions": {
+                   "service": "products"
+                }
             }]
         })
     );

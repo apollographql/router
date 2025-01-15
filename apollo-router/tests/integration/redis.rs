@@ -1,6 +1,5 @@
 // The redis cache keys in this file have to change whenever the following change:
 // * the supergraph schema
-// * experimental_query_planner_mode
 // * federation version
 //
 // How to get the new cache key:
@@ -42,6 +41,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -52,7 +52,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
     let known_cache_key = &format!(
-        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:924b36a9ae6af4ff198220b1302b14b6329c4beb7c022fd31d6fef82eaad7ccb",
+        "plan:router:{}:8c0b4bfb4630635c2b5748c260d686ddb301d164e5818c63d6d9d77e13631676:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d9f7a00bc249cb51cfc8599f86b6dc5272967b37b1409dc4717f105b6939fe43",
         env!("CARGO_PKG_VERSION")
     );
 
@@ -992,19 +992,9 @@ async fn query_planner_redis_update_query_fragments() {
         // This configuration turns the fragment generation option *off*.
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:28acec2bebc3922cd261ed3c8a13b26d53b49e891797a199e3e1ce8089e813e6",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:fb1a8e6e454ad6a1d0d48b24dc9c7c4dd6d9bf58b6fdaf43cd24eb77fbbb3a17",
             env!("CARGO_PKG_VERSION")
         ),
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "the cache key for different query planner modes is currently different"]
-async fn query_planner_redis_update_planner_mode() {
-    test_redis_query_plan_config_update(
-        include_str!("fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"),
-        "",
     )
     .await;
 }
@@ -1025,7 +1015,7 @@ async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:af3139ddd647c755d2eab5e6a177dc443030a528db278c19ad7b45c5c0324378",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:dc062fcc9cfd9582402d1e8b1fa3ee336ea1804d833443869e0b3744996716a2",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1050,33 +1040,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
         &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8b87abe2e45d38df4712af966aa540f33dbab6fc2868a409f2dbb6a5a4fb2d08",
-            env!("CARGO_PKG_VERSION")
-        ),
-    )
-    .await;
-}
-
-// TODO drop this test once we remove the JS QP
-#[tokio::test(flavor = "multi_thread")]
-async fn query_planner_redis_update_reuse_query_fragments() {
-    // If this test fails and the cache key format changed you'll need to update
-    // the key here.  Look at the top of the file for instructions on getting
-    // the new cache key.
-    //
-    // You first need to follow the process and update the key in
-    // `test_redis_query_plan_config_update`, and then update the key in this
-    // test.
-    //
-    // This test requires graphos license, so make sure you have
-    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
-    // test just passes locally.
-    test_redis_query_plan_config_update(
-        include_str!(
-            "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
-        ),
-        &format!(
-            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9af18c8afd568c197050fc1a60c52a8c98656f1775016110516fabfbedc135fe",
+            "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:bdc09980aa6ef28a67f5aeb8759763d8ac5a4fc43afa8c5a89f58cc998c48db3",
             env!("CARGO_PKG_VERSION")
         ),
     )
@@ -1104,16 +1068,20 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
 
     // If the tests above are failing, this is the key that needs to be changed first.
     let starting_key = &format!(
-        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:924b36a9ae6af4ff198220b1302b14b6329c4beb7c022fd31d6fef82eaad7ccb",
+        "plan:router:{}:5938623f2155169070684a48be1e0b8468d0f2c662b5527a2247f683173f7d05:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d9f7a00bc249cb51cfc8599f86b6dc5272967b37b1409dc4717f105b6939fe43",
         env!("CARGO_PKG_VERSION")
     );
     assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
-    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_anonymous())
+        .await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
     router.assert_reloaded().await;
-    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_anonymous())
+        .await;
     router
         .assert_redis_cache_contains(new_cache_key, Some(starting_key))
         .await;

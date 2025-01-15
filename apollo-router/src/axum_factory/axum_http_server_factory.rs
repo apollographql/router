@@ -29,12 +29,15 @@ use hyper::server::conn::Http;
 use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
+use opentelemetry_api::metrics::MeterProvider as _;
+use opentelemetry_api::metrics::ObservableGauge;
 use serde::Serialize;
 use serde_json::json;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::layer::layer_fn;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -60,6 +63,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::metrics::meter_provider;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
@@ -73,20 +77,29 @@ use crate::Context;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
-struct SessionCountGuard;
+fn session_count_instrument() -> ObservableGauge<u64> {
+    let meter = meter_provider().meter("apollo/router");
+    meter
+        .u64_observable_gauge("apollo_router_session_count_active")
+        .with_description("Amount of in-flight sessions")
+        .with_callback(|gauge| {
+            gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
+        })
+        .init()
+}
 
-impl SessionCountGuard {
+struct ActiveSessionCountGuard;
+
+impl ActiveSessionCountGuard {
     fn start() -> Self {
-        let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
-        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
         Self
     }
 }
 
-impl Drop for SessionCountGuard {
+impl Drop for ActiveSessionCountGuard {
     fn drop(&mut self) {
-        let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
-        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
     }
 }
 
@@ -625,6 +638,14 @@ where
         );
     }
 
+    // Tie the lifetime of the session count instrument to the lifetime of the router
+    // by moving it into a no-op layer.
+    let instrument = session_count_instrument();
+    router = router.layer(layer_fn(move |service| {
+        let _ = &instrument;
+        service
+    }));
+
     router
 }
 
@@ -634,7 +655,7 @@ async fn handle_graphql(
     experimental_log_on_broken_pipe: bool,
     http_request: Request<DecompressionBody<Body>>,
 ) -> impl IntoResponse {
-    let _guard = SessionCountGuard::start();
+    let _guard = ActiveSessionCountGuard::start();
 
     let (parts, body) = http_request.into_parts();
 
@@ -746,7 +767,7 @@ impl<'a> CancelHandler<'a> {
     }
 }
 
-impl<'a> Drop for CancelHandler<'a> {
+impl Drop for CancelHandler<'_> {
     fn drop(&mut self) {
         if !self.got_first_response {
             if self.experimental_log_on_broken_pipe {

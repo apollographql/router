@@ -1,7 +1,8 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Type;
-use lazy_static::lazy_static;
 
 use crate::schema::FederationSchema;
 
@@ -15,18 +16,16 @@ pub(crate) enum ArgumentCompositionStrategy {
     Union,
 }
 
-lazy_static! {
-    pub(crate) static ref MAX_STRATEGY: MaxArgumentCompositionStrategy =
-        MaxArgumentCompositionStrategy::new();
-    pub(crate) static ref MIN_STRATEGY: MinArgumentCompositionStrategy =
-        MinArgumentCompositionStrategy::new();
-    pub(crate) static ref SUM_STRATEGY: SumArgumentCompositionStrategy =
-        SumArgumentCompositionStrategy::new();
-    pub(crate) static ref INTERSECTION_STRATEGY: IntersectionArgumentCompositionStrategy =
-        IntersectionArgumentCompositionStrategy {};
-    pub(crate) static ref UNION_STRATEGY: UnionArgumentCompositionStrategy =
-        UnionArgumentCompositionStrategy {};
-}
+pub(crate) static MAX_STRATEGY: LazyLock<MaxArgumentCompositionStrategy> =
+    LazyLock::new(MaxArgumentCompositionStrategy::new);
+pub(crate) static MIN_STRATEGY: LazyLock<MinArgumentCompositionStrategy> =
+    LazyLock::new(MinArgumentCompositionStrategy::new);
+pub(crate) static SUM_STRATEGY: LazyLock<SumArgumentCompositionStrategy> =
+    LazyLock::new(SumArgumentCompositionStrategy::new);
+pub(crate) static INTERSECTION_STRATEGY: LazyLock<IntersectionArgumentCompositionStrategy> =
+    LazyLock::new(|| IntersectionArgumentCompositionStrategy {});
+pub(crate) static UNION_STRATEGY: LazyLock<UnionArgumentCompositionStrategy> =
+    LazyLock::new(|| UnionArgumentCompositionStrategy {});
 
 impl ArgumentCompositionStrategy {
     pub(crate) fn name(&self) -> &str {

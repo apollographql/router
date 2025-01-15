@@ -307,25 +307,6 @@ expression: "&schema"
         }
       ]
     },
-    "Auto": {
-      "enum": [
-        "auto"
-      ],
-      "type": "string"
-    },
-    "AvailableParallelism": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Auto",
-          "description": "#/definitions/Auto"
-        },
-        {
-          "format": "uint",
-          "minimum": 1.0,
-          "type": "integer"
-        }
-      ]
-    },
     "BatchProcessorConfig": {
       "description": "Batch processor configuration",
       "properties": {
@@ -4453,46 +4434,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "QueryPlannerMode": {
-      "description": "Query planner modes.",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use primarily the Javascript-based implementation, but also schedule background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
-          "enum": [
-            "both_best_effort"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the new Rust-based implementation but fall back to the legacy one for supergraph schemas composed with legacy Apollo Federation 1.",
-          "enum": [
-            "new_best_effort"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "QueryPlanning": {
       "additionalProperties": false,
       "description": "Query planning cache configuration",
@@ -4500,10 +4441,6 @@ expression: "&schema"
         "cache": {
           "$ref": "#/definitions/QueryPlanCache",
           "description": "#/definitions/QueryPlanCache"
-        },
-        "experimental_parallelism": {
-          "$ref": "#/definitions/AvailableParallelism",
-          "description": "#/definitions/AvailableParallelism"
         },
         "experimental_paths_limit": {
           "default": null,
@@ -4736,36 +4673,6 @@ expression: "&schema"
           "type": "string"
         }
       ]
-    },
-    "RetryConfig": {
-      "additionalProperties": false,
-      "description": "Retry configuration",
-      "properties": {
-        "min_per_sec": {
-          "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "retry_mutations": {
-          "description": "allows request retries on mutations. This should only be activated if mutations are idempotent. Disabled by default",
-          "nullable": true,
-          "type": "boolean"
-        },
-        "retry_percent": {
-          "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
-          "format": "float",
-          "nullable": true,
-          "type": "number"
-        },
-        "ttl": {
-          "default": null,
-          "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
-          "type": "string"
-        }
-      },
-      "type": "object"
     },
     "Router": {
       "additionalProperties": false,
@@ -6511,11 +6418,6 @@ expression: "&schema"
           "description": "#/definitions/Http2Config",
           "nullable": true
         },
-        "experimental_retry": {
-          "$ref": "#/definitions/RetryConfig",
-          "description": "#/definitions/RetryConfig",
-          "nullable": true
-        },
         "global_rate_limit": {
           "$ref": "#/definitions/RateLimitConf",
           "description": "#/definitions/RateLimitConf",
@@ -6647,12 +6549,6 @@ expression: "&schema"
         "experimental_log_on_broken_pipe": {
           "default": false,
           "description": "Log a message if the client closes the connection before the response is sent. Default: false.",
-          "type": "boolean"
-        },
-        "experimental_reuse_query_fragments": {
-          "default": null,
-          "description": "Enable reuse of query fragments This feature is deprecated and will be removed in next release. The config can only be set when the legacy query planner is explicitly enabled.",
-          "nullable": true,
           "type": "boolean"
         },
         "generate_query_fragments": {
@@ -7403,6 +7299,12 @@ expression: "&schema"
         "parent_based_sampler": {
           "default": true,
           "description": "Whether to use parent based sampling",
+          "type": "boolean"
+        },
+        "preview_datadog_agent_sampling": {
+          "default": null,
+          "description": "Use datadog agent sampling. This means that all spans will be sent to the Datadog agent and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog",
+          "nullable": true,
           "type": "boolean"
         },
         "resource": {
@@ -8375,10 +8277,6 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
-    },
-    "experimental_query_planner_mode": {
-      "$ref": "#/definitions/QueryPlannerMode",
-      "description": "#/definitions/QueryPlannerMode"
     },
     "experimental_type_conditioned_fetching": {
       "default": false,

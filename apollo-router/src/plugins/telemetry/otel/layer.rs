@@ -1,23 +1,20 @@
 use std::any::TypeId;
 use std::fmt;
 use std::marker;
-use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Instant;
 use std::time::SystemTime;
 
 use once_cell::unsync;
+use opentelemetry::trace as otel;
 use opentelemetry::trace::noop;
 use opentelemetry::trace::OrderMap;
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry::trace::{self as otel};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
-use rand::thread_rng;
-use rand::Rng;
 use tracing_core::field;
 use tracing_core::span;
 use tracing_core::span::Attributes;
@@ -32,8 +29,6 @@ use tracing_subscriber::Layer;
 use super::OtelData;
 use super::PreSampledTracer;
 use crate::plugins::cache::invalidation_endpoint::INVALIDATION_ENDPOINT_SPAN_NAME;
-use crate::plugins::telemetry::config::Sampler;
-use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_STACKTRACE;
 use crate::plugins::telemetry::consts::OTEL_KIND;
@@ -46,7 +41,6 @@ use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::reload::IsSampled;
 use crate::plugins::telemetry::reload::SampledSpan;
-use crate::plugins::telemetry::reload::SPAN_SAMPLING_RATE;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
 
@@ -157,7 +151,7 @@ struct SpanEventVisitor<'a, 'b> {
     custom_event: bool,
 }
 
-impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
+impl field::Visit for SpanEventVisitor<'_, '_> {
     /// Record events on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
@@ -318,7 +312,7 @@ struct SpanAttributeVisitor<'a> {
     exception_config: ExceptionFieldConfig,
 }
 
-impl<'a> SpanAttributeVisitor<'a> {
+impl SpanAttributeVisitor<'_> {
     fn record(&mut self, attribute: KeyValue) {
         debug_assert!(self.span_builder.attributes.is_some());
         if let Some(v) = self.span_builder.attributes.as_mut() {
@@ -327,7 +321,7 @@ impl<'a> SpanAttributeVisitor<'a> {
     }
 }
 
-impl<'a> field::Visit for SpanAttributeVisitor<'a> {
+impl field::Visit for SpanAttributeVisitor<'_> {
     /// Set attributes on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
@@ -662,32 +656,6 @@ thread_local! {
     });
 }
 
-pub(crate) fn configure(sampler: &SamplerOption) {
-    let ratio = match sampler {
-        SamplerOption::TraceIdRatioBased(ratio) => {
-            // can't use std::cmp::min because f64 is not Ord
-            if *ratio > 1.0 {
-                1.0
-            } else {
-                *ratio
-            }
-        }
-        SamplerOption::Always(s) => match s {
-            Sampler::AlwaysOn => 1f64,
-            Sampler::AlwaysOff => 0f64,
-        },
-    };
-
-    SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::Relaxed);
-}
-
-impl<S, T> OpenTelemetryLayer<S, T> {
-    fn sample(&self) -> bool {
-        let s: f64 = thread_rng().gen_range(0.0..=1.0);
-        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
-    }
-}
-
 impl<S, T> OpenTelemetryLayer<S, T>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
@@ -740,7 +708,7 @@ where
         }
 
         // - there's no parent span (it's the root), so we make the sampling decision
-        self.sample()
+        true
     }
 }
 
@@ -755,46 +723,34 @@ where
     /// [tracing `Span`]: tracing::Span
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let is_sampled = self.enabled(span.metadata(), &ctx);
         let mut extensions = span.extensions_mut();
         let parent_cx = self.parent_context(attrs, &ctx);
 
         // Record new trace id if there is no active parent span
-        let trace_id = if parent_cx.span().span_context().is_valid()
-            || parent_cx.span().span_context().trace_id() != opentelemetry::trace::TraceId::INVALID
+        let trace_id = if parent_cx.span().span_context().trace_id()
+            != opentelemetry::trace::TraceId::INVALID
         {
-            // It probably means we have a remote parent trace
             parent_cx.span().span_context().trace_id()
         } else {
-            let sampled_span = span
-                .parent()
-                .and_then(|s| s.extensions().get::<SampledSpan>().cloned());
-
-            match sampled_span {
-                // It's not the root span
-                Some(SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _)) => {
-                    opentelemetry_api::trace::TraceId::from(trace_id.to_u128())
-                }
-                // It's probably the root span
-                None => self.tracer.new_trace_id(),
-            }
+            self.tracer.new_trace_id()
         };
-
         let span_id = self.tracer.new_span_id();
-        let sampled = if is_sampled {
+        let sampled = if self.enabled(attrs.metadata(), &ctx) {
             SampledSpan::Sampled(trace_id.to_bytes().into(), span_id)
         } else {
             SampledSpan::NotSampled(trace_id.to_bytes().into(), span_id)
         };
+        let is_sampled = matches!(sampled, SampledSpan::Sampled(_, _));
         extensions.insert(sampled);
+
+        // Inactivity may still be tracked even if the span isn't sampled.
+        if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
+            extensions.insert(Timings::new());
+        }
 
         if !is_sampled {
             // Nothing more to do as it's not sampled
             return;
-        }
-
-        if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
-            extensions.insert(Timings::new());
         }
 
         let mut builder = self
@@ -802,7 +758,7 @@ where
             .span_builder(attrs.metadata().name())
             .with_start_time(SystemTime::now())
             // Eagerly assign span id so children have stable parent id
-            .with_span_id(span_id)
+            .with_span_id(self.tracer.new_span_id())
             .with_trace_id(trace_id);
 
         let builder_attrs = builder.attributes.get_or_insert(OrderMap::with_capacity(

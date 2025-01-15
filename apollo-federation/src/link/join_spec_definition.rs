@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -7,7 +9,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 
 use super::argument::directive_optional_list_argument;
 use crate::bail;
@@ -167,17 +168,15 @@ pub(crate) struct EnumValueDirectiveArguments {
 #[derive(Clone)]
 pub(crate) struct JoinSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
 }
 
 impl JoinSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::join_identity(),
                 version,
             },
-            minimum_federation_version,
         }
     }
 
@@ -410,35 +409,15 @@ impl SpecDefinition for JoinSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
-    }
 }
 
-lazy_static! {
-    pub(crate) static ref JOIN_VERSIONS: SpecDefinitions<JoinSpecDefinition> = {
+pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 1 },
-            None,
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 2 },
-            None,
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 3 },
-            Some(Version { major: 2, minor: 0 }),
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 4 },
-            Some(Version { major: 2, minor: 7 }),
-        ));
-        definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 5 },
-            Some(Version { major: 2, minor: 8 }),
-        ));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 1 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 2 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 3 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 4 }));
+        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 5 }));
         definitions
-    };
-}
+    });

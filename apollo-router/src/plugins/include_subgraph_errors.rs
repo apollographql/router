@@ -47,7 +47,7 @@ impl Plugin for IncludeSubgraphErrors {
 
         let sub_name_response = name.to_string();
         let sub_name_error = name.to_string();
-        return service
+        service
             .map_response(move |mut response: SubgraphResponse| {
                 let errors = &mut response.response.body_mut().errors;
                 if !errors.is_empty() {
@@ -82,13 +82,12 @@ impl Plugin for IncludeSubgraphErrors {
                     })
                 }
             })
-            .boxed();
+            .boxed()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -102,7 +101,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlannerPool;
+    use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -211,14 +210,9 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Schema::parse(schema, &configuration).unwrap();
 
-        let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.into(),
-            Arc::clone(&configuration),
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
+        let planner = QueryPlannerService::new(schema.into(), Arc::clone(&configuration))
+            .await
+            .unwrap();
         let schema = planner.schema();
         let subgraph_schemas = planner.subgraph_schemas();
 

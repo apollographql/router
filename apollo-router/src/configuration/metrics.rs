@@ -8,7 +8,6 @@ use opentelemetry_api::KeyValue;
 use paste::paste;
 use serde_json::Value;
 
-use super::AvailableParallelism;
 use crate::metrics::meter_provider;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
@@ -47,9 +46,6 @@ impl Metrics {
         );
         data.populate_license_instrument(license_state);
         data.populate_user_plugins_instrument(configuration);
-        data.populate_query_planner_experimental_parallelism(configuration);
-        data.populate_deno_or_rust_mode_instruments(configuration);
-        data.populate_legacy_fragment_usage(configuration);
 
         data.into()
     }
@@ -124,19 +120,20 @@ impl InstrumentData {
     }
 
     pub(crate) fn populate_config_instruments(&mut self, yaml: &serde_json::Value) {
-        // This macro will query the config json for a primary metric and optionally metric attributes.
-
-        // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
-        // We should consider converting the rest of the codebase to use jsonpath_rust.
-
-        // Example usage:
-        // populate_usage_instrument!(
-        //             value.apollo.router.config.authorization, // The metric name
-        //             "$.authorization", // The path into the config
-        //             opt.require_authentication, // The name of the attribute
-        //             "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
-        //         );
-
+        /// This macro will query the config json for a primary metric and optionally metric attributes.
+        ///
+        /// The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
+        /// We should consider converting the rest of the codebase to use jsonpath_rust.
+        ///
+        /// Example usage:
+        /// ```rust,ignore
+        /// populate_config_instrument!(
+        ///     apollo.router.config.authorization, // The metric name
+        ///     "$.authorization", // The path into the config
+        ///     opt.require_authentication, // The name of the attribute
+        ///     "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
+        /// );
+        /// ```
         macro_rules! populate_config_instrument {
             ($($metric:ident).+, $path:literal) => {
                 let instrument_name = stringify!($($metric).+).to_string();
@@ -303,9 +300,7 @@ impl InstrumentData {
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
-            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]",
-            opt.subgraph.retry,
-            "$[?(@.all.experimental_retry || @.subgraphs..experimental_retry)]"
+            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
 
         populate_config_instrument!(
@@ -497,85 +492,6 @@ impl InstrumentData {
             ),
         );
     }
-
-    pub(crate) fn populate_legacy_fragment_usage(&mut self, configuration: &Configuration) {
-        // Fragment generation takes precedence over fragment reuse. Only report when fragment reuse is *actually active*.
-        if configuration.supergraph.reuse_query_fragments == Some(true)
-            && !configuration.supergraph.generate_query_fragments
-        {
-            self.data.insert(
-                "apollo.router.config.reuse_query_fragments".to_string(),
-                (1, HashMap::new()),
-            );
-        }
-    }
-
-    pub(crate) fn populate_query_planner_experimental_parallelism(
-        &mut self,
-        configuration: &Configuration,
-    ) {
-        let query_planner_parallelism_config = configuration
-            .supergraph
-            .query_planning
-            .experimental_parallelism;
-
-        if query_planner_parallelism_config != Default::default() {
-            let mut attributes = HashMap::new();
-            attributes.insert(
-                "mode".to_string(),
-                if let AvailableParallelism::Auto(_) = query_planner_parallelism_config {
-                    "auto"
-                } else {
-                    "static"
-                }
-                .into(),
-            );
-            self.data.insert(
-                "apollo.router.config.query_planning.parallelism".to_string(),
-                (
-                    configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_query_planner_parallelism()
-                        .map(|n| {
-                            #[cfg(test)]
-                            {
-                                // Set to a fixed number for snapshot tests
-                                if let AvailableParallelism::Auto(_) =
-                                    query_planner_parallelism_config
-                                {
-                                    return 8;
-                                }
-                            }
-                            let as_usize: usize = n.into();
-                            let as_u64: u64 = as_usize.try_into().unwrap_or_default();
-                            as_u64
-                        })
-                        .unwrap_or_default(),
-                    attributes,
-                ),
-            );
-        }
-    }
-
-    /// Populate metrics on the rollout of experimental Rust replacements of JavaScript code.
-    pub(crate) fn populate_deno_or_rust_mode_instruments(&mut self, configuration: &Configuration) {
-        let experimental_query_planner_mode = match configuration.experimental_query_planner_mode {
-            super::QueryPlannerMode::Legacy => "legacy",
-            super::QueryPlannerMode::Both => "both",
-            super::QueryPlannerMode::BothBestEffort => "both_best_effort",
-            super::QueryPlannerMode::New => "new",
-            super::QueryPlannerMode::NewBestEffort => "new_best_effort",
-        };
-
-        self.data.insert(
-            "apollo.router.config.experimental_query_planner_mode".to_string(),
-            (
-                1,
-                HashMap::from_iter([("mode".to_string(), experimental_query_planner_mode.into())]),
-            ),
-        );
-    }
 }
 
 impl From<InstrumentData> for Metrics {
@@ -608,9 +524,7 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
-    use crate::configuration::QueryPlannerMode;
     use crate::uplink::license_enforcement::LicenseState;
-    use crate::Configuration;
 
     #[derive(RustEmbed)]
     #[folder = "src/configuration/testdata/metrics"]
@@ -628,8 +542,6 @@ mod test {
 
             let mut data = InstrumentData::default();
             data.populate_config_instruments(yaml);
-            let configuration: Configuration = input.parse().unwrap();
-            data.populate_query_planner_experimental_parallelism(&configuration);
             let _metrics: Metrics = data.into();
             assert_non_zero_metrics_snapshot!(file_name);
         }
@@ -680,37 +592,6 @@ mod test {
         configuration.plugins.plugins = Some(custom_plugins);
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
-        let _metrics: Metrics = data.into();
-        assert_non_zero_metrics_snapshot!();
-    }
-
-    #[test]
-    fn test_experimental_mode_metrics() {
-        let mut data = InstrumentData::default();
-        data.populate_deno_or_rust_mode_instruments(&Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        });
-        let _metrics: Metrics = data.into();
-        assert_non_zero_metrics_snapshot!();
-    }
-
-    #[test]
-    fn test_experimental_mode_metrics_2() {
-        let mut data = InstrumentData::default();
-        // Default query planner value should still be reported
-        data.populate_deno_or_rust_mode_instruments(&Configuration::default());
-        let _metrics: Metrics = data.into();
-        assert_non_zero_metrics_snapshot!();
-    }
-
-    #[test]
-    fn test_experimental_mode_metrics_3() {
-        let mut data = InstrumentData::default();
-        data.populate_deno_or_rust_mode_instruments(&Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

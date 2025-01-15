@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
@@ -63,7 +62,7 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::plugin::test::MockSubgraph;
-use crate::query_planner::BridgeQueryPlannerPool;
+use crate::query_planner::QueryPlannerService;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -2267,14 +2266,9 @@ async fn test_supergraph_timeout() {
 
     let schema = include_str!("..//testdata/minimal_supergraph.graphql");
     let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
-    let planner = BridgeQueryPlannerPool::new(
-        Vec::new(),
-        schema.clone(),
-        conf.clone(),
-        NonZeroUsize::new(1).unwrap(),
-    )
-    .await
-    .unwrap();
+    let planner = QueryPlannerService::new(schema.clone(), conf.clone())
+        .await
+        .unwrap();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
