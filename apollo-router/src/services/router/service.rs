@@ -44,6 +44,7 @@ use crate::configuration::BatchingMode;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -925,7 +926,7 @@ impl RouterCreator {
             // NOTE: Buffer is required because the static_page service is not Clone.
             // The buffer should be >= concurrency as per the advice
             // at: https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound
-            .buffer(50_000)
+            .buffered() // XXX: Added temporarily during backpressure fixing
             .layer(static_page.clone())
             .service(
                 supergraph_creator

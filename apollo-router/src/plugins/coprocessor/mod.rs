@@ -485,7 +485,7 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffer(50_000)
+            .buffered() // XXX: Added temporarily during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -624,7 +624,7 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffer(50_000)
+            .buffered() // XXX: Added temporarily during backpressure fixing
             .service(service)
             .boxed()
     }

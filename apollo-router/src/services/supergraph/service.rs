@@ -33,6 +33,7 @@ use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
@@ -914,7 +915,7 @@ impl PluggableSupergraphServiceBuilder {
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
         let sb = ServiceBuilder::new()
-            .buffer(50_000)
+            .buffered() // XXX: Added temporarily during backpressure fixing
             .layer(content_negotiation::SupergraphLayer::default())
             .service(
                 self.plugins
