@@ -140,6 +140,7 @@ impl RouterHttpServer {
             license.unwrap_or_default(),
             shutdown_receiver,
         );
+
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
         let state_machine = StateMachine::new(
