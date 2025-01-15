@@ -6475,9 +6475,9 @@ dependencies = [
 
 [[package]]
 name = "shape"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70179a0773695f4fc0b3e8e59f356064ed1532492e52bcf7e0dfef42934ec4c5"
+checksum = "7417fe45205214f2386c2dfbedc2173c4a7d7d2178cae2446b037fc6b89ec7cd"
 dependencies = [
  "apollo-compiler",
  "indexmap 2.7.0",
