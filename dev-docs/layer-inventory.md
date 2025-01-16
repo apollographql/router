@@ -51,13 +51,52 @@ Plugins:
 - Telemetry: other work
   - A lot of stuff is happening inside a `map_future` layer. I haven't checked this out but I think it's fine from a backpressure/pipeline perspective.
   - This would be easier to understand in a named layer, potentially.
-- Body limiting
+- Body limiting (limits plugin)
   - Rejects bodies that are too big. It's an equivalent of the tower-http `RequestBodyLimitLayer`.
   - **It is not Clone**. We can trivially derive it, but, we should probably use tower-http's implementation.
   - There's a bit of a dance happening here that we can hopefully remove.
   - Comment: "This layer differs from the tower version in that it will always generate an error eagerly rather than allowing the downstream service to catch and handle the error."
   - I do not understand what that means. But it must be related to making the `map_error_to_graphql` call inside the limits plugin work.
   - It may not be trivial to change this to use tower-http.
+- Traffic shaping:
+  - Load shedding.
+    - This is just tower!
+  - TimeoutLayer
+    - Only present if a timeout is configured in the router.
+    - We use a `.map_result()` layer to handle the error and turn it into a GraphQL error response.
+    - This is provided by `tower`!
+  - Load shedding.
+    - Do we need this twice? Wouldn't it all propagate to the outermost^ load shedding layer?
+  - ConcurrencyLimitLayer
+    - Only present if a concurrency limit is configured in the router.
+    - We use a `.map_result()` layer to handle the error and turn it into a GraphQL error response.
+    - This is provided by `tower`!
+  - Load shedding.
+    - Do we need this thrice? Wouldn't it all propagate to the outermost^ load shedding layer?
+  - RateLimitLayer
+    - Only present if a global rate limit is configured in the router.
+    - We use a `.map_result()` layer to handle the error and turn it into a GraphQL error response.
+    - This is provided by `tower`!
+- Fleet detection
+  - Records router request and response size (unless disabled by environment variable).
+  - The size counting has the effect of turning all bodies into streams, which may have negative effects!
+  - It is Clone.
+- Authentication: InstrumentLayer
+  - The same underlying implementation as the one in "Telemetry: InstrumentLayer", but creating a different span.
+  - **It is not Clone**, but could be trivially derived, if we stick the `span_fn` in an Arc.
+- Authentication: implementation
+  - It reads a JWT from the request and adds various context values.
+  - It can short-circuit on invalid JWTs.
+  - This is just a checkpoint layer, so it will be easy to adapt
+- File uploads
+  - Processes multipart requests and enforces file uploads-specific limits (eg. max amount of files).
+  - The multipart state is moved into extensions and the request is modified to look like a normal GraphQL request.
+  - **It is not Clone**. This is a oneshot checkpoint layer. At first glance it does not look terribly difficult to change it to a normal checkpoint layer.
+- Progressive override
+  - Adds override labels used in the schema to the context. Coprocessors can supposedly use this.
+  - It is Clone! This is using `map_request` from tower, so it's fine for backpressure.
+- Rhai/coprocessors
+  - I have not looked deeply into it but I think this will be okay
 
 Proper (`RouterService`):
 - Batching
@@ -115,5 +154,21 @@ Plugins:
   - A lot of stuff is happening inside a `map_response` and a `map_future` layer.
   - This copies several resources when the service is created, and uses them for the entire lifetime of the service. This will not do if we do not create the pipeline from scratch for every request.
   - This would be easier to understand if split apart into several named layers, potentially.
+- Authorization
+  - Rejects requests if not authenticated.
+  - I'm extremely confused why this happens here as opposed to the authentication plugin.
+  - This is a checkpoint layer.
+- File uploads
+  - Patches up variables in the parsed JSON to pass validation.
+  - **It is not Clone**. This is a oneshot checkpoint layer, but it looks easy enough to update.
+- Entity caching: Cache control headers
+  - Sets cache control headers on responses based on context. The context is populated by the subgraph service.
+- Progressive override
+  - Collect overriden labels from the context (added by rhai or coprocessors), calculate the special percentage-chance labels to override, and add *all* enabled override labels to the context for use by the query planner service.
+  - It is Clone! This is using `map_request` from tower, so it's fine for backpressure.
+- Connectors
+  - Not sure what this does in detail but it's using `map_future_with_request_data` which is probably fine.
+- Rhai/coprocessors
+  - I have not looked deeply into it but I think this will be okay
 
 The bulk of the "Proper" `SupergraphService` is doing query planning, and then handing things off to the execution service. This probably could be conceptualised as 2 layers, or 3 if there is also one to handle subscriptions.
