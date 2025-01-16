@@ -17,6 +17,7 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use opentelemetry_datadog::DatadogTraceState;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
@@ -42,8 +43,6 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::tracing::datadog_exporter;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -141,7 +140,7 @@ impl TracingConfigurator for Config {
 
         let fixed_span_names = self.fixed_span_names;
 
-        let exporter = datadog_exporter::new_pipeline()
+        let exporter = opentelemetry_datadog::new_pipeline()
             .with(
                 &self.endpoint.to_uri(&Uri::from_static(DEFAULT_ENDPOINT)),
                 |builder, e| builder.with_agent_endpoint(e.to_string().trim_end_matches('/')),
@@ -242,7 +241,7 @@ impl TracingConfigurator for Config {
 }
 
 struct ExporterWrapper {
-    delegate: datadog_exporter::DatadogExporter,
+    delegate: opentelemetry_datadog::DatadogExporter,
     span_metrics: HashMap<String, bool>,
 }
 
