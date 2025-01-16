@@ -8,6 +8,7 @@ use tower::BoxError;
 
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -26,7 +27,7 @@ impl TracingConfigurator for super::super::otlp::Config {
         let exporter: SpanExporterBuilder = self.exporter(TelemetryDataKind::Traces)?;
         let batch_span_processor = BatchSpanProcessor::builder(
             exporter.build_span_exporter()?,
-            opentelemetry::runtime::Tokio,
+            NamedTokioRuntime::new("otlp-tracing"),
         )
         .with_batch_config(self.batch_processor.clone().into())
         .build()

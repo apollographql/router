@@ -117,6 +117,11 @@ The initial call to Uplink during router startup is not reflected in metrics.
   - `report.type`: The type of report submitted: "traces" or "metrics"
   - `report.protocol`: Either "apollo" or "otlp", depending on the experimental_otlp_tracing_sampler configuration.
 
+### Telemetry
+- `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
+  - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`, `zipkin-tracing`.
+  - `error` = One of `channel closed`, `channel full`.
+
 ### Deprecated
 
 The following metrics have been deprecated and should not be used.
