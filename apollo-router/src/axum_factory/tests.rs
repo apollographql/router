@@ -61,6 +61,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
+use crate::metrics::FutureMetricsExt as _;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner::QueryPlannerService;
 use crate::router_factory::create_plugins;
@@ -2350,4 +2351,96 @@ async fn test_supergraph_timeout() {
              }]
         })
     );
+}
+
+/// There are two session count gauges:
+/// - apollo_router_session_count_total, the number of open client connections
+/// - apollo_router_session_count_active, the number of in-flight HTTP requests
+///
+/// To test them, we use two hyper clients. Each client has its own connection pool, so by manually
+/// sending requests and completing responses, and creating and dropping clients, we can control
+/// the amount of open connections and the amount of in-flight requests.
+///
+/// XXX(@goto-bus-stop): this only tests the `session_count_total` metric right now. The
+/// `session_count_active` metric is reported from inside an axum router, so its lifetime is
+/// actually a little shorter than the full request/response cycle, in a way that is not easy to
+/// test from the outside. To test it we could use a custom inner service (passed to
+/// `init_with_config`) where we can control the progress the inner service makes.
+/// For now, I've tested the `session_count_active` metric manually and confirmed its value makes
+/// sense...
+#[tokio::test]
+async fn it_reports_session_count_metric() {
+    let configuration = Configuration::fake_builder().build().unwrap();
+
+    async {
+        let (server, _client) = init_with_config(
+            router::service::empty().await,
+            Arc::new(configuration),
+            MultiMap::new(),
+        )
+        .await
+        .unwrap();
+
+        let url = server
+            .graphql_listen_address()
+            .as_ref()
+            .unwrap()
+            .to_string();
+
+        let make_request = || {
+            http::Request::builder()
+                .uri(&url)
+                .body(hyper::Body::from(r#"{ "query": "{ me }" }"#))
+                .unwrap()
+        };
+
+        let client = hyper::Client::new();
+        // Create a second client that does not reuse the same connection pool.
+        let second_client = hyper::Client::new();
+
+        let first_response = client.request(make_request()).await.unwrap();
+
+        assert_gauge!(
+            "apollo_router_session_count_total",
+            1,
+            "listener" = url.clone()
+        );
+
+        let second_response = second_client.request(make_request()).await.unwrap();
+
+        // Both requests are in-flight
+        assert_gauge!(
+            "apollo_router_session_count_total",
+            2,
+            "listener" = url.clone()
+        );
+
+        _ = hyper::body::to_bytes(first_response.into_body()).await;
+
+        // Connection is still open in the pool even though the request is complete.
+        assert_gauge!(
+            "apollo_router_session_count_total",
+            2,
+            "listener" = url.clone()
+        );
+
+        _ = hyper::body::to_bytes(second_response.into_body()).await;
+
+        drop(client);
+        drop(second_client);
+
+        // XXX(@goto-bus-stop): Not ideal, but we would probably have to drop down to very
+        // low-level hyper primitives to control the shutdown of connections to the required
+        // extent. 100ms is a long time so I hope it's not flaky.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // All connections are closed
+        assert_gauge!(
+            "apollo_router_session_count_total",
+            0,
+            "listener" = url.clone()
+        );
+    }
+    .with_metrics()
+    .await;
 }
