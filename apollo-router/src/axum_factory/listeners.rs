@@ -224,6 +224,19 @@ pub(super) fn serve_router_on_listen_addr(
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+
+    let meter = meter_provider().meter("apollo/router");
+    let total_session_count_instrument = meter
+        .u64_observable_gauge("apollo_router_session_count_total")
+        .with_description("Number of currently connected clients")
+        .with_callback(move |gauge| {
+            gauge.observe(
+                TOTAL_SESSION_COUNT.load(Ordering::Relaxed),
+                &[KeyValue::new("listener", address.to_string())],
+            );
+        })
+        .init();
+
     // this server reproduces most of hyper::server::Server's behaviour
     // we select over the stop_listen_receiver channel and the listener's
     // accept future. If the channel received something or the sender
@@ -231,18 +244,6 @@ pub(super) fn serve_router_on_listen_addr(
     // listener_receiver
     let server = async move {
         tokio::pin!(shutdown_receiver);
-
-        let _total_session_count_instrument = meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo_router_session_count_total")
-            .with_description("Number of currently connected clients")
-            .with_callback(move |gauge| {
-                gauge.observe(
-                    TOTAL_SESSION_COUNT.load(Ordering::Relaxed),
-                    &[KeyValue::new("listener", address.to_string())],
-                );
-            })
-            .init();
 
         let connection_shutdown = Arc::new(Notify::new());
 
@@ -263,13 +264,20 @@ pub(super) fn serve_router_on_listen_addr(
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
 
-                            // We only want to recognise sessions if we are the main graphql port.
-                            let _guard = main_graphql_port.then(TotalSessionCountGuard::start);
+                            // The session count instrument must be kept alive as long as any
+                            // request is in flight. So its lifetime is not related to the server
+                            // itself. The simplest way to do this is to hold onto a reference for
+                            // the duration of every request.
+                            let session_count_instrument = total_session_count_instrument.clone();
+                            // We only want to count sessions if we are the main graphql port.
+                            let session_count_guard = main_graphql_port.then(TotalSessionCountGuard::start);
 
                             let mut http_config = http_config.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
+                                let _session_count_instrument = session_count_instrument;
+                                let _session_count_guard = session_count_guard;
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
