@@ -329,6 +329,34 @@ impl Display for OpPath {
     }
 }
 
+impl PartialOrd for OpPathElement {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (OpPathElement::Field(x), OpPathElement::Field(y)) => {
+                // We prefer the one with a sibling typename (= Less).
+                // Otherwise, not comparable.
+                match (&x.sibling_typename, &y.sibling_typename) {
+                    (Some(_), None) => Some(Ordering::Less),
+                    (None, Some(_)) => Some(Ordering::Greater),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl PartialOrd for OpGraphPathTrigger {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (OpGraphPathTrigger::OpPathElement(x), OpGraphPathTrigger::OpPathElement(y)) => {
+                x.partial_cmp(y)
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, serde::Serialize)]
 pub(crate) enum OpPathElement {
     Field(Field),

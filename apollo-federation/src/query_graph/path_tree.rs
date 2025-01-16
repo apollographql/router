@@ -208,7 +208,7 @@ impl Display for OpPathTree {
 
 impl<TTrigger, TEdge> PathTree<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
+    TTrigger: Eq + Hash + PartialOrd,
     TEdge: Copy + Hash + Eq + Into<Option<EdgeIndex>>,
 {
     /// Returns the `QueryGraphNode` represented by `self.node`.
@@ -243,13 +243,13 @@ where
         }
 
         struct PathTreeChildInputs<'inputs, TTrigger, GraphPathIter> {
-            /// trigger: the final trigger value
+            /// trigger: the final trigger value chosen amongst the candidate triggers
             ///   - Two equivalent triggers can have minor differences in the sibling_typename.
             ///     This field holds the final trigger value that will be used.
             ///
-            /// PORT_NOTE: The JS QP used the last trigger value. So, we are following that
-            ///            to avoid mismatches. But, it can be revisited.
-            ///            We may want to keep or merge the sibling_typename values.
+            /// PORT_NOTE: The JS QP used the last trigger value, since the next trigger value
+            ///            overwrites the `trigger` field. Instead, Rust QP adopts the one with the
+            ///            sibling_typename set or the first one if none are set.
             trigger: &'inputs Arc<TTrigger>,
             conditions: Option<Arc<OpPathTree>>,
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
@@ -292,7 +292,10 @@ where
             match for_edge.by_unique_trigger.entry(trigger) {
                 Entry::Occupied(entry) => {
                     let existing = entry.into_mut();
-                    existing.trigger = trigger;
+                    if *trigger < *existing.trigger {
+                        // overwrite if the new trigger is preferable (= less)
+                        existing.trigger = trigger;
+                    }
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
                     if let Some(other) = matching_context_ids {
                         existing
