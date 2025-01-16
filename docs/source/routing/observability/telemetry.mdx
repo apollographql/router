@@ -12,13 +12,13 @@ Since the router is the single access point for all traffic to and from your gra
 - Diagnose issues and deduce root causes
 - Optimize resource usage and system reliability
 
+To understand how router telemetry fits into the broader set of GraphOS observability tooling, see the [observability overview](/graphos/routing/observability).
+
 ## How router telemetry works
 
-By default, the router doesn't collect and export any telemetry beyond [what it sends to GraphOS](). You configure which telemetry data to collect and where to export it via your router's configuration file.
+By default, the router doesn't collect and export any telemetry beyond [the operation](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router-or-apollo-server) and [field usage](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router) metrics it sends to GraphOS. You configure additional telemetry data to collect and where to export it via your router's configuration file.
 
-The router request lifecycle is the primary data source for telemetry data or _signals_. These signals include _logs_, _metrics_, and _traces_. The section on [router telemetry signals](#) details these data types and gives basic configuration examples.
-
-_Exporters_ are responsible for sending telemetry data to your application performance monitoring (APM) and observability tools for storage, visualization, and analysis.
+The router request lifecycle is the primary data source for telemetry data or _signals_. These signals include _logs_, _metrics_, and _traces_. The section on [router telemetry signals](#router-telemetry-signals) explains these data types and gives basic configuration examples. _Exporters_ are responsible for sending telemetry data to your application performance monitoring (APM) and observability tools for storage, visualization, and analysis.
 
 ```mermaid
 flowchart LR
@@ -239,7 +239,7 @@ Effective telemetry provides just the right amount and granularity of informatio
 
 Specific events that need to be captured—and the conditions under which they need to be captured—can change as client applications and graphs change. Different environments, such as production and development, can have different observability requirements.
 
-Router telemetry is customizable to meet the observability needs of different graphs. Keep in mind your particular environments’ and graphs’ requirements when configuring your telemetry.
+Router telemetry is customizable to meet the observability needs of different graphs. Keep in mind your particular environments' and graphs' requirements when configuring your telemetry.
 
 ### Balancing telemetry and router performance
 
