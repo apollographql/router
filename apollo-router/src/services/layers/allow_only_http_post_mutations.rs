@@ -1,6 +1,4 @@
-//! Prevent mutations if the HTTP method is GET.
-//!
-//! See [`Layer`] and [`Service`] for more details.
+//! A supergraph service layer that requires that GraphQL mutations use the HTTP POST method.
 
 use std::ops::ControlFlow;
 
@@ -23,6 +21,16 @@ use crate::layers::ServiceBuilderExt;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
+/// A supergraph service layer that requires that GraphQL mutations use the HTTP POST method.
+///
+/// Responds with a 405 Method Not Allowed if it receives a GraphQL mutation using any other HTTP
+/// method.
+///
+/// This layer requires that a ParsedDocument is available on the context and that the request has
+/// a valid GraphQL operation and operation name. If these conditions are not met the layer will
+/// return early with an unspecified error response.
+// XXX(@goto-bus-stop): since this layer holds no state, we should have no problem making it
+// `Clone`able.
 #[derive(Default)]
 pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 
@@ -54,6 +62,9 @@ where
                         .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
                     {
                         None => {
+                            // We shouldn't ever reach here unless the pipeline was set up
+                            // improperly (i.e. programmer error), but do something better than
+                            // panicking just in case.
                             let errors = vec![Error::builder()
                                 .message("Cannot find executable document".to_string())
                                 .extension_code("MISSING_EXECUTABLE_DOCUMENT")
@@ -77,6 +88,8 @@ where
 
                     match op {
                         Err(_) => {
+                            // We shouldn't end up here if the request is valid, and validation
+                            // should happen well before this, but do something just in case.
                             let errors = vec![Error::builder()
                                 .message("Cannot find operation".to_string())
                                 .extension_code("MISSING_OPERATION")

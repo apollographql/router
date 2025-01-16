@@ -616,7 +616,6 @@ async fn subscription_task(
                         subgraph_schemas: execution_service_factory.subgraph_schemas.clone(),
                         plugins: plugins.clone(),
                         fetch_service_factory,
-
                     };
                 }
             }
