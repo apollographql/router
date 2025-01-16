@@ -49,7 +49,7 @@ docker-compose up -d
 ```
 
 **Note:** `-d` is for running into background. You can remove `-d` if you
-have issues and you want to see the logs or if you want to run the service
+have issues, and you want to see the logs or if you want to run the service
 in foreground.
 
 ### Run against the docker-compose or Node.js setup
@@ -71,7 +71,7 @@ This limits the noise generated while exploration is taking place.
 When you are ready to create a PR, run a build with strict checking enabled,
 and check for license compliance.
 
-Use `cargo xtask all` to run all of the checks the CI will run.
+Use `cargo xtask all` to run all the checks the CI will run.
 
 The CI checks require `cargo-deny` and `cargo-about` which can both be installed by running:
 

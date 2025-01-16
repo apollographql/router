@@ -3,14 +3,12 @@
 #![warn(unreachable_pub)]
 use std::fmt;
 
-use opentelemetry::trace::TraceContextExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::Span;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Registry;
 
-use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::IsSampled;
 
 /// Trace ID
@@ -19,21 +17,9 @@ use crate::plugins::telemetry::reload::IsSampled;
 pub struct TraceId([u8; 16]);
 
 impl TraceId {
-    /// Create a TraceId. If the span is not sampled then return None.
-    pub fn maybe_new() -> Option<Self> {
-        let span = Span::current();
-        let context = span.context();
-        let span_ref = context.span();
-        let span_context = span_ref.span_context();
-        if span_context.is_sampled() {
-            Some(Self(span_context.trace_id().to_bytes()))
-        } else {
-            None
-        }
-    }
 
     /// Get the current trace id if it's a valid one, even if it's not sampled
-    pub(crate) fn current() -> Option<Self> {
+    pub fn current() -> Option<Self> {
         let trace_id = Span::current()
             .with_subscriber(move |(id, dispatch)| {
                 if let Some(reg) = dispatch.downcast_ref::<Registry>() {
@@ -106,14 +92,14 @@ mod test {
 
     #[test]
     fn it_returns_invalid_trace_id() {
-        let my_id = TraceId::maybe_new();
+        let my_id = TraceId::current();
         assert!(my_id.is_none());
     }
 
     #[test]
     fn it_correctly_compares_invalid_and_invalid_trace_id() {
-        let my_id = TraceId::maybe_new();
-        let other_id = TraceId::maybe_new();
+        let my_id = TraceId::current();
+        let other_id = TraceId::current();
         assert!(my_id.is_none());
         assert!(other_id.is_none());
         assert!(other_id == my_id);
@@ -143,7 +129,7 @@ mod test {
         tracing::subscriber::with_default(subscriber, || {
             // Spans will be sent to the configured OpenTelemetry exporter
             let _span = tracing::trace_span!("trace test").entered();
-            assert!(TraceId::maybe_new().is_some());
+            assert!(TraceId::current().is_some());
         });
     }
 
@@ -152,7 +138,7 @@ mod test {
         let _guard = TRACING_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let my_id = TraceId::maybe_new();
+        let my_id = TraceId::current();
         assert!(my_id.is_none());
         // Create a tracing layer with the configured tracer
         let provider = opentelemetry::sdk::trace::TracerProvider::builder()
@@ -168,7 +154,7 @@ mod test {
             // Spans will be sent to the configured OpenTelemetry exporter
             let _span = tracing::trace_span!("trace test").entered();
 
-            let other_id = TraceId::maybe_new();
+            let other_id = TraceId::current();
             assert!(other_id.is_some());
             assert_ne!(other_id, my_id);
         });
@@ -193,9 +179,9 @@ mod test {
             // Spans will be sent to the configured OpenTelemetry exporter
             let _span = tracing::trace_span!("trace test").entered();
 
-            let my_id = TraceId::maybe_new();
+            let my_id = TraceId::current();
             assert!(my_id.is_some());
-            let other_id = TraceId::maybe_new();
+            let other_id = TraceId::current();
             assert_eq!(other_id, my_id);
         });
     }

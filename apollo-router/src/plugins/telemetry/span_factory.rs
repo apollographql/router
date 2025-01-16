@@ -76,7 +76,7 @@ impl SpanMode {
     pub(crate) fn create_router<B>(&self, request: &http::Request<B>) -> ::tracing::span::Span {
         match self {
             SpanMode::Deprecated => {
-                let trace_id = TraceId::maybe_new()
+                let trace_id = TraceId::current()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
                 let span = info_span!(ROUTER_SPAN_NAME,
