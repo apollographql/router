@@ -43,7 +43,21 @@ Front (`RouterCreator`):
   - It is Clone!
   - This layer rejects requests with invalid Accept or Content-Type headers.
 
-Plugin layers happen here or in between somewhere, TBD.
+Plugins:
+- Telemetry: InstrumentLayer
+  - Only used with `SpanMode::Deprecated`
+  - Maybe a candidate for removal in 2.0?
+  - **It is not Clone**, but could be trivially derived, if we stick the span_fn in an Arc.
+- Telemetry: other work
+  - A lot of stuff is happening inside a `map_future` layer. I haven't checked this out but I think it's fine from a backpressure/pipeline perspective.
+  - This would be easier to understand in a named layer, potentially.
+- Body limiting
+  - Rejects bodies that are too big. It's an equivalent of the tower-http `RequestBodyLimitLayer`.
+  - **It is not Clone**. We can trivially derive it, but, we should probably use tower-http's implementation.
+  - There's a bit of a dance happening here that we can hopefully remove.
+  - Comment: "This layer differs from the tower version in that it will always generate an error eagerly rather than allowing the downstream service to catch and handle the error."
+  - I do not understand what that means. But it must be related to making the `map_error_to_graphql` call inside the limits plugin work.
+  - It may not be trivial to change this to use tower-http.
 
 Proper (`RouterService`):
 - Batching
@@ -88,5 +102,18 @@ Front (`SupergraphCreator`):
   - **It is not Clone** today but it can trivially be derived.
 
 Plugin layers happen here or in between somewhere, TBD.
+Plugins:
+- CSRF
+  - This is a checkpoint layer.
+  - **It is not Clone**, but CheckpointLayer can trivially be made Clone, I think.
+  - Rejects requests that might be cross-site request forgery...
+  - TODO(@goto-bus-stop): I'm not actually sure how this works
+- Telemetry: InstrumentLayer
+  - The same underlying implementation as the one in `router_service`, but creating a different span.
+  - **It is not Clone**, but could be trivially derived, if we stick the `span_fn` in an Arc.
+- Telemetry: other work
+  - A lot of stuff is happening inside a `map_response` and a `map_future` layer.
+  - This copies several resources when the service is created, and uses them for the entire lifetime of the service. This will not do if we do not create the pipeline from scratch for every request.
+  - This would be easier to understand if split apart into several named layers, potentially.
 
 The bulk of the "Proper" `SupergraphService` is doing query planning, and then handing things off to the execution service. This probably could be conceptualised as 2 layers, or 3 if there is also one to handle subscriptions.
