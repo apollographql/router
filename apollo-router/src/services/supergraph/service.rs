@@ -54,6 +54,7 @@ use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::connector_service::ConnectorServiceFactory;
+use crate::services::execution;
 use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::http::HttpClientServiceFactory;
@@ -89,8 +90,9 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
-    execution_service_factory: ExecutionServiceFactory,
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
+    execution_service_factory: ExecutionServiceFactory,
+    execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     notify: Notify<String, graphql::Response>,
 }
@@ -104,9 +106,15 @@ impl SupergraphService {
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
+        let execution_service: execution::BoxCloneService = ServiceBuilder::new()
+            .buffered()
+            .service(execution_service_factory.create())
+            .boxed_clone();
+
         SupergraphService {
             query_planner_service,
             execution_service_factory,
+            execution_service,
             schema,
             notify,
         }
@@ -141,6 +149,7 @@ impl Service<SupergraphRequest> for SupergraphService {
         let fut = service_call(
             planning,
             self.execution_service_factory.clone(),
+            self.execution_service.clone(),
             schema,
             req,
             self.notify.clone(),
@@ -171,6 +180,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 async fn service_call(
     planning: CachingQueryPlanner<QueryPlannerService>,
     execution_service_factory: ExecutionServiceFactory,
+    execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
     notify: Notify<String, graphql::Response>,
@@ -321,12 +331,14 @@ async fn service_call(
                     let (subs_tx, subs_rx) = mpsc::channel(1);
                     let query_plan = plan.clone();
                     let execution_service_factory_cloned = execution_service_factory.clone();
+                    let execution_service_cloned = execution_service.clone();
                     let cloned_supergraph_req =
                         clone_supergraph_request(&req.supergraph_request, context.clone());
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
                             execution_service_factory_cloned,
+                            execution_service_cloned,
                             ctx,
                             query_plan,
                             subs_rx,
@@ -338,8 +350,7 @@ async fn service_call(
                     subscription_tx = subs_tx.into();
                 }
 
-                let execution_response = execution_service_factory
-                    .create()
+                let execution_response = execution_service
                     .oneshot(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
@@ -434,6 +445,7 @@ pub struct SubscriptionTaskParams {
 
 async fn subscription_task(
     mut execution_service_factory: ExecutionServiceFactory,
+    execution_service: execution::BoxCloneService,
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
@@ -539,7 +551,7 @@ async fn subscription_task(
                 match message {
                     Some(mut val) => {
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_event(&supergraph_req, &execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_event(&supergraph_req, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
@@ -644,7 +656,7 @@ async fn subscription_task(
 
 async fn dispatch_event(
     supergraph_req: &SupergraphRequest,
-    execution_service_factory: &ExecutionServiceFactory,
+    execution_service: execution::BoxCloneService,
     query_plan: Option<&Arc<QueryPlan>>,
     context: Context,
     mut val: graphql::Response,
@@ -666,7 +678,6 @@ async fn dispatch_event(
                 .build()
                 .await;
 
-            let execution_service = execution_service_factory.create();
             let execution_response = execution_service.oneshot(execution_request).await;
             let next_response = match execution_response {
                 Ok(mut execution_response) => execution_response.next_response().await,
