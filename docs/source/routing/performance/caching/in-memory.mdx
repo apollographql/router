@@ -82,7 +82,7 @@ If the router is using distributed caching for query plans, the warm-up phase wi
 
 ## Caching automatic persisted queries (APQ)
 
-[Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
+[Automatic Persisted Queries (**APQ**)](https://www.apollographql.com/docs/apollo-server/performance/apq) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
 
 The router supports using APQ in its communications with both clients _and_ subgraphs:
 
