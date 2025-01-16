@@ -5,8 +5,10 @@ use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use petgraph::visit::EdgeRef;
@@ -358,6 +360,37 @@ impl QueryPlanner {
         self.federated_query_graph.subgraph_schemas()
     }
 
+    fn normalize_operation(
+        &self,
+        operation: &executable::Operation,
+        fragments: &IndexMap<Name, Node<executable::Fragment>>,
+        check_for_cooperative_cancellation: &Option<&dyn Fn() -> ControlFlow<()>>,
+    ) -> Result<NormalizedDefer, FederationError> {
+        normalize_operation(
+            operation,
+            fragments,
+            &self.api_schema,
+            &self.interface_types_with_interface_objects,
+            &|| {
+                QueryPlanningParameters::check_cancellation_with(check_for_cooperative_cancellation)
+            },
+        )?
+        .with_normalized_defer()
+    }
+
+    /// The `pub` version of `normalize_operation` for CLI command.
+    pub fn normalized_operation(
+        &self,
+        operation: &executable::Operation,
+        fragments: &IndexMap<Name, Node<executable::Fragment>>,
+    ) -> Result<Operation, FederationError> {
+        let NormalizedDefer {
+            operation: normalized_operation,
+            ..
+        } = self.normalize_operation(operation, fragments, &None)?;
+        Ok(normalized_operation)
+    }
+
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
     #[cfg_attr(
         feature = "snapshot_tracing",
@@ -388,24 +421,17 @@ impl QueryPlanner {
 
         let statistics = QueryPlanningStatistics::default();
 
-        let normalized_operation = normalize_operation(
-            operation,
-            &document.fragments,
-            &self.api_schema,
-            &self.interface_types_with_interface_objects,
-            &|| {
-                QueryPlanningParameters::check_cancellation_with(
-                    &options.check_for_cooperative_cancellation,
-                )
-            },
-        )?;
-
         let NormalizedDefer {
             operation: normalized_operation,
             assigned_defer_labels,
             defer_conditions,
             has_defers,
-        } = normalized_operation.with_normalized_defer()?;
+        } = self.normalize_operation(
+            operation,
+            &document.fragments,
+            &options.check_for_cooperative_cancellation,
+        )?;
+
         if has_defers && is_subscription {
             return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
         }

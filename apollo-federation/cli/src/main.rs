@@ -115,6 +115,12 @@ enum Command {
         #[command(flatten)]
         planner: QueryPlannerArgs,
     },
+    /// Outputs the normalized version of the given query
+    Normalize {
+        query: PathBuf,
+        /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
+        schemas: Vec<PathBuf>,
+    },
     /// Validate one supergraph schema file or multiple subgraph schemas
     Validate {
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
@@ -217,6 +223,7 @@ fn main() -> ExitCode {
             schemas,
             planner,
         } => cmd_plan(json, &query, &schemas, planner),
+        Command::Normalize { query, schemas } => cmd_normalize(&query, &schemas),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Satisfiability { supergraph_schema } => cmd_satisfiability(&supergraph_schema),
@@ -512,6 +519,23 @@ fn cmd_plan(
         Ok(_) => Ok(()),
         Err(err) => Err(anyhow!("{err}")),
     }
+}
+
+// Use the query planner to normalize the input query
+fn cmd_normalize(query_path: &Path, schema_paths: &[PathBuf]) -> Result<(), AnyError> {
+    let query = read_input(query_path);
+    let supergraph = load_supergraph(schema_paths)?;
+    let planner = QueryPlanner::new(&supergraph, Default::default())?;
+    let query_doc =
+        ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)
+            .map_err(FederationError::from)?;
+    let operation = query_doc
+        .operations
+        .get(None)
+        .map_err(|_| SingleFederationError::OperationNameNotProvided)?;
+    let normalized = planner.normalized_operation(operation, &query_doc.fragments)?;
+    println!("{}", normalized);
+    Ok(())
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), AnyError> {
