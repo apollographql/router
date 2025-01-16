@@ -6,10 +6,19 @@ description: Observe and monitor the health and performance of GraphQL operation
 
 import TelemetryPerformanceNote from '../../../shared/telemetry-performance.mdx';
 
-In this overview, learn about:
-- How GraphOS Router and Apollo Router Core telemetry enable supergraph observability and debuggability
-- What data is captured in the router's logs, metrics, and traces
-- What exporters are available to provide telemetry to your application performance monitoring (APM) tools
+Since the router is the single access point for all traffic to and from your graph, router telemetry is the most comprehensive way to observe your supergraph. By implementing telemetry, you can:
+
+- Monitor your supergraph's health and performance
+- Diagnose issues and deduce root causes
+- Optimize resource usage and system reliability
+
+## How router telemetry works
+
+By default, the router doesn't collect and export any telemetry beyond [what it sends to GraphOS](). You configure which telemetry data to collect and where to export it via your router's configuration file.
+
+The router request lifecycle is the primary data source for telemetry data or _signals_. These signals include _logs_, _metrics_, and _traces_. The section on [router telemetry signals](#) details these data types and gives basic configuration examples.
+
+_Exporters_ are responsible for sending telemetry data to your application performance monitoring (APM) and observability tools for storage, visualization, and analysis.
 
 ```mermaid
 flowchart LR
@@ -20,139 +29,228 @@ flowchart LR
     end
 
     apms["APM, agent,<br/>or collector"]
-    exporters--"native or<br/>OTLP"-->apms
+    exporters-->apms
 
 ```
 
-## Observability through telemetry
+### Telemetry exporters
 
-The health of your supergraph is only as good as the health of your router. Because the router is the single entry point to the supergraph, all client requests pass through the [router's request lifecycle](/router/customizations/overview#the-request-lifecycle). Any issues with the router are likely to affect the handling of all requests to your supergraph.
+The router emits telemetry in the industry-standard OpenTelemetry Protocol (OTLP) format and is therefore compatible with many APM tools, including:
 
-Diagnosing your router's health and performance requires it to show observable data about its inner workings. The more observable data you can monitor and analyze, the faster you can identify unhealthy behaviors, deduce root causes, and implement fixes.
+- Prometheus
+- OpenTelemetry Collector
+- Datadog
+- New Relic
+- Jaeger
+- Zipkin
 
-The router provides the necessary data to monitor its health and troubleshoot issues. The router's observability is critical for maintaining a healthy, performant supergraph and minimizing its [mean time to repair (MTTR)](https://en.wikipedia.org/wiki/Mean_time_to_repair). 
- 
-## Collect exactly the telemetry you need
+### Attributes and selectors
 
-Effective telemetry provides just the right amount and granularity of information to maintain your graph. Too much data can overwhelm your system, for example, with high cardinality metrics. Too little may not provide enough information to debug issues.
+Attributes and selectors are key-value pairs that add contextual information about the router request lifecycle to telemetry data. You can annotate events, metrics, and spans with them and then use them to filter and group data in your APMs.
 
-Specific events that need to be captured&mdash;and the conditions under which they need to be captured&mdash;can change as client applications and graphs change. Different environments, such as production and development, can have different observability requirements.
+The router supports a set of standard attributes from [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/). Example attributes include:
 
-Router telemetry is customizable to meet the observability needs of different graphs. You can record custom events in different stages of the router request lifecycle and create custom contexts with [attributes](#router-telemetry-attributes) to track a request or response as it flows through the router. You can shape the volume and rate of emitted telemetry, for example, with batched telemetry.
+- HTTP status code  
+- GraphQL operation name  
+- Subgraph name
 
-## Router telemetry types
+Selectors allow you define custom data points based on the router's request lifecycle. 
 
-The router collects different types of telemetry, including:
+|  | Description |
+| ----- | ----- |
+| **Attribute** | Standard data points that can be attached to spans, instruments, and events. |
+| **Selector** | Custom data points extracted from the router's request lifecycle, tailored to specific needs. |
 
-* [Logs and events](#logs-and-events)
-* [Metrics and instruments](#metrics-and-instruments)
-* [Traces and spans](#traces-and-spans)
+This configuration snippet enables including a subgraph's name in whatever telemetry data is being collected.
 
-These let you collect data about the inner workings of your router and export logs, metrics, and traces to your application performance monitoring (APM) and observability tools.
+\<example config\>
 
-```mermaid
-flowchart LR
-    subgraph Router
-    lifecycle("Request Lifecycle<br/>(telemetry sources)")
-    logs_exporter("Logs<br/>Exporter")
-        terminal(stdout)
-    metrics_exporter("Metrics<br/>Exporter")
-    traces_exporter("Traces<br/>Exporter")
-    prometheus("Prometheus<br/>Endpoint")
+### Conditions
 
-    lifecycle-->logs_exporter-->terminal
-    lifecycle--->metrics_exporter-->prometheus
-    lifecycle--->traces_exporter
-    end
+You can set conditions for instruments and events to only collect telemetry data [when necessary](#collect-exactly-the-telemetry-you-need). This configuration snippet enables only collecting the relevant telemetry data when 
 
-    otlp_apm["OTLP-enabled APM<br/>(e.g. New Relic)"]
-    zipkin[Zipkin]
-    datadog[Datadog agent]
-    apm1[APM]
-    collector("OpenTelemetry<br/>Collector")
-    jaeger("Jaeger<br/>(agent or collector)")
+\<condition-example\>.
+
+\<example config\>
+
+## Router telemetry signals
+
+The router supports three signal types for collecting and exporting telemetry:
+
+<table>
+  <thead>
+    <tr>
+      <th>Signal</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="/graphos/routing/observability/telemetry#logs-and-events">Logs and events</a></td>
+      <td>
+        <ul>
+          <li>Capture and export logs in text or JSON format.</li>
+          <li>Trigger custom events to log critical actions during the router request lifecycle.</li>
+        </ul>
+      </td>
+    </tr>
+    <tr>
+      <td><a href="/graphos/routing/observability/telemetry#metrics-and-instruments">Metrics and instruments</a></td>
+      <td>
+        <ul>
+          <li>Export standard metrics for Router operations.</li>
+          <li>Leverage OpenTelemetry (OTEL) metrics to capture HTTP lifecycle data.</li>
+          <li>Define custom metrics using attributes and selectors.</li>
+        </ul>
+      </td>
+    </tr>
+    <tr>
+      <td><a href="/graphos/routing/observability/telemetry#traces-and-spans">Traces and spans</a></td>
+      <td>
+        <ul>
+          <li>Export traces of router transactions.</li>
+          <li>Use spans to monitor specific actions within traces and attach attributes or selectors for deeper insights.</li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 
-    metrics_exporter--"OTLP"--->otlp_apm
-    metrics_exporter--"OTLP"--->collector
-    metrics_exporter--"OTLP"--->datadog
-    traces_exporter--"OTLP"--->jaeger
-    traces_exporter--"native or<br/>OTLP"-->datadog
-    traces_exporter--"native"-->jaeger
-    traces_exporter--"native"--->zipkin
-    prometheus<--"scrapes"-->apm1
-
-```
+These mechanisms let you collect data about the inner workings of your router and graph and export them accordingly. 
 
 ### Logs and events
 
-Logs record **events** in the router. Examples of logged events include:
+Logs record events in the router's request lifecycle. Examples of logged events include:
 
-* Information about the router lifecycle
-* Warnings about misconfiguration
-* Errors that occurred during a request
+- Information about the router lifecycle  
+- Warnings about misconfiguration  
+- Errors that occurred during a request
 
-Logs can be consumed by [logging exporters](/router/configuration/telemetry/exporters/logging/overview) and as part of [spans](#traces-and-spans) via [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview). 
+#### Log exporters
+
+You can log events to standard output in either text or JSON format. Logs can also be consumed by [logging exporters](/router/configuration/telemetry/exporters/logging/overview) and as part of [spans](/graphos/routing/observability/telemetry#traces-and-spans) via [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview).
+
+\<Mermaid diagram of below\>
+
+
+#### Example log configuration
+
+This configuration snippet enables stdout logging in JSON:
+
+\<example config\>
 
 ### Metrics and instruments
 
-Metrics are measurements of the router's behavior that can be exported and monitored. Different kinds of metrics include histograms, gauges, and counts. 
+Metrics are measurements of the router's behavior, for example, the number of incoming HTTP requests. Metrics are numeric values that are collected and often analyzed over time to identify trends.
 
-Metrics can be consumed by _exporters_. See [Metrics exporters](/router/configuration/telemetry/exporters/metrics/overview) for an overview of supported exporters.
+Instruments define _how_ to collect and report metrics. Different kinds of instruments include counters, gauges, and histograms. Given the metric “number of incoming HTTP requests”, different instruments collect a count, histogram, and gauge of this metric.
 
-An individual metric is called an _instrument_. Example instruments of the router include:
+#### Instrument types
 
-* Number of received requests 
-* Histogram of request durations
-* Number of in-flight requests
+Metric instruments fall into three categories:
+
+<table>
+  <thead>
+    <tr>
+      <th>Instrument Type</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Router instruments</strong></td>
+      <td>
+        Standard instruments for the router's request life cycle, including:
+        <ul>
+          <li>The number of HTTP requests by HTTP status</li>
+          <li>A histogram of HTTP router request duration</li>
+        </ul>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>OTEL instruments</strong></td>
+      <td>
+        Standard OpenTelemetry instruments around the HTTP lifecycle, including:
+        <ul>
+          <li>The number of active requests in flight</li>
+          <li>A histogram of request body sizes</li>
+        </ul>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Custom instrument</strong></td>
+      <td>
+        Custom instruments defined in the router's request life cycle.
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+#### Example instrument configuration
+
+This configuration snippet enables OTEL instrumentation for a histogram of request body sizes:
+
+\<example config\>
 
 See [Instruments](/router/configuration/telemetry/instrumentation/instruments) for an overview of available instruments and a guide for configuring and customizing instruments.
 
+#### Metric exporters
+
+Metrics can be consumed and monitored by exporters. 
+
+\<Mermaid diagram of below\>  
+
+This configuration snippet enables exporting metrics to a Datadog agent:
+
+\<example config\>
+
+See [Metrics exporters](/router/configuration/telemetry/exporters/metrics/overview) for an overview of supported exporters.
+
+#### Dropping metrics using views
+
+Define views to filter out specific metrics before export, ensuring only relevant data is captured.
+
 ### Traces and spans
 
-Traces monitor the flow of a request through the router. A trace is composed of [**spans**](/router/configuration/telemetry/instrumentation/spans). A span captures a request's duration as it flows through the router request lifecycle. Spans may include contextual information about the request, such as the HTTP status code, or the name of the subgraph being queried.
+Traces monitor the flow of a request through the router. A trace is composed of [spans](/router/configuration/telemetry/instrumentation/spans). A span captures a request's duration as it flows through the router request lifecycle. Spans may include contextual information about the request, such as the HTTP status code or the name of the subgraph being queried.
 
 Examples of spans include:
 
-* `router` - Wraps an entire request from the HTTP perspective
-* `supergraph` - Wraps a request once GraphQL parsing has taken place
-* `subgraph` - Wraps a request to a subgraph.
+- router \- Wraps an entire request from the HTTP perspective  
+- supergraph \- Wraps a request once GraphQL parsing has taken place  
+- subgraph \- Wraps a request to a subgraph.
+
+#### Tracing exporters
 
 Traces are consumed via [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview).
 
-## Router telemetry exporters
+\<Mermaid diagram of below\>
 
-The router exports its collected telemetry in formats compatible with industry-standard APM tools. The router supports logging, metrics, and tracing exporters for a variety of tools, including:
+This configuration snippet enables exporting traces to a Datadog agent:
 
-* Prometheus
-* OpenTelemetry Collector
-* Datadog
-* New Relic
-* Jaeger
-* Zipkin
-
-For more information, see [logging exporters](/router/configuration/telemetry/exporters/logging/overview), [metrics exporters](/router/configuration/telemetry/exporters/metrics/overview), and [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview).
-
-## Router telemetry attributes
-
-You can annotate events, metrics, and spans with **attributes**. Attributes are key-value pairs that add contextual information about the router pipeline to telemetry. You can then use these attributes to filter and group data in your APMs.
-
-Example attributes include:
-
-* HTTP status code
-* GraphQL operation name
-* Subgraph name
-
-You can use [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors) as span attributes.
-
-<PremiumFeature>
-
-[Custom attributes for spans](/router/configuration/telemetry/instrumentation/spans/#attributes) require a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
-
-</PremiumFeature>
+\<example config\>
 
 ## Best practices
+
+### Collect exactly the telemetry you need
+
+Effective telemetry provides just the right amount and granularity of information to maintain your graph. Too much data can overwhelm your system, for example, with high cardinality metrics. Too little may not provide enough information to debug issues.
+
+Specific events that need to be captured—and the conditions under which they need to be captured—can change as client applications and graphs change. Different environments, such as production and development, can have different observability requirements.
+
+Router telemetry is customizable to meet the observability needs of different graphs. Keep in mind your particular environments’ and graphs’ requirements when configuring your telemetry.
 
 ### Balancing telemetry and router performance
 
 <TelemetryPerformanceNote/>
+
+## Next steps
+
+Consult the following documentation for details on how to configure the various telemetry mechanisms and exporters:
+
+- [Log Exporters Overview](/graphos/reference/router/telemetry/log-exporters/overview)  
+- [Trace Exporters Overview](/graphos/reference/router/telemetry/trace-exporters/overview)  
+- [Metrics Exporters Overview](/graphos/reference/router/telemetry/metrics-exporters/overview)  
+- [Attributes and Selectors](/graphos/reference/router/telemetry/instrumentation/selectors)  
+- [Conditions](/graphos/reference/router/telemetry/instrumentation/conditions)
