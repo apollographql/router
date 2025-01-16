@@ -33,13 +33,13 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     machine:
-      image: ubuntu-2004:2024.01.1
+      image: cimg/base:current
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
-      image: ubuntu-2004:2024.01.1
+      image: cimg/base:current
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
