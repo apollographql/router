@@ -36,7 +36,7 @@ impl SpanMode {
             SpanMode::Deprecated => {
                 if matches!(
                     license_state,
-                    LicenseState::LicensedWarn | LicenseState::LicensedHalt
+                    LicenseState::LicensedWarn(_) | LicenseState::LicensedHalt(_)
                 ) {
                     error_span!(
                         REQUEST_SPAN_NAME,

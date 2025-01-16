@@ -78,6 +78,7 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
@@ -94,6 +95,7 @@ pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
     notify: Notify<String, graphql::Response>,
+    license: LicenseState,
 }
 
 #[buildstructor::buildstructor]
@@ -104,12 +106,14 @@ impl SupergraphService {
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Self {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
             schema,
             notify,
+            license,
         }
     }
 }
@@ -145,6 +149,7 @@ impl Service<SupergraphRequest> for SupergraphService {
             schema,
             req,
             self.notify.clone(),
+            self.license,
         )
         .or_else(|error: BoxError| async move {
             let errors = vec![crate::error::Error {
@@ -175,6 +180,7 @@ async fn service_call(
     schema: Arc<Schema>,
     req: SupergraphRequest,
     notify: Notify<String, graphql::Response>,
+    license: LicenseState,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
@@ -333,6 +339,7 @@ async fn service_call(
                             subs_rx,
                             notify,
                             cloned_supergraph_req,
+                            license,
                         )
                         .await;
                     });
@@ -440,6 +447,7 @@ async fn subscription_task(
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
+    license: LicenseState,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -566,7 +574,7 @@ async fn subscription_task(
                             .map(|(k, v)| (k.clone(), v.schema.clone()))
                             .collect(),
                     );
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None).await {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None, license).await {
                         Ok(plugins) => Arc::new(plugins),
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
@@ -800,6 +808,7 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     configuration: Option<Arc<Configuration>>,
     planner: QueryPlannerService,
+    license: LicenseState,
 }
 
 impl PluggableSupergraphServiceBuilder {
@@ -810,6 +819,7 @@ impl PluggableSupergraphServiceBuilder {
             http_service_factory: Default::default(),
             configuration: None,
             planner,
+            license: Default::default(),
         }
     }
 
@@ -847,6 +857,14 @@ impl PluggableSupergraphServiceBuilder {
         configuration: Arc<Configuration>,
     ) -> PluggableSupergraphServiceBuilder {
         self.configuration = Some(configuration);
+        self
+    }
+
+    pub(crate) fn with_license(
+        mut self,
+        license: LicenseState,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.license = license;
         self
     }
 
@@ -913,6 +931,7 @@ impl PluggableSupergraphServiceBuilder {
             schema,
             plugins: self.plugins,
             config: configuration,
+            license: self.license,
         })
     }
 }
@@ -925,6 +944,7 @@ pub(crate) struct SupergraphCreator {
     schema: Arc<Schema>,
     config: Arc<Configuration>,
     plugins: Arc<Plugins>,
+    license: LicenseState,
 }
 
 pub(crate) trait HasPlugins {
@@ -983,6 +1003,7 @@ impl SupergraphCreator {
             })
             .schema(self.schema.clone())
             .notify(self.config.notify.clone())
+            .license(self.license)
             .build();
 
         let shaping = self

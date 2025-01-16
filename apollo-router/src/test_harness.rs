@@ -35,6 +35,7 @@ use crate::services::supergraph;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
 use crate::spec::Schema;
+#[cfg(test)]
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -304,6 +305,7 @@ impl<'a> TestHarness<'a> {
                 None,
                 None,
                 Some(builder.extra_plugins),
+                Default::default(),
             )
             .await?;
 
@@ -343,7 +345,7 @@ impl<'a> TestHarness<'a> {
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
             let span = PropagatingMakeSpan {
-                license: LicenseState::default(),
+                license: Default::default(),
                 span_mode: span_mode(&config),
             }
             .make_span(&request.router_request);

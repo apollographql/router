@@ -1831,7 +1831,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::default(),
+            Default::default(),
             all_connections_stopped_sender,
         )
         .await
@@ -1860,7 +1860,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
-            LicenseState::default(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -2438,9 +2438,16 @@ async fn test_supergraph_timeout() {
             .map(|(k, v)| (k.clone(), v.schema.clone()))
             .collect(),
     );
-    let mut plugins = create_plugins(&conf, &schema, subgraph_schemas, None, None)
-        .await
-        .unwrap();
+    let mut plugins = create_plugins(
+        &conf,
+        &schema,
+        subgraph_schemas,
+        None,
+        None,
+        Default::default(),
+    )
+    .await
+    .unwrap();
 
     plugins.insert("delay".into(), Box::new(Delay));
 

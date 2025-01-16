@@ -549,6 +549,7 @@ mod test {
                 subgraph_schemas,
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
+                Default::default(),
             )
             .await
             .expect("create plugins should work"),

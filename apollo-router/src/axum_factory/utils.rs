@@ -52,7 +52,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         };
         if matches!(
             self.license,
-            LicenseState::LicensedWarn | LicenseState::LicensedHalt
+            LicenseState::LicensedWarn(_) | LicenseState::LicensedHalt(_)
         ) {
             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             span.record("apollo_router.license", LICENSE_EXPIRED_SHORT_MESSAGE);
