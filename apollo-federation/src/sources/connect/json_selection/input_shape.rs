@@ -504,8 +504,14 @@ fn reconcile_input_shapes(
     ) -> Shape {
         match shape.case() {
             shape::ShapeCase::Name(name, _) => {
-                let shape = field_shapes.get(name.as_str()).unwrap();
-                reconcile(field_shapes, trie, shape)
+                if let Some(shape) = field_shapes.get(name.as_str()) {
+                    reconcile(field_shapes, trie, shape)
+                } else {
+                    Shape::error_with_range(
+                        format!("`{}` does not exist", name),
+                        trie.1.first().cloned(),
+                    )
+                }
             }
             shape::ShapeCase::Object { fields, rest: _ } => {
                 if trie.0.is_empty() {
