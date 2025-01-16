@@ -4,6 +4,7 @@ use opentelemetry::trace::SamplingResult;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry_datadog::DatadogTraceState;
 use opentelemetry_sdk::trace::ShouldSample;
 
@@ -77,6 +78,16 @@ impl ShouldSample for DatadogAgentSampling {
 
         // We always want to measure
         result.trace_state = result.trace_state.with_measuring(true);
+        // We always want to set the sampling.priority attribute in case we are communicating with the agent via otlp.
+        // Reverse engineered from https://github.com/DataDog/datadog-agent/blob/c692f62423f93988b008b669008f9199a5ad196b/pkg/trace/api/otlp.go#L502
+        result.attributes.push(KeyValue::new(
+            "sampling.priority",
+            Value::I64(if result.trace_state.priority_sampling_enabled() {
+                1
+            } else {
+                0
+            }),
+        ));
 
         result
     }
@@ -96,6 +107,7 @@ mod tests {
     use opentelemetry::trace::TraceState;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
+    use opentelemetry::Value;
     use opentelemetry_datadog::DatadogTraceState;
     use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::ShouldSample;
@@ -147,9 +159,13 @@ mod tests {
         assert_eq!(result.decision, SamplingDecision::RecordOnly);
         // Verify that the sampling priority is set to AutoReject
         assert!(!result.trace_state.priority_sampling_enabled());
-
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
+        // Verify that the sampling.priority attribute is set correctly
+        assert!(result
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "sampling.priority" && kv.value == Value::I64(0)));
     }
 
     #[test]
@@ -177,6 +193,12 @@ mod tests {
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
+
+        // Verify that the sampling.priority attribute is set correctly
+        assert!(result
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "sampling.priority" && kv.value == Value::I64(0)));
     }
 
     #[test]
@@ -204,6 +226,12 @@ mod tests {
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
+
+        // Verify that the sampling.priority attribute is set correctly
+        assert!(result
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "sampling.priority" && kv.value == Value::I64(1)));
     }
 
     #[test]
@@ -239,5 +267,11 @@ mod tests {
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
+
+        // Verify that the sampling.priority attribute is set correctly
+        assert!(result
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "sampling.priority" && kv.value == Value::I64(1)));
     }
 }
