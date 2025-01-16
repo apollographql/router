@@ -102,7 +102,7 @@ mod test {
         let other_id = TraceId::current();
         assert!(my_id.is_none());
         assert!(other_id.is_none());
-        assert!(other_id == my_id);
+        assert_eq!(other_id, my_id);
     }
 
     #[tokio::test]
