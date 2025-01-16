@@ -541,6 +541,7 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
 
     #[derive(RustEmbed)]
@@ -575,7 +576,9 @@ mod test {
     #[test]
     fn test_license_warn() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedWarn);
+        data.populate_license_instrument(&LicenseState::LicensedWarn(Some(
+            LicenseLimits::default(),
+        )));
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
@@ -583,7 +586,9 @@ mod test {
     #[test]
     fn test_license_halt() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedHalt);
+        data.populate_license_instrument(&LicenseState::LicensedHalt(Some(
+            LicenseLimits::default(),
+        )));
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

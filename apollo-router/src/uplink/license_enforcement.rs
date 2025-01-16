@@ -74,9 +74,14 @@ pub(crate) struct Claims {
     pub(crate) sub: String,
     pub(crate) aud: OneOrMany<Audience>,
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "warnAt")]
+    /// When to warn the user about an expiring license that must be renewed to avoid halting the
+    /// router
     pub(crate) warn_at: SystemTime,
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
+    /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
+    /// TPS limits may not exist in a Licnese; if not, no limits apply
+    pub(crate) tps: Option<TpsLimit>,
 }
 
 fn deserialize_epoch_seconds<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
@@ -591,22 +596,40 @@ impl Display for LicenseEnforcementReport {
     }
 }
 
-/// License controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
+/// These are claims extracted from the License and represent ways Apollo limits the router's usage It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
 #[derive(Debug, Clone, Default)]
 pub struct License {
     pub(crate) claims: Option<Claims>,
 }
 
+/// Transactions Per Second limits. We talk as though this will be in seconds, but the Duration
+/// here is actually given to us in milliseconds via the License's JWT's claims
+#[derive(Builder, Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct TpsLimit {
+    pub(crate) capacity: usize,
+    pub(crate) duration: Duration,
+}
+
+/// LicenseLimits represent what can be done with a router based on the claims in the License. You
+/// might have a certain tier be limited in its capacity for transactions over a certain duration,
+/// as an example
+#[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
+pub(crate) struct LicenseLimits {
+    /// Transaction Per Second limits. If none are found in the License's claims, there are no
+    /// limits to apply
+    tps: Option<TpsLimit>,
+}
+
 /// Licenses are converted into a stream of license states by the expander
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
 pub(crate) enum LicenseState {
     /// licensed
-    Licensed,
+    Licensed(Option<LicenseLimits>),
     /// warn
-    LicensedWarn,
+    LicensedWarn(Option<LicenseLimits>),
     /// halt
-    LicensedHalt,
+    LicensedHalt(Option<LicenseLimits>),
 
     /// unlicensed
     #[default]
@@ -849,6 +872,7 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
+                tps: Default::default()
             }),
         );
     }
@@ -864,6 +888,7 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
+                tps: Default::default()
             }),
         );
     }

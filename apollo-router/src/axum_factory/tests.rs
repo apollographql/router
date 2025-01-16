@@ -1820,7 +1820,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::default(),
+            Default::default(),
             all_connections_stopped_sender,
         )
         .await
@@ -1849,7 +1849,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
-            LicenseState::default(),
+            Default::default(),
         )
         .await
         .unwrap();

@@ -518,7 +518,7 @@ async fn license_handler(
 ) -> Response {
     if matches!(
         license,
-        LicenseState::LicensedHalt | LicenseState::LicensedWarn
+        LicenseState::LicensedHalt(_) | LicenseState::LicensedWarn(_)
     ) {
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
@@ -543,7 +543,7 @@ async fn license_handler(
         }
     }
 
-    if matches!(license, LicenseState::LicensedHalt) {
+    if matches!(license, LicenseState::LicensedHalt(_)) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(axum::body::Body::default())
