@@ -238,6 +238,7 @@ commands:
                   if [[ ! -d "$HOME/.deb" ]]; then
                     mkdir $HOME/.deb
                     sudo apt-get update
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install build-essential
                     sudo apt remove gcc-9
                     sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev gcc-10
                   fi
