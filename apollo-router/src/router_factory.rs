@@ -48,6 +48,7 @@ use crate::services::Plugins;
 use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
 use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::ListenAddr;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
@@ -140,6 +141,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<Self::RouterFactory, BoxError>;
 }
 
@@ -158,6 +160,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<Self::RouterFactory, BoxError> {
         // we have to create a telemetry plugin before creating everything else, to generate a trace
         // of router and plugin creation
@@ -210,6 +213,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             previous_router,
             initial_telemetry_plugin,
             extra_plugins,
+            license,
         )
         .instrument(router_span)
         .await
@@ -224,6 +228,7 @@ impl YamlRouterFactory {
         previous_router: Option<&'a RouterCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<RouterCreator, BoxError> {
         let mut supergraph_creator = self
             .inner_create_supergraph(
@@ -232,6 +237,7 @@ impl YamlRouterFactory {
                 previous_router.map(|router| &*router.supergraph_creator),
                 initial_telemetry_plugin,
                 extra_plugins,
+                license,
             )
             .await?;
 
@@ -292,6 +298,7 @@ impl YamlRouterFactory {
         previous_supergraph: Option<&'a SupergraphCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
@@ -344,6 +351,7 @@ impl YamlRouterFactory {
                 bridge_query_planner.subgraph_schemas(),
                 initial_telemetry_plugin,
                 extra_plugins,
+                license,
             )
             .instrument(span)
             .await?
@@ -355,7 +363,7 @@ impl YamlRouterFactory {
             let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
             builder = builder.with_configuration(configuration.clone());
             let subgraph_services =
-                create_subgraph_services(&plugins, &schema, &configuration).await?;
+                create_subgraph_services(&plugins, &schema, &configuration, license).await?;
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
             }
@@ -374,6 +382,7 @@ pub(crate) async fn create_subgraph_services(
     plugins: &Arc<Plugins>,
     schema: &Schema,
     configuration: &Configuration,
+    license: LicenseState,
 ) -> Result<
     IndexMap<
         String,
@@ -417,6 +426,7 @@ pub(crate) async fn create_subgraph_services(
             name,
             configuration,
             &tls_root_store,
+            // TODO: here?
             shaping.subgraph_client_config(name),
         )?;
 
@@ -429,6 +439,7 @@ pub(crate) async fn create_subgraph_services(
                 configuration,
                 subscription_plugin_conf.clone(),
                 http_service_factory,
+                // TODO: insert license; get tps-related config, apply ConfiguredBy::Apollo(..)
             )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
@@ -551,6 +562,8 @@ pub(crate) async fn create_plugins(
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    // TODO: hook into rate plugin for tps
+    _license: LicenseState,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let supergraph_schema_id = schema.schema_id.clone();

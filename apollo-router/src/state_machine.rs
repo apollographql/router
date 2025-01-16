@@ -310,7 +310,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         previous_router_service_factory: Option<&FA::RouterFactory>,
         configuration: Arc<Configuration>,
         schema_state: Arc<SchemaState>,
-        license: LicenseState,
+        license_state: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
     ) -> Result<State<FA>, ApolloRouterError>
@@ -325,15 +325,18 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         // Check the license
         let report = LicenseEnforcementReport::build(&configuration, &schema);
 
-        match license {
-            LicenseState::Licensed => {
+        let license = match license_state {
+            LicenseState::Licensed(license) => {
                 tracing::debug!("A valid Apollo license has been detected.");
+                Some(license)
             }
-            LicenseState::LicensedWarn if report.uses_restricted_features() => {
+            LicenseState::LicensedWarn(license) if report.uses_restricted_features() => {
                 tracing::error!("License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                Some(license)
             }
-            LicenseState::LicensedHalt if report.uses_restricted_features() => {
+            LicenseState::LicensedHalt(license) if report.uses_restricted_features() => {
                 tracing::error!("License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                Some(license)
             }
             LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
@@ -348,14 +351,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             }
             _ => {
                 tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
+                None
             }
-        }
+        };
 
         // If there are no restricted featured in use then the effective license is Licensed as we don't need warn or halt behavior.
         let effective_license = if !report.uses_restricted_features() {
-            LicenseState::Licensed
+            LicenseState::Licensed(license)
         } else {
-            license
+            license_state
         };
 
         let router_service_factory = state_machine
@@ -366,6 +370,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 schema,
                 previous_router_service_factory,
                 None,
+                effective_license,
             )
             .await
             .map_err(ServiceCreationError)?;

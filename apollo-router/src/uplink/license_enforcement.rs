@@ -65,7 +65,7 @@ pub(crate) enum OneOrMany<T> {
     Many(Vec<T>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub(crate) struct Claims {
     pub(crate) iss: String,
     pub(crate) sub: String,
@@ -503,7 +503,7 @@ impl Display for LicenseEnforcementReport {
 
 /// License controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct License {
     pub(crate) claims: Option<Claims>,
 }
@@ -512,11 +512,11 @@ pub struct License {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
 pub(crate) enum LicenseState {
     /// licensed
-    Licensed,
+    Licensed(License),
     /// warn
-    LicensedWarn,
+    LicensedWarn(License),
     /// halt
-    LicensedHalt,
+    LicensedHalt(License),
 
     /// unlicensed
     #[default]
