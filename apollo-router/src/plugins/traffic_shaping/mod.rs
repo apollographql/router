@@ -7,34 +7,27 @@
 //! * Rate limiting
 //!
 mod deduplication;
-pub(crate) mod rate;
-pub(crate) mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::limit::ConcurrencyLimitLayer;
+use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
-use tower::util::future::EitherResponseFuture;
-use tower::util::Either;
+use tower::timeout::error::Elapsed;
+use tower::timeout::TimeoutLayer;
 use tower::BoxError;
-use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use self::deduplication::QueryDeduplicationLayer;
-use self::rate::RateLimitLayer;
-use self::rate::RateLimited;
-use self::timeout::Elapsed;
-use self::timeout::TimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
@@ -42,11 +35,11 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::http::service::Compression;
-use crate::services::router::BoxService;
+use crate::services::router;
 use crate::services::subgraph;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
-use crate::Context;
+use crate::services::SubgraphResponse;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -205,128 +198,109 @@ impl Plugin for TrafficShaping {
         })
     }
 
-    fn router_service(&self, service: BoxService) -> BoxService {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
-            .map_result(|result: Result<RouterResponse, BoxError>| {
-                match result {
-                    Ok(ok) => Ok(ok),
-                    Err(err) if err.is::<tower::timeout::error::Elapsed>() => {
-                        // TODO add metrics
-                        let error = graphql::Error::builder()
-                            .message("Your request has been timed out")
-                            .extension_code("GATEWAY_TIMEOUT")
-                            .build();
-                        Ok(RouterResponse::builder()
-                            .context(Context::default())
-                            .status_code(StatusCode::GATEWAY_TIMEOUT)
-                            .error(error)
-                            .build()
-                            .expect("should build overloaded response"))
+            .map_future_with_request_data(
+                |req: &router::Request| req.context.clone(),
+                move |ctx, future| {
+                    async {
+                        let response: Result<RouterResponse, BoxError> = future.await;
+                        match response {
+                            Ok(ok) => Ok(ok),
+                            Err(err) if err.is::<Elapsed>() => {
+                                // TODO add metrics
+                                let error = graphql::Error::builder()
+                                    .message("Your request has been timed out")
+                                    .extension_code("GATEWAY_TIMEOUT")
+                                    .build();
+                                Ok(RouterResponse::error_builder()
+                                    .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                    .error(error)
+                                    .context(ctx)
+                                    .build()
+                                    .expect("should build overloaded response"))
+                            }
+                            Err(err) => Err(err),
+                        }
                     }
-                    Err(err) => Err(err),
-                }
-            })
+                },
+            )
             .load_shed()
             .option_layer(self.config.router.as_ref().and_then(|router| {
                 router
                     .timeout
                     .as_ref()
-                    .map(|timeout| tower::timeout::TimeoutLayer::new(*timeout))
+                    .map(|timeout| TimeoutLayer::new(*timeout))
             }))
-            .map_result(|result: Result<RouterResponse, BoxError>| {
-                match result {
-                    Ok(ok) => Ok(ok),
-                    Err(err) if err.is::<Overloaded>() => {
-                        // TODO add metrics
-                        let error = graphql::Error::builder()
-                            .message("Your request has been concurrency limited")
-                            .extension_code("REQUEST_CONCURRENCY_LIMITED")
-                            .build();
-                        Ok(RouterResponse::builder()
-                            .context(Context::default())
-                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                            .error(error)
-                            .build()
-                            .expect("should build overloaded response"))
+            .map_future_with_request_data(
+                |req: &router::Request| req.context.clone(),
+                move |ctx, future| {
+                    async {
+                        let response: Result<RouterResponse, BoxError> = future.await;
+                        match response {
+                            Ok(ok) => Ok(ok),
+                            Err(err) if err.is::<Overloaded>() => {
+                                // TODO add metrics
+                                let error = graphql::Error::builder()
+                                    .message("Your request has been concurrency limited")
+                                    .extension_code("REQUEST_CONCURRENCY_LIMITED")
+                                    .build();
+                                Ok(RouterResponse::error_builder()
+                                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                    .error(error)
+                                    .context(ctx)
+                                    .build()
+                                    .expect("should build overloaded response"))
+                            }
+                            Err(err) => Err(err),
+                        }
                     }
-                    Err(err) => Err(err),
-                }
-            })
+                },
+            )
             .load_shed()
             .option_layer(self.config.router.as_ref().and_then(|router| {
                 router
                     .concurrency_limit
                     .as_ref()
-                    .map(|limit| tower::limit::ConcurrencyLimitLayer::new(*limit))
+                    .map(|limit| ConcurrencyLimitLayer::new(*limit))
             }))
-            .map_result(|result: Result<RouterResponse, BoxError>| {
-                match result {
-                    Ok(ok) => Ok(ok),
-                    Err(err) if err.is::<Overloaded>() => {
-                        // TODO add metrics
-                        let error = graphql::Error::builder()
-                            .message("Your request has been rate limited")
-                            .extension_code("REQUEST_RATE_LIMITED")
-                            .build();
-                        Ok(RouterResponse::builder()
-                            .context(Context::default())
-                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                            .error(error)
-                            .build()
-                            .expect("should build overloaded response"))
+            .map_future_with_request_data(
+                |req: &router::Request| req.context.clone(),
+                move |ctx, future| {
+                    async {
+                        let response: Result<RouterResponse, BoxError> = future.await;
+                        match response {
+                            Ok(ok) => Ok(ok),
+                            Err(err) if err.is::<Overloaded>() => {
+                                // TODO add metrics
+                                let error = graphql::Error::builder()
+                                    .message("Your request has been rate limited")
+                                    .extension_code("REQUEST_RATE_LIMITED")
+                                    .build();
+                                Ok(RouterResponse::error_builder()
+                                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                    .error(error)
+                                    .context(ctx)
+                                    .build()
+                                    .expect("should build overloaded response"))
+                            }
+                            Err(err) => Err(err),
+                        }
                     }
-                    Err(err) => Err(err),
-                }
-            })
+                },
+            )
             .load_shed()
             .option_layer(self.config.router.as_ref().and_then(|router| {
-                router.global_rate_limit.as_ref().map(|limit| {
-                    tower::limit::RateLimitLayer::new(limit.capacity.into(), limit.interval)
-                })
+                router
+                    .global_rate_limit
+                    .as_ref()
+                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
             }))
             .service(service)
             .boxed()
     }
-}
 
-pub(crate) type TrafficShapingSubgraphFuture<S> = EitherResponseFuture<
-    EitherResponseFuture<
-        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-    >,
-    <S as Service<subgraph::Request>>::Future,
->;
-
-impl TrafficShaping {
-    fn merge_config<T: Merge + Clone>(
-        all_config: Option<&T>,
-        subgraph_config: Option<&T>,
-    ) -> Option<T> {
-        let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
-        merged_subgraph_config.or_else(|| all_config.cloned())
-    }
-
-    pub(crate) fn subgraph_service_internal<S>(
-        &self,
-        name: &str,
-        service: S,
-    ) -> impl Service<
-        subgraph::Request,
-        Response = subgraph::Response,
-        Error = BoxError,
-        Future = TrafficShapingSubgraphFuture<S>,
-    > + Clone
-           + Send
-           + Sync
-           + 'static
-    where
-        S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-        <S as Service<subgraph::Request>>::Future: std::marker::Send,
-    {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
@@ -343,59 +317,90 @@ impl TrafficShaping {
                         .unwrap()
                         .entry(name.to_string())
                         .or_insert_with(|| {
-                            RateLimitLayer::new(rate_limit_conf.capacity, rate_limit_conf.interval)
+                            RateLimitLayer::new(
+                                rate_limit_conf.capacity.into(),
+                                rate_limit_conf.interval,
+                            )
                         })
                         .clone()
                 });
 
-            Either::Left(ServiceBuilder::new()
-                .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
-                  QueryDeduplicationLayer::default
-                ))
-                    .map_future_with_request_data(
-                        |req: &subgraph::Request| req.context.clone(),
-                        move |ctx, future| {
-                            async {
-                                let response: Result<subgraph::Response, BoxError> = future.await;
-                                match response {
-                                    Err(error) if error.is::<Elapsed>() => {
-                                        subgraph::Response::error_builder()
-                                            .status_code(StatusCode::GATEWAY_TIMEOUT)
-                                            .error::<graphql::Error>(Elapsed::new().into())
-                                            .context(ctx)
-                                            .build()
-                                    }
-                                    Err(error) if error.is::<RateLimited>() => {
-                                        subgraph::Response::error_builder()
-                                            .status_code(StatusCode::TOO_MANY_REQUESTS)
-                                            .error::<graphql::Error>(RateLimited::new().into())
-                                            .context(ctx)
-                                            .build()
-                                    }
-                                    _ => response,
+            // FIXME: document or find a better way to write it
+            let service = ServiceBuilder::new().buffered().service(service);
+            let service = ServiceBuilder::new()
+                .option_layer(
+                    config
+                        .shaping
+                        .deduplicate_query
+                        .unwrap_or_default()
+                        .then(QueryDeduplicationLayer::default),
+                )
+                .service(service);
+
+            ServiceBuilder::new()
+                .map_future_with_request_data(
+                    |req: &subgraph::Request| req.context.clone(),
+                    move |ctx, future| {
+                        async {
+                            let response: Result<SubgraphResponse, BoxError> = future.await;
+                            match response {
+                                Ok(ok) => Ok(ok),
+                                Err(err) if err.is::<Elapsed>() => {
+                                    // TODO add metrics
+                                    let error = graphql::Error::builder()
+                                        .message("Your request has been timed out")
+                                        .extension_code("GATEWAY_TIMEOUT")
+                                        .build();
+                                    Ok(SubgraphResponse::error_builder()
+                                        .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                        .error(error)
+                                        .context(ctx)
+                                        .build())
                                 }
-                            }.boxed()
-                        },
-                    )
-                    .load_shed()
-                    .layer(TimeoutLayer::new(
-                        config.shaping
-                        .timeout
-                        .unwrap_or(DEFAULT_TIMEOUT),
-                    ))
-                    .option_layer(rate_limit)
-                .service(service)
+                                Err(err) if err.is::<Overloaded>() => {
+                                    // TODO add metrics
+                                    let error = graphql::Error::builder()
+                                        .message("Your request has been rate limited")
+                                        .extension_code("REQUEST_RATE_LIMITED")
+                                        .build();
+                                    Ok(SubgraphResponse::error_builder()
+                                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                        .error(error)
+                                        .context(ctx)
+                                        .build())
+                                }
+                                Err(err) => Err(err),
+                            }
+                        }
+                    },
+                )
+                .load_shed()
+                .layer(TimeoutLayer::new(
+                    config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                ))
+                .option_layer(rate_limit)
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.shaping.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
-
                     req
-                }))
+                })
+                .service(service)
+                .boxed()
         } else {
-            Either::Right(service)
+            service
         }
+    }
+}
+
+impl TrafficShaping {
+    fn merge_config<T: Merge + Clone>(
+        all_config: Option<&T>,
+        subgraph_config: Option<&T>,
+    ) -> Option<T> {
+        let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
+        merged_subgraph_config.or_else(|| all_config.cloned())
     }
 
     pub(crate) fn subgraph_client_config(
@@ -624,10 +629,7 @@ mod test {
         });
 
         let _response = plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("test", test_service)
+            .subgraph_service("test", test_service.boxed())
             .oneshot(request)
             .await
             .unwrap();
@@ -774,10 +776,7 @@ mod test {
         });
 
         assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("test", test_service.clone())
+            .subgraph_service("test", test_service.clone().boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap()
@@ -786,21 +785,15 @@ mod test {
             .errors
             .is_empty());
         let err = plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("test", test_service.clone())
+            .subgraph_service("test", test_service.clone().boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap_err();
 
-        assert!(err.is::<RateLimited>());
+        assert!(err.is::<Overloaded>());
 
         assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("another", test_service.clone())
+            .subgraph_service("test", test_service.clone().boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap()
@@ -810,10 +803,7 @@ mod test {
             .is_empty());
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("test", test_service.clone())
+            .subgraph_service("test", test_service.clone().boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap()
@@ -855,7 +845,7 @@ mod test {
 
         let mut svc = plugin.router_service(mock_service.clone().boxed());
 
-        let response: router::Response = svc
+        let response: RouterResponse = svc
             .ready()
             .await
             .expect("it is ready")
@@ -864,7 +854,7 @@ mod test {
             .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
 
-        let response: router::Response = svc
+        let response: RouterResponse = svc
             .ready()
             .await
             .expect("it is ready")
@@ -885,7 +875,7 @@ mod test {
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        let response: router::Response = svc
+        let response: RouterResponse = svc
             .ready()
             .await
             .expect("it is ready")
@@ -918,7 +908,7 @@ mod test {
 
         let mut rs = plugin.router_service(svc);
 
-        let response: router::Response = rs
+        let response: RouterResponse = rs
             .ready()
             .await
             .expect("it is ready")

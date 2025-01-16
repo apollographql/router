@@ -224,7 +224,7 @@ impl Response {
         context: Context,
         subgraph_name: String,
         id: SubgraphRequestId,
-    ) -> Response {
+    ) -> Self {
         Self {
             response,
             context,
@@ -250,7 +250,7 @@ impl Response {
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
-    ) -> Response {
+    ) -> Self {
         // Build a response
         let res = graphql::Response::builder()
             .and_label(label)
@@ -300,8 +300,8 @@ impl Response {
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
-    ) -> Response {
-        Response::new(
+    ) -> Self {
+        Self::new(
             label,
             data,
             path,
@@ -336,7 +336,7 @@ impl Response {
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
     ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+        Ok(Self::new(
             label,
             data,
             path,
@@ -360,8 +360,8 @@ impl Response {
         context: Context,
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
-    ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+    ) -> Self {
+        Self::new(
             Default::default(),
             Default::default(),
             Default::default(),
@@ -372,7 +372,7 @@ impl Response {
             Default::default(),
             subgraph_name,
             id,
-        ))
+        )
     }
 }
 
