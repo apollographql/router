@@ -304,20 +304,17 @@ impl PluginPrivate for FleetDetector {
 
                         // Short-circuit for complete bodies
                         //
-                        // If the `SizeHint` gives us an exact value, where the upper and lower
-                        // bounds are equal, we can use this for the metric and return without
-                        // wrapping the request Body.
-                        if let Some(upper) = size_hint.upper() {
-                            if upper == size_hint.lower() {
-                                let sn = sn.clone();
-                                u64_counter!(
-                                    "apollo.router.operations.fetch.request_size",
-                                    "Total number of request bytes for subgraph fetches",
-                                    upper,
-                                    subgraph.name = sn.to_string()
-                                );
-                                return body;
-                            }
+                        // If the `SizeHint` gives us an exact value, we can use this for the
+                        // metric and return without wrapping the request Body into a stream.
+                        if let Some(size) = size_hint.exact() {
+                            let sn = sn.clone();
+                            u64_counter!(
+                                "apollo.router.operations.fetch.request_size",
+                                "Total number of request bytes for subgraph fetches",
+                                size,
+                                subgraph.name = sn.to_string()
+                            );
+                            return body;
                         }
 
                         // For streaming bodies, we need to wrap the stream and count bytes as we go
