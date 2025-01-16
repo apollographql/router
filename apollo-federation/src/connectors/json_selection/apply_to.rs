@@ -477,35 +477,30 @@ impl ApplyToInternal for WithRange<PathList> {
                             tail.apply_to_path(shallow_mapped_array, vars, &input_path_with_key)
                         })
                 } else {
+                    let not_found = (
+                        None,
+                        vec![ApplyToError::new(
+                            format!(
+                                "Property {} not found in {}",
+                                key.dotted(),
+                                json_type_name(data),
+                            ),
+                            input_path_with_key.to_vec(),
+                            key.range(),
+                        )],
+                    );
+
                     if !matches!(data, JSON::Object(_)) {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                            )],
-                        );
+                        return not_found;
                     }
-                    let Some(child) = data.get(key.as_str()) else {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                            )],
-                        );
-                    };
-                    tail.apply_to_path(child, vars, &input_path_with_key)
+
+                    if let Some(child) = data.get(key.as_str()) {
+                        tail.apply_to_path(child, vars, &input_path_with_key)
+                    } else if tail.is_question() {
+                        (None, vec![])
+                    } else {
+                        not_found
+                    }
                 }
             }
 
@@ -586,7 +581,17 @@ impl ApplyToInternal for WithRange<PathList> {
                     },
                 )
             }
+
             PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path),
+
+            PathList::Question(_, tail) => {
+                if data.is_null() {
+                    (None, vec![])
+                } else {
+                    tail.apply_to_path(data, vars, input_path)
+                }
+            }
+
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
@@ -789,6 +794,19 @@ impl ApplyToInternal for WithRange<PathList> {
                     ),
                     None,
                 )
+            }
+
+            PathList::Question(_q, tail) => {
+                if input_shape.is_null() {
+                    // TODO Somehow copy names from input_shape to this new
+                    // Shape::none() shape?
+                    (Shape::none(), None)
+                } else {
+                    // TODO This should return input_shape.question() once we
+                    // support that new child shape method.
+                    // (input_shape.question(), Some(tail))
+                    (input_shape, Some(tail))
+                }
             }
 
             PathList::Empty => (input_shape, None),

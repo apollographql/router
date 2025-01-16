@@ -401,13 +401,7 @@ impl NamedSelection {
             match PathSelection::parse(input.clone()) {
                 Ok((remainder, path)) => {
                     if path.has_subselection() {
-                        Ok((
-                            remainder,
-                            Self {
-                                alias: None,
-                                path,
-                            },
-                        ))
+                        Ok((remainder, Self { alias: None, path }))
                     } else {
                         Err(nom_fail_message(
                             input.clone(),
@@ -602,6 +596,11 @@ pub(super) enum PathList {
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection.
     Method(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
+
+    // A ? token, mapping the previous expression to None if it was null, which
+    // allows handling null as a missing value rather than as JSON. The first
+    // parameter wraps the range of the ? token.
+    Question(WithRange<String>, WithRange<PathList>),
 
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
@@ -834,6 +833,14 @@ impl PathList {
             };
         }
 
+        // Parse PathList::NullToNone, the "?" production for PathList.
+        if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
+            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+            let full_range = merge_ranges(question.range(), rest.range());
+            let question_mark_string = Self::Question(question.take_as(|s| s.to_string()), rest);
+            return Ok((remainder, WithRange::new(question_mark_string, full_range)));
+        }
+
         // Likewise, if the PathSelection has a SubSelection, it must appear at
         // the end of a non-empty path. PathList::parse_with_depth is not
         // responsible for enforcing a trailing SubSelection in the
@@ -860,6 +867,7 @@ impl PathList {
         fn rest_is_empty_or_selection(rest: &WithRange<PathList>) -> bool {
             match rest.as_ref() {
                 PathList::Selection(_) | PathList::Empty => true,
+                PathList::Question(_, q_rest) => rest_is_empty_or_selection(q_rest),
                 _ => false,
             }
         }
@@ -874,6 +882,10 @@ impl PathList {
             }
             _ => None,
         }
+    }
+
+    pub(super) fn is_question(&self) -> bool {
+        matches!(self, Self::Question(_, _))
     }
 
     #[allow(unused)]
@@ -898,6 +910,7 @@ impl PathList {
             Self::Key(_, tail) => tail.next_subselection(),
             Self::Expr(_, tail) => tail.next_subselection(),
             Self::Method(_, _, tail) => tail.next_subselection(),
+            Self::Question(_, tail) => tail.next_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
         }
@@ -911,6 +924,7 @@ impl PathList {
             Self::Key(_, tail) => tail.next_mut_subselection(),
             Self::Expr(_, tail) => tail.next_mut_subselection(),
             Self::Method(_, _, tail) => tail.next_mut_subselection(),
+            Self::Question(_, tail) => tail.next_mut_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
         }
@@ -942,6 +956,9 @@ impl ExternalVarPaths for PathList {
                         paths.extend(lit_arg.external_var_paths());
                     }
                 }
+                paths.extend(rest.external_var_paths());
+            }
+            PathList::Question(_, rest) => {
                 paths.extend(rest.external_var_paths());
             }
             PathList::Selection(sub) => paths.extend(sub.external_var_paths()),

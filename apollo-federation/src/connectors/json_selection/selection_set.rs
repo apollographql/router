@@ -243,6 +243,13 @@ impl PathList {
                     path.range(),
                 ),
             ),
+            Self::Question(question, path) => Self::Question(
+                question.clone(),
+                WithRange::new(
+                    path.apply_selection_set(document, selection_set),
+                    path.range(),
+                ),
+            ),
             Self::Selection(sub) => {
                 Self::Selection(sub.apply_selection_set(document, selection_set))
             }

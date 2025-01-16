@@ -95,7 +95,7 @@ VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
 AtPath               ::= "@" PathStep*
 ExprPath             ::= "$" NO_SPACE MethodArgs PathStep*
-PathStep             ::= "." Key | "->" Identifier MethodArgs?
+PathStep             ::= "." Key | "->" Identifier MethodArgs? | "?"
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
@@ -739,7 +739,8 @@ method, which binds `@` to the product object, then attempts to evaluate
 ![PathStep](./grammar/PathStep.svg)
 
 A `PathStep` is a single step along a `VarPath` or `KeyPath`, which can either
-select a nested key using `.` or invoke a method using `->`.
+select a nested key using `.`, invoke a method using `->`, or coerce `null` to
+`None` using the `?` token.
 
 Keys selected using `.` can be either `Identifier` or `LitString` names, but
 method names invoked using `->` must be `Identifier` names, and must be
@@ -829,6 +830,20 @@ conjunction: $.a->and($.b, $.c)
 aImpliesB: $.a->not->or($.b)
 excludedMiddle: $.toBe->or($.toBe->not)->eq(true)
 ```
+
+Any `PathStep` may optionally be a `?` character, which maps `null` values to
+`None`, short-circuiting path evaluation.
+
+```graphql
+a: $args.something?.nested?.name
+b: isNull?.possiblyNull?.value
+c: $.doesNotExist?->slice(0, 5)
+```
+
+If any of these `?`s map a `null` value to `None`, the whole path will evaluate
+to `None`, and the corresponding key (`a`, `b`, or `c`) will not be defined in
+the output object. The same behavior holds if properties like `$args.something`
+are simply missing (`None`) rather than `null`.
 
 ### `MethodArgs ::=`
 
