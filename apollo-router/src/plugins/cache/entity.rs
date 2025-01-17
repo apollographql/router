@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 use http::header;
@@ -45,6 +46,7 @@ use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -390,8 +392,11 @@ impl Plugin for EntityCache {
 
                     response
                 })
-                .service(CacheService(Some(InnerCacheService {
-                    service,
+                .service(CacheService {
+                    service: ServiceBuilder::new()
+                        .buffered()
+                        .service(service)
+                        .boxed_clone(),
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,
@@ -400,7 +405,7 @@ impl Plugin for EntityCache {
                     private_id,
                     invalidation: self.invalidation.clone(),
                     expose_keys_in_context: self.expose_keys_in_context,
-                })));
+                });
             tower::util::BoxService::new(inner)
         } else {
             ServiceBuilder::new()
@@ -498,9 +503,9 @@ impl EntityCache {
     }
 }
 
-struct CacheService(Option<InnerCacheService>);
-struct InnerCacheService {
-    service: subgraph::BoxService,
+#[derive(Clone)]
+struct CacheService {
+    service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
     storage: RedisCacheStorage,
@@ -518,23 +523,20 @@ impl Service<subgraph::Request> for CacheService {
 
     fn poll_ready(
         &mut self,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        match &mut self.0 {
-            Some(s) => s.service.poll_ready(cx),
-            None => panic!("service should have been called only once"),
-        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: subgraph::Request) -> Self::Future {
-        match self.0.take() {
-            None => panic!("service should have been called only once"),
-            Some(s) => Box::pin(s.call_inner(request)),
-        }
+        let clone = self.clone();
+        let inner = std::mem::replace(self, clone);
+
+        Box::pin(inner.call_inner(request))
     }
 }
 
-impl InnerCacheService {
+impl CacheService {
     async fn call_inner(
         mut self,
         request: subgraph::Request,
@@ -548,7 +550,7 @@ impl InnerCacheService {
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
         {
-            return self.service.call(request).await;
+            return self.service.ready().await?.call(request).await;
         }
         let query = request
             .subgraph_request
@@ -562,7 +564,7 @@ impl InnerCacheService {
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
-            return self.service.call(request).await;
+            return self.service.ready().await?.call(request).await;
         }
 
         if !request
@@ -604,7 +606,7 @@ impl InnerCacheService {
                             CacheSubgraph(cache_hit),
                         );
 
-                        let mut response = self.service.call(request).await?;
+                        let mut response = self.service.ready().await?.call(request).await?;
 
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
@@ -661,7 +663,7 @@ impl InnerCacheService {
                     }
                 }
             } else {
-                let mut response = self.service.call(request).await?;
+                let mut response = self.service.ready().await?.call(request).await?;
                 if let Some(invalidation_extensions) = response
                     .response
                     .body_mut()
@@ -693,7 +695,7 @@ impl InnerCacheService {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, mut cache_result)) => {
                     let context = request.context.clone();
-                    let mut response = match self.service.call(request).await {
+                    let mut response = match self.service.ready().await?.call(request).await {
                         Ok(response) => response,
                         Err(e) => {
                             let e = match e.downcast::<FetchError>() {

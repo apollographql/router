@@ -165,11 +165,11 @@ impl Service<SubgraphRequest> for MockSubgraph {
         }
         let body = req.subgraph_request.body_mut();
 
+        let subscription_stream = self.subscription_stream.clone();
         if let Some(sub_stream) = &mut req.subscription_stream {
             sub_stream
                 .try_send(Box::pin(
-                    self.subscription_stream
-                        .take()
+                    subscription_stream
                         .expect("must have a subscription stream set")
                         .into_stream(),
                 ))

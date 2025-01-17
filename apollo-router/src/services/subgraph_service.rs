@@ -32,9 +32,9 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
@@ -56,6 +56,7 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::layers::ServiceBuilderExt;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
@@ -73,6 +74,7 @@ use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
 use crate::services::router;
+use crate::services::subgraph;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
@@ -1574,8 +1576,7 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
-    pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
-    pub(crate) plugins: Arc<Plugins>,
+    pub(crate) services: Arc<HashMap<String, Arc<parking_lot::Mutex<subgraph::BoxCloneService>>>>,
 }
 
 impl SubgraphServiceFactory {
@@ -1583,23 +1584,29 @@ impl SubgraphServiceFactory {
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
     ) -> Self {
+        let mut map = HashMap::with_capacity(services.len());
+        for (name, maker) in services.into_iter() {
+            let mut service = maker.make();
+            service = plugins
+                .iter()
+                .rev()
+                .fold(service, |acc, (_, e)| e.subgraph_service(&name, acc));
+            let final_service = ServiceBuilder::new()
+                .buffered()
+                .service(service)
+                .boxed_clone();
+            map.insert(name, Arc::new(parking_lot::Mutex::new(final_service)));
+        }
+
         SubgraphServiceFactory {
-            services: Arc::new(services.into_iter().collect()),
-            plugins,
+            services: Arc::new(map),
         }
     }
 
-    pub(crate) fn create(
-        &self,
-        name: &str,
-    ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
-        self.services.get(name).map(|service| {
-            let service = service.make();
-            self.plugins
-                .iter()
-                .rev()
-                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
-        })
+    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
+        self.services
+            .get(name)
+            .map(|svc| svc.lock().clone().boxed())
     }
 }
 
@@ -1607,7 +1614,7 @@ impl SubgraphServiceFactory {
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+    fn make(&self) -> subgraph::BoxService;
 }
 
 impl<S> MakeSubgraphService for S
@@ -1619,7 +1626,7 @@ where
         + 'static,
     <S as Service<SubgraphRequest>>::Future: Send,
 {
-    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn make(&self) -> subgraph::BoxService {
         self.clone().boxed()
     }
 }

@@ -226,12 +226,13 @@ impl Plugin for TrafficShaping {
                 },
             )
             .load_shed()
-            .option_layer(self.config.router.as_ref().and_then(|router| {
-                router
-                    .timeout
+            .layer(TimeoutLayer::new(
+                self.config
+                    .router
                     .as_ref()
-                    .map(|timeout| TimeoutLayer::new(*timeout))
-            }))
+                    .and_then(|r| r.timeout)
+                    .unwrap_or(DEFAULT_TIMEOUT),
+            ))
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| {
@@ -325,18 +326,6 @@ impl Plugin for TrafficShaping {
                         .clone()
                 });
 
-            // FIXME: document or find a better way to write it
-            let service = ServiceBuilder::new().buffered().service(service);
-            let service = ServiceBuilder::new()
-                .option_layer(
-                    config
-                        .shaping
-                        .deduplicate_query
-                        .unwrap_or_default()
-                        .then(QueryDeduplicationLayer::default),
-                )
-                .service(service);
-
             ServiceBuilder::new()
                 .map_future_with_request_data(
                     |req: &subgraph::Request| req.context.clone(),
@@ -379,6 +368,13 @@ impl Plugin for TrafficShaping {
                     config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
                 ))
                 .option_layer(rate_limit)
+                .option_layer(
+                    config
+                        .shaping
+                        .deduplicate_query
+                        .unwrap_or_default()
+                        .then(QueryDeduplicationLayer::default),
+                )
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.shaping.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
@@ -386,6 +382,7 @@ impl Plugin for TrafficShaping {
                     }
                     req
                 })
+                .buffered()
                 .service(service)
                 .boxed()
         } else {
@@ -775,36 +772,36 @@ mod test {
             graphql::Request::default() => graphql::Response::default()
         });
 
-        assert!(plugin
-            .subgraph_service("test", test_service.clone().boxed())
-            .oneshot(SubgraphRequest::fake_builder().build())
+        let mut svc = plugin.subgraph_service("test", test_service.boxed());
+
+        assert!(svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(SubgraphRequest::fake_builder().build())
             .await
             .unwrap()
             .response
             .body()
             .errors
             .is_empty());
-        let err = plugin
-            .subgraph_service("test", test_service.clone().boxed())
-            .oneshot(SubgraphRequest::fake_builder().build())
+        let response = svc
+            .ready()
             .await
-            .unwrap_err();
-
-        assert!(err.is::<Overloaded>());
-
-        assert!(plugin
-            .subgraph_service("test", test_service.clone().boxed())
-            .oneshot(SubgraphRequest::fake_builder().build())
+            .expect("it is ready")
+            .call(SubgraphRequest::fake_builder().build())
             .await
-            .unwrap()
-            .response
-            .body()
-            .errors
-            .is_empty());
+            .expect("it responded");
+
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(plugin
-            .subgraph_service("test", test_service.clone().boxed())
-            .oneshot(SubgraphRequest::fake_builder().build())
+
+        assert!(svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(SubgraphRequest::fake_builder().build())
             .await
             .unwrap()
             .response
@@ -828,22 +825,19 @@ mod test {
 
         let plugin = get_traffic_shaping_plugin(&config).await;
         let mut mock_service = MockRouterService::new();
-        mock_service.expect_clone().returning(|| {
-            let mut mock_service = MockRouterService::new();
 
-            mock_service.expect_call().times(0..3).returning(|_| {
-                Ok(RouterResponse::fake_builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .build()
-                    .unwrap())
-            });
-            mock_service
-                .expect_clone()
-                .returning(MockRouterService::new);
-            mock_service
+        mock_service.expect_call().times(0..3).returning(|_| {
+            Ok(RouterResponse::fake_builder()
+                .data(json!({ "test": 1234_u32 }))
+                .build()
+                .unwrap())
         });
+        mock_service
+            .expect_clone()
+            .returning(MockRouterService::new);
 
-        let mut svc = plugin.router_service(mock_service.clone().boxed());
+        // let mut svc = plugin.router_service(mock_service.clone().boxed());
+        let mut svc = plugin.router_service(mock_service.boxed());
 
         let response: RouterResponse = svc
             .ready()
