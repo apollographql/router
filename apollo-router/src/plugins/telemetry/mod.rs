@@ -1081,7 +1081,7 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, common, spans_config)?;
-        builder = setup_tracing(builder, &config.apollo, common, spans_config)?;
+        // builder = setup_tracing(builder, &config.apollo, common, spans_config)?;
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)
