@@ -49,6 +49,14 @@ Source code generated using Scaffold will continue to compile; so existing Rust 
 
 The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
 
+### Hot reloading `--supergraph-urls`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
+
+<!-- PR: TODO(@goto-bus-stop) -->
+
+The `--supergraph-urls` command-line argument or the `APOLLO_ROUTER_SUPERGRAPH_URLS` environment variable no longer support hot reloading. In v1.x, if hot reloading was enabled, the router would repeatedly fetch the URLs on the interval specified by `--apollo-uplink-poll-interval`.
+
+If hot reloading from a remote URL is desired, consider running a script to download the supergraph URL on an interval, and point the router to the downloaded file on the filesystem.
+
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
