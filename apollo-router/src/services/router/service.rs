@@ -44,6 +44,7 @@ use crate::configuration::BatchingMode;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -66,7 +67,6 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-#[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
 #[cfg(test)]
@@ -97,27 +97,30 @@ static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct RouterService {
-    supergraph_creator: Arc<SupergraphCreator>,
     apq_layer: APQLayer,
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     batching: Batching,
+    supergraph_service: supergraph::BoxCloneService,
 }
 
 impl RouterService {
-    pub(crate) fn new(
-        supergraph_creator: Arc<SupergraphCreator>,
+    fn new(
+        sgb: supergraph::BoxService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
     ) -> Self {
+        let supergraph_service: supergraph::BoxCloneService =
+            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
+
         RouterService {
-            supergraph_creator,
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
             batching,
+            supergraph_service,
         }
     }
 }
@@ -218,30 +221,33 @@ impl Service<RouterRequest> for RouterService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         // This service eventually calls `QueryAnalysisLayer::parse_document()`
         // which calls `compute_job::execute()`
-        if crate::compute_job::is_full() {
-            return Poll::Pending;
-        }
-        Poll::Ready(Ok(()))
+        // XXX(@goto-bus-stop): this reads to me like we should propagate `poll_ready` calls down to
+        // QueryAnalysisLayer :)
+        self.supergraph_service.poll_ready(cx)
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
-        let clone = self.clone();
+        let self_clone = self.clone();
 
-        let this = std::mem::replace(self, clone);
+        let this = std::mem::replace(self, self_clone);
 
         let fut = async move { this.call_inner(req).await };
+
         Box::pin(fut)
     }
 }
 
 impl RouterService {
     async fn process_supergraph_request(
-        &self,
+        self,
         supergraph_request: SupergraphRequest,
     ) -> Result<router::Response, BoxError> {
+        // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
+        // layers with various ifs and matches, but *really*, we are calling each layer in order
+        // and handling short-circuiting.
         let mut request_res = self
             .persisted_query_layer
             .supergraph_request(supergraph_request);
@@ -260,11 +266,18 @@ impl RouterService {
                     .await
                 {
                     Err(response) => response,
-                    Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+                    Ok(request) => {
+                        // This is safe to do because we cloned the entire router_service before
+                        // calling it.
+                        self.supergraph_service.oneshot(request).await?
+                    }
                 },
             },
         };
 
+        // XXX(@goto-bus-stop): *all* of the code using these `accepts_` variables looks like it
+        // duplicates what the content_negotiation::SupergraphLayer is doing. We should delete one
+        // or the other, and absolutely not do it inline here.
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
@@ -274,6 +287,8 @@ impl RouterService {
             .extensions()
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
+
+        // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
         let display_router_response: DisplayRouterResponse = context
             .extensions()
             .with_lock(|lock| lock.get().cloned())
@@ -408,13 +423,17 @@ impl RouterService {
         }
     }
 
-    async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
+    async fn call_inner(self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context;
         let (parts, body) = req.router_request.into_parts();
-        let requests = self.get_graphql_requests(&context, &parts, body).await?;
+        let requests = self
+            .clone()
+            .get_graphql_requests(&context, &parts, body)
+            .await?;
 
+        let my_self = self.clone();
         let (supergraph_requests, is_batch) = match futures::future::ready(requests)
-            .and_then(|r| self.translate_request(&context, parts, r))
+            .and_then(|r| my_self.translate_request(&context, parts, r))
             .await
         {
             Ok(requests) => requests,
@@ -442,13 +461,13 @@ impl RouterService {
         // Requests can be cancelled at any point of the router pipeline, but all failures bubble back
         // up through here, so we can catch them without having to specially handle batch queries in
         // other portions of the codebase.
-        let futures = supergraph_requests
-            .into_iter()
-            .map(|supergraph_request| async {
+        let futures = supergraph_requests.into_iter().map(|supergraph_request| {
+            let my_self = self.clone();
+            async move {
                 // We clone the context here, because if the request results in an Err, the
                 // response context will no longer exist.
                 let context = supergraph_request.context.clone();
-                let result = self.process_supergraph_request(supergraph_request).await;
+                let result = my_self.process_supergraph_request(supergraph_request).await;
 
                 // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
                 // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
@@ -467,7 +486,8 @@ impl RouterService {
                 }
 
                 result
-            });
+            }
+        });
 
         // Use join_all to preserve ordering of concurrent operations
         // (Short circuit processing and propagate any errors in the batch)
@@ -511,7 +531,7 @@ impl RouterService {
     }
 
     async fn translate_query_request(
-        &self,
+        self,
         parts: &Parts,
     ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
         let mut is_batch = false;
@@ -531,7 +551,7 @@ impl RouterService {
                         result = graphql::Request::batch_from_urlencoded_query(q.to_string())
                             .map_err(|e| TranslateError {
                                 status: StatusCode::BAD_REQUEST,
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
+                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                                 extension_details: format!(
                                     "failed to decode a valid GraphQL request from path {e}"
                                 ),
@@ -539,7 +559,7 @@ impl RouterService {
                         if result.is_empty() {
                             return Err(TranslateError {
                                 status: StatusCode::BAD_REQUEST,
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
+                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                                 extension_details: "failed to decode a valid GraphQL request from path: empty array ".to_string()
                             });
                         }
@@ -553,13 +573,13 @@ impl RouterService {
                         };
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            extension_code: "BATCHING_NOT_ENABLED",
+                            extension_code: "BATCHING_NOT_ENABLED".to_string(),
                             extension_details,
                         });
                     } else {
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                             extension_details: format!(
                                 "failed to decode a valid GraphQL request from path {err}"
                             ),
@@ -571,7 +591,7 @@ impl RouterService {
         }).unwrap_or_else(|| {
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
-                extension_code: "INVALID_GRAPHQL_REQUEST",
+                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                 extension_details: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
             })
         })
@@ -595,7 +615,7 @@ impl RouterService {
                     result =
                         graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                             extension_details: format!(
                                 "failed to deserialize the request body into JSON: {e}"
                             ),
@@ -603,7 +623,7 @@ impl RouterService {
                     if result.is_empty() {
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                             extension_details:
                                 "failed to decode a valid GraphQL request from path: empty array "
                                     .to_string(),
@@ -620,13 +640,13 @@ impl RouterService {
                     };
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
-                        extension_code: "BATCHING_NOT_ENABLED",
+                        extension_code: "BATCHING_NOT_ENABLED".to_string(),
                         extension_details,
                     });
                 } else {
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
-                        extension_code: "INVALID_GRAPHQL_REQUEST",
+                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                         extension_details: format!(
                             "failed to deserialize the request body into JSON: {err}"
                         ),
@@ -638,7 +658,7 @@ impl RouterService {
     }
 
     async fn translate_request(
-        &self,
+        self,
         context: &Context,
         parts: Parts,
         graphql_requests: (Vec<graphql::Request>, bool),
@@ -705,7 +725,7 @@ impl RouterService {
                     Batch::query_for_index(shared_batch_details.clone(), index + 1).map_err(
                         |err| TranslateError {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
-                            extension_code: "BATCHING_ERROR",
+                            extension_code: "BATCHING_ERROR".to_string(),
                             extension_details: format!("failed to create batch entry: {err}"),
                         },
                     )?,
@@ -733,7 +753,7 @@ impl RouterService {
             let b_for_index =
                 Batch::query_for_index(shared_batch_details, 0).map_err(|err| TranslateError {
                     status: StatusCode::INTERNAL_SERVER_ERROR,
-                    extension_code: "BATCHING_ERROR",
+                    extension_code: "BATCHING_ERROR".to_string(),
                     extension_details: format!("failed to create batch entry: {err}"),
                 })?;
             context
@@ -753,7 +773,7 @@ impl RouterService {
     }
 
     async fn get_graphql_requests(
-        &self,
+        self,
         context: &Context,
         parts: &Parts,
         body: Body,
@@ -842,9 +862,10 @@ impl RouterService {
     }
 }
 
-struct TranslateError<'a> {
+#[derive(Clone)]
+struct TranslateError {
     status: StatusCode,
-    extension_code: &'a str,
+    extension_code: String,
     extension_details: String,
 }
 
@@ -913,7 +934,7 @@ impl RouterCreator {
         apq_layer.activate();
 
         let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            supergraph_creator.clone(),
+            supergraph_creator.create(),
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
@@ -925,7 +946,7 @@ impl RouterCreator {
             // NOTE: Buffer is required because the static_page service is not Clone.
             // The buffer should be >= concurrency as per the advice
             // at: https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound
-            .buffer(50_000)
+            .buffered() // XXX: Added temporarily during backpressure fixing
             .layer(static_page.clone())
             .service(
                 supergraph_creator
