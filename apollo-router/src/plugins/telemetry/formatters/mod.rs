@@ -40,44 +40,39 @@ pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
     "thread.name",
 ];
 
-/// `FilteringFormatter` is useful if you want to not filter the entire event but only want to not display it
+/// Wrap a [tracing] event formatter with rate limiting.
+///
 /// ```ignore
 /// use tracing_core::Event;
-/// use tracing_subscriber::fmt::format::{Format};
+/// use tracing_subscriber::fmt::format::Format;
+/// use crate::plugins::telemetry::config_new::logging::RateLimit;
+///
 /// tracing_subscriber::fmt::fmt()
-/// .event_format(FilteringFormatter::new(
-///     Format::default().pretty(),
-///     // Do not display the event if an attribute name starts with "counter"
-///     |event: &Event| !event.metadata().fields().iter().any(|f| f.name().starts_with("counter")),
-/// ))
-/// .finish();
+///     .event_format(RateLimitFormatter::new(
+///         Format::default().pretty(),
+///         &RateLimit::default(),
+///     ))
+///     .finish();
 /// ```
-pub(crate) struct FilteringFormatter<T, F> {
+pub(crate) struct RateLimitFormatter<T> {
     inner: T,
-    filter_fn: F,
     rate_limiter: Mutex<HashMap<Identifier, RateCounter>>,
     config: RateLimit,
 }
 
-fn always_true(_event: &tracing::Event<'_>) -> bool {
-    true
-}
-
-impl<T> FilteringFormatter<T, fn(&tracing::Event<'_>) -> bool> {
+impl<T> RateLimitFormatter<T> {
     pub(crate) fn new(inner: T, rate_limit: &RateLimit) -> Self {
         Self {
             inner,
-            filter_fn: always_true,
             rate_limiter: Mutex::new(HashMap::new()),
             config: rate_limit.clone(),
         }
     }
 }
 
-impl<T, F, S, N> FormatEvent<S, N> for FilteringFormatter<T, F>
+impl<T, S, N> FormatEvent<S, N> for RateLimitFormatter<T>
 where
     T: FormatEvent<S, N>,
-    F: Fn(&tracing::Event<'_>) -> bool,
     S: Subscriber + for<'a> LookupSpan<'a>,
     N: for<'a> FormatFields<'a> + 'static,
 {
@@ -87,44 +82,37 @@ where
         writer: Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> fmt::Result {
-        if (self.filter_fn)(event) {
-            match self.rate_limit(event) {
-                RateResult::Deny => return Ok(()),
+        match self.rate_limit(event) {
+            RateResult::Deny => return Ok(()),
 
-                RateResult::Allow => {}
-                RateResult::AllowSkipped(skipped) => {
-                    if let Some(span) = event
-                        .parent()
-                        .and_then(|id| ctx.span(id))
-                        .or_else(|| ctx.lookup_current())
-                    {
-                        let mut extensions = span.extensions_mut();
-                        match extensions.get_mut::<LogAttributes>() {
-                            None => {
-                                let mut attributes = LogAttributes::default();
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                                extensions.insert(attributes);
-                            }
-                            Some(attributes) => {
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                            }
+            RateResult::Allow => {}
+            RateResult::AllowSkipped(skipped) => {
+                if let Some(span) = event
+                    .parent()
+                    .and_then(|id| ctx.span(id))
+                    .or_else(|| ctx.lookup_current())
+                {
+                    let mut extensions = span.extensions_mut();
+                    match extensions.get_mut::<LogAttributes>() {
+                        None => {
+                            let mut attributes = LogAttributes::default();
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
+                            extensions.insert(attributes);
+                        }
+                        Some(attributes) => {
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
                         }
                     }
                 }
             }
-            self.inner.format_event(ctx, writer, event)
-        } else {
-            Ok(())
         }
+        self.inner.format_event(ctx, writer, event)
     }
 }
 
-impl<T, F, S> EventFormatter<S> for FilteringFormatter<T, F>
+impl<T, S> EventFormatter<S> for RateLimitFormatter<T>
 where
     T: EventFormatter<S>,
-    F: Fn(&tracing::Event<'_>) -> bool,
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn format_event<W>(
@@ -136,37 +124,31 @@ where
     where
         W: std::fmt::Write,
     {
-        if (self.filter_fn)(event) {
-            match self.rate_limit(event) {
-                RateResult::Deny => return Ok(()),
+        match self.rate_limit(event) {
+            RateResult::Deny => return Ok(()),
 
-                RateResult::Allow => {}
-                RateResult::AllowSkipped(skipped) => {
-                    if let Some(span) = event
-                        .parent()
-                        .and_then(|id| ctx.span(id))
-                        .or_else(|| ctx.lookup_current())
-                    {
-                        let mut extensions = span.extensions_mut();
-                        match extensions.get_mut::<LogAttributes>() {
-                            None => {
-                                let mut attributes = LogAttributes::default();
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                                extensions.insert(attributes);
-                            }
-                            Some(attributes) => {
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                            }
+            RateResult::Allow => {}
+            RateResult::AllowSkipped(skipped) => {
+                if let Some(span) = event
+                    .parent()
+                    .and_then(|id| ctx.span(id))
+                    .or_else(|| ctx.lookup_current())
+                {
+                    let mut extensions = span.extensions_mut();
+                    match extensions.get_mut::<LogAttributes>() {
+                        None => {
+                            let mut attributes = LogAttributes::default();
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
+                            extensions.insert(attributes);
+                        }
+                        Some(attributes) => {
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
                         }
                     }
                 }
             }
-            self.inner.format_event(ctx, writer, event)
-        } else {
-            Ok(())
         }
+        self.inner.format_event(ctx, writer, event)
     }
 }
 
@@ -175,7 +157,7 @@ enum RateResult {
     AllowSkipped(u32),
     Deny,
 }
-impl<T, F> FilteringFormatter<T, F> {
+impl<T> RateLimitFormatter<T> {
     fn rate_limit(&self, event: &tracing::Event<'_>) -> RateResult {
         if self.config.enabled {
             let now = Instant::now();

@@ -25,7 +25,7 @@ use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
@@ -52,7 +52,7 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(FilteringFormatter::new(format, rate_limit), std::io::stdout)
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
                         .boxed()
                 }
 
@@ -61,7 +61,7 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(FilteringFormatter::new(format, rate_limit), std::io::stdout)
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
                         .boxed()
                 }
             }
