@@ -31,7 +31,7 @@ pub(super) fn request_failure(
             }])
             .context(context)
             .status_code(error_details.status)
-            .build()?
+            .build()
     };
 
     Ok(ControlFlow::Break(res))
@@ -57,6 +57,5 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             .status_code(error_details.status)
             .context(context)
             .build()
-            .expect("can't fail to build our error message")
     }
 }
