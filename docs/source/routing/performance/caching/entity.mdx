@@ -67,18 +67,18 @@ For example, the diagram below shows how a price entity can be cached and then c
 flowchart RL
 	subgraph QueryResponse["JSON Response"]
 		n1["{
-			&emsp;&emsp;&quot;products&quot;: [
-			&emsp;&emsp;&emsp;&emsp;{
-			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;name&quot;: &quot;DraftSnowboard&quot;,
-			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;pastPurchases&quot;: ...,
-			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;price&quot;: {
-			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;amount&quot;: &quot;1500&quot;,
-			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;currency_code&quot;: &quot;USD&quot;
-			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;},
-			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;quantity&quot;: &quot;250&quot;
-			&emsp;&emsp;&emsp;&emsp;},
-			&emsp;&emsp;&emsp;&emsp;...
-			&emsp;&emsp;]		
+			&quot;products&quot;: [
+			{
+			&quot;name&quot;: &quot;DraftSnowboard&quot;,
+			&quot;pastPurchases&quot;: ...,
+			&quot;price&quot;: {
+			&quot;amount&quot;: &quot;1500&quot;,
+			&quot;currency_code&quot;: &quot;USD&quot;
+			},
+			&quot;quantity&quot;: &quot;250&quot;
+			},
+			...
+			]		
 		}"]
     end
 
@@ -90,37 +90,37 @@ flowchart RL
 
 	subgraph PriceQueryFragment["Price Query Fragment (e.g. TTL 2200)"]
 		n2["{
-    	&emsp;&emsp;&quot;price&quot;: {
-        &emsp;&emsp;&emsp;&emsp;&quot;id&quot;: 101,
-        &emsp;&emsp;&emsp;&emsp;&quot;product_id&quot;: 12,
-        &emsp;&emsp;&emsp;&emsp;&quot;amount&quot;: 1500,
-        &emsp;&emsp;&emsp;&emsp;&quot;currency_code&quot;: &quot;USD&quot;
-    	&emsp;&emsp;}
+    	&quot;price&quot;: {
+        &quot;id&quot;: 101,
+        &quot;product_id&quot;: 12,
+        &quot;amount&quot;: 1500,
+        &quot;currency_code&quot;: &quot;USD&quot;
+    	}
 		}"]
 	end
 
 	subgraph PurchaseHistoryQueryFragment["Purchase History Query Fragment"]
 		n3["{
-			&emsp;&emsp;&quot;purchases&quot;: {
-			&emsp;&emsp;&emsp;&emsp;&quot;product_id&quot;: 12,
-			&emsp;&emsp;&emsp;&emsp;&quot;user_id&quot;: 2932,
-			&emsp;&emsp;&emsp;&emsp;...
-			&emsp;&emsp;}
+			&quot;purchases&quot;: {
+			&quot;product_id&quot;: 12,
+			&quot;user_id&quot;: 2932,
+			...
+			}
 		}"]
 	end
 
 	subgraph InventoryQueryFragment["Inventory Query Fragment"]
 		n4["{
-			&emsp;&emsp;&quot;inventory&quot;: {
-			&emsp;&emsp;&emsp;&emsp;&quot;id&quot;: 19,
-			&emsp;&emsp;&emsp;&emsp;&quot;product_id&quot;: 12,
-			&emsp;&emsp;&emsp;&emsp;&quot;quantity&quot;: 250
-			&emsp;&emsp;}
+			&quot;inventory&quot;: {
+			&quot;id&quot;: 19,
+			&quot;product_id&quot;: 12,
+			&quot;quantity&quot;: 250
+			}
 		}"]
 	end
 
 	Router
-	Database[("&emsp;&emsp;&emsp;")]
+	Database[("")]
 
   Router --> QueryResponse
 	Purchases --> Router
@@ -220,12 +220,12 @@ You can invalidate entity cache entries with a [specifically formatted request](
 flowchart RL
 	subgraph QueryResponse["Cache invalidation POST"]
 		n1["{
-			&emsp;&emsp;&quot;kind&quot;: &quot;subgraph&quot;,
-			&emsp;&emsp;&quot;subgraph&quot;: &quot;price&quot;,
-			&emsp;&emsp;&quot;type&quot;: &quot;Price&quot;,
-			&emsp;&emsp;&quot;key&quot;: {
-			&emsp;&emsp;&emsp;&emsp;&quot;id&quot;: &quot;101&quot;
-			&emsp;&emsp;}
+			&quot;kind&quot;: &quot;subgraph&quot;,
+			&quot;subgraph&quot;: &quot;price&quot;,
+			&quot;type&quot;: &quot;Price&quot;,
+			&quot;key&quot;: {
+			&quot;id&quot;: &quot;101&quot;
+			}
 		}"]
     end
 
@@ -237,17 +237,17 @@ flowchart RL
 
 	subgraph PriceQueryFragment["Price Query Fragment (e.g. TTL 2200)"]
 		n2[" ̶{̶
-    	&emsp;&emsp;&quot; ̶p̶r̶i̶c̶e̶&quot;:  ̶{̶
-        &emsp;&emsp;&emsp;&emsp;&quot; ̶i̶d̶&quot;:  ̶1̶0̶1̶,
-        &emsp;&emsp;&emsp;&emsp;&quot; ̶p̶r̶o̶d̶u̶c̶t̶_̶i̶d̶&quot;:  ̶1̶2̶,
-        &emsp;&emsp;&emsp;&emsp;&quot; ̶a̶m̶o̶u̶n̶t̶&quot;:  ̶1̶5̶0̶0̶,
-        &emsp;&emsp;&emsp;&emsp;&quot;̶c̶u̶r̶r̶e̶n̶c̶y̶_̶c̶o̶d̶e̶&quot;: &quot; ̶U̶S̶D̶&quot;
-    	&emsp;&emsp; ̶}̶
+    	&quot; ̶p̶r̶i̶c̶e̶&quot;:  ̶{̶
+        &quot; ̶i̶d̶&quot;:  ̶1̶0̶1̶,
+        &quot; ̶p̶r̶o̶d̶u̶c̶t̶_̶i̶d̶&quot;:  ̶1̶2̶,
+        &quot; ̶a̶m̶o̶u̶n̶t̶&quot;:  ̶1̶5̶0̶0̶,
+        &quot;̶c̶u̶r̶r̶e̶n̶c̶y̶_̶c̶o̶d̶e̶&quot;: &quot; ̶U̶S̶D̶&quot;
+    	 ̶}̶
 		 ̶}̶"]
 	end
 
 	Router
-	Database[("&emsp;&emsp;&emsp;")]
+	Database[("")]
 
     QueryResponse --> Router
 	Purchases --> Router
