@@ -161,6 +161,7 @@ fn get_measuring(span: &SpanData) -> f64 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_traces<'interner, S, N, R>(
     interner: &mut StringInterner<'interner>,
     model_config: &'interner ModelConfig,
