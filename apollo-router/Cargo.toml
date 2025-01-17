@@ -151,7 +151,11 @@ opentelemetry_sdk = { version = "0.24.1", default-features = false, features = [
     "trace",
 ] }
 opentelemetry-aws = "0.12.0"
-opentelemetry-datadog = { version = "0.12.0", features = ["agent-sampling", "reqwest-client"] }
+# START TEMP DATADOG Temporarily remove until we upgrade otel to the latest version
+# This means including the rmp library
+# opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
+rmp = "0.8"
+# END TEMP DATADOG
 opentelemetry-http = "0.13.0"
 opentelemetry-jaeger-propagator = "0.3.0"
 opentelemetry-otlp = { version = "0.17.0", default-features = false, features = [
@@ -296,6 +300,7 @@ opentelemetry-proto = { version = "0.5.0", features = [
     "gen-tonic-messages",
     "with-serde",
 ] }
+opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
 pretty_assertions = "1.4.0"
 rand_core = "0.6.4"
