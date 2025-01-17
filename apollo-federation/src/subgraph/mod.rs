@@ -119,7 +119,7 @@ impl Subgraph {
                     .schema_definition
                     .make_mut()
                     .directives
-                    .push(defaults.applied_link_directive().into());
+                    .push(defaults.applied_link_directive());
                 defaults
             }
         };
@@ -136,7 +136,7 @@ impl Subgraph {
                     .schema_definition
                     .make_mut()
                     .directives
-                    .push(defaults.applied_link_directive().into());
+                    .push(defaults.applied_link_directive());
                 defaults
             }
         };
