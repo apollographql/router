@@ -4,6 +4,7 @@ use http::uri;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::{self};
 use opentelemetry_sdk::export::ExportError;
+use opentelemetry_sdk::Resource;
 use url::ParseError;
 
 use self::unified_tags::UnifiedTags;
@@ -150,6 +151,7 @@ impl ApiVersion {
         traces: Vec<&[trace::SpanData]>,
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
+        resource: Option<&Resource>,
     ) -> Result<Vec<u8>, Error> {
         match self {
             Self::Version03 => v03::encode(
@@ -167,6 +169,7 @@ impl ApiVersion {
                     Some(f) => f(span, config),
                     None => default_resource_mapping(span, config),
                 },
+                resource,
             ),
             Self::Version05 => v05::encode(
                 model_config,
@@ -184,6 +187,7 @@ impl ApiVersion {
                     None => default_resource_mapping(span, config),
                 },
                 unified_tags,
+                resource,
             ),
         }
     }
@@ -261,6 +265,7 @@ pub(crate) mod tests {
                 traces.iter().map(|x| &x[..]).collect(),
                 &Mapping::empty(),
                 &UnifiedTags::new(),
+                None,
             )?);
 
         assert_eq!(encoded.as_str(), "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
@@ -290,6 +295,7 @@ pub(crate) mod tests {
                 traces.iter().map(|x| &x[..]).collect(),
                 &Mapping::empty(),
                 &unified_tags,
+                None,
             )?);
 
         // TODO: Need someone to generate the expected result or instructions to do so.

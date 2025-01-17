@@ -3,6 +3,7 @@ use std::time::SystemTime;
 use opentelemetry::trace::Status;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::Resource;
 
 use super::unified_tags::UnifiedTagField;
 use super::unified_tags::UnifiedTags;
@@ -80,6 +81,7 @@ pub(crate) fn encode<S, N, R>(
     get_name: N,
     get_resource: R,
     unified_tags: &UnifiedTags,
+    resource: Option<&Resource>,
 ) -> Result<Vec<u8>, Error>
 where
     for<'a> S: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
@@ -95,6 +97,7 @@ where
         get_resource,
         &traces,
         unified_tags,
+        resource,
     )?;
 
     let mut payload = Vec::with_capacity(traces.len() * 512);
@@ -166,6 +169,7 @@ fn encode_traces<'interner, S, N, R>(
     get_resource: R,
     traces: &'interner [&[SpanData]],
     unified_tags: &'interner UnifiedTags,
+    resource: Option<&'interner Resource>,
 ) -> Result<Vec<u8>, Error>
 where
     for<'a> S: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
@@ -235,10 +239,16 @@ where
 
             rmp::encode::write_map_len(
                 &mut encoded,
-                span.attributes.len() as u32
+                (span.attributes.len() + resource.map(|r| r.len()).unwrap_or(0)) as u32
                     + unified_tags.compute_attribute_size()
                     + GIT_META_TAGS_COUNT,
             )?;
+            if let Some(resource) = resource {
+                for (key, value) in resource.iter() {
+                    rmp::encode::write_u32(&mut encoded, interner.intern(key.as_str()))?;
+                    rmp::encode::write_u32(&mut encoded, interner.intern_value(value))?;
+                }
+            }
 
             write_unified_tags(&mut encoded, interner, unified_tags)?;
 

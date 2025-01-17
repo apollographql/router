@@ -74,6 +74,7 @@ pub struct DatadogExporter {
     api_version: ApiVersion,
     mapping: Mapping,
     unified_tags: UnifiedTags,
+    resource: Option<Resource>,
 }
 
 impl DatadogExporter {
@@ -92,6 +93,7 @@ impl DatadogExporter {
             api_version,
             mapping,
             unified_tags,
+            resource: None,
         }
     }
 
@@ -106,6 +108,7 @@ impl DatadogExporter {
             traces,
             &self.mapping,
             &self.unified_tags,
+            self.resource.as_ref(),
         )?;
         let req = http::Request::builder()
             .method(http::Method::POST)
@@ -414,6 +417,10 @@ impl SpanExporter for DatadogExporter {
 
         let client = self.client.clone();
         Box::pin(send_request(client, request))
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.resource = Some(resource.clone());
     }
 }
 
