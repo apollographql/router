@@ -225,7 +225,6 @@ async fn fetch_supergraph_from_first_viable_url(urls: &[Url]) -> Option<SchemaSt
 mod tests {
     use std::env::temp_dir;
 
-    use futures::select;
     use test_log::test;
     use tracing_futures::WithSubscriber;
     use wiremock::matchers::method;
@@ -313,17 +312,13 @@ mod tests {
                     Url::parse(&format!("http://{}/schema1", mock_server.address())).unwrap(),
                     Url::parse(&format!("http://{}/schema2", mock_server.address())).unwrap(),
                 ],
-                watch: true,
-                period: Duration::from_secs(1),
             }
             .into_stream();
 
             assert!(
                 matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
             );
-            assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
-            );
+            assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await;
@@ -349,17 +344,13 @@ mod tests {
                     Url::parse(&format!("http://{}/schema1", mock_server.address())).unwrap(),
                     Url::parse(&format!("http://{}/schema2", mock_server.address())).unwrap(),
                 ],
-                watch: true,
-                period: Duration::from_secs(1),
             }
             .into_stream();
 
             assert!(
                 matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_2)
             );
-            assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_2)
-            );
+            assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
         }
         .with_subscriber(assert_snapshot_subscriber!({
             "[].fields[\"url.full\"]" => "[url.full]"
@@ -387,8 +378,6 @@ mod tests {
                     Url::parse(&format!("http://{}/schema1", mock_server.address())).unwrap(),
                     Url::parse(&format!("http://{}/schema2", mock_server.address())).unwrap(),
                 ],
-                watch: true,
-                period: Duration::from_secs(1),
             }
             .into_stream();
 
@@ -397,84 +386,6 @@ mod tests {
         .with_subscriber(assert_snapshot_subscriber!({
             "[].fields[\"url.full\"]" => "[url.full]"
         }))
-        .await;
-    }
-    #[test(tokio::test)]
-    async fn schema_success_fail_success() {
-        async {
-            let mock_server = MockServer::start().await;
-            let mut stream = SchemaSource::URLs {
-                urls: vec![
-                    Url::parse(&format!("http://{}/schema1", mock_server.address())).unwrap(),
-                ],
-                watch: true,
-                period: Duration::from_secs(1),
-            }
-            .into_stream()
-            .boxed()
-            .fuse();
-
-            let success = Mock::given(method("GET"))
-                .and(path("/schema1"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(SCHEMA_1))
-                .mount_as_scoped(&mock_server)
-                .await;
-
-            assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
-            );
-
-            drop(success);
-
-            // Next call will timeout
-            assert!(select! {
-                _res = stream.next() => false,
-                _res = tokio::time::sleep(Duration::from_secs(2)).boxed().fuse() => true,
-
-            });
-
-            // Now we should get the schema again if the endpoint is back
-            Mock::given(method("GET"))
-                .and(path("/schema1"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(SCHEMA_1))
-                .mount(&mock_server)
-                .await;
-
-            assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
-            );
-        }
-        .with_subscriber(assert_snapshot_subscriber!({
-            "[].fields[\"url.full\"]" => "[url.full]"
-        }))
-        .await;
-    }
-
-    #[test(tokio::test)]
-    async fn schema_no_watch() {
-        async {
-            let mock_server = MockServer::start().await;
-            Mock::given(method("GET"))
-                .and(path("/schema1"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(SCHEMA_1))
-                .mount(&mock_server)
-                .await;
-
-            let mut stream = SchemaSource::URLs {
-                urls: vec![
-                    Url::parse(&format!("http://{}/schema1", mock_server.address())).unwrap(),
-                ],
-                watch: false,
-                period: Duration::from_secs(1),
-            }
-            .into_stream();
-
-            assert!(
-                matches!(stream.next().await.unwrap(), UpdateSchema(schema) if schema.sdl == SCHEMA_1)
-            );
-            assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
-        }
-        .with_subscriber(assert_snapshot_subscriber!())
         .await;
     }
 }
