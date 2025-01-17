@@ -46,6 +46,8 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::http_ext;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::telemetry::apollo::OtlpErrorMetricsMode;
@@ -383,7 +385,7 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    self.count_error_codes(vec![Some("INVALID_ACCEPT_HEADER")], &context);
+                    self.count_error_codes(vec!["INVALID_ACCEPT_HEADER"], &context);
 
                     // Useful for selector in spans/instruments/events
                     context.insert_json_value(
@@ -818,15 +820,7 @@ impl RouterService {
         Ok(graphql_requests)
     }
 
-    fn count_errors(&self, errors: &[graphql::Error], context: &Context) {
-        let codes = errors
-            .iter()
-            .map(|e| e.extensions.get("code").and_then(|c| c.as_str()))
-            .collect();
-        self.count_error_codes(codes, context);
-    }
-
-    fn count_error_codes(&self, codes: Vec<Option<&str>>, context: &Context) {
+    fn count_errors(&self, errors: &Vec<graphql::Error>, context: &Context) {
         let unwrap_context_string = |context_key: &str| -> String {
             context
                 .get::<_, String>(context_key)
@@ -841,7 +835,8 @@ impl RouterService {
         let client_version = unwrap_context_string(CLIENT_VERSION);
 
         let mut map = HashMap::new();
-        for code in &codes {
+        for error in errors {
+            let code = error.extensions.get("code").and_then(|c| c.as_str());
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
 
@@ -880,6 +875,24 @@ impl RouterService {
                 }
             }
         }
+    }
+
+    fn count_error_codes(&self, codes: Vec<&str>, context: &Context) {
+        let errors = codes
+            .iter()
+            .map(|c| {
+                let mut extensions = Object::new();
+                extensions.insert("code", Value::String((*c).into()));
+                graphql::Error {
+                    message: "".into(),
+                    locations: vec![],
+                    path: None,
+                    extensions,
+                }
+            })
+            .collect();
+
+        self.count_errors(&errors, context);
     }
 }
 
