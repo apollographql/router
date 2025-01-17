@@ -1,7 +1,7 @@
 ---
 title: GraphOS Router Features
-subtitle: Use router features enabled by GraphOS and the Enterprise plan
-description: Unlock Enterprise features for the GraphOS Router by connecting it to Apollo GraphOS.
+subtitle: Use router features enabled by GraphOS and licensed plans
+description: Unlock additional features for the GraphOS Router by connecting it to Apollo GraphOS.
 redirectFrom: 
   - /router/enterprise-features
 ---
@@ -14,28 +14,28 @@ A router connected to GraphOS, whether cloud-hosted or self-hosted, is called a 
 
 For details on these features, see [this blog post](https://blog.apollographql.com/apollo-router-v1-12-improved-router-security-performance-and-extensibility) in addition to the documentation links above.
 
-## Enterprise plan features
+## Commercially licensed plan features
 
 <Tip>
 
-Try the Enterprise features of GraphOS Router with a free [GraphOS trial](https://www.apollographql.com/pricing).
+Try the commercially licensed features of GraphOS Router with a free [GraphOS trial](https://www.apollographql.com/pricing).
 
 </Tip>
 
 To enable support for Enterprise features in GraphOS Router:
 
-- Your organization must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+- Your organization must have a [GraphOS licensed plan](https://www.apollographql.com/pricing/).
 - You must run GraphOS Router v1.12 or later. [Download the latest version.](/graphos/reference/router/self-hosted-install#1-download-and-extract-the-router-binary)
-    - Certain Enterprise features might require a later router version. See a particular feature's documentation for details.
+    - Certain licensed features might require a later router version. See a particular feature's documentation for details.
 - Your router instances must connect to GraphOS with a **graph API key** and **graph ref** associated with your organization.
     - You connect your router to GraphOS by setting [these environment variables](/graphos/reference/router/configuration#environment-variables) when starting the router.
     - If your router _already_ connects to your GraphOS Enterprise organization, no further action is required.
 
-After enabling support, you can begin using all [Enterprise features](#graphos-router-features).
+After enabling support, you can begin using licensed [commercial features](#graphos-router-features).
 
-### The Enterprise license
+### The commercial license
 
-Whenever your router instance starts up and connects to GraphOS, it fetches a **license**, which is the credential that authorizes its use of Enterprise features:
+Whenever your router instance starts up and connects to GraphOS, it fetches a **license**, which is the credential that authorizes its use of commercial features:
 
 ```mermaid
 flowchart LR;
@@ -56,13 +56,13 @@ A router instance's license is valid for the duration of your organization's cur
 
 <MinVersion version="1.37.0">
 
-### Offline Enterprise license
+### Offline commercial license
 
 </MinVersion>
 
 <Tip>
 
-Offline Enterprise license support is available on an as-needed basis. Send a request to your Apollo contact to enable it for your GraphOS Studio organization.
+Offline license support is available on an as-needed basis. Send a request to your Apollo contact to enable it for your GraphOS Studio organization.
 
 </Tip>
 
