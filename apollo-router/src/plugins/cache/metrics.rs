@@ -6,10 +6,10 @@ use std::time::Instant;
 
 use bloomfilter::Bloom;
 use http::header;
-use tower::ServiceBuilder;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 

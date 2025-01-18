@@ -75,20 +75,6 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
 
-    // NOTE: Unless we re-create our router, this test will fail with a 500
-    // instead of the desired 413. We need to figure out why before this
-    // PR is merged.
-    let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_body_limit.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
     // This query is huge and will be rejected because it is too large before hitting the coprocessor
     let (_trace_id, response) = router
         .execute_query(Query::default().with_huge_query())

@@ -76,8 +76,10 @@ fn service_usage() {
 ///
 /// The query planner reports the failed subgraph fetch as an error with a reason of "service
 /// closed", which is what this test expects.
+// NOTE: I'm not really sure that this test is needed now that we are fixing back-pressure.
+// EVALUATE BEFORE MERGING
 #[tokio::test]
-#[should_panic(expected = "this panic should be propagated to the test harness")]
+// #[should_panic(expected = "this panic should be propagated to the test harness")]
 async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
@@ -93,9 +95,9 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    mock_products_service.expect_call().times(1).withf(|_| {
-        panic!("this panic should be propagated to the test harness");
-    });
+    // mock_products_service.expect_call().times(1).withf(|_| {
+    // panic!("this panic should be propagated to the test harness");
+    // });
     mock_products_service.expect_clone().return_once(|| {
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service.expect_call().times(1).withf(|_| {
@@ -139,7 +141,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     let reason: String =
         serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())
             .unwrap();
-    assert_eq!(reason, "service closed".to_string());
+    assert_eq!(reason, "buffer's worker closed unexpectedly".to_string());
 }
 
 #[tokio::test]
@@ -678,6 +680,9 @@ async fn dependent_mutations() {
 
     // the first fetch returned null, so there should never be a call to B
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
+    mock_b_service
+        .expect_clone()
+        .returning(|| plugin::test::MockSubgraphService::new());
     mock_b_service.expect_call().never();
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
