@@ -12,6 +12,7 @@ use super::response_shape_compare::PathConstraint;
 use super::CheckFailure;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::ValidFederationSchema;
@@ -26,6 +27,25 @@ pub(crate) struct SubgraphConstraint<'a> {
     /// subgraph_types: The set of object types that are possible under the current context.
     /// - Note: The empty subgraph_types means all types are possible.
     subgraph_types: IndexSet<ObjectTypeDefinitionPosition>,
+}
+
+fn is_resolvable(
+    ty_pos: &ObjectTypeDefinitionPosition,
+    schema: &ValidFederationSchema,
+) -> Result<bool, FederationError> {
+    let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
+    let key_directive_definition = federation_spec_definition.key_directive_definition(schema)?;
+    let ty_def = ty_pos.get(schema.schema())?;
+    let mut resolvable_key_applications = Vec::new();
+    for directive in ty_def.directives.get_all(&key_directive_definition.name) {
+        let key_directive_application =
+            federation_spec_definition.key_directive_arguments(directive)?;
+        if !key_directive_application.resolvable {
+            continue;
+        }
+        resolvable_key_applications.push(key_directive_application);
+    }
+    Ok(!resolvable_key_applications.is_empty())
 }
 
 impl<'a> SubgraphConstraint<'a> {
@@ -48,7 +68,9 @@ impl<'a> SubgraphConstraint<'a> {
         for (subgraph_name, subgraph_schema) in self.subgraphs_by_name.iter() {
             if let Some(entity_ty_pos) = subgraph_schema.entity_type()? {
                 let entity_ty_def = entity_ty_pos.get(subgraph_schema.schema())?;
-                if entity_ty_def.members.contains(&ty_pos.type_name) {
+                if entity_ty_def.members.contains(&ty_pos.type_name)
+                    && is_resolvable(ty_pos, subgraph_schema)?
+                {
                     result.insert(subgraph_name.clone());
                 }
             }
