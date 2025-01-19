@@ -150,7 +150,7 @@ fn test_type_conditions_over_multiple_different_interface_types() {
     insta::assert_snapshot!(response_shape(op_str), @r###"
     {
       test_u -----> test_u {
-        data -may-> data(arg: 0) on I ∧ U = {R, S}
+        data -may-> data(arg: 0) on I ∩ U = {R, S}
         data -may-> data(arg: 0) on U
       }
     }
@@ -187,7 +187,7 @@ fn test_type_conditions_merge_same_object_type() {
     {
       test_u -----> test_u {
         data -may-> data(arg: 0) on R
-        data -may-> data(arg: 0) on I ∧ U = {R, S}
+        data -may-> data(arg: 0) on I ∩ U = {R, S}
       }
     }
     "###);
@@ -220,7 +220,7 @@ fn test_type_conditions_merge_equivalent_intersections() {
     insta::assert_snapshot!(response_shape(op_str), @r###"
     {
       test_u -----> test_u {
-        data -may-> data(arg: 0) on I ∧ U = {R, S}
+        data -may-> data(arg: 0) on I ∩ U = {R, S}
       }
     }
     "###);
@@ -250,7 +250,7 @@ fn test_type_conditions_merge_different_but_equivalent_intersection_expressions(
     insta::assert_snapshot!(response_shape(op_str), @r###"
     {
       test_v -----> test_v {
-        data -may-> data(arg: 0) on I ∧ V = {R, S}
+        data -may-> data(arg: 0) on I ∩ V = {R, S}
       }
     }
     "###);

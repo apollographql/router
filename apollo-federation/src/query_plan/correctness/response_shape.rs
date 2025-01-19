@@ -126,6 +126,7 @@ fn get_ground_types(
 }
 
 /// A sequence of type conditions applied (used for display)
+// - This displays a type condition as an intersection of named types.
 // - If the vector is empty, it means a "deduced type condition".
 //   Thus, we may not know how to display such a composition of types.
 //   That can happen when a more specific type condition is computed
@@ -1179,7 +1180,7 @@ impl fmt::Display for AppliedTypeCondition {
         }
         for (i, cond) in self.0.iter().enumerate() {
             if i > 0 {
-                write!(f, " ∧ ")?;
+                write!(f, " ∩ ")?;
             }
             write!(f, "{}", cond.type_name())?;
         }
