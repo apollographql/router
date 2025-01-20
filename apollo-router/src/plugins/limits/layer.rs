@@ -23,15 +23,6 @@ struct BodyLimitControlInner {
     current: AtomicUsize,
 }
 
-impl Clone for BodyLimitControlInner {
-    fn clone(&self) -> Self {
-        Self {
-            limit: AtomicUsize::new(self.limit.load(std::sync::atomic::Ordering::SeqCst)),
-            current: AtomicUsize::new(0),
-        }
-    }
-}
-
 /// This structure allows the body limit to be updated dynamically.
 /// It also allows the error message to be updated
 ///
@@ -39,16 +30,16 @@ impl Clone for BodyLimitControlInner {
 // why it is. But I doubt that it would be the only way to solve whatever it's doing.
 #[derive(Clone)]
 pub(crate) struct BodyLimitControl {
-    inner: BodyLimitControlInner,
+    inner: Arc<BodyLimitControlInner>,
 }
 
 impl BodyLimitControl {
     pub(crate) fn new(limit: usize) -> Self {
         Self {
-            inner: BodyLimitControlInner {
+            inner: Arc::new(BodyLimitControlInner {
                 limit: AtomicUsize::new(limit),
                 current: AtomicUsize::new(0),
-            },
+            }),
         }
     }
 

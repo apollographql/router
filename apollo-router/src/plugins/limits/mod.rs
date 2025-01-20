@@ -241,8 +241,7 @@ mod test {
     use http::StatusCode;
     use tower::BoxError;
 
-    // TODO: Re-instate when test re-instated
-    // use crate::plugins::limits::layer::BodyLimitControl;
+    use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
@@ -383,8 +382,6 @@ mod test {
         assert!(resp.is_err());
     }
 
-    /*
-     * TODO: Temporarily comment out until we understand it better
     #[tokio::test]
     async fn test_limits_dynamic_update() {
         let plugin = plugin().await;
@@ -430,7 +427,6 @@ mod test {
             "{}"
         );
     }
-    */
 
     async fn plugin() -> PluginTestHarness<LimitsPlugin> {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::new(

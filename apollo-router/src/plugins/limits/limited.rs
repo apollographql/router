@@ -1,6 +1,3 @@
-// Note: This seems to be at odds with the cloning router service approach, so we may decide we
-// don't need this in future.
-// For now, it's the cause of some of the failing test apollo-router plugins::limits::test::test_limits_dynamic_update
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
