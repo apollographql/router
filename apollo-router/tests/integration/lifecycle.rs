@@ -243,7 +243,9 @@ async fn test_experimental_notice() {
     router.start().await;
     router.assert_started().await;
     router
-        .assert_log_contains("You're using some \\\"experimental\\\" features of the Apollo Router")
+        .wait_for_log_message(
+            "You're using some \\\"experimental\\\" features of the Apollo Router",
+        )
         .await;
     router.graceful_shutdown().await;
 }

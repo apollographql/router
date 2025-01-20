@@ -159,6 +159,7 @@ pub struct IntegrationTest {
     redis_namespace: String,
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
+    logs: Vec<String>,
 }
 
 impl IntegrationTest {
@@ -495,6 +496,7 @@ impl IntegrationTest {
             redis_namespace,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
+            logs: vec![],
         }
     }
 
@@ -601,12 +603,12 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_started(&mut self) {
-        self.assert_log_contains("GraphQL endpoint exposed").await;
+        self.wait_for_log_message("GraphQL endpoint exposed").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_not_started(&mut self) {
-        self.assert_log_contains("no valid configuration").await;
+        self.wait_for_log_message("no valid configuration").await;
     }
 
     #[allow(dead_code)]
@@ -863,25 +865,26 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_reloaded(&mut self) {
-        self.assert_log_contains("reload complete").await;
+        self.wait_for_log_message("reload complete").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_no_reload_necessary(&mut self) {
-        self.assert_log_contains("no reload necessary").await;
+        self.wait_for_log_message("no reload necessary").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_not_reloaded(&mut self) {
-        self.assert_log_contains("continuing with previous configuration")
+        self.wait_for_log_message("continuing with previous configuration")
             .await;
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn wait_for_log_message(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(10) {
             if let Ok(line) = self.stdio_rx.try_recv() {
+                self.logs.push(line.to_string());
                 if line.contains(msg) {
                     return;
                 }
@@ -889,6 +892,17 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         self.dump_stack_traces();
+        panic!("'{msg}' not detected in logs");
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_log_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                return;
+            }
+        }
+
         panic!("'{msg}' not detected in logs");
     }
 
