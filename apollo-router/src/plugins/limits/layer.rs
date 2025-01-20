@@ -19,7 +19,7 @@ pub(super) enum BodyLimitError {
 }
 
 struct BodyLimitControlInner {
-    limit: AtomicUsize,
+    limit: Arc<AtomicUsize>,
     current: AtomicUsize,
 }
 
@@ -30,16 +30,25 @@ struct BodyLimitControlInner {
 // why it is. But I doubt that it would be the only way to solve whatever it's doing.
 #[derive(Clone)]
 pub(crate) struct BodyLimitControl {
-    inner: Arc<BodyLimitControlInner>,
+    inner: BodyLimitControlInner,
+}
+
+impl Clone for BodyLimitControlInner {
+    fn clone(&self) -> Self {
+        Self {
+            limit: self.limit.clone(),
+            current: AtomicUsize::new(self.current.load(std::sync::atomic::Ordering::SeqCst)),
+        }
+    }
 }
 
 impl BodyLimitControl {
     pub(crate) fn new(limit: usize) -> Self {
         Self {
-            inner: Arc::new(BodyLimitControlInner {
-                limit: AtomicUsize::new(limit),
+            inner: BodyLimitControlInner {
+                limit: Arc::new(AtomicUsize::new(limit)),
                 current: AtomicUsize::new(0),
-            }),
+            },
         }
     }
 
