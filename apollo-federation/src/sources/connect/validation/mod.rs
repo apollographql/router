@@ -16,6 +16,7 @@
 
 mod coordinates;
 mod entity;
+mod expression;
 mod extended_type;
 mod graphql;
 mod http;
@@ -389,9 +390,10 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
             }
         }
 
+        let expression_context = expression::Context::for_source(schema);
         errors.extend(headers::validate_arg(
             http_arg,
-            schema,
+            &expression_context,
             HttpHeadersCoordinate::Source {
                 directive_name: &directive.name,
             },

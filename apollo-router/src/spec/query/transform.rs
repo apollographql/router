@@ -569,13 +569,10 @@ mod tests {
                 def: &ast::Field,
             ) -> Result<Option<ast::Field>, BoxError> {
                 Ok(field(self, field_def, def)?.map(|mut new| {
-                    new.directives.push(
-                        ast::Directive {
-                            name: apollo_compiler::name!("added"),
-                            arguments: Vec::new(),
-                        }
-                        .into(),
-                    );
+                    new.directives.push(ast::Directive {
+                        name: apollo_compiler::name!("added"),
+                        arguments: Vec::new(),
+                    });
                     new
                 }))
             }

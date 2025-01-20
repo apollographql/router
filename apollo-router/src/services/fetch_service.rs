@@ -1,11 +1,9 @@
 //! Tower fetcher for fetch node execution.
 
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use serde_json_bytes::Value;
 use tokio::sync::mpsc;
@@ -29,6 +27,7 @@ use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionNode;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::OperationKind;
@@ -47,7 +46,7 @@ use crate::spec::Schema;
 pub(crate) struct FetchService {
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
 }
@@ -166,7 +165,7 @@ impl FetchService {
     fn fetch_with_subgraph_service(
         schema: Arc<Schema>,
         subgraph_service_factory: Arc<SubgraphServiceFactory>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
         request: FetchRequest,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
@@ -195,7 +194,7 @@ impl FetchService {
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = &variables.contextual_arguments {
             if let Some(subgraph_schema) = subgraph_schemas.get(&service_name.to_string()) {
-                match build_operation_with_aliasing(operation, ctx_arg, subgraph_schema) {
+                match build_operation_with_aliasing(operation, ctx_arg, &subgraph_schema.schema) {
                     Ok(op) => {
                         alias_query_string = op.serialize().no_indent().to_string();
                         alias_query_string.as_str()
@@ -456,7 +455,7 @@ impl FetchService {
 #[derive(Clone)]
 pub(crate) struct FetchServiceFactory {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
@@ -465,7 +464,7 @@ pub(crate) struct FetchServiceFactory {
 impl FetchServiceFactory {
     pub(crate) fn new(
         schema: Arc<Schema>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
         subgraph_service_factory: Arc<SubgraphServiceFactory>,
         subscription_config: Option<SubscriptionConfig>,
         connector_service_factory: Arc<ConnectorServiceFactory>,

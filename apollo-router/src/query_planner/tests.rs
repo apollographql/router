@@ -1893,8 +1893,14 @@ fn broken_plan_does_not_panic() {
         estimated_size: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
-    let mut subgraph_schemas = HashMap::new();
-    subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
+    let mut subgraph_schemas = HashMap::default();
+    subgraph_schemas.insert(
+        "X".to_owned(),
+        query_planner::fetch::SubgraphSchema {
+            implementers_map: subgraph_schema.implementers_map(),
+            schema: Arc::new(subgraph_schema),
+        },
+    );
     let result = Arc::make_mut(&mut plan.root)
         .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
     assert_eq!(

@@ -96,8 +96,8 @@ Named(
                                 },
                                 None,
                             ),
-                            Path(
-                                Some(
+                            Path {
+                                alias: Some(
                                     Alias {
                                         name: WithRange {
                                             node: Field(
@@ -112,7 +112,8 @@ Named(
                                         ),
                                     },
                                 ),
-                                PathSelection {
+                                inline: false,
+                                path: PathSelection {
                                     path: WithRange {
                                         node: Key(
                                             WithRange {
@@ -223,7 +224,7 @@ Named(
                                         ),
                                     },
                                 },
-                            ),
+                            },
                             Group(
                                 Alias {
                                     name: WithRange {

@@ -174,9 +174,9 @@ checksum = "c1fd03a028ef38ba2276dce7e33fcd6369c158a1bca17946c4b1b701891c1ff7"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.24"
+version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71153ad85c85f7aa63f0e0a5868912c220bb48e4c764556f5841d37fc17b0103"
+checksum = "2d810db7b42773a4082426bcd58658cb9b311c5b74febd255130a9dcfc13109d"
 dependencies = [
  "ahash",
  "apollo-parser",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.0.0-preview.3"
+version = "2.0.0-preview.4"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -229,6 +229,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "sha1",
+ "shape",
  "strum 0.26.3",
  "strum_macros 0.26.4",
  "tempfile",
@@ -252,9 +253,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b64257011a999f2e22275cf7a118f651e58dc9170e11b775d435de768fad0387"
+checksum = "c8f05cbc7da3c2e3bb2f86e985aad5f72571d2e2cd26faf8caa7782131576f84"
 dependencies = [
  "memchr",
  "rowan",
@@ -263,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.0.0-preview.3"
+version = "2.0.0-preview.4"
 dependencies = [
  "access-json",
  "ahash",
@@ -441,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.0.0-preview.3"
+version = "2.0.0-preview.4"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -457,9 +458,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89479524886fdbe62b124d3825879778680e0147304d1a6d32164418f8089a2"
+checksum = "95a04f64d4d4f0048201967b8064257de212ab240fd74e2b153691b39b0e8721"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
@@ -486,9 +487,9 @@ checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
 name = "ariadne"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44055e597c674aef7cb903b2b9f6e4cba1277ed0d2d61dae7cd52d7ffa81f8e2"
+checksum = "31beedec3ce83ae6da3a79592b3d8d7afd146a5b15bb9bb940279aced60faa89"
 dependencies = [
  "concolor",
  "unicode-width",
@@ -4242,15 +4243,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
-name = "memoffset"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "memory-stats"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5924,13 +5916,12 @@ dependencies = [
 
 [[package]]
 name = "rowan"
-version = "0.15.15"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a58fa8a7ccff2aec4f39cc45bf5f985cec7125ab271cf681c279fd00192b49"
+checksum = "417a3a9f582e349834051b8a10c8d71ca88da4211e4093528e36b9845f6b5f21"
 dependencies = [
  "countme",
  "hashbrown 0.14.5",
- "memoffset",
  "rustc-hash 1.1.0",
  "text-size",
 ]
@@ -6470,6 +6461,19 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shape"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70179a0773695f4fc0b3e8e59f356064ed1532492e52bcf7e0dfef42934ec4c5"
+dependencies = [
+ "apollo-compiler",
+ "indexmap 2.7.0",
+ "lazy_static",
+ "serde_json",
+ "serde_json_bytes",
 ]
 
 [[package]]

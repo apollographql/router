@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_compiler::execution::JsonMap;
+use apollo_compiler::response::JsonMap;
 use http::header::CONTENT_TYPE;
 use itertools::EitherOrBoth;
 use itertools::Itertools;

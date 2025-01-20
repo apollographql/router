@@ -4,7 +4,7 @@ expression: "JSONSelection::parse(\"id $.object\")"
 ---
 Err(
     JSONSelectionParseError {
-        message: "Named path selection must either begin with alias or end with subselection",
+        message: "Named path selection must either begin with alias or ..., or end with subselection",
         fragment: "$.object",
         offset: 3,
     },

@@ -7,8 +7,8 @@ mod visitor;
 use std::fmt;
 use std::pin::Pin;
 
-use apollo_compiler::execution::GraphQLError as CompilerExecutionError;
-use apollo_compiler::execution::ResponseDataPathElement;
+use apollo_compiler::response::GraphQLError as CompilerExecutionError;
+use apollo_compiler::response::ResponseDataPathSegment;
 use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
@@ -233,10 +233,10 @@ impl From<CompilerExecutionError> for Error {
             let elements = path
                 .into_iter()
                 .map(|element| match element {
-                    ResponseDataPathElement::Field(name) => {
+                    ResponseDataPathSegment::Field(name) => {
                         JsonPathElement::Key(name.as_str().to_owned(), None)
                     }
-                    ResponseDataPathElement::ListIndex(i) => JsonPathElement::Index(i),
+                    ResponseDataPathSegment::ListIndex(i) => JsonPathElement::Index(i),
                 })
                 .collect();
             Some(Path(elements))
