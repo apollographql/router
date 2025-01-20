@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
@@ -25,6 +24,7 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::fetch::Variables;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
@@ -56,7 +56,7 @@ impl QueryPlan {
         service_factory: &'a Arc<FetchServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
-        subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: &'a Arc<SubgraphSchemas>,
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
@@ -112,7 +112,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
-    pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: &'a Arc<SubgraphSchemas>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,

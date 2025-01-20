@@ -39,13 +39,13 @@
 //!
 //! This prevents possible collision while hashing multiple things in a sequence. The
 //! `^` character cannot be present in GraphQL names, so this is a good separator.
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::hash::Hash;
 use std::hash::Hasher;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::executable;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::schema;
@@ -79,6 +79,7 @@ pub(crate) struct QueryHashVisitor<'a> {
     // For now, introspection is still handled by the planner, so when an
     // introspection query is hashed, it should take the whole schema into account
     schema_str: &'a str,
+    implementers_map: &'a HashMap<Name, schema::Implementers>,
     hasher: Sha256,
     fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
@@ -95,15 +96,17 @@ impl<'a> QueryHashVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         schema_str: &'a str,
+        implementers_map: &'a HashMap<Name, schema::Implementers>,
         executable: &'a executable::ExecutableDocument,
     ) -> Result<Self, BoxError> {
         let mut visitor = Self {
             schema,
             schema_str,
+            implementers_map,
             hasher: Sha256::new(),
             fragments: executable.fragments.iter().collect(),
-            hashed_types: HashSet::new(),
-            hashed_field_definitions: HashSet::new(),
+            hashed_types: HashSet::default(),
+            hashed_field_definitions: HashSet::default(),
             seen_introspection: false,
             // should we just return an error if we do not find those directives?
             join_field_directive_name: Schema::directive_name(
@@ -124,7 +127,7 @@ impl<'a> QueryHashVisitor<'a> {
                 ">=0.1.0",
                 CONTEXT_DIRECTIVE_NAME,
             ),
-            contexts: HashMap::new(),
+            contexts: HashMap::default(),
         };
 
         visitor.hash_schema()?;
@@ -147,10 +150,11 @@ impl<'a> QueryHashVisitor<'a> {
     pub(crate) fn hash_query(
         schema: &'a schema::Schema,
         schema_str: &'a str,
+        implementers_map: &'a HashMap<Name, schema::Implementers>,
         executable: &'a executable::ExecutableDocument,
         operation_name: Option<&str>,
     ) -> Result<Vec<u8>, BoxError> {
-        let mut visitor = QueryHashVisitor::new(schema, schema_str, executable)?;
+        let mut visitor = QueryHashVisitor::new(schema, schema_str, implementers_map, executable)?;
         traverse::document(&mut visitor, executable, operation_name)?;
         // hash the entire query string to prevent collisions
         executable.to_string().hash(&mut visitor);
@@ -326,7 +330,7 @@ impl<'a> QueryHashVisitor<'a> {
                 }
                 "^IMPLEMENTED_INTERFACES_LIST_END".hash(self);
 
-                if let Some(implementers) = self.schema().implementers_map().get(&i.name) {
+                if let Some(implementers) = self.implementers_map.get(&i.name) {
                     "^IMPLEMENTER_OBJECT_LIST".hash(self);
 
                     for object in &implementers.objects {
@@ -651,7 +655,7 @@ impl<'a> QueryHashVisitor<'a> {
     ) -> Result<(), BoxError> {
         "^INTERFACE_IMPL".hash(self);
 
-        if let Some(implementers) = self.schema.implementers_map().get(&intf.name) {
+        if let Some(implementers) = self.implementers_map.get(&intf.name) {
             "^IMPLEMENTER_LIST".hash(self);
             for object in &implementers.objects {
                 self.hash_type_by_name(object)?;
@@ -840,12 +844,17 @@ mod tests {
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec).unwrap();
+        let implementers_map = schema.implementers_map();
+        let mut visitor =
+            QueryHashVisitor::new(&schema, schema_str, &implementers_map, &exec).unwrap();
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         (
             hex::encode(visitor.finish()),
-            hex::encode(QueryHashVisitor::hash_query(&schema, schema_str, &exec, None).unwrap()),
+            hex::encode(
+                QueryHashVisitor::hash_query(&schema, schema_str, &implementers_map, &exec, None)
+                    .unwrap(),
+            ),
         )
             .into()
     }
@@ -859,7 +868,9 @@ mod tests {
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec).unwrap();
+        let implementers_map = schema.implementers_map();
+        let mut visitor =
+            QueryHashVisitor::new(&schema, schema_str, &implementers_map, &exec).unwrap();
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
