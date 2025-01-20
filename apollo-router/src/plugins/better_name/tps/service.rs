@@ -7,13 +7,12 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use crate::plugins::better_name::tps::error::TpsLimited;
-use crate::plugins::better_name::tps::tps::Tps;
-
 use futures::ready;
 use tower::Service;
 
 use super::future::ResponseFuture;
+use crate::plugins::better_name::tps::error::TpsLimited;
+use crate::plugins::better_name::tps::tps::Tps;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TpsLimit<T> {
