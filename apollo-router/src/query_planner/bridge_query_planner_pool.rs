@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -7,7 +6,6 @@ use std::sync::Mutex;
 use std::task::Poll;
 use std::time::Instant;
 
-use apollo_compiler::validation::Valid;
 use async_channel::bounded;
 use async_channel::Sender;
 use futures::future::BoxFuture;
@@ -27,6 +25,7 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::introspection::IntrospectionCache;
 use crate::metrics::meter_provider;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::PlannerMode;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -40,7 +39,7 @@ pub(crate) struct BridgeQueryPlannerPool {
     js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
     pool_mode: PoolMode,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
     compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_used: Arc<AtomicU64>,
     v8_heap_used_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
@@ -248,9 +247,7 @@ impl BridgeQueryPlannerPool {
         self.schema.clone()
     }
 
-    pub(crate) fn subgraph_schemas(
-        &self,
-    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
         self.subgraph_schemas.clone()
     }
 

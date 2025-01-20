@@ -594,7 +594,13 @@ mod test {
         )
         .await
         .unwrap();
-        let subgraph_schemas = planner.subgraph_schemas();
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
 
         let mut builder =
             PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
