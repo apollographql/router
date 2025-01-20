@@ -149,7 +149,9 @@ pub(crate) mod test_utils {
     pub(crate) fn collect_metrics() -> Metrics {
         let mut metrics = Metrics::default();
         let (_, reader) = meter_provider_and_readers();
-        reader.collect(&mut metrics.resource_metrics).unwrap();
+        reader
+            .collect(&mut metrics.resource_metrics)
+            .expect("Failed to collect metrics. Did you forget to use `async{}.with_metrics()`? See dev-docs/metrics.md");
         metrics
     }
 
@@ -911,6 +913,10 @@ macro_rules! assert_metric {
     };
 }
 
+/// Assert the value of a counter metric that has the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_counter {
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
@@ -950,6 +956,10 @@ macro_rules! assert_counter {
     };
 }
 
+/// Assert the value of a counter metric that has the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_up_down_counter {
 
@@ -983,6 +993,10 @@ macro_rules! assert_up_down_counter {
     };
 }
 
+/// Assert the value of a gauge metric that has the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_gauge {
 
@@ -1016,6 +1030,10 @@ macro_rules! assert_gauge {
     };
 }
 
+/// Assert the sum value of a histogram metric with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_histogram_sum {
 
@@ -1049,6 +1067,10 @@ macro_rules! assert_histogram_sum {
     };
 }
 
+/// Assert that a histogram metric exists with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_histogram_exists {
 
@@ -1082,6 +1104,10 @@ macro_rules! assert_histogram_exists {
     };
 }
 
+/// Assert that a histogram metric does not exist with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_histogram_not_exists {
 
@@ -1115,6 +1141,13 @@ macro_rules! assert_histogram_not_exists {
     };
 }
 
+/// Assert that all metrics match an [insta] snapshot.
+///
+/// Consider using [assert_non_zero_metrics_snapshot] to produce more grokkable snapshots if
+/// zero-valued metrics are not relevant to your test.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 #[allow(unused_macros)]
 macro_rules! assert_metrics_snapshot {
@@ -1133,6 +1166,10 @@ macro_rules! assert_metrics_snapshot {
     };
 }
 
+/// Assert that all metrics with a non-zero value match an [insta] snapshot.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 #[allow(unused_macros)]
 macro_rules! assert_non_zero_metrics_snapshot {
