@@ -12,18 +12,18 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: small
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
       - image: cimg/redis:7.4.1
       - image: jaegertracing/all-in-one:1.54.0
       - image: openzipkin/zipkin:3.4.3
@@ -32,14 +32,14 @@ executors:
     environment:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
-    machine:
-      image: ubuntu-2004:2024.01.1
+    docker:
+      - image: cimg/base:current
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
-    machine:
-      image: ubuntu-2004:2024.01.1
+    docker:
+      - image: cimg/base:current
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
@@ -237,7 +237,8 @@ commands:
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
                     mkdir $HOME/.deb
-                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev
+                    sudo apt-get update
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install build-essential libssl-dev libdw-dev
                   fi
                   sudo dpkg -i $HOME/.deb/*.deb
 
@@ -929,7 +930,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: small
     environment:
       <<: *common_job_environment
