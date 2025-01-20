@@ -68,7 +68,7 @@ impl PluginPrivate for FileUploadsPlugin {
         }
         let limits = self.limits;
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: router::Request| {
+            .checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match router_layer(req, limits).await {
@@ -83,6 +83,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -92,7 +93,7 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: supergraph::Request| {
+            .checkpoint_async(move |req: supergraph::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match supergraph_layer(req).await {
@@ -107,6 +108,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -141,12 +143,13 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: subgraph::Request| {
+            .checkpoint_async(|req: subgraph::Request| {
                 subgraph_layer(req)
                     .boxed()
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
