@@ -608,7 +608,14 @@ pub struct License {
 #[derive(Builder, Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct TpsLimit {
     pub(crate) capacity: usize,
-    pub(crate) duration: Duration,
+    pub(crate) interval: Duration,
+}
+
+impl Default for TpsLimit {
+    fn default() -> Self {
+        // TODO: decide if this is a good strategy or if we should do something else
+        todo!()
+    }
 }
 
 /// LicenseLimits represent what can be done with a router based on the claims in the License. You
@@ -618,7 +625,7 @@ pub(crate) struct TpsLimit {
 pub(crate) struct LicenseLimits {
     /// Transaction Per Second limits. If none are found in the License's claims, there are no
     /// limits to apply
-    tps: Option<TpsLimit>,
+    pub(crate) tps: Option<TpsLimit>,
 }
 
 /// Licenses are converted into a stream of license states by the expander
@@ -636,6 +643,16 @@ pub(crate) enum LicenseState {
     Unlicensed,
 }
 
+impl LicenseState {
+    pub(crate) fn get_limits(&self) -> Option<LicenseLimits> {
+        match self {
+            LicenseState::Licensed(limits)
+            | LicenseState::LicensedWarn(limits)
+            | LicenseState::LicensedHalt(limits) => *limits,
+            _ => None,
+        }
+    }
+}
 impl Display for License {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(claims) = &self.claims {

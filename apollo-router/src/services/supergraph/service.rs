@@ -34,6 +34,8 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::plugin::DynPlugin;
+use crate::plugins::better_name::RouterLimits;
+use crate::plugins::better_name::APOLLO_ROUTER_LIMITS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
 use crate::plugins::subscription::Subscription;
@@ -1013,19 +1015,48 @@ impl SupergraphCreator {
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
             .expect("traffic shaping should always be part of the plugin list");
 
-        let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
-            .layer(shaping.supergraph_service_internal(supergraph_service));
+        // TODO: docs on why the conditional; doc assumption of if plugin exists, we have limits
+        // set
+        let service = if let Some(router_limits) = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_ROUTER_LIMITS)
+            .and_then(|plugin| plugin.1.as_any().downcast_ref::<RouterLimits>())
+        {
+            // TODO: doc that despite assumption, we still have gating logic in
+            // supergraph_service_internal
+            let supergraph_service =
+                router_limits.supergraph_service_internal(supergraph_service.clone(), self.license);
+            let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
+                .layer(shaping.supergraph_service_internal(supergraph_service));
 
-        ServiceBuilder::new()
-            .layer(content_negotiation::SupergraphLayer::default())
-            .service(
-                self.plugins
-                    .iter()
-                    .rev()
-                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
-                        e.supergraph_service(acc)
-                    }),
-            )
+            ServiceBuilder::new()
+                .layer(content_negotiation::SupergraphLayer::default())
+                .service(
+                    self.plugins
+                        .iter()
+                        .rev()
+                        .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                            e.supergraph_service(acc)
+                        }),
+                )
+        } else {
+            let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
+                .layer(shaping.supergraph_service_internal(supergraph_service));
+
+            ServiceBuilder::new()
+                .layer(content_negotiation::SupergraphLayer::default())
+                .service(
+                    self.plugins
+                        .iter()
+                        .rev()
+                        .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                            e.supergraph_service(acc)
+                        }),
+                )
+        };
+
+        service
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {

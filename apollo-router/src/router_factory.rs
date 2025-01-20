@@ -574,7 +574,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     // NOTE: unused, but we'd use this for determining whether to add the optional apollo plugin
     // below for the tps plugin (which doesn't exist yet)
-    _license: LicenseState,
+    license: LicenseState,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let supergraph_schema_id = schema.schema_id.clone();
@@ -707,8 +707,9 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_mandatory_apollo_plugin!("fleet_detector");
 
-    // NOTE: we'd use the unused license arg here for figuring out whether to add the optional
-    // apollo tps plugin
+    if let Some(_limits) = license.get_limits() {
+        add_optional_apollo_plugin!("router_limits");
+    }
 
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
