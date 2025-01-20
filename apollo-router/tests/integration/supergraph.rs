@@ -21,7 +21,7 @@ async fn test_supergraph_error_http1_max_headers_config() -> Result<(), BoxError
         .await;
 
     router.start().await;
-    router.assert_log_contains("'limits.http1_max_request_headers' requires 'hyper_header_limits' feature: enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'").await;
+    router.assert_log_contained("'limits.http1_max_request_headers' requires 'hyper_header_limits' feature: enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'").await;
     router.assert_not_started().await;
     Ok(())
 }
