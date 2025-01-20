@@ -23,16 +23,16 @@ async fn test_json() -> Result<(), BoxError> {
     router.assert_started().await;
 
     router.execute_default_query().await;
-    router.assert_log_contains("trace_id").await;
+    router.wait_for_log_message("trace_id").await;
     router.execute_default_query().await;
-    router.assert_log_contains("span_id").await;
+    router.wait_for_log_message("span_id").await;
     router.execute_default_query().await;
-    router.assert_log_contains(r#""static_one":"test""#).await;
+    router.wait_for_log_message(r#""static_one":"test""#).await;
     #[cfg(unix)]
     {
         router.execute_default_query().await;
         router
-            .assert_log_contains(
+            .wait_for_log_message(
                 r#""schema.id":"dd8960ccefda82ca58e8ac0bc266459fd49ee8215fd6b3cc72e7bc3d7f3464b9""#,
             )
             .await;
@@ -40,10 +40,12 @@ async fn test_json() -> Result<(), BoxError> {
 
     router.execute_default_query().await;
     router
-        .assert_log_contains(r#""on_supergraph_response_event":"on_supergraph_event""#)
+        .wait_for_log_message(r#""on_supergraph_response_event":"on_supergraph_event""#)
         .await;
     router.execute_default_query().await;
-    router.assert_log_contains(r#""response_status":200"#).await;
+    router
+        .wait_for_log_message(r#""response_status":200"#)
+        .await;
     router.graceful_shutdown().await;
 
     Ok(())
@@ -66,20 +68,22 @@ async fn test_json_promote_span_attributes() -> Result<(), BoxError> {
     router.assert_started().await;
 
     router.execute_default_query().await;
-    router.assert_log_contains("trace_id").await;
+    router.wait_for_log_message("trace_id").await;
     router.execute_query(Query::default()).await;
-    router.assert_log_contains("span_id").await;
+    router.wait_for_log_message("span_id").await;
     router.execute_default_query().await;
-    router.assert_log_contains(r#""static_one":"test""#).await;
-    router.execute_default_query().await;
-    router.assert_log_contains(r#""response_status":200"#).await;
-    router.execute_default_query().await;
-    router.assert_log_contains(r#""too_big":true"#).await;
-    router.execute_default_query().await;
-    router.assert_log_contains(r#""too_big":"nope""#).await;
+    router.wait_for_log_message(r#""static_one":"test""#).await;
     router.execute_default_query().await;
     router
-        .assert_log_contains(r#""graphql.document":"query ExampleQuery {topProducts{name}}""#)
+        .wait_for_log_message(r#""response_status":200"#)
+        .await;
+    router.execute_default_query().await;
+    router.wait_for_log_message(r#""too_big":true"#).await;
+    router.execute_default_query().await;
+    router.wait_for_log_message(r#""too_big":"nope""#).await;
+    router.execute_default_query().await;
+    router
+        .wait_for_log_message(r#""graphql.document":"query ExampleQuery {topProducts{name}}""#)
         .await;
     router.execute_default_query().await;
     router.assert_log_not_contains(r#""should_not_log""#).await;
@@ -106,13 +110,13 @@ async fn test_json_uuid_format() -> Result<(), BoxError> {
     router.assert_started().await;
 
     router.execute_default_query().await;
-    router.assert_log_contains("trace_id").await;
+    router.wait_for_log_message("trace_id").await;
     let (trace_id, _) = router.execute_default_query().await;
     router
-        .assert_log_contains(&format!("{}", Uuid::from_bytes(trace_id.to_bytes())))
+        .wait_for_log_message(&format!("{}", Uuid::from_bytes(trace_id.to_bytes())))
         .await;
     router.execute_default_query().await;
-    router.assert_log_contains("span_id").await;
+    router.wait_for_log_message("span_id").await;
     router.graceful_shutdown().await;
 
     Ok(())
@@ -135,13 +139,13 @@ async fn test_text_uuid_format() -> Result<(), BoxError> {
     router.assert_started().await;
 
     router.execute_default_query().await;
-    router.assert_log_contains("trace_id").await;
+    router.wait_for_log_message("trace_id").await;
     let (trace_id, _) = router.execute_default_query().await;
     router
-        .assert_log_contains(&format!("{}", Uuid::from_bytes(trace_id.to_bytes())))
+        .wait_for_log_message(&format!("{}", Uuid::from_bytes(trace_id.to_bytes())))
         .await;
     router.execute_default_query().await;
-    router.assert_log_contains("span_id").await;
+    router.wait_for_log_message("span_id").await;
     router.graceful_shutdown().await;
 
     Ok(())
@@ -163,17 +167,19 @@ async fn test_json_sampler_off() -> Result<(), BoxError> {
     router.assert_started().await;
 
     router.execute_default_query().await;
-    router.assert_log_contains("trace_id").await;
+    router.wait_for_log_message("trace_id").await;
     router.execute_default_query().await;
-    router.assert_log_contains("span_id").await;
+    router.wait_for_log_message("span_id").await;
     router.execute_default_query().await;
-    router.assert_log_contains(r#""static_one":"test""#).await;
+    router.wait_for_log_message(r#""static_one":"test""#).await;
     router.execute_default_query().await;
     router
-        .assert_log_contains(r#""on_supergraph_response_event":"on_supergraph_event""#)
+        .wait_for_log_message(r#""on_supergraph_response_event":"on_supergraph_event""#)
         .await;
     router.execute_default_query().await;
-    router.assert_log_contains(r#""response_status":200"#).await;
+    router
+        .wait_for_log_message(r#""response_status":200"#)
+        .await;
     router.graceful_shutdown().await;
 
     Ok(())
@@ -197,15 +203,15 @@ async fn test_text() -> Result<(), BoxError> {
 
     router.execute_query(Query::default()).await;
     router.execute_query(Query::default()).await;
-    router.assert_log_contains("trace_id").await;
+    router.wait_for_log_message("trace_id").await;
     router.execute_query(Query::default()).await;
-    router.assert_log_contains("span_id").await;
+    router.wait_for_log_message("span_id").await;
     router
-        .assert_log_contains(r#"on_supergraph_response_event=on_supergraph_event"#)
+        .wait_for_log_message(r#"on_supergraph_response_event=on_supergraph_event"#)
         .await;
     router.execute_query(Query::default()).await;
     router.execute_query(Query::default()).await;
-    router.assert_log_contains("response_status=200").await;
+    router.wait_for_log_message("response_status=200").await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -227,11 +233,11 @@ async fn test_text_sampler_off() -> Result<(), BoxError> {
     router.assert_started().await;
     router.execute_default_query().await;
     router.execute_default_query().await;
-    router.assert_log_contains("trace_id").await;
+    router.wait_for_log_message("trace_id").await;
     router.execute_default_query().await;
-    router.assert_log_contains("span_id").await;
+    router.wait_for_log_message("span_id").await;
     router.execute_default_query().await;
-    router.assert_log_contains("response_status=200").await;
+    router.wait_for_log_message("response_status=200").await;
     router.graceful_shutdown().await;
     Ok(())
 }

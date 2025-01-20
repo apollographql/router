@@ -264,6 +264,7 @@ ahash = "0.8.11"
 itoa = "1.0.9"
 ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
+log = "0.4.22"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
