@@ -147,23 +147,26 @@ impl IntrospectionCache {
     }
 
     fn execute_introspection(schema: &spec::Schema, doc: &ParsedDocument) -> graphql::Response {
-        let schema = schema.api_schema();
+        let api_schema = schema.api_schema();
         let operation = &doc.operation;
         let variable_values = Default::default();
-        match apollo_compiler::execution::coerce_variable_values(
-            schema,
+        match apollo_compiler::request::coerce_variable_values(
+            api_schema,
             operation,
             &variable_values,
-        ) {
-            Ok(variable_values) => apollo_compiler::execution::execute_introspection_only_query(
-                schema,
+        )
+        .and_then(|variable_values| {
+            apollo_compiler::introspection::partial_execute(
+                api_schema,
+                &schema.implementers_map,
                 &doc.executable,
                 operation,
                 &variable_values,
             )
-            .into(),
+        }) {
+            Ok(response) => response.into(),
             Err(e) => {
-                let error = e.into_graphql_error(&doc.executable.sources);
+                let error = e.to_graphql_error(&doc.executable.sources);
                 graphql::Response::builder().error(error).build()
             }
         }

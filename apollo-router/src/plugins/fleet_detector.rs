@@ -7,7 +7,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use futures::StreamExt;
-use http_body_util::BodyExt;
+use http_body::Body as _;
+use http_body_util::BodyExt as _;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::metrics::Unit;
@@ -299,6 +300,24 @@ impl PluginPrivate for FleetDetector {
                 HttpRequest {
                     http_request: req.http_request.map(move |body| {
                         let sn = sn.clone();
+                        let size_hint = body.size_hint();
+
+                        // Short-circuit for complete bodies
+                        //
+                        // If the `SizeHint` gives us an exact value, we can use this for the
+                        // metric and return without wrapping the request Body into a stream.
+                        if let Some(size) = size_hint.exact() {
+                            let sn = sn.clone();
+                            u64_counter!(
+                                "apollo.router.operations.fetch.request_size",
+                                "Total number of request bytes for subgraph fetches",
+                                size,
+                                subgraph.name = sn.to_string()
+                            );
+                            return body;
+                        }
+
+                        // For streaming bodies, we need to wrap the stream and count bytes as we go
                         router::body::from_result_stream(body.into_data_stream().inspect(
                             move |res| {
                                 if let Ok(bytes) = res {
@@ -477,6 +496,8 @@ register_private_plugin!("apollo", "fleet_detector", FleetDetector);
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
     use http::StatusCode;
     use tower::Service as _;
 
@@ -486,6 +507,7 @@ mod tests {
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
+    use crate::services::router::Body;
 
     #[tokio::test]
     async fn test_disabled_router_service() {
@@ -666,7 +688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_enabled_http_client_service() {
+    async fn test_enabled_http_client_service_full() {
         async {
             // WHEN the plugin is enabled
             let plugin = FleetDetector {
@@ -674,7 +696,7 @@ mod tests {
                 ..Default::default()
             };
 
-            // GIVEN an http client service request
+            // GIVEN an http client service request with a complete body
             let mut mock_bad_request_service = MockHttpClientService::new();
             mock_bad_request_service
                 .expect_call()
@@ -718,6 +740,86 @@ mod tests {
                 .http_response
                 .into_body()
                 .collect()
+                .await
+                .unwrap();
+
+            // THEN fetch metrics should exist
+            assert_counter!(
+                "apollo.router.operations.fetch",
+                1,
+                &[
+                    KeyValue::new("subgraph.name", "subgraph"),
+                    KeyValue::new("http.response.status_code", 400),
+                    KeyValue::new("client_error", false)
+                ]
+            );
+            assert_counter!(
+                "apollo.router.operations.fetch.request_size",
+                7,
+                &[KeyValue::new("subgraph.name", "subgraph"),]
+            );
+            assert_counter!(
+                "apollo.router.operations.fetch.response_size",
+                7,
+                &[KeyValue::new("subgraph.name", "subgraph"),]
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_enabled_http_client_service_stream() {
+        async {
+            // WHEN the plugin is enabled
+            let plugin = FleetDetector {
+                enabled: true,
+                ..Default::default()
+            };
+
+            // GIVEN an http client service request with a streaming body
+            let mut mock_bad_request_service = MockHttpClientService::new();
+            mock_bad_request_service.expect_call().times(1).returning(
+                |req: http::Request<Body>| {
+                    Box::pin(async {
+                        // making sure the request body is consumed
+                        let data = router::body::into_bytes(req.into_body()).await?;
+                        Ok(http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            .body(router::body::from_bytes(data))
+                            .unwrap())
+                    })
+                },
+            );
+            let mut bad_request_http_client_service = plugin.http_client_service(
+                "subgraph",
+                mock_bad_request_service
+                    .map_request(|req: HttpRequest| req.http_request)
+                    .map_response(|res: http::Response<Body>| HttpResponse {
+                        http_response: res.map(Body::from),
+                        context: Default::default(),
+                    })
+                    .boxed(),
+            );
+            let http_client_req = HttpRequest {
+                http_request: http::Request::builder()
+                    .body(router::body::from_result_stream(futures::stream::once(
+                        async { Ok::<_, Infallible>(bytes::Bytes::from("request")) },
+                    )))
+                    .unwrap(),
+                context: Default::default(),
+            };
+            let http_client_response = bad_request_http_client_service
+                .ready()
+                .await
+                .unwrap()
+                .call(http_client_req)
+                .await
+                .unwrap();
+
+            // making sure the response body is consumed
+            let _data = router::body::into_bytes(http_client_response.http_response.into_body())
                 .await
                 .unwrap();
 
