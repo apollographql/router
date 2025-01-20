@@ -303,6 +303,10 @@ mod async_checkpoint_tests {
                     .unwrap())
             });
 
+        execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
+
         let service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
             .service(execution_service);
@@ -354,7 +358,11 @@ mod async_checkpoint_tests {
 
     #[tokio::test]
     async fn test_double_ready_doesnt_panic() {
-        let router_service = MockExecutionService::new();
+        let mut router_service = MockExecutionService::new();
+
+        router_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
 
         let mut service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -372,12 +380,18 @@ mod async_checkpoint_tests {
             .await
             .unwrap();
 
-        assert!(service_stack.ready().await.is_err());
+        assert!(service_stack.ready().await.is_ok());
     }
 
     #[tokio::test]
     async fn test_double_call_doesnt_panic() {
-        let router_service = MockExecutionService::new();
+        let mut router_service = MockExecutionService::new();
+
+        router_service.expect_clone().returning(|| {
+            let mut mes = MockExecutionService::new();
+            mes.expect_clone().returning(MockExecutionService::new);
+            mes
+        });
 
         let mut service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -396,9 +410,11 @@ mod async_checkpoint_tests {
             .await
             .unwrap();
 
+        service_stack.ready().await.unwrap();
+
         assert!(service_stack
             .call(ExecutionRequest::fake_builder().build())
             .await
-            .is_err());
+            .is_ok());
     }
 }

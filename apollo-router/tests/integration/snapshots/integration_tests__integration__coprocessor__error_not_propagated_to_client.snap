@@ -2,4 +2,4 @@
 source: apollo-router/tests/integration/coprocessor.rs
 expression: response.text().await?
 ---
-"{\"errors\":[{\"message\":\"500 Internal Server Error\",\"extensions\":{\"code\":\"INTERNAL_SERVER_ERROR\"}}]}"
+"{\"errors\":[{\"message\":\"internal server error\",\"extensions\":{\"code\":\"INTERNAL_SERVER_ERROR\"}}]}"
