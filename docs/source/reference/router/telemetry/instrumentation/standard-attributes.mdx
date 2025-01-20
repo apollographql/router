@@ -109,3 +109,14 @@ Standard attributes of the `subgraph` service:
 | `subgraph.graphql.operation.type`  | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query     |
 | `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph  (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)             |
 | `http.request.resend_count`        | `true`\|`false`                     | Number of retries for an http request to a subgraph              |
+
+#### Connector
+
+Standard attributes of the `connector` service:
+
+| Attribute                | Values                              | Description                                                      |
+|--------------------------|-------------------------------------|------------------------------------------------------------------|
+| `subgraph.name`          |                                     | The name of the subgraph containing the connector                |
+| `connector.source.name`  |                                     | The name of the `@source` associated with this connector, if any |
+| `connector.http.method`  |                                     | The HTTP method for the connector (`GET` or `POST`, for example) |
+| `connector.url.template` |                                     | The URL template for the connector                               |

@@ -1215,4 +1215,4 @@ end_time: "[end_time]"
 operation_count: 0
 operation_count_by_type: []
 traces_pre_aggregated: true
-extended_references_enabled: false
+extended_references_enabled: true

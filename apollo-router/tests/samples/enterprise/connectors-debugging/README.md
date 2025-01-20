@@ -1,0 +1,1 @@
+Example testing the connectors debugging extensions feature

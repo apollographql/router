@@ -6,11 +6,11 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
-use axum::body::BoxBody;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::poll_fn;
@@ -22,10 +22,14 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
-use http_body::Body;
+#[cfg(unix)]
+use http_body_util::BodyExt;
+use hyper::rt::ReadBufCursor;
+use hyper_util::rt::TokioIo;
 use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
+use pin_project_lite::pin_project;
 use reqwest::header::ACCEPT;
 use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
@@ -42,7 +46,9 @@ use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
+use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
@@ -61,7 +67,6 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
-use crate::metrics::FutureMetricsExt as _;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner::QueryPlannerService;
 use crate::router_factory::create_plugins;
@@ -513,16 +518,20 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     Ok(())
 }
 
-#[tokio::test]
-async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
-    let original_body = json!({ "query": "query { me { name } }" });
+async fn gzip(json: serde_json::Value) -> Vec<u8> {
     let mut encoder = GzipEncoder::new(Vec::new());
     encoder
-        .write_all(original_body.to_string().as_bytes())
+        .write_all(json.to_string().as_bytes())
         .await
         .unwrap();
     encoder.shutdown().await.unwrap();
-    let compressed_body = encoder.into_inner();
+    encoder.into_inner()
+}
+
+#[tokio::test]
+async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
     let expected_response = graphql::Response::builder()
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
@@ -557,6 +566,54 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
         response.json::<graphql::Response>().await.unwrap(),
         expected_response,
     );
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unsupported_compression() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
+
+    let router_service = router::service::empty().await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a compression algorithm it can't decompress
+        .header(CONTENT_ENCODING, HeaderValue::from_static("unsupported"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
+
+    let router_service = router::service::empty().await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a different (valid) compression algorithm than the one we actually used
+        .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
     server.shutdown().await?;
     Ok(())
@@ -708,7 +765,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/*"))
+                .path(String::from("/{*rest}"))
                 .build(),
         )
         .build()
@@ -858,7 +915,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/:my_prefix/graphql"))
+                .path(String::from("/{my_prefix}/graphql"))
                 .build(),
         )
         .build()
@@ -923,7 +980,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql/*"))
+                .path(String::from("/graphql/{*rest}"))
                 .build(),
         )
         .build()
@@ -1918,11 +1975,11 @@ async fn http_deferred_service() -> impl Service<
         .await
         .unwrap()
         .map_err(Into::into)
-        .map_response(|response: http::Response<BoxBody>| {
+        .map_response(|response: http::Response<axum::body::Body>| {
             let response = response.map(|body| {
                 // Convert from axum’s BoxBody to AsyncBufRead
-                let mut body = Box::pin(body);
-                let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
+                let mut body = body.into_data_stream();
+                let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
                     .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
                 StreamReader::new(stream)
             });
@@ -2090,23 +2147,124 @@ async fn listening_to_unix_socket() {
 }
 
 #[cfg(unix)]
+pin_project! {
+    /// Wrapper around [`tokio::net::UnixStream`].
+    #[derive(Debug)]
+    struct UnixStream {
+        #[pin]
+        unix_stream: tokio::net::UnixStream,
+    }
+}
+
+#[cfg(unix)]
+impl UnixStream {
+    async fn connect(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        let unix_stream = tokio::net::UnixStream::connect(path).await?;
+        Ok(Self { unix_stream })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncWrite for UnixStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.project().unix_stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        self.project().unix_stream.poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.unix_stream.is_write_vectored()
+    }
+}
+
+#[cfg(unix)]
+impl hyper::rt::Write for UnixStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.project().unix_stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_shutdown(cx)
+    }
+}
+
+#[cfg(unix)]
+impl AsyncRead for UnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.project().unix_stream.poll_read(cx, buf)
+    }
+}
+
+#[cfg(unix)]
+impl hyper::rt::Read for UnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: ReadBufCursor<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        let mut t = TokioIo::new(self.project().unix_stream);
+        Pin::new(&mut t).poll_read(cx, buf)
+    }
+}
+
+#[cfg(unix)]
 async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
-    use tokio::net::UnixStream;
     let stream = UnixStream::connect(addr.to_string()).await.unwrap();
-    let (mut sender, conn) = hyper::client::conn::handshake(stream).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
             println!("Connection failed: {:?}", err);
         }
     });
 
-    let http_body = hyper::Body::from(body.to_string());
     let mut request = http::Request::builder()
         .method(method.clone())
         .header("Host", "localhost:4100")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .body(http_body)
+        .body(body.to_string())
         .unwrap();
     if method == Method::GET {
         *request.uri_mut() = body.parse().unwrap();
@@ -2358,96 +2516,4 @@ async fn test_supergraph_timeout() {
              }]
         })
     );
-}
-
-/// There are two session count gauges:
-/// - apollo_router_session_count_total, the number of open client connections
-/// - apollo_router_session_count_active, the number of in-flight HTTP requests
-///
-/// To test them, we use two hyper clients. Each client has its own connection pool, so by manually
-/// sending requests and completing responses, and creating and dropping clients, we can control
-/// the amount of open connections and the amount of in-flight requests.
-///
-/// XXX(@goto-bus-stop): this only tests the `session_count_total` metric right now. The
-/// `session_count_active` metric is reported from inside an axum router, so its lifetime is
-/// actually a little shorter than the full request/response cycle, in a way that is not easy to
-/// test from the outside. To test it we could use a custom inner service (passed to
-/// `init_with_config`) where we can control the progress the inner service makes.
-/// For now, I've tested the `session_count_active` metric manually and confirmed its value makes
-/// sense...
-#[tokio::test]
-async fn it_reports_session_count_metric() {
-    let configuration = Configuration::fake_builder().build().unwrap();
-
-    async {
-        let (server, _client) = init_with_config(
-            router::service::empty().await,
-            Arc::new(configuration),
-            MultiMap::new(),
-        )
-        .await
-        .unwrap();
-
-        let url = server
-            .graphql_listen_address()
-            .as_ref()
-            .unwrap()
-            .to_string();
-
-        let make_request = || {
-            http::Request::builder()
-                .uri(&url)
-                .body(hyper::Body::from(r#"{ "query": "{ me }" }"#))
-                .unwrap()
-        };
-
-        let client = hyper::Client::new();
-        // Create a second client that does not reuse the same connection pool.
-        let second_client = hyper::Client::new();
-
-        let first_response = client.request(make_request()).await.unwrap();
-
-        assert_gauge!(
-            "apollo_router_session_count_total",
-            1,
-            "listener" = url.clone()
-        );
-
-        let second_response = second_client.request(make_request()).await.unwrap();
-
-        // Both requests are in-flight
-        assert_gauge!(
-            "apollo_router_session_count_total",
-            2,
-            "listener" = url.clone()
-        );
-
-        _ = hyper::body::to_bytes(first_response.into_body()).await;
-
-        // Connection is still open in the pool even though the request is complete.
-        assert_gauge!(
-            "apollo_router_session_count_total",
-            2,
-            "listener" = url.clone()
-        );
-
-        _ = hyper::body::to_bytes(second_response.into_body()).await;
-
-        drop(client);
-        drop(second_client);
-
-        // XXX(@goto-bus-stop): Not ideal, but we would probably have to drop down to very
-        // low-level hyper primitives to control the shutdown of connections to the required
-        // extent. 100ms is a long time so I hope it's not flaky.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        // All connections are closed
-        assert_gauge!(
-            "apollo_router_session_count_total",
-            0,
-            "listener" = url.clone()
-        );
-    }
-    .with_metrics()
-    .await;
 }

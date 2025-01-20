@@ -8,8 +8,9 @@ use std::time::Instant;
 
 use ::tracing::info_span;
 use ::tracing::Span;
-use axum::headers::HeaderName;
+use axum_extra::headers::HeaderName;
 use config_new::cache::CacheInstruments;
+use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::Selectors;
@@ -73,7 +74,6 @@ use self::config_new::instruments::RouterInstruments;
 use self::config_new::instruments::SubgraphInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
-use self::metrics::AttributesForwardConf;
 use self::reload::reload_fmt;
 pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -99,11 +99,13 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
@@ -132,11 +134,11 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
+use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
 use crate::services::execution;
+use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::subgraph;
-use crate::services::subgraph::Request;
-use crate::services::subgraph::Response;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
@@ -173,8 +175,6 @@ pub(crate) const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
-pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
-pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
@@ -203,6 +203,7 @@ pub(crate) struct Telemetry {
     router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     subgraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    connector_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     cache_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     activation: Mutex<TelemetryActivation>,
 }
@@ -262,6 +263,7 @@ struct BuiltinInstruments {
     router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
@@ -271,6 +273,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
         supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
+        connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
     }
 }
@@ -286,7 +289,6 @@ impl PluginPrivate for Telemetry {
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
-        config.exporters.logging.validate()?;
         if let Err(err) = config.instrumentation.validate() {
             ::tracing::warn!("Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events");
         }
@@ -305,6 +307,7 @@ impl PluginPrivate for Telemetry {
             router_custom_instruments,
             supergraph_custom_instruments,
             subgraph_custom_instruments,
+            connector_custom_instruments,
             cache_custom_instruments,
         } = create_builtin_instruments(&config.instrumentation.instruments);
 
@@ -330,6 +333,7 @@ impl PluginPrivate for Telemetry {
             router_custom_instruments: RwLock::new(router_custom_instruments),
             supergraph_custom_instruments: RwLock::new(supergraph_custom_instruments),
             subgraph_custom_instruments: RwLock::new(subgraph_custom_instruments),
+            connector_custom_instruments: RwLock::new(connector_custom_instruments),
             cache_custom_instruments: RwLock::new(cache_custom_instruments),
             config: Arc::new(config),
         })
@@ -576,14 +580,20 @@ impl PluginPrivate for Telemetry {
         let static_supergraph_instruments = self.supergraph_custom_instruments.read().clone();
         let static_graphql_instruments = self.graphql_custom_instruments.read().clone();
         ServiceBuilder::new()
-            .instrument(move |supergraph_req: &SupergraphRequest| span_mode.create_supergraph(
-                &config_instrument.apollo,
-                supergraph_req,
-                field_level_instrumentation_ratio,
-            ))
+            .instrument(move |supergraph_req: &SupergraphRequest| {
+                span_mode.create_supergraph(
+                    &config_instrument.apollo,
+                    supergraph_req,
+                    field_level_instrumentation_ratio,
+                )
+            })
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) = resp.context.extensions().with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned()) {
+                if let Some(usage_reporting) = resp
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+                {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
@@ -591,52 +601,49 @@ impl PluginPrivate for Telemetry {
                     );
                 }
                 // To expose trace_id or not
-                let expose_trace_id_header = config.exporters.tracing.response_trace_id.enabled.then(|| {
-                    config.exporters.tracing.response_trace_id
-                        .header_name
-                        .clone()
-                        .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
-                });
+                let expose_trace_id_header =
+                    config.exporters.tracing.response_trace_id.enabled.then(|| {
+                        config
+                            .exporters
+                            .tracing
+                            .response_trace_id
+                            .header_name
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
+                    });
 
                 // Append the trace ID with the right format, based on the config
                 let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
-                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => format!("{:032x}", trace_id),
-                        TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
+                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
+                            format!("{:032x}", trace_id)
+                        }
+                        TraceIdFormat::Decimal => {
+                            format!("{}", u128::from_be_bytes(trace_id.to_bytes()))
+                        }
                         TraceIdFormat::Datadog => trace_id.to_datadog(),
                         TraceIdFormat::Uuid => Uuid::from_bytes(trace_id.to_bytes()).to_string(),
                     };
 
                     HeaderValue::from_str(&id).ok()
                 };
-                if let (Some(header_name), Some(trace_id)) = (
-                    expose_trace_id_header,
-                    trace_id().and_then(format_id),
-                ) {
+                if let (Some(header_name), Some(trace_id)) =
+                    (expose_trace_id_header, trace_id().and_then(format_id))
+                {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }
 
-                if resp.context.contains_key(LOGGING_DISPLAY_HEADERS) {
-                    let sorted_headers = resp
-                        .response
-                        .headers()
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v))
-                        .collect::<BTreeMap<_, _>>();
-                    ::tracing::info!(http.response.headers = ?sorted_headers, "Supergraph response headers");
-                }
-                let display_body = resp.context.contains_key(LOGGING_DISPLAY_BODY);
-                resp.map_stream(move |gql_response| {
-                    if display_body {
-                        ::tracing::info!(http.response.body = ?gql_response, "Supergraph GraphQL response");
-                    }
-                    gql_response
-                })
+                resp
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
-                    let custom_attributes = config.instrumentation.spans.supergraph.attributes.on_request(req);
-                    Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
+                    let custom_attributes = config
+                        .instrumentation
+                        .spans
+                        .supergraph
+                        .attributes
+                        .on_request(req);
+                    Self::populate_context(field_level_instrumentation_ratio, req);
                     let custom_instruments = config
                         .instrumentation
                         .instruments
@@ -644,15 +651,35 @@ impl PluginPrivate for Telemetry {
                     custom_instruments.on_request(req);
                     let custom_graphql_instruments: GraphQLInstruments = config
                         .instrumentation
-                        .instruments.new_graphql_instruments(static_graphql_instruments.clone());
+                        .instruments
+                        .new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
-                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments)
+                    (
+                        req.context.clone(),
+                        custom_instruments,
+                        custom_attributes,
+                        supergraph_events,
+                        custom_graphql_instruments,
+                    )
                 },
-                move |(ctx, custom_instruments, mut custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
+                move |(
+                    ctx,
+                    custom_instruments,
+                    mut custom_attributes,
+                    supergraph_events,
+                    custom_graphql_instruments,
+                ): (
+                    Context,
+                    SupergraphInstruments,
+                    Vec<KeyValue>,
+                    SupergraphEvents,
+                    GraphQLInstruments,
+                ),
+                      fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -665,30 +692,48 @@ impl PluginPrivate for Telemetry {
                         span.set_span_dyn_attributes(custom_attributes);
                         match &result {
                             Ok(resp) => {
-                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
+                                span.set_span_dyn_attributes(
+                                    config
+                                        .instrumentation
+                                        .spans
+                                        .supergraph
+                                        .attributes
+                                        .on_response(resp),
+                                );
                                 custom_instruments.on_response(resp);
                                 supergraph_events.on_response(resp);
                                 custom_graphql_instruments.on_response(resp);
-                            },
+                            }
                             Err(err) => {
-                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err, &ctx));
+                                span.set_span_dyn_attributes(
+                                    config
+                                        .instrumentation
+                                        .spans
+                                        .supergraph
+                                        .attributes
+                                        .on_error(err, &ctx),
+                                );
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
                                 custom_graphql_instruments.on_error(err, &ctx);
-                            },
+                            }
                         }
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
                             result,
-                            start.elapsed(),
                             custom_instruments,
                             supergraph_events,
                             custom_graphql_instruments,
                         )
                         .await;
                         Self::update_metrics_on_response_events(
-                            &ctx, config, field_level_instrumentation_ratio, sender, start, result,
+                            &ctx,
+                            config,
+                            field_level_instrumentation_ratio,
+                            sender,
+                            start,
+                            result,
                         )
                     }
                 },
@@ -725,9 +770,6 @@ impl PluginPrivate for Telemetry {
         let config = self.config.clone();
         let span_mode = self.config.instrumentation.spans.mode;
         let conf = self.config.clone();
-        let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
-        let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
-        let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
         let static_subgraph_instruments = self.subgraph_custom_instruments.read().clone();
@@ -738,11 +780,6 @@ impl PluginPrivate for Telemetry {
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
-                    Self::store_subgraph_request_attributes(
-                        subgraph_metrics_conf_req.as_ref(),
-                        sub_request,
-                    );
-
                     let custom_attributes = config
                         .instrumentation
                         .spans
@@ -785,11 +822,7 @@ impl PluginPrivate for Telemetry {
                     CacheInstruments,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
-                    let subgraph_attribute = subgraph_attribute.clone();
-                    let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
                     let conf = conf.clone();
-                    // Using Instant because it is guaranteed to be monotonically increasing.
-                    let now = Instant::now();
                     async move {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
@@ -829,14 +862,101 @@ impl PluginPrivate for Telemetry {
                             }
                         }
 
-                        Self::store_subgraph_response_attributes(
-                            &context,
-                            subgraph_attribute,
-                            subgraph_metrics_conf.as_ref(),
-                            now,
-                            &result,
-                        );
                         result
+                    }
+                },
+            )
+            .service(service)
+            .boxed()
+    }
+
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
+        let static_connector_instruments = self.connector_custom_instruments.read().clone();
+        ServiceBuilder::new()
+            .map_future_with_request_data(
+                move |http_request: &HttpRequest| {
+                    if http_request
+                        .context
+                        .contains_key(CONNECTOR_INFO_CONTEXT_KEY)
+                    {
+                        let custom_instruments = req_fn_config
+                            .instrumentation
+                            .instruments
+                            .new_connector_instruments(static_connector_instruments.clone());
+                        custom_instruments.on_request(http_request);
+                        let custom_events =
+                            req_fn_config.instrumentation.events.new_connector_events();
+                        custom_events.on_request(http_request);
+
+                        let custom_span_attributes = req_fn_config
+                            .instrumentation
+                            .spans
+                            .connector
+                            .attributes
+                            .on_request(http_request);
+
+                        (
+                            http_request.context.clone(),
+                            Some((custom_instruments, custom_events, custom_span_attributes)),
+                        )
+                    } else {
+                        (http_request.context.clone(), None)
+                    }
+                },
+                move |(context, custom_telemetry): (
+                    Context,
+                    Option<(ConnectorInstruments, ConnectorEvents, Vec<KeyValue>)>,
+                ),
+                      f: BoxFuture<
+                    'static,
+                    Result<crate::services::http::HttpResponse, BoxError>,
+                >| {
+                    let conf = res_fn_config.clone();
+                    async move {
+                        match custom_telemetry {
+                            Some((custom_instruments, custom_events, custom_span_attributes)) => {
+                                let span = Span::current();
+                                span.set_span_dyn_attributes_for_span_name(
+                                    CONNECT_SPAN_NAME,
+                                    custom_span_attributes,
+                                );
+                                let result = f.await;
+                                match &result {
+                                    Ok(http_response) => {
+                                        span.set_span_dyn_attributes_for_span_name(
+                                            CONNECT_SPAN_NAME,
+                                            conf.instrumentation
+                                                .spans
+                                                .connector
+                                                .attributes
+                                                .on_response(http_response),
+                                        );
+                                        custom_instruments.on_response(http_response);
+                                        custom_events.on_response(http_response);
+                                    }
+                                    Err(err) => {
+                                        span.set_span_dyn_attributes_for_span_name(
+                                            CONNECT_SPAN_NAME,
+                                            conf.instrumentation
+                                                .spans
+                                                .connector
+                                                .attributes
+                                                .on_error(err, &context),
+                                        );
+                                        custom_instruments.on_error(err, &context);
+                                        custom_events.on_error(err, &context);
+                                    }
+                                }
+                                result
+                            }
+                            _ => f.await,
+                        }
                     }
                 },
             )
@@ -889,6 +1009,7 @@ impl PluginPrivate for Telemetry {
             router_custom_instruments,
             supergraph_custom_instruments,
             subgraph_custom_instruments,
+            connector_custom_instruments,
             cache_custom_instruments,
         } = create_builtin_instruments(&self.config.instrumentation.instruments);
 
@@ -896,6 +1017,7 @@ impl PluginPrivate for Telemetry {
         *self.router_custom_instruments.write() = router_custom_instruments;
         *self.supergraph_custom_instruments.write() = supergraph_custom_instruments;
         *self.subgraph_custom_instruments.write() = subgraph_custom_instruments;
+        *self.connector_custom_instruments.write() = connector_custom_instruments;
         *self.cache_custom_instruments.write() = cache_custom_instruments;
 
         reload_fmt(create_fmt_layer(&self.config));
@@ -1019,29 +1141,12 @@ impl Telemetry {
         config: Arc<Conf>,
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
-        request_duration: Duration,
         custom_instruments: SupergraphInstruments,
         custom_events: SupergraphEvents,
         custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
-        let mut metric_attrs = context
-            .extensions()
-            .with_lock(|lock| lock.get::<MetricsAttributes>().cloned())
-            .map(|attrs| {
-                attrs
-                    .0
-                    .into_iter()
-                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                    .collect::<Vec<KeyValue>>()
-            })
-            .unwrap_or_default();
         let res = match result {
             Ok(response) => {
-                metric_attrs.push(KeyValue::new(
-                    "status",
-                    response.response.status().as_u16().to_string(),
-                ));
-
                 let ctx = context.clone();
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
@@ -1068,19 +1173,6 @@ impl Telemetry {
                 });
                 let (first_response, rest) = stream.into_future().await;
 
-                let attributes = config
-                    .exporters
-                    .metrics
-                    .common
-                    .attributes
-                    .supergraph
-                    .get_attributes_from_router_response(&parts, &context, &first_response);
-
-                metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
-
-                if !parts.status.is_success() {
-                    metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
-                }
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -1090,55 +1182,14 @@ impl Telemetry {
 
                 Ok(SupergraphResponse { context, response })
             }
-            Err(err) => {
-                metric_attrs.push(KeyValue::new("status", "500"));
-                Err(err)
-            }
+            Err(err) => Err(err),
         };
 
-        // http_requests_total - the total number of HTTP requests received
-        u64_counter!(
-            "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
-            1,
-            metric_attrs
-        );
-
-        f64_histogram!(
-            "apollo_router_http_request_duration_seconds",
-            "Duration of HTTP requests.",
-            request_duration.as_secs_f64(),
-            metric_attrs
-        );
         res
     }
 
-    fn populate_context(
-        config: Arc<Conf>,
-        field_level_instrumentation_ratio: f64,
-        req: &SupergraphRequest,
-    ) {
+    fn populate_context(field_level_instrumentation_ratio: f64, req: &SupergraphRequest) {
         let context = &req.context;
-        let http_request = &req.supergraph_request;
-        let headers = http_request.headers();
-
-        let (should_log_headers, should_log_body) = config.exporters.logging.should_log(req);
-        if should_log_headers {
-            let sorted_headers = req
-                .supergraph_request
-                .headers()
-                .iter()
-                .map(|(k, v)| (k.as_str(), v))
-                .collect::<BTreeMap<_, _>>();
-            ::tracing::info!(http.request.headers = ?sorted_headers, "Supergraph request headers");
-
-            let _ = req.context.insert(LOGGING_DISPLAY_HEADERS, true);
-        }
-        if should_log_body {
-            ::tracing::info!(http.request.body = ?req.supergraph_request.body(), "Supergraph request body");
-
-            let _ = req.context.insert(LOGGING_DISPLAY_BODY, true);
-        }
 
         // List of custom attributes for metrics
         let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
@@ -1149,158 +1200,11 @@ impl Telemetry {
             );
         }
 
-        let router_attributes_conf = &config.exporters.metrics.common.attributes.supergraph;
-        attributes.extend(
-            router_attributes_conf
-                .get_attributes_from_request(headers, req.supergraph_request.body()),
-        );
-        attributes.extend(router_attributes_conf.get_attributes_from_context(context));
-
-        let _ = context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(MetricsAttributes(attributes)));
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
                 .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
         }
-    }
-
-    fn create_subgraph_metrics_conf(&self, name: &str) -> Arc<AttributesForwardConf> {
-        let subgraph_cfg = &self.config.exporters.metrics.common.attributes.subgraph;
-        macro_rules! extend_config {
-            ($forward_kind: ident) => {{
-                let mut cfg = subgraph_cfg.all.$forward_kind.clone();
-                cfg.extend(
-                    subgraph_cfg
-                        .subgraphs
-                        .get(&name.to_owned())
-                        .map(|s| s.$forward_kind.clone())
-                        .unwrap_or_default(),
-                );
-
-                cfg
-            }};
-        }
-        macro_rules! merge_config {
-            ($forward_kind: ident) => {{
-                let mut cfg = subgraph_cfg.all.$forward_kind.clone();
-                cfg.merge(
-                    subgraph_cfg
-                        .subgraphs
-                        .get(&name.to_owned())
-                        .map(|s| s.$forward_kind.clone())
-                        .unwrap_or_default(),
-                );
-
-                cfg
-            }};
-        }
-
-        Arc::new(AttributesForwardConf {
-            insert: extend_config!(insert),
-            request: merge_config!(request),
-            response: merge_config!(response),
-            errors: merge_config!(errors),
-            context: extend_config!(context),
-        })
-    }
-
-    fn store_subgraph_request_attributes(
-        attribute_forward_config: &AttributesForwardConf,
-        sub_request: &Request,
-    ) {
-        let mut attributes = HashMap::new();
-        attributes.extend(attribute_forward_config.get_attributes_from_request(
-            sub_request.subgraph_request.headers(),
-            sub_request.subgraph_request.body(),
-        ));
-        attributes
-            .extend(attribute_forward_config.get_attributes_from_context(&sub_request.context));
-        sub_request
-            .context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(SubgraphMetricsAttributes(attributes)));
-        //.unwrap();
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn store_subgraph_response_attributes(
-        context: &Context,
-        subgraph_attribute: KeyValue,
-        attribute_forward_config: &AttributesForwardConf,
-        now: Instant,
-        result: &Result<Response, BoxError>,
-    ) {
-        let mut metric_attrs = context
-            .extensions()
-            .with_lock(|lock| lock.get::<SubgraphMetricsAttributes>().cloned())
-            .map(|attrs| {
-                attrs
-                    .0
-                    .into_iter()
-                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                    .collect::<Vec<KeyValue>>()
-            })
-            .unwrap_or_default();
-        metric_attrs.push(subgraph_attribute);
-        // Fill attributes from context
-        metric_attrs.extend(
-            attribute_forward_config
-                .get_attributes_from_context(context)
-                .into_iter()
-                .map(|(k, v)| KeyValue::new(k, v)),
-        );
-
-        match &result {
-            Ok(response) => {
-                metric_attrs.push(KeyValue::new(
-                    "status",
-                    response.response.status().as_u16().to_string(),
-                ));
-
-                // Fill attributes from response
-                metric_attrs.extend(
-                    attribute_forward_config
-                        .get_attributes_from_response(
-                            response.response.headers(),
-                            response.response.body(),
-                        )
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                );
-
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    metric_attrs
-                );
-            }
-            Err(err) => {
-                metric_attrs.push(KeyValue::new("status", "500"));
-                // Fill attributes from error
-                metric_attrs.extend(
-                    attribute_forward_config
-                        .get_attributes_from_error(err)
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                );
-
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    metric_attrs
-                );
-            }
-        }
-        f64_histogram!(
-            "apollo_router_http_request_duration_seconds",
-            "Duration of HTTP requests.",
-            now.elapsed().as_secs_f64(),
-            metric_attrs
-        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1331,27 +1235,6 @@ impl Telemetry {
                         Default::default(),
                     );
                 }
-                let mut metric_attrs = Vec::new();
-                // Fill attributes from error
-
-                metric_attrs.extend(
-                    config
-                        .exporters
-                        .metrics
-                        .common
-                        .attributes
-                        .supergraph
-                        .get_attributes_from_error(&e)
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                );
-
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    metric_attrs
-                );
 
                 Err(e)
             }
@@ -2101,12 +1984,6 @@ pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Ve
     });
 }
 
-#[derive(Clone)]
-struct MetricsAttributes(HashMap<String, AttributeValue>);
-
-#[derive(Clone)]
-struct SubgraphMetricsAttributes(HashMap<String, AttributeValue>);
-
 struct EnableSubgraphFtv1;
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
@@ -2122,7 +1999,7 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
-    use axum::headers::HeaderName;
+    use axum_extra::headers::HeaderName;
     use dashmap::DashMap;
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
@@ -2176,7 +2053,7 @@ mod tests {
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
     use crate::plugins::telemetry::EnableSubgraphFtv1;
-    use crate::services::router::body::get_body_bytes;
+    use crate::services::router;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -2224,11 +2101,11 @@ mod tests {
             .into_router();
 
         let http_req_prom = http::Request::get("http://localhost:9090/metrics")
-            .body(Default::default())
+            .body(axum::body::Body::empty())
             .unwrap();
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = get_body_bytes(resp.body_mut()).await.unwrap();
+        let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
             .split('\n')
             .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
@@ -2290,13 +2167,12 @@ mod tests {
             make_supergraph_request(plugin.as_ref()).await;
 
             assert_counter!(
-                "apollo_router_http_requests_total",
+                "http.request",
                 1,
                 "another_test" = "my_default_value",
                 "my_value" = 2,
                 "myname" = "label_value",
                 "renamed_value" = "my_value_set",
-                "status" = "200",
                 "x-custom" = "coming_from_header"
             );
         }
@@ -2317,7 +2193,10 @@ mod tests {
                     Ok(SupergraphResponse::fake_builder()
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
-                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .errors(vec![crate::graphql::Error::builder()
+                            .message("nope")
+                            .extension_code("NOPE")
+                            .build()])
                         .build()
                         .unwrap())
                 },
@@ -2337,13 +2216,12 @@ mod tests {
                 .unwrap();
 
             assert_counter!(
-                "apollo_router_http_requests_total",
+                "http.request",
                 1,
                 "another_test" = "my_default_value",
-                "error" = "400 Bad Request",
+                "error" = "nope",
                 "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "400"
+                "renamed_value" = "my_value_set"
             );
         }
         .with_metrics()
@@ -2927,6 +2805,7 @@ mod tests {
                         .build()
                         .unwrap(),
                 )
+                .subgraph_name("my_subgraph_name")
                 .build();
             let _subgraph_response = subgraph_service
                 .ready()
@@ -2936,15 +2815,15 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_counter!(
-                "apollo_router_http_requests_total",
+            assert_histogram_count!(
+                "http.client.request.duration",
                 1,
                 "error" = "custom_error_for_propagation",
                 "my_key" = "my_custom_attribute_from_context",
                 "query_from_request" = "query { test }",
-                "status" = "200",
+                "status" = 200,
                 "subgraph" = "my_subgraph_name",
-                "unknown_data" = "default_value"
+                "subgraph_error_extended_code" = "FETCH_ERROR"
             );
         }
         .with_metrics()
@@ -2987,6 +2866,7 @@ mod tests {
                         .build()
                         .unwrap(),
                 )
+                .subgraph_name("my_subgraph_name_error")
                 .build();
             let _subgraph_response = subgraph_service
                 .ready()
@@ -2996,62 +2876,13 @@ mod tests {
                 .await
                 .expect_err("should be an error");
 
-            assert_counter!(
-                "apollo_router_http_requests_total",
+            assert_histogram_count!(
+                "http.client.request.duration",
                 1,
-                "message" = "cannot contact the subgraph",
-                "status" = "500",
+                "message" =
+                    "HTTP fetch failed from 'my_subgraph_name_error': cannot contact the subgraph",
                 "subgraph" = "my_subgraph_name_error",
-                "subgraph_error_extended_code" = "SUBREQUEST_HTTP_ERROR"
-            );
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_subgraph_metrics_bad_request() {
-        async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
-
-            let mut mock_bad_request_service = MockSupergraphService::new();
-            mock_bad_request_service.expect_call().times(1).returning(
-                move |req: SupergraphRequest| {
-                    Ok(SupergraphResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .data(json!({"errors": [{"message": "nope"}]}))
-                        .build()
-                        .unwrap())
-                },
-            );
-
-            let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
-
-            let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
-
-            let _router_response = bad_request_supergraph_service
-                .ready()
-                .await
-                .unwrap()
-                .call(router_req.build().unwrap())
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
-
-            assert_counter!(
-                "apollo_router_http_requests_total",
-                1,
-                "another_test" = "my_default_value",
-                "error" = "400 Bad Request",
-                "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "400"
+                "query_from_request" = "query { test }"
             );
         }
         .with_metrics()
@@ -3076,16 +2907,17 @@ mod tests {
                 .into_router();
 
             let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
-                .body(Default::default())
+                .body(crate::services::router::body::empty())
                 .unwrap();
 
-            let resp = web_endpoint
-                .ready()
-                .await
-                .unwrap()
-                .call(http_req_prom)
-                .await
-                .unwrap();
+            let resp = <axum::Router as tower::ServiceExt<http::Request<axum::body::Body>>>::ready(
+                &mut web_endpoint,
+            )
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
             assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         }
         .with_metrics()
@@ -3097,6 +2929,8 @@ mod tests {
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+
             make_supergraph_request(plugin.as_ref()).await;
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
             assert_snapshot!(prometheus_metrics);
@@ -3112,6 +2946,8 @@ mod tests {
                 "testdata/prometheus_custom_buckets.router.yaml"
             ))
             .await;
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+
             make_supergraph_request(plugin.as_ref()).await;
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
@@ -3129,6 +2965,7 @@ mod tests {
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
             assert_snapshot!(prometheus_metrics);

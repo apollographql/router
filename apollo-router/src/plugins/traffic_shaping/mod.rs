@@ -22,6 +22,7 @@ use http::HeaderValue;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::util::future::EitherResponseFuture;
 use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
@@ -227,8 +228,8 @@ impl Plugin for TrafficShaping {
     }
 }
 
-pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
-    Either<
+pub(crate) type TrafficShapingSubgraphFuture<S> = EitherResponseFuture<
+    EitherResponseFuture<
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
     >,
@@ -344,8 +345,7 @@ impl TrafficShaping {
                         .clone()
                 });
 
-            Either::A(ServiceBuilder::new()
-
+            Either::Left(ServiceBuilder::new()
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
@@ -390,7 +390,7 @@ impl TrafficShaping {
                     req
                 }))
         } else {
-            Either::B(service)
+            Either::Right(service)
         }
     }
 
