@@ -742,7 +742,7 @@ mod tests {
         let mut demand_controlled_subgraph_schemas = HashMap::new();
         for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(subgraph_schema.clone()).unwrap();
+                DemandControlledSchema::new(subgraph_schema.schema.clone()).unwrap();
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
         }

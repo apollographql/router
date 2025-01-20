@@ -248,7 +248,13 @@ mod test {
             .await
             .unwrap();
         let schema = planner.schema();
-        let subgraph_schemas = planner.subgraph_schemas();
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
