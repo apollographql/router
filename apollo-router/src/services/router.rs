@@ -35,7 +35,7 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
-//#[deprecated]
+#[deprecated]
 pub type Body = hyper::Body;
 pub type Error = hyper::Error;
 
@@ -51,6 +51,10 @@ assert_impl_all!(Request: Send);
 #[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
+    #[deprecated(
+        since = "1.50.0",
+        note = "the request body type will move from hyper::Body to a new type in Router 2.0"
+    )]
     pub router_request: http::Request<Body>,
 
     /// Context for extension
@@ -178,6 +182,10 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct Response {
+    #[deprecated(
+        since = "1.50.0",
+        note = "the response body type will move from hyper::Body to a new type in Router 2.0"
+    )]
     pub response: http::Response<Body>,
     pub context: Context,
 }
