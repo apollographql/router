@@ -1,6 +1,5 @@
 //! Calls out to the apollo-federation crate
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -9,16 +8,15 @@ use std::task::Poll;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
+use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::KeyValue;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -42,6 +40,8 @@ use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::fetch::QueryHash;
+use crate::query_planner::fetch::SubgraphSchema;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -67,7 +67,7 @@ const INTERNAL_INIT_ERROR: &str = "internal";
 pub(crate) struct QueryPlannerService {
     planner: Arc<QueryPlanner>,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
@@ -191,7 +191,15 @@ impl QueryPlannerService {
             planner
                 .subgraph_schemas()
                 .iter()
-                .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
+                .map(|(name, schema)| {
+                    (
+                        name.to_string(),
+                        SubgraphSchema {
+                            implementers_map: schema.schema().implementers_map(),
+                            schema: Arc::new(schema.schema().clone()),
+                        },
+                    )
+                })
                 .collect(),
         );
 
@@ -218,9 +226,7 @@ impl QueryPlannerService {
         self.schema.clone()
     }
 
-    pub(crate) fn subgraph_schemas(
-        &self,
-    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
         self.subgraph_schemas.clone()
     }
 
@@ -383,6 +389,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                     let hash = QueryHashVisitor::hash_query(
                         this.schema.supergraph_schema(),
                         &this.schema.raw_sdl,
+                        &this.schema.implementers_map,
                         &executable_document,
                         operation_name.as_deref(),
                     )
@@ -508,6 +515,7 @@ impl QueryPlannerService {
             let hash = QueryHashVisitor::hash_query(
                 self.schema.supergraph_schema(),
                 &self.schema.raw_sdl,
+                &self.schema.implementers_map,
                 &executable_document,
                 key.operation_name.as_deref(),
             )
@@ -595,6 +603,8 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use test_log::test;
     use tower::ServiceExt;
 

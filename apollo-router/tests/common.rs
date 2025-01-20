@@ -26,21 +26,21 @@ use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::trace::config;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::sdk::Resource;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::KeyValue;
 use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::trace::config;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use regex::Regex;
 use reqwest::Request;
@@ -228,7 +228,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_sync_agent_exporter()
                             .expect("jaeger pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -247,7 +247,7 @@ impl Telemetry {
                         )
                         .build_span_exporter()
                         .expect("otlp pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -261,7 +261,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -275,7 +275,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .init_exporter()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_scheduled_delay(Duration::from_millis(10))
                     .build(),
@@ -296,7 +296,7 @@ impl Telemetry {
                 let propagator = opentelemetry_jaeger::Propagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Datadog => {
@@ -309,7 +309,7 @@ impl Telemetry {
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 );
 
                 if let Some(psr) = psr {
@@ -319,17 +319,17 @@ impl Telemetry {
                 }
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Zipkin => {
                 let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             _ => {}
@@ -421,7 +421,9 @@ impl IntegrationTest {
         let url = format!("http://{address}/");
 
         // Add a default override for products, if not specified
-        subgraph_overrides.entry("products".into()).or_insert(url);
+        subgraph_overrides
+            .entry("products".into())
+            .or_insert(url.clone());
 
         // Insert the overrides into the config
         let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
@@ -439,13 +441,23 @@ impl IntegrationTest {
 
         let subgraph_context = Arc::new(Mutex::new(None));
         Mock::given(method("POST"))
-            .respond_with(TracedResponder{response_template:responder.unwrap_or_else(||
-                ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
+            .respond_with(TracedResponder {
+                response_template: responder.unwrap_or_else(|| {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "data": {
+                            "topProducts": [
+                                { "name": "Table" },
+                                { "name": "Couch" },
+                                { "name": "Chair" },
+                            ],
+                        },
+                    }))
+                }),
                 telemetry: telemetry.clone(),
                 extra_propagator: extra_propagator.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
                 subgraph_callback,
-                subgraph_context: subgraph_context.clone()
+                subgraph_context: subgraph_context.clone(),
             })
             .mount(&subgraphs)
             .await;
@@ -527,7 +539,6 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
-
         router
             .args(dbg!([
                 "--hr",
@@ -553,7 +564,6 @@ impl IntegrationTest {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
-
                 // Extract the bind address from a log line that looks like this: GraphQL endpoint exposed at http://127.0.0.1:51087/
                 if let Some(captures) = bind_address_regex.captures(&line) {
                     let address = captures.name("address").unwrap().as_str();
@@ -750,7 +760,7 @@ impl IntegrationTest {
                 global::get_text_map_propagator(|propagator| {
                     propagator.inject_context(
                         &tracing::span::Span::current().context(),
-                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                        &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                     );
                 });
                 request.headers_mut().remove(ACCEPT);
@@ -791,7 +801,7 @@ impl IntegrationTest {
         global::get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &span.context(),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
             );
         });
 
@@ -1153,6 +1163,7 @@ fn merge_overrides(
     let overrides = subgraph_overrides
         .iter()
         .map(|(name, url)| (name.clone(), serde_json::Value::String(url.clone())));
+    let overrides2 = overrides.clone();
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("override_subgraph_url"))
@@ -1165,6 +1176,23 @@ fn merge_overrides(
         }
         Some(override_url) => {
             override_url.extend(overrides);
+        }
+    }
+    if let Some(sources) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("preview_connectors"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("subgraphs"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("connectors"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("sources"))
+        .and_then(|o| o.as_object_mut())
+    {
+        for (name, url) in overrides2 {
+            let mut obj = serde_json::Map::new();
+            obj.insert("override_url".to_string(), url.clone());
+            sources.insert(name.to_string(), Value::Object(obj));
         }
     }
 

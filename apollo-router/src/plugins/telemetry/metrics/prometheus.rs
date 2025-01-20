@@ -24,7 +24,6 @@ use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
-use crate::services::router::Body;
 use crate::ListenAddr;
 
 /// Prometheus configuration
@@ -199,7 +198,7 @@ impl Service<router::Request> for PrometheusService {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
                     .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body::<Body>(modified_stats.into())
+                    .body(router::body::from_bytes(modified_stats))
                     .map_err(BoxError::from)?,
                 context: req.context,
             })

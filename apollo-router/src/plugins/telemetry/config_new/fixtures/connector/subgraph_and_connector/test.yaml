@@ -1,0 +1,42 @@
+description: Both subgraph and connector HTTP client duration metrics
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        query: "query { hello }"
+    - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - context:
+        map:
+          "apollo_router::connector::info":
+            subgraph_name: reviews
+            source_name: reviews_api
+            http_method: GET
+            url_template: "/reviews"
+    - http_request:
+        uri: "/reviews"
+        method: GET
+    - http_response:
+        status: 200
+        body: |
+          { "foo": "bar" }
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - router_response:
+        body: |
+          hello
+        status: 200
