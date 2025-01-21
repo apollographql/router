@@ -31,10 +31,10 @@ To configure the router to send traces via OTLP, set the Jaeger endpoint with po
 ```yaml title="router.yaml"
 telemetry:
   exporters:
-    propagation:
-      # Important! You must enable Jaeger propagation to use allow use of Jaeger headers for traceIDs.
-      jaeger: true
     tracing:
+      propagation:
+          # Important! You must enable Jaeger propagation to use allow use of Jaeger headers for traceIDs.
+          jaeger: true
       otlp:
         enabled: true
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)

@@ -182,9 +182,12 @@ telemetry:
 
 ```yaml title="router.yaml"
 telemetry:
-    exporters:
-        otlp:
-            enabled: true
+  exporters:
+    tracing:
+      propagation:
+        jaeger: true
+      otlp:
+        enabled: true
 ```
 
 And ensure that you have enabled OTLP support in your Jaeger instance using `COLLECTOR_OTLP_ENABLED=true` and exposing ports `4317` and or `4318` for gRPC and HTTP respectively.
