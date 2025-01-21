@@ -25,6 +25,10 @@ pub struct Test {
     /// Pass --features to cargo test
     #[clap(long)]
     features: Option<String>,
+
+    /// Pass `--no-fail-fast` to `cargo test`
+    #[clap(long)]
+    no_fail_fast: bool,
 }
 
 impl Test {
@@ -77,6 +81,10 @@ impl Test {
             if let Some(jobs) = self.jobs {
                 args.push("--jobs".to_string());
                 args.push(jobs.to_string());
+            }
+
+            if self.no_fail_fast {
+                args.push("--no-fail-fast".to_string());
             }
 
             args.push("--".to_string());
