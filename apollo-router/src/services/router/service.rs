@@ -971,6 +971,10 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
+        // Note: This is required because RouterCreator implements ServiceFactory which requires
+        // Sync access to the RouterService.
+        // This is only called once per connection, so the contention on the lock should be light
+        // and the clone is a lightweight Arc Clone and should complete quickly.
         self.sb.lock().clone()
     }
 }

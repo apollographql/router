@@ -1604,6 +1604,11 @@ impl SubgraphServiceFactory {
     }
 
     pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
+        // Note: This is required because SubgraphServiceFactory requires
+        // Sync access to the SubgraphService.
+        // This is only called once per subgraph perconnection, so the contention on the
+        // lock should be light and the clone is a lightweight Arc Clone and should
+        // complete quickly.
         self.services
             .get(name)
             .map(|svc| svc.lock().clone().boxed())
