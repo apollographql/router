@@ -327,17 +327,17 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         let report = LicenseEnforcementReport::build(&configuration, &schema);
 
         let license_limits = match license {
-            LicenseState::Licensed(license) => {
+            LicenseState::Licensed { limits } => {
                 tracing::debug!("A valid Apollo license has been detected.");
-                license
+                limits
             }
-            LicenseState::LicensedWarn(license) if report.uses_restricted_features() => {
+            LicenseState::LicensedWarn { limits } if report.uses_restricted_features() => {
                 tracing::error!("License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
-                license
+                limits
             }
-            LicenseState::LicensedHalt(license) if report.uses_restricted_features() => {
+            LicenseState::LicensedHalt { limits } if report.uses_restricted_features() => {
                 tracing::error!("License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
-                license
+                limits
             }
             LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
@@ -359,7 +359,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
         // If there are no restricted featured in use then the effective license is Licensed as we don't need warn or halt behavior.
         let effective_license = if !report.uses_restricted_features() {
-            LicenseState::Licensed(license_limits)
+            LicenseState::Licensed {
+                limits: license_limits,
+            }
         } else {
             license
         };
@@ -711,7 +713,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::Licensed(Some(LicenseLimits::default()))),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -733,7 +737,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::LicensedHalt(Some(LicenseLimits::default()))),
+                    UpdateLicense(LicenseState::LicensedHalt {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -755,7 +761,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::LicensedWarn(Some(LicenseLimits::default()))),
+                    UpdateLicense(LicenseState::LicensedWarn {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -778,7 +786,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::Licensed(Some(LicenseLimits::default()))),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
                     Shutdown
@@ -826,7 +836,9 @@ mod tests {
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
-                    UpdateLicense(LicenseState::Licensed(Some(LicenseLimits::default()))),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -949,7 +961,9 @@ mod tests {
                         launch_id: None
                     }),
                     UpdateLicense(Default::default()),
-                    UpdateLicense(LicenseState::Licensed(Some(LicenseLimits::default()))),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )

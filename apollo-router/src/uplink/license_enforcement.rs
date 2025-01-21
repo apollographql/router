@@ -641,11 +641,11 @@ pub struct LicenseLimits {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
 pub enum LicenseState {
     /// licensed
-    Licensed(Option<LicenseLimits>),
+    Licensed { limits: Option<LicenseLimits> },
     /// warn
-    LicensedWarn(Option<LicenseLimits>),
+    LicensedWarn { limits: Option<LicenseLimits> },
     /// halt
-    LicensedHalt(Option<LicenseLimits>),
+    LicensedHalt { limits: Option<LicenseLimits> },
 
     /// unlicensed
     #[default]
@@ -655,9 +655,10 @@ pub enum LicenseState {
 impl LicenseState {
     pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
         match self {
-            LicenseState::Licensed(limits)
-            | LicenseState::LicensedWarn(limits)
-            | LicenseState::LicensedHalt(limits) => limits.as_ref(),
+            // FIXME: update
+            LicenseState::Licensed { limits }
+            | LicenseState::LicensedWarn { limits }
+            | LicenseState::LicensedHalt { limits } => limits.as_ref(),
             _ => None,
         }
     }

@@ -576,9 +576,9 @@ mod test {
     #[test]
     fn test_license_warn() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedWarn(Some(
-            LicenseLimits::default(),
-        )));
+        data.populate_license_instrument(&LicenseState::LicensedWarn {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
@@ -586,9 +586,9 @@ mod test {
     #[test]
     fn test_license_halt() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedHalt(Some(
-            LicenseLimits::default(),
-        )));
+        data.populate_license_instrument(&LicenseState::LicensedHalt {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

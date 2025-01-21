@@ -196,28 +196,30 @@ fn reset_checks_for_licenses(
     if halt_at > now {
         // Only add halt if it isn't immediately going to be triggered.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedHalt(limits)),
+            Event::UpdateLicense(LicenseState::LicensedHalt { limits }),
             (halt_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedHalt(
+        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedHalt {
             limits,
-        ))));
+        })));
     }
     if warn_at > now {
         // Only add warn if it isn't immediately going to be triggered and halt is not already set.
         // Something that is halted is by definition also warn.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedWarn(limits)),
+            Event::UpdateLicense(LicenseState::LicensedWarn { limits }),
             (warn_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedWarn(
+        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedWarn {
             limits,
-        ))));
+        })));
     }
 
-    Poll::Ready(Some(Event::UpdateLicense(LicenseState::Licensed(limits))))
+    Poll::Ready(Some(Event::UpdateLicense(LicenseState::Licensed {
+        limits,
+    })))
 }
 
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
@@ -521,8 +523,12 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
-                Event::UpdateLicense(LicenseState::LicensedHalt(_)) => SimpleEvent::HaltLicense,
-                Event::UpdateLicense(LicenseState::LicensedWarn(_)) => SimpleEvent::WarnLicense,
+                Event::UpdateLicense(LicenseState::LicensedHalt { limits: _ }) => {
+                    SimpleEvent::HaltLicense
+                }
+                Event::UpdateLicense(LicenseState::LicensedWarn { limits: _ }) => {
+                    SimpleEvent::WarnLicense
+                }
                 Event::UpdateLicense(_) => SimpleEvent::UpdateLicense,
                 Event::NoMoreLicense => SimpleEvent::NoMoreLicense,
                 Event::Reload => SimpleEvent::ForcedHotReload,
