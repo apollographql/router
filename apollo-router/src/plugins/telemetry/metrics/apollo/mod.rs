@@ -11,6 +11,7 @@ use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::Resource;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
+use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
@@ -110,6 +111,7 @@ impl Config {
         let exporter = MetricsExporterBuilder::Tonic(
             opentelemetry_otlp::new_exporter()
                 .tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
                 .with_timeout(batch_processor.max_export_timeout)
                 .with_metadata(metadata)

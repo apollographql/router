@@ -207,6 +207,7 @@ impl GrpcExporter {
             {
                 return Some(
                     ClientTlsConfig::new()
+                        .with_native_roots()
                         .with(&domain_name, |b, d| b.domain_name(*d))
                         .try_with(&self.ca, |b, c| {
                             Ok(b.ca_certificate(Certificate::from_pem(c)))
@@ -219,7 +220,9 @@ impl GrpcExporter {
                 .transpose();
             }
         }
-        Ok(None)
+        // This was a breaking change in tonic where we now have to specify native roots.
+        Ok(Some(ClientTlsConfig::new()
+            .with_native_roots()))
     }
 
     fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {

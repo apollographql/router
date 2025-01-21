@@ -22,6 +22,7 @@ use parking_lot::Mutex;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
+use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
@@ -77,6 +78,7 @@ impl ApolloOtlpExporter {
                 let span_exporter = SpanExporterBuilder::from(
                     opentelemetry_otlp::new_exporter()
                         .tonic()
+                        .with_tls_config(ClientTlsConfig::new().with_native_roots())
                         .with_timeout(batch_config.max_export_timeout)
                         .with_endpoint(endpoint.to_string())
                         .with_metadata(metadata)
