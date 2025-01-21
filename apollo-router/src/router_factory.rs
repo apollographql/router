@@ -605,16 +605,12 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(mut plugin_config) = $opt_plugin_config {
-                    // If any of the mandatory plugins need special treatment, then we'll
-                    // perform it here.
                     if name == "apollo.telemetry" {
-                        // The apollo.telemetry" plugin isn't happy with empty config, so we
-                        // give it some.
+                        // If any of the mandatory plugins need special treatment, then we'll
+                        // perform it here. The apollo.telemetry" plugin isn't happy with empty
+                        // config, so we give it some.
                         // This is *required* by the telemetry module or it will fail...
                         inject_schema_id(&supergraph_schema_id, &mut plugin_config);
-                    }
-                    if name == "apollo.router_limits" {
-                        todo!()
                     }
 
                     add_plugin!(name.to_string(), factory, plugin_config);
