@@ -63,7 +63,9 @@ pub(crate) enum ConfigMode {
 
 /// Hashed value of query planner configuration for use in cache keys.
 #[derive(Clone, Hash, PartialEq, Eq)]
-struct ConfigModeHash(Vec<u8>);
+// XXX(@goto-bus-stop): I think this probably should not be pub(crate), but right now all fields in
+// the cache keys are pub(crate), which I'm not going to change at this time :)
+pub(crate) struct ConfigModeHash(Vec<u8>);
 
 impl std::fmt::Display for ConfigModeHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
