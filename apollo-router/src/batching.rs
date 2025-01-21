@@ -485,7 +485,7 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::query_planner::fetch::QueryHash;
+    use crate::spec::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
     use crate::services::subgraph;
