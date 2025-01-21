@@ -25,8 +25,6 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::better_name::RouterLimits;
-use crate::plugins::better_name::APOLLO_ROUTER_LIMITS;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;

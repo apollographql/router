@@ -611,19 +611,35 @@ pub(crate) struct TpsLimit {
     pub(crate) interval: Duration,
 }
 
+// FIXME: see below for LicenseState
 /// LicenseLimits represent what can be done with a router based on the claims in the License. You
 /// might have a certain tier be limited in its capacity for transactions over a certain duration,
 /// as an example
 #[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
-pub(crate) struct LicenseLimits {
+pub struct LicenseLimits {
     /// Transaction Per Second limits. If none are found in the License's claims, there are no
     /// limits to apply
     pub(crate) tps: Option<TpsLimit>,
 }
 
+// FIXME: make pub(crate), not pub; ran into this in
+// examples/async-auth/rust/src/allow_client_id_from_file.rs:
+// error: type `apollo_router::uplink::license_enforcement::LicenseState` is private
+//    --> examples/async-auth/rust/src/allow_client_id_from_file.rs:220:20
+//     |
+// 220 |           let init = PluginInit::fake_builder()
+//     |  ____________________^
+// 221 | |             .config(AllowClientIdConfig {
+// 222 | |                 path: "allowedClientIds.json".to_string(),
+// 223 | |                 header: "x-client-id".to_string(),
+// 224 | |             })
+// 225 | |             .build();
+//     | |____________________^ private type
+//
+//
 /// Licenses are converted into a stream of license states by the expander
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
-pub(crate) enum LicenseState {
+pub enum LicenseState {
     /// licensed
     Licensed(Option<LicenseLimits>),
     /// warn

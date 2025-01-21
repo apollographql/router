@@ -174,6 +174,7 @@ where
 {
     /// Create a new PluginInit builder
     #[builder(entry = "builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     /// Build a new PluginInit for the supplied configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -200,6 +201,7 @@ where
     }
 
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -229,6 +231,7 @@ where
 
     /// Create a new PluginInit builder
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,
@@ -237,7 +240,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
-        license: LicenseState,
+        license: Option<LicenseState>,
     ) -> Self {
         PluginInit {
             config,
@@ -248,7 +251,7 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
-            license,
+            license: license.unwrap_or_default(),
         }
     }
 }
@@ -354,7 +357,6 @@ impl PluginFactory {
         (self.instance_factory)(
             PluginInit::fake_builder()
                 .config(configuration.clone())
-                .license(LicenseState::default())
                 .build(),
         )
         .await

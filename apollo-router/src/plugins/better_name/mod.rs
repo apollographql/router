@@ -18,8 +18,6 @@ use crate::plugin::PluginPrivate;
 use crate::services::router;
 use crate::services::RouterResponse;
 
-pub(crate) const APOLLO_ROUTER_LIMITS: &str = "apollo.traffic_shaping";
-
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RouterLimits {
@@ -44,7 +42,8 @@ impl PluginPrivate for RouterLimits {
             limits
         } else {
             tracing::warn!("License limits found during plugin initialization but failed to get_limits() during plugin initialization");
-            // FIXME: panic, figure out whether to default here or to where
+            // FIXME: panic, figure out whether to default here or what to do in this case; we
+            // conditionally add this plugin and these limits _should_ be defined here
             panic!()
         };
 

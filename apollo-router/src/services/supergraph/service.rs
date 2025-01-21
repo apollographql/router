@@ -37,8 +37,6 @@ use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
-use crate::plugins::better_name::RouterLimits;
-use crate::plugins::better_name::APOLLO_ROUTER_LIMITS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
 use crate::plugins::subscription::Subscription;
@@ -1070,9 +1068,5 @@ impl SupergraphCreator {
                 experimental_pql_prewarm,
             )
             .await
-    }
-
-    pub(crate) fn get_license(&self) -> &LicenseState {
-        &self.license
     }
 }

@@ -1,7 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
 use std::collections::HashMap;
-use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -49,8 +48,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::better_name::RouterLimits;
-use crate::plugins::better_name::APOLLO_ROUTER_LIMITS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -933,32 +930,6 @@ impl RouterCreator {
         // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
-
-        let license = supergraph_creator.get_license();
-
-        if let Some(limits) = license.get_limits() {
-            let plugins = supergraph_creator.plugins();
-            let plugins = plugins
-                .iter()
-                .find(|i| i.0.as_str() == APOLLO_ROUTER_LIMITS);
-
-            // Struggling here; wanting to use a setter to set the tps limits because we can't use
-            // a config; not sure how, but wanting to take the registered plugin and configure it
-            // with the passed-in license's limits. Below is a quick stab at it, but getting
-            // `cannot borrow data in a & reference as mutable`
-            //let blah =
-            //    plugins.and_then(|plugin| (plugin.1).as_any().downcast_ref::<RouterLimits>());
-            ////.and_then(|plugin| (*plugin.1).as_any().downcast_ref::<RouterLimits>())
-
-            //blah.unwrap().set_tps(
-            //    // FIXME: unwrap
-            //    NonZeroU64::new(limits.tps.unwrap().capacity as u64).unwrap(),
-            //    // FIXME: unwrap
-            //    limits.tps.unwrap().interval,
-            //);
-
-            todo!()
-        }
 
         let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
             supergraph_creator.create(),
