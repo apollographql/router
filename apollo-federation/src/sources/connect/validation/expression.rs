@@ -84,10 +84,22 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
         expression,
         location,
     } = expression;
-    let shaped_selection = expression.shaped_selection();
-    // TODO Refine shaped_selection with additional named shapes to eliminate
-    // errors and Unknown shapes from the computed output shape.
+
+    let var_shapes: IndexMap<String, Shape> = context
+        .var_lookup
+        .iter()
+        .map(|(name, shape)| (name.to_string(), shape.clone()))
+        .collect();
+
+    let shaped_selection = expression
+        .shaped_selection()
+        // Refine shaped_selection with additional named shapes derived from
+        // context.schema, which typically helps eliminate errors and unknown
+        // shapes from the computed output shape.
+        .refine(var_shapes);
+
     let shape = shaped_selection.output_shape();
+
     let errors: Vec<Error> = shape
         .errors()
         .map(|err| Error {
