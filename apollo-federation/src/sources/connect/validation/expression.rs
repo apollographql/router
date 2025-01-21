@@ -85,18 +85,21 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
         location,
     } = expression;
 
-    let var_shapes: IndexMap<String, Shape> = context
-        .var_lookup
-        .iter()
-        .map(|(name, shape)| (name.to_string(), shape.clone()))
-        .collect();
+    // let var_shapes: IndexMap<String, Shape> = context
+    //     .var_lookup
+    //     .iter()
+    //     .map(|(name, shape)| (name.to_string(), shape.clone()))
+    //     .collect();
 
-    let shaped_selection = expression
-        .shaped_selection()
-        // Refine shaped_selection with additional named shapes derived from
-        // context.schema, which typically helps eliminate errors and unknown
-        // shapes from the computed output shape.
-        .refine(var_shapes);
+    let shaped_selection = expression.shaped_selection();
+    // Refine shaped_selection with additional named shapes derived from
+    // context.schema, which typically helps eliminate errors and unknown
+    // shapes from the computed output shape.
+    //
+    // TODO Reenable this when we can deal with the consequences better,
+    // using (for example) tools for mapping GraphQL null values to None
+    // when appropriate.
+    // .refine(var_shapes);
 
     let shape = shaped_selection.output_shape();
 
