@@ -321,6 +321,8 @@ The router makes several values available in the request context, which is share
 - `apollo::telemetry::client_name`: client name extracted from the client name header
 - `apollo::telemetry::client_version`: client version extracted from the client version header
 - `apollo::telemetry::contains_graphql_error`: true if the response contains at least one error
+- `apollo::telemetry::studio_exclude`: true if the current request's trace details should be excluded from Studio
+- `apollo::telemetry::subgraph_ftv1`: JSON-serialized trace data returned by the subgraph when FTV1 is enabled
 
 ## Customization creation
 
