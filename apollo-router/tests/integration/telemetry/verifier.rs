@@ -103,6 +103,8 @@ pub trait Verifier {
         println!("span kinds verified");
         self.verify_span_attributes(&trace)?;
         println!("span attributes verified");
+        self.verify_resources(&trace)?;
+        println!("span attributes verified");
         Ok(())
     }
 
@@ -156,4 +158,6 @@ pub trait Verifier {
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError>;
 
     fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError>;
+
+    fn verify_resources(&self, _trace: &Value) -> Result<(), BoxError>;
 }

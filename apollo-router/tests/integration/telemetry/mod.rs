@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use opentelemetry::trace::TraceId;
@@ -22,6 +23,7 @@ struct TraceSpec {
     priority_sampled: Option<&'static str>,
     subgraph_sampled: Option<bool>,
     trace_id: Option<String>,
+    resources: HashMap<&'static str, &'static str>,
 }
 
 #[buildstructor::buildstructor]
@@ -38,6 +40,7 @@ impl TraceSpec {
         priority_sampled: Option<&'static str>,
         subgraph_sampled: Option<bool>,
         trace_id: Option<String>,
+        resources: HashMap<&'static str, &'static str>,
     ) -> Self {
         Self {
             operation_name,
@@ -49,6 +52,7 @@ impl TraceSpec {
             priority_sampled,
             subgraph_sampled,
             trace_id,
+            resources,
         }
     }
 }

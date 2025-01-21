@@ -143,6 +143,10 @@ impl Verifier for ZipkinTraceSpec {
     fn spec(&self) -> &TraceSpec {
         &self.trace_spec
     }
+
+    fn verify_resources(&self, _trace: &Value) -> Result<(), BoxError> {
+        Ok(())
+    }
 }
 
 impl TraceSpec {
