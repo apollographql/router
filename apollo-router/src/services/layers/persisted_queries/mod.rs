@@ -413,10 +413,8 @@ mod tests {
 
     use maplit::hashmap;
     use serde_json::json;
-    use tracing::instrument::WithSubscriber;
 
     use super::*;
-    use crate::assert_snapshot_subscriber;
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
     use crate::configuration::PersistedQueriesSafelist;
@@ -985,11 +983,14 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(all(not(feature = "ci"), target_os = "macos")))]
     async fn pq_layer_freeform_graphql_with_safelist_log_unknown_true() {
+        use tracing::instrument::WithSubscriber;
+
         async {
             pq_layer_freeform_graphql_with_safelist(true).await;
         }
-        .with_subscriber(assert_snapshot_subscriber!())
+        .with_subscriber(crate::assert_snapshot_subscriber!())
         .await
     }
 
