@@ -62,6 +62,22 @@ pub(crate) enum ConfigMode {
     Js(Arc<QueryPlannerConfig>),
 }
 
+/// Hashed value of query planner configuration for use in cache keys.
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct ConfigModeHash(Vec<u8>);
+
+impl std::fmt::Display for ConfigModeHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
+impl std::fmt::Debug for ConfigModeHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ConfigModeHash").field(&hex::encode(&self.0)).finish()
+    }
+}
+
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
@@ -75,7 +91,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
-    config_mode_hash: Arc<QueryHash>,
+    config_mode_hash: Arc<ConfigModeHash>,
 }
 
 fn init_query_plan_from_redis(
@@ -152,7 +168,7 @@ where
                     .hash(&mut hasher);
             }
         };
-        let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
+        let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
 
         Ok(Self {
             cache,
@@ -209,7 +225,7 @@ where
                                 hash,
                                 metadata,
                                 plan_options,
-                                config_mode: _,
+                                config_mode_hash: _,
                                 schema_id: _,
                             },
                             _,
@@ -219,7 +235,7 @@ where
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
-                            config_mode: self.config_mode_hash.clone(),
+                            config_mode_hash: self.config_mode_hash.clone(),
                         },
                     )
                     .take(count)
@@ -264,7 +280,7 @@ where
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
-                        config_mode: self.config_mode_hash.clone(),
+                        config_mode_hash: self.config_mode_hash.clone(),
                     });
                 }
             }
@@ -280,7 +296,7 @@ where
             hash,
             metadata,
             plan_options,
-            config_mode: _,
+            config_mode_hash: _,
         } in all_cache_keys
         {
             let doc = match query_analysis
@@ -298,7 +314,7 @@ where
                 schema_id: self.schema.schema_id.clone(),
                 metadata,
                 plan_options,
-                config_mode: self.config_mode_hash.clone(),
+                config_mode_hash: self.config_mode_hash.clone(),
             };
 
             if experimental_reuse_query_plans {
@@ -491,7 +507,7 @@ where
             schema_id: self.schema.schema_id.clone(),
             metadata,
             plan_options,
-            config_mode: self.config_mode_hash.clone(),
+            config_mode_hash: self.config_mode_hash.clone(),
         };
 
         let context = request.context.clone();
@@ -634,7 +650,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: Arc<QueryHash>,
+    pub(crate) config_mode_hash: Arc<ConfigModeHash>,
 }
 
 const ROUTER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -651,7 +667,7 @@ impl std::fmt::Display for CachingQueryKey {
         "^plan_options".hash(&mut hasher);
         self.plan_options.hash(&mut hasher);
         "^config_mode".hash(&mut hasher);
-        self.config_mode.hash(&mut hasher);
+        self.config_mode_hash.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
@@ -669,7 +685,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: Arc<QueryHash>,
+    pub(crate) config_mode_hash: Arc<ConfigModeHash>,
 }
 
 struct StructHasher {
