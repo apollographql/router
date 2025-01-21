@@ -729,7 +729,7 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             let new_query = new_doc.to_string();
-            let new_hash = QueryHash::new(&self.schema, &new_query, key.operation_name.as_deref());
+            let new_hash = self.schema.schema_id.operation_hash(&new_query, key.operation_name.as_deref());
 
             key.filtered_query = new_query;
             let executable_document = new_doc
