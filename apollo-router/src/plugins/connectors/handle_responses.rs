@@ -79,6 +79,8 @@ impl RawResponse {
                     connector.config.as_ref(),
                     context,
                     Some(parts.status.as_u16()),
+                    None,
+                    Some(&parts),
                 );
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
