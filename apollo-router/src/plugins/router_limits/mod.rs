@@ -1,4 +1,9 @@
-// TODO: mod docs
+//! A plugin for enforcing product limitations in the router based on License claims
+//!
+//! Currently includes:
+//! * TPS Rate Limiting: a certain threshold, set via License claim, for how many operations over a
+//! certain interval can be serviced
+
 use std::num::NonZeroU64;
 use std::time::Duration;
 
@@ -38,21 +43,23 @@ impl PluginPrivate for RouterLimits {
     type Config = ();
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let limits = if let Some(limits) = init.license.get_limits() {
-            limits
-        } else {
-            tracing::warn!("License limits found during plugin initialization but failed to get_limits() during plugin initialization");
-            // FIXME: panic, figure out whether to default here or what to do in this case; we
-            // conditionally add this plugin and these limits _should_ be defined here
-            panic!()
-        };
+        let limits = init
+            .license
+            .get_limits()
+            .ok_or("License limits found during plugin initialization but failed to get limits in constructor phase of router_limits")
+            ?;
+
+        let tps = limits
+            .tps
+            .ok_or("License limits defined but no TPS claim defined")?;
+
+        let capacity = NonZeroU64::new(tps.capacity as u64)
+            .ok_or("Failed to convert TPS capacity into a usable value")?;
 
         Ok(Self {
             tps: TpsLimitConf {
-                // FIXME: unwrap
-                capacity: NonZeroU64::new(limits.tps.unwrap().capacity as u64).unwrap(),
-                // FIXME: unwrap
-                interval: limits.tps.unwrap().interval,
+                capacity,
+                interval: tps.interval,
             },
         })
     }
@@ -69,7 +76,6 @@ impl PluginPrivate for RouterLimits {
                             Err(err) if err.is::<Overloaded>() => {
                                 // TODO: add metrics
                                 let error = graphql::Error::builder()
-                                    // TODO: better product messaging
                                     .message("Your request has been rate limited")
                                     // TODO: better extension to distinguish between user- and
                                     // apollo-set limits

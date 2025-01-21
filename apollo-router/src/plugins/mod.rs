@@ -22,7 +22,6 @@ macro_rules! schemar_fn {
 
 pub(crate) mod authentication;
 pub(crate) mod authorization;
-pub(crate) mod better_name;
 pub(crate) mod cache;
 pub(crate) mod connectors;
 mod coprocessor;
@@ -39,6 +38,7 @@ pub(crate) mod override_url;
 pub(crate) mod progressive_override;
 mod record_replay;
 pub(crate) mod rhai;
+pub(crate) mod router_limits;
 pub(crate) mod subscription;
 pub(crate) mod telemetry;
 #[cfg(test)]
