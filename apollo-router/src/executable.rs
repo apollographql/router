@@ -498,7 +498,6 @@ impl Executable {
                     ConfigurationSource::File {
                         path,
                         watch: opt.hot_reload,
-                        delay: None,
                     }
                 })
                 .unwrap_or_default(),
@@ -541,7 +540,6 @@ impl Executable {
                 SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
-                    delay: None,
                 }
             }
             (_, _, Some(supergraph_urls), _, _) => {

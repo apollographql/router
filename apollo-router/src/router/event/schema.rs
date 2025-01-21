@@ -39,11 +39,6 @@ pub enum SchemaSource {
 
         /// `true` to watch the file for changes and hot apply them.
         watch: bool,
-
-        /// When watching, the delay to wait before applying the new schema.
-        /// Note: This variable is deprecated and has no effect.
-        #[deprecated]
-        delay: Option<Duration>,
     },
 
     /// Apollo managed federation.
@@ -93,7 +88,6 @@ impl SchemaSource {
             SchemaSource::File {
                 path,
                 watch,
-                delay: _,
             } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -302,13 +296,9 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let schema = include_str!("../../testdata/supergraph.graphql");
         write_and_flush(&mut file, schema).await;
-        let mut stream = SchemaSource::File {
-            path,
-            watch: true,
-            delay: None,
-        }
-        .into_stream()
-        .boxed();
+        let mut stream = SchemaSource::File { path, watch: true }
+            .into_stream()
+            .boxed();
 
         // First update is guaranteed
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
@@ -326,12 +316,7 @@ mod tests {
         let schema = include_str!("../../testdata/supergraph.graphql");
         write_and_flush(&mut file, schema).await;
 
-        let mut stream = SchemaSource::File {
-            path,
-            watch: false,
-            delay: None,
-        }
-        .into_stream();
+        let mut stream = SchemaSource::File { path, watch: false }.into_stream();
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
     }
@@ -341,7 +326,6 @@ mod tests {
         let mut stream = SchemaSource::File {
             path: temp_dir().join("does_not_exist"),
             watch: true,
-            delay: None,
         }
         .into_stream();
 
