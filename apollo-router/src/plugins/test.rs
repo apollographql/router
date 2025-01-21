@@ -120,7 +120,12 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
-            .subgraph_schemas(subgraph_schemas)
+            .subgraph_schemas(Arc::new(
+                subgraph_schemas
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.schema.clone()))
+                    .collect(),
+            ))
             .notify(Notify::default())
             .build();
 

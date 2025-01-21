@@ -339,11 +339,19 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // Process the plugins.
+        let subgraph_schemas = Arc::new(
+            bridge_query_planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
+
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
                 &schema,
-                bridge_query_planner.subgraph_schemas(),
+                subgraph_schemas,
                 initial_telemetry_plugin,
                 extra_plugins,
             )

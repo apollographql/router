@@ -1,13 +1,11 @@
 //! Calls out to nodejs query planner
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -48,6 +46,8 @@ use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::dual_query_planner::BothModeComparisonJob;
+use crate::query_planner::fetch::SubgraphSchema;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -72,7 +72,7 @@ const INTERNAL_INIT_ERROR: &str = "internal";
 pub(crate) struct BridgeQueryPlanner {
     planner: PlannerMode,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
@@ -358,9 +358,7 @@ impl PlannerMode {
         }
     }
 
-    async fn subgraphs(
-        &self,
-    ) -> Result<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>, ServiceBuildError> {
+    async fn subgraphs(&self) -> Result<SubgraphSchemas, ServiceBuildError> {
         let js = match self {
             PlannerMode::Js(js) => js,
             PlannerMode::Both { js, .. } => js,
@@ -368,7 +366,15 @@ impl PlannerMode {
                 return Ok(rust
                     .subgraph_schemas()
                     .iter()
-                    .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
+                    .map(|(name, schema)| {
+                        (
+                            name.to_string(),
+                            SubgraphSchema {
+                                implementers_map: schema.schema().implementers_map(),
+                                schema: Arc::new(schema.schema().clone()),
+                            },
+                        )
+                    })
                     .collect())
             }
         };
@@ -378,7 +384,13 @@ impl PlannerMode {
             .map(|(name, schema_str)| {
                 let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
                     .map_err(|errors| SchemaError::Validate(errors.into()))?;
-                Ok((name, Arc::new(schema)))
+                Ok((
+                    name,
+                    SubgraphSchema {
+                        implementers_map: schema.implementers_map(),
+                        schema: Arc::new(schema),
+                    },
+                ))
             })
             .collect()
     }
@@ -428,9 +440,7 @@ impl BridgeQueryPlanner {
         self.schema.clone()
     }
 
-    pub(crate) fn subgraph_schemas(
-        &self,
-    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
         self.subgraph_schemas.clone()
     }
 
@@ -826,6 +836,8 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use serde_json::json;
     use test_log::test;
     use tower::Service;

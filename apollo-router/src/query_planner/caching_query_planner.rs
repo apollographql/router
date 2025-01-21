@@ -1,10 +1,8 @@
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 use std::task;
 
-use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
@@ -89,7 +87,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     >,
     delegate: T,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
@@ -122,7 +120,7 @@ where
     pub(crate) async fn new(
         delegate: T,
         schema: Arc<Schema>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
         plugins: Plugins,
     ) -> Result<CachingQueryPlanner<T>, BoxError> {
@@ -399,9 +397,7 @@ impl CachingQueryPlanner<BridgeQueryPlannerPool> {
         self.delegate.js_planners()
     }
 
-    pub(crate) fn subgraph_schemas(
-        &self,
-    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
         self.delegate.subgraph_schemas()
     }
 

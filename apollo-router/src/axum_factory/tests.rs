@@ -2278,7 +2278,14 @@ async fn test_supergraph_timeout() {
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
-    let mut plugins = create_plugins(&conf, &schema, planner.subgraph_schemas(), None, None)
+    let subgraph_schemas = Arc::new(
+        planner
+            .subgraph_schemas()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.schema.clone()))
+            .collect(),
+    );
+    let mut plugins = create_plugins(&conf, &schema, subgraph_schemas, None, None)
         .await
         .unwrap();
 
