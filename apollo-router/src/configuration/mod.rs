@@ -627,6 +627,11 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
+    /// Limit the depth of nested list fields in introspection queries
+    /// to protect avoid generating huge responses.
+    /// Default: false
+    pub(crate) introspection_check_max_depth: bool,
+
     /// Enable QP generation of fragments for subgraph requests
     /// Default: true
     pub(crate) generate_query_fragments: bool,
@@ -670,6 +675,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
+        introspection_check_max_depth: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
@@ -680,6 +686,8 @@ impl Supergraph {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            introspection_check_max_depth: introspection_check_max_depth
+                .unwrap_or_else(default_graphql_introspection_check_max_depth),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
             generate_query_fragments: generate_query_fragments
@@ -699,6 +707,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
+        introspection_check_max_depth: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
@@ -709,6 +718,8 @@ impl Supergraph {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            introspection_check_max_depth: introspection_check_max_depth
+                .unwrap_or_else(default_graphql_introspection_check_max_depth),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
             generate_query_fragments: generate_query_fragments
@@ -1438,6 +1449,10 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
+}
+
+fn default_graphql_introspection_check_max_depth() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]

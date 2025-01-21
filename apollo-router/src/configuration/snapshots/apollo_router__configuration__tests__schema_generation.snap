@@ -6863,6 +6863,11 @@ expression: "&schema"
           "description": "Enable introspection Default: false",
           "type": "boolean"
         },
+        "introspection_check_max_depth": {
+          "default": false,
+          "description": "Limit the depth of nested list fields in introspection queries to protect avoid generating huge responses. Default: false",
+          "type": "boolean"
+        },
         "listen": {
           "$ref": "#/definitions/ListenAddr",
           "description": "#/definitions/ListenAddr"
