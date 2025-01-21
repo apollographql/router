@@ -34,7 +34,7 @@ pub(crate) struct RouterLimits {
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TpsLimitConf {
-    /// THe number of operations allowed during a certain interval
+    /// The number of operations allowed during a certain interval
     pub(crate) capacity: NonZeroU64,
     /// The interval as specied in the user's license; this is in milliseconds
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -42,6 +42,7 @@ pub(crate) struct TpsLimitConf {
     pub(crate) interval: Duration,
 }
 
+/// Here's some description
 #[async_trait::async_trait]
 impl PluginPrivate for RouterLimits {
     type Config = ();
