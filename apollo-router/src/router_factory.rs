@@ -681,6 +681,8 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_mandatory_apollo_plugin!("fleet_detector");
 
+    // This check must _not_ be removed. If we have the plugin registered but there aren't claims
+    // in the license, the plugin's constructor will error out when looking for those claims
     if let Some(_limits) = license.get_limits() {
         add_optional_apollo_plugin!("router_limits");
     } else {
