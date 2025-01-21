@@ -72,7 +72,7 @@ where
     }
 
     async fn dedup(
-        service: S,
+        mut service: S,
         wait_map: WaitMap,
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
@@ -85,7 +85,7 @@ where
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
         {
-            return service.ready_oneshot().await?.call(request).await;
+            return service.call(request).await;
         }
         loop {
             let mut locked_wait_map = wait_map.lock().await;
@@ -137,12 +137,7 @@ where
                             locked_wait_map.remove(&cache_key);
                         });
 
-                        service
-                            .ready_oneshot()
-                            .await?
-                            .call(request)
-                            .await
-                            .map(CloneSubgraphResponse)
+                        service.call(request).await.map(CloneSubgraphResponse)
                     };
 
                     // Let our waiters know

@@ -239,6 +239,7 @@ mod test {
     use http_body_util::BodyStream;
     use tower::BoxError;
     use tower::ServiceBuilder;
+    use tower::ServiceExt;
     use tower_service::Service;
 
     use crate::plugins::limits::layer::BodyLimitControl;
@@ -254,6 +255,9 @@ mod test {
                 panic!("should have rejected request");
             });
         let resp: Result<http::Response<String>, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(http::Request::new("This is a test".to_string()))
             .await;
         assert!(resp.is_err());
@@ -271,7 +275,12 @@ mod test {
                     .body("This is a test".to_string())
                     .unwrap())
             });
-        let resp: Result<_, BoxError> = service.call(http::Request::new("OK".to_string())).await;
+        let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
+            .call(http::Request::new("OK".to_string()))
+            .await;
 
         assert!(resp.is_ok());
         let resp = resp.unwrap();
@@ -289,6 +298,9 @@ mod test {
                 panic!("should have rejected request");
             });
         let resp: Result<http::Response<String>, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 http::Request::builder()
                     .header("Content-Length", "100")
@@ -312,6 +324,9 @@ mod test {
                     .unwrap())
             });
         let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 http::Request::builder()
                     .header("Content-Length", "5")
@@ -342,6 +357,9 @@ mod test {
                 }
             });
         let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(http::Request::new("This is a test".to_string()))
             .await;
         assert!(resp.is_err());
@@ -360,6 +378,9 @@ mod test {
                     .unwrap())
             });
         let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 http::Request::builder()
                     .header("Content-Length", "5")
