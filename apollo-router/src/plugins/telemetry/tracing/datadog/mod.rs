@@ -42,6 +42,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -225,7 +226,7 @@ impl TracingConfigurator for Config {
                 delegate: exporter,
                 span_metrics,
             },
-            opentelemetry_sdk::runtime::Tokio,
+            NamedTokioRuntime::new("datadog-tracing"),
         )
         .with_batch_config(self.batch_processor.clone().into())
         .build()

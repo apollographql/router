@@ -2,6 +2,7 @@ extern crate core;
 
 use std::collections::HashSet;
 use std::ops::Deref;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use opentelemetry::trace::TraceId;
@@ -25,6 +26,36 @@ use crate::integration::telemetry::DatadogId;
 use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_trace_error() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
+    let mock_server = mock_otlp_server_delayed().await;
+    let config = include_str!("fixtures/otlp_invalid_endpoint.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.assert_log_contained("OpenTelemetry trace error occurred: cannot send message to batch processor 'otlp-tracing' as the channel is full").await;
+    router.assert_metrics_contains(r#"apollo_router_telemetry_batch_processor_errors_total{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router"}"#, None).await;
+    router.graceful_shutdown().await;
+
+    drop(mock_server);
+    Ok(())
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
@@ -842,6 +873,24 @@ impl Verifier for OtlpTraceSpec<'_> {
         }
         Ok(())
     }
+}
+
+async fn mock_otlp_server_delayed() -> MockServer {
+    let mock_server = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/traces"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(1))
+                .set_body_raw(
+                    ExportTraceServiceResponse::default().encode_to_vec(),
+                    "application/x-protobuf",
+                ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    mock_server
 }
 
 async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {
