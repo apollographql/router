@@ -269,6 +269,7 @@ impl Query {
         let hash = QueryHashVisitor::hash_query(
             schema.supergraph_schema(),
             &schema.raw_sdl,
+            &schema.implementers_map,
             &executable_document,
             operation_name,
         )
@@ -323,10 +324,13 @@ impl Query {
         let operation = get_operation(document, operation_name)?;
         let operation = Operation::from_hir(&operation, schema, &mut defer_stats, &fragments)?;
 
-        let mut visitor =
-            QueryHashVisitor::new(schema.supergraph_schema(), &schema.raw_sdl, document).map_err(
-                |e| SpecError::QueryHashing(format!("could not calculate the query hash: {e}")),
-            )?;
+        let mut visitor = QueryHashVisitor::new(
+            schema.supergraph_schema(),
+            &schema.raw_sdl,
+            &schema.implementers_map,
+            document,
+        )
+        .map_err(|e| SpecError::QueryHashing(format!("could not calculate the query hash: {e}")))?;
         traverse::document(&mut visitor, document, operation_name).map_err(|e| {
             SpecError::QueryHashing(format!("could not calculate the query hash: {e}"))
         })?;

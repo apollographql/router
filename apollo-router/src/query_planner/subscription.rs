@@ -280,7 +280,7 @@ impl SubscriptionNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(schema)?;
+        self.operation.init_parsed(&schema.schema)?;
         Ok(())
     }
 }
