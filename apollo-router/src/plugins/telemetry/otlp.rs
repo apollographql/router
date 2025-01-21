@@ -221,8 +221,7 @@ impl GrpcExporter {
             }
         }
         // This was a breaking change in tonic where we now have to specify native roots.
-        Ok(Some(ClientTlsConfig::new()
-            .with_native_roots()))
+        Ok(Some(ClientTlsConfig::new().with_native_roots()))
     }
 
     fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {
