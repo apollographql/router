@@ -274,19 +274,19 @@ impl Query {
 
     #[cfg(test)]
     pub(crate) fn parse(
-        query: impl Into<String>,
+        query_text: impl Into<String>,
         operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, tower::BoxError> {
-        let query = query.into();
+        let query_text = query_text.into();
 
-        let doc = Self::parse_document(&query, operation_name, schema, configuration)?;
+        let doc = Self::parse_document(&query_text, operation_name, schema, configuration)?;
         let (fragments, operation, defer_stats, schema_aware_hash) =
-            Self::extract_query_information(schema, query, &doc.executable, operation_name)?;
+            Self::extract_query_information(schema, &query_text, &doc.executable, operation_name)?;
 
         Ok(Query {
-            string: query,
+            string: query_text,
             fragments,
             operation,
             subselections: HashMap::new(),
@@ -301,7 +301,7 @@ impl Query {
     /// Extract serializable data structures from the apollo-compiler HIR.
     pub(crate) fn extract_query_information(
         schema: &Schema,
-        query: &str,
+        query_text: &str,
         document: &ExecutableDocument,
         operation_name: Option<&str>,
     ) -> Result<(Fragments, Operation, DeferStats, QueryHash), SpecError> {
@@ -313,7 +313,7 @@ impl Query {
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
         let operation = get_operation(document, operation_name)?;
         let operation = Operation::from_hir(&operation, schema, &mut defer_stats, &fragments)?;
-        let hash = schema.schema_id.operation_hash(query, operation_name);
+        let hash = schema.schema_id.operation_hash(query_text, operation_name);
 
         Ok((fragments, operation, defer_stats, hash))
     }
