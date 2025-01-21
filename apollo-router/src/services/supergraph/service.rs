@@ -959,15 +959,6 @@ impl PluggableSupergraphServiceBuilder {
             .license(self.license)
             .build();
 
-        if let Some(router_limits) = self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_ROUTER_LIMITS)
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<RouterLimits>())
-        {
-            router_limits.supergraph_service_internal(supergraph_service.clone(), self.license);
-        };
-
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 

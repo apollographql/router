@@ -946,16 +946,16 @@ impl RouterCreator {
             // a config; not sure how, but wanting to take the registered plugin and configure it
             // with the passed-in license's limits. Below is a quick stab at it, but getting
             // `cannot borrow data in a & reference as mutable`
-            let blah =
-                plugins.and_then(|plugin| (plugin.1).as_any().downcast_ref::<RouterLimits>());
-            //.and_then(|plugin| (*plugin.1).as_any().downcast_ref::<RouterLimits>())
+            //let blah =
+            //    plugins.and_then(|plugin| (plugin.1).as_any().downcast_ref::<RouterLimits>());
+            ////.and_then(|plugin| (*plugin.1).as_any().downcast_ref::<RouterLimits>())
 
-            blah.unwrap().set_tps(
-                // FIXME: unwrap
-                NonZeroU64::new(limits.tps.unwrap().capacity as u64).unwrap(),
-                // FIXME: unwrap
-                limits.tps.unwrap().interval,
-            );
+            //blah.unwrap().set_tps(
+            //    // FIXME: unwrap
+            //    NonZeroU64::new(limits.tps.unwrap().capacity as u64).unwrap(),
+            //    // FIXME: unwrap
+            //    limits.tps.unwrap().interval,
+            //);
 
             todo!()
         }

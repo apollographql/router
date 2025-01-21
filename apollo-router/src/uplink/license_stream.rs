@@ -184,7 +184,7 @@ fn reset_checks_for_licenses(
             .tps(
                 TpsLimit::builder()
                     .capacity(tps_limit.capacity)
-                    .duration(tps_limit.duration)
+                    .interval(tps_limit.interval)
                     .build(),
             )
             .build()
