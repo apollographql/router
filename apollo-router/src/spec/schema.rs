@@ -675,7 +675,7 @@ mod tests {
             let schema = Schema::parse(schema, &Default::default()).unwrap();
 
             assert_eq!(
-                Schema::schema_id(&schema.raw_sdl),
+                Schema::schema_id(&schema.raw_sdl).as_str(),
                 "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }
