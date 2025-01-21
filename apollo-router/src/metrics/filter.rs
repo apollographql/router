@@ -105,7 +105,7 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
-                Regex::new(r"apollo\.router\.(config|entities|instance|operations\.(fetch|request_size|response_size))(\..*|$)")
+                Regex::new(r"apollo\.router\.(config|entities|instance|operations\.(connectors|fetch|request_size|response_size)|schema\.connectors)(\..*|$)")
                     .expect("regex should have been valid"),
             )
             .build()
@@ -289,6 +289,14 @@ mod test {
             .u64_counter("apollo.router.lifecycle.api_schema")
             .init()
             .add(1, &[]);
+        filtered
+            .u64_counter("apollo.router.operations.connectors")
+            .init()
+            .add(1, &[]);
+        filtered
+            .u64_observable_gauge("apollo.router.schema.connectors")
+            .with_callback(move |observer| observer.observe(1, &[]))
+            .init();
         meter_provider.force_flush(&cx).unwrap();
 
         let metrics: Vec<_> = exporter
@@ -315,6 +323,13 @@ mod test {
         assert!(metrics
             .iter()
             .any(|m| m.name == "apollo.router.lifecycle.api_schema"));
+
+        assert!(metrics
+            .iter()
+            .any(|m| m.name == "apollo.router.operations.connectors"));
+        assert!(metrics
+            .iter()
+            .any(|m| m.name == "apollo.router.schema.connectors"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -396,6 +411,14 @@ mod test {
             .u64_counter("apollo.router.entities.test")
             .init()
             .add(1, &[]);
+        filtered
+            .u64_counter("apollo.router.operations.connectors")
+            .init()
+            .add(1, &[]);
+        filtered
+            .u64_observable_gauge("apollo.router.schema.connectors")
+            .with_callback(move |observer| observer.observe(1, &[]))
+            .init();
         meter_provider.force_flush(&cx).unwrap();
 
         let metrics: Vec<_> = exporter
@@ -414,5 +437,11 @@ mod test {
         assert!(!metrics
             .iter()
             .any(|m| m.name == "apollo.router.entities.test"));
+        assert!(!metrics
+            .iter()
+            .any(|m| m.name == "apollo.router.operations.connectors"));
+        assert!(!metrics
+            .iter()
+            .any(|m| m.name == "apollo.router.schema.connectors"));
     }
 }

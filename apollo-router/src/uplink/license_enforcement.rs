@@ -11,8 +11,11 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_compiler::ast;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
@@ -107,6 +110,7 @@ impl ParsedLinkSpec {
             .specified_argument_by_name(LINK_URL_ARGUMENT)
             .and_then(|value| {
                 let url_string = value.as_str();
+
                 let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
 
                 let mut segments = parsed_url.path_segments()?;
@@ -133,6 +137,43 @@ impl ParsedLinkSpec {
                     url: url_string?.to_string(),
                 }))
             })
+    }
+
+    fn from_join_directive_args(
+        args: &[(Name, Node<ast::Value>)],
+    ) -> Option<Result<Self, url::ParseError>> {
+        let url_string = args
+            .iter()
+            .find(|(name, _)| name == &Name::new_unchecked(LINK_URL_ARGUMENT))
+            .and_then(|(_, value)| value.as_str());
+
+        let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
+
+        let mut segments = parsed_url.path_segments()?;
+        let spec_name = segments.next()?.to_string();
+        let spec_url = format!(
+            "{}://{}/{}",
+            parsed_url.scheme(),
+            parsed_url.host()?,
+            spec_name
+        );
+        let version_string = segments.next()?.strip_prefix('v')?;
+        let parsed_version =
+            semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
+
+        let imported_as = args
+            .iter()
+            .find(|(name, _)| name == &Name::new_unchecked(LINK_AS_ARGUMENT))
+            .and_then(|(_, value)| value.as_str())
+            .map(|s| s.to_string());
+
+        Some(Ok(ParsedLinkSpec {
+            spec_name,
+            spec_url,
+            version: parsed_version,
+            imported_as,
+            url: url_string?.to_string(),
+        }))
     }
 
     // Implements directive name construction logic for link directives.
@@ -212,6 +253,28 @@ impl LicenseEnforcementReport {
             })
             .collect::<HashMap<_, _>>();
 
+        let link_specs_in_join_directive = schema
+            .supergraph_schema()
+            .schema_definition
+            .directives
+            .get_all("join__directive")
+            .filter(|join| {
+                join.specified_argument_by_name("name")
+                    .and_then(|name| name.as_str())
+                    .map(|name| name == LINK_DIRECTIVE_NAME)
+                    .unwrap_or_default()
+            })
+            .filter_map(|join| {
+                join.specified_argument_by_name("args")
+                    .and_then(|arg| arg.as_object())
+            })
+            .filter_map(|link| {
+                ParsedLinkSpec::from_join_directive_args(link).map(|maybe_spec| {
+                    maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
+                })?
+            })
+            .collect::<HashMap<_, _>>();
+
         let mut schema_violations: Vec<SchemaViolation> = Vec::new();
 
         for (_subgraph_name, subgraph_url) in schema.subgraphs() {
@@ -285,6 +348,20 @@ impl LicenseEnforcementReport {
                                     explanation: explanation.to_string(),
                                 });
                             }
+                        }
+                    }
+                }
+                SchemaRestriction::SpecInJoinDirective {
+                    spec_url,
+                    name,
+                    version_req,
+                } => {
+                    if let Some(link_spec) = link_specs_in_join_directive.get(spec_url) {
+                        if version_req.matches(&link_spec.version) {
+                            schema_violations.push(SchemaViolation::Spec {
+                                url: link_spec.url.to_string(),
+                                name: name.to_string(),
+                            });
                         }
                     }
                 }
@@ -402,6 +479,19 @@ impl LicenseEnforcementReport {
             SchemaRestriction::Spec {
                 name: "authenticated".to_string(),
                 spec_url: "https://specs.apollo.dev/authenticated".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+            },
+            SchemaRestriction::SpecInJoinDirective {
+                name: "connect".to_string(),
+                spec_url: "https://specs.apollo.dev/connect".to_string(),
                 version_req: semver::VersionReq {
                     comparators: vec![semver::Comparator {
                         op: semver::Op::Exact,
@@ -615,6 +705,12 @@ pub(crate) enum SchemaRestriction {
         argument: String,
         explanation: String,
     },
+
+    SpecInJoinDirective {
+        spec_url: String,
+        name: String,
+        version_req: semver::VersionReq,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -675,6 +771,7 @@ mod test {
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::OneOrMany;
+    use crate::uplink::license_enforcement::SchemaViolation;
     use crate::Configuration;
 
     #[track_caller]
@@ -900,5 +997,25 @@ mod test {
             report.restricted_schema_in_use.is_empty(),
             "shouldn't have found restricted features"
         );
+    }
+
+    #[test]
+    fn schema_enforcement_connectors() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+        );
+
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted connect feature"
+        );
+        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+            assert_eq!("connect", name);
+        } else {
+            panic!("should have reported connect feature violation")
+        }
     }
 }

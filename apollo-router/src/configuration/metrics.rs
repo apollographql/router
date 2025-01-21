@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use jsonpath_rust::JsonPathInst;
+use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Meter;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use paste::paste;
 use serde_json::Value;
 
@@ -340,6 +340,8 @@ impl InstrumentData {
             "$..events.supergraph",
             opt.events.subgraph,
             "$..events.subgraph",
+            opt.events.connector,
+            "$..events.connector",
             opt.instruments,
             "$..instruments",
             opt.instruments.router,
@@ -348,6 +350,8 @@ impl InstrumentData {
             "$..instruments.supergraph",
             opt.instruments.subgraph,
             "$..instruments.subgraph",
+            opt.instruments.connector,
+            "$..instruments.connector",
             opt.instruments.graphql,
             "$..instruments.graphql",
             opt.instruments.default_attribute_requirement_level,
@@ -363,9 +367,7 @@ impl InstrumentData {
             opt.spans.subgraph,
             "$..spans.subgraph",
             opt.spans.supergraph,
-            "$..spans.supergraph",
-            opt.logging.experimental_when_header,
-            "$..logging.experimental_when_header"
+            "$..spans.supergraph"
         );
 
         populate_config_instrument!(
@@ -398,6 +400,23 @@ impl InstrumentData {
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
             "$.metrics_reference_mode"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.connectors,
+            "$.preview_connectors",
+            opt.debug_extensions,
+            "$[?(@.debug_extensions == true)]",
+            opt.expose_sources_in_context,
+            "$[?(@.expose_sources_in_context == true)]",
+            opt.max_requests_per_operation_per_source,
+            "$[?(@.max_requests_per_operation_per_source)]",
+            opt.subgraph.config,
+            "$[?(@.subgraphs..['$config'])]",
+            opt.source.override_url,
+            "$[?(@.subgraphs..sources..override_url)]",
+            opt.source.max_requests_per_operation,
+            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.

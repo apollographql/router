@@ -19,16 +19,6 @@ telemetry:
           scheduled_delay: 100ms
         agent:
           endpoint: default
-    logging:
-      experimental_when_header:
-        - name: apollo-router-log-request
-          value: test
-          headers: true # default: false
-          body: true # default: false
-        # log request for all requests coming from Iphones
-        - name: custom-header
-          match: ^foo.*
-          headers: true
 override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:
