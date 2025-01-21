@@ -1,8 +1,7 @@
 //! A plugin for enforcing product limitations in the router based on License claims
 //!
 //! Currently includes:
-//! * TPS Rate Limiting: a certain threshold, set via License claim, for how many operations over a
-//! certain interval can be serviced
+//! * TPS Rate Limiting: a certain threshold, set via License claim, for how many operations over a certain interval can be serviced
 
 use std::num::NonZeroU64;
 use std::time::Duration;
@@ -68,28 +67,23 @@ impl PluginPrivate for RouterLimits {
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
-                move |ctx, future| {
-                    async {
-                        let response: Result<RouterResponse, BoxError> = future.await;
-                        match response {
-                            Ok(ok) => Ok(ok),
-                            Err(err) if err.is::<Overloaded>() => {
-                                // TODO: add metrics
-                                let error = graphql::Error::builder()
-                                    .message("Your request has been rate limited")
-                                    // TODO: better extension to distinguish between user- and
-                                    // apollo-set limits
-                                    .extension_code("REQUEST_RATE_LIMITED")
-                                    .build();
-                                Ok(RouterResponse::error_builder()
-                                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                                    .error(error)
-                                    .context(ctx)
-                                    .build()
-                                    .expect("should build overloaded response"))
-                            }
-                            Err(err) => Err(err),
+                move |ctx, future| async {
+                    let response: Result<RouterResponse, BoxError> = future.await;
+                    match response {
+                        Ok(ok) => Ok(ok),
+                        Err(err) if err.is::<Overloaded>() => {
+                            let error = graphql::Error::builder()
+                                .message("Your request has been rate limited")
+                                .extension_code("ROUTER_TPS_LIMIT_REACHED")
+                                .build();
+                            Ok(RouterResponse::error_builder()
+                                .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                .error(error)
+                                .context(ctx)
+                                .build()
+                                .expect("should build overloaded response"))
                         }
+                        Err(err) => Err(err),
                     }
                 },
             )
