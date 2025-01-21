@@ -1826,6 +1826,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
         .or_insert_with(|| now);
 
     if last_logged == now {
+        // These events are logged with explicitly no parent. This allows them to be detached from traces.
         match err {
             opentelemetry::global::Error::Trace(err) => {
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
@@ -1833,17 +1834,17 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
             opentelemetry::global::Error::Metric(err) => {
                 if let MetricsError::Other(msg) = &err {
                     if msg.contains("Warning") {
-                        ::tracing::warn!("OpenTelemetry metric warning occurred: {}", msg);
+                        ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
                         return;
                     }
                 }
-                ::tracing::error!("OpenTelemetry metric error occurred: {}", err);
+                ::tracing::error!(parent: None, "OpenTelemetry metric error occurred: {}", err);
             }
             opentelemetry::global::Error::Other(err) => {
-                ::tracing::error!("OpenTelemetry error occurred: {}", err)
+                ::tracing::error!(parent: None, "OpenTelemetry error occurred: {}", err)
             }
             other => {
-                ::tracing::error!("OpenTelemetry error occurred: {:?}", other)
+                ::tracing::error!(parent: None, "OpenTelemetry error occurred: {:?}", other)
             }
         }
     }

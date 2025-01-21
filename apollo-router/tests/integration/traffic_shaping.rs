@@ -119,7 +119,7 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     assert!(response.contains("GATEWAY_TIMEOUT"));
 
     router
-        .assert_log_contains(r#""otel.name":"GraphQL Operation""#)
+        .wait_for_log_message(r#""otel.name":"GraphQL Operation""#)
         .await;
 
     router.graceful_shutdown().await;
