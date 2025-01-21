@@ -213,7 +213,10 @@ fn test_map_method() {
             (Some(json!(["123"])), vec![]),
         );
         let mut named_shapes = IndexMap::default();
-        named_shapes.insert("$root".to_string(), Shape::from_json_bytes(&single_value_data));
+        named_shapes.insert(
+            "$root".to_string(),
+            Shape::from_json_bytes(&single_value_data),
+        );
         let output_shape = json_selection.output_shape(&named_shapes);
         assert_eq!(output_shape.pretty_print(), "List<String>");
     }
