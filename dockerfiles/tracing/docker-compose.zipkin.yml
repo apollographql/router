@@ -20,8 +20,6 @@ services:
       - 4000:4000
     environment:
       - RUST_BACKTRACE=1
-    # environment:
-    #   - JAEGER_ENDPOINT=http://jaeger:14268/api/traces
     depends_on:
       - zipkin
 
