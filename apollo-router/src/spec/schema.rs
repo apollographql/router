@@ -33,7 +33,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) schema_id: Arc<SchemaHash>,
+    pub(crate) schema_id: SchemaHash,
     pub(crate) launch_id: Option<Arc<String>>,
 }
 
@@ -115,7 +115,7 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(SchemaHash::new(&raw_sdl.sdl));
+        let schema_id = Schema::schema_id(&raw_sdl.sdl);
 
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
@@ -149,6 +149,11 @@ impl Schema {
 
     pub(crate) fn supergraph_schema(&self) -> &Valid<apollo_compiler::Schema> {
         self.supergraph.schema.schema()
+    }
+
+    /// Compute the Schema ID for an SDL string.
+    pub(crate) fn schema_id(sdl: &str) -> SchemaHash {
+        SchemaHash::new(sdl)
     }
 
     /// Extracts a string containing the entire [`Schema`].
@@ -359,18 +364,40 @@ impl std::ops::Deref for ApiSchema {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct SchemaHash(#[serde(with = "hex")] Vec<u8>);
+/// A schema ID is the sha256 hash of the schema text.
+///
+/// That means that differences in whitespace and comments affect the hash, not only semantic
+/// differences in the schema.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct SchemaHash(
+    /// The internal representation is a pointer to a string.
+    /// This is not ideal, it might be better eg. to just have a fixed-size byte array that can be
+    /// turned into a string as needed.
+    /// But `Arc<String>` is used in the public plugin interface and other places, so this is
+    /// essentially a backwards compatibility decision.
+    Arc<String>
+);
 impl SchemaHash {
-    pub fn new(sdl: &str) -> Self {
+    pub(crate) fn new(sdl: &str) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(sdl);
-        Self(hasher.finalize().as_slice().into())
+        let hash = format!("{:x}", hasher.finalize());
+        Self(Arc::new(hash))
     }
 
-    pub fn operation_hash(&self, query: &str, operation_name: Option<&str>) -> QueryHash {
+    /// Return the underlying data.
+    pub(crate) fn into_inner(self) -> Arc<String> {
+        self.0
+    }
+
+    /// Return the hash as a hexadecimal string slice.
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub(crate) fn operation_hash(&self, query: &str, operation_name: Option<&str>) -> QueryHash {
         let mut hasher = Sha256::new();
-        hasher.update(self.0);
+        hasher.update(self.0.as_bytes());
         // byte separator between each part that is hashed
         hasher.update(&[0xFF][..]);
         hasher.update(query);
@@ -380,17 +407,9 @@ impl SchemaHash {
     }
 }
 
-impl std::fmt::Debug for SchemaHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("SchemaHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
 impl Display for SchemaHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
+        write!(f, "{}", self.0.as_str())
     }
 }
 

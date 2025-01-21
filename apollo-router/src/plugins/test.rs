@@ -117,7 +117,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
 
         let plugin_init = PluginInit::builder()
             .config(config_for_plugin.clone())
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
