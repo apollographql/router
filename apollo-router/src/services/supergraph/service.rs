@@ -37,6 +37,8 @@ use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
+use crate::plugins::better_name::RouterLimits;
+use crate::plugins::better_name::APOLLO_ROUTER_LIMITS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
 use crate::plugins::subscription::Subscription;
@@ -957,6 +959,15 @@ impl PluggableSupergraphServiceBuilder {
             .license(self.license)
             .build();
 
+        if let Some(router_limits) = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_ROUTER_LIMITS)
+            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<RouterLimits>())
+        {
+            router_limits.supergraph_service_internal(supergraph_service.clone(), self.license);
+        };
+
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
@@ -1068,5 +1079,9 @@ impl SupergraphCreator {
                 experimental_pql_prewarm,
             )
             .await
+    }
+
+    pub(crate) fn get_license(&self) -> &LicenseState {
+        &self.license
     }
 }
