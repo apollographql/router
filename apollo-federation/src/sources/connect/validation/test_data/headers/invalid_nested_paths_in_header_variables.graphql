@@ -1,0 +1,60 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+  )
+
+type Query {
+  scalar(scalar: String): String
+    @connect(
+      http: {
+        GET: "http://127.0.0.1"
+        headers: [
+          { name: "x-custom-header", value: "{$args.scalar.blah}"}
+        ]
+      }
+      selection: "$"
+    )
+  object(input: InputObject): Object
+    @connect(
+      http: {
+        GET: "http://127.0.0.1"
+        headers: [
+          { name: "x-custom-header", value: "{$args.input.fieldThatDoesntExist}"}
+        ]
+      }
+      selection: "id"
+    )
+  enum(enum: Enum): Enum
+  @connect(
+    http: {
+      GET: "http://127.0.0.1"
+      headers: [
+        { name: "x-custom-header", value: "{$args.enum.cantHaveFields}"}
+      ]
+    }
+    selection: "$"
+  )
+}
+
+type Object {
+  id: ID!
+  newField: String
+    @connect(
+      http: {
+        GET: "http://127.0.0.1"
+        headers: [
+          { name: "x-custom-header", value: "{$this.fieldThatDoesntExist}"}
+        ]
+      }
+      selection: "$"
+    )
+}
+
+input InputObject {
+  id: ID!
+}
+
+enum Enum {
+  VALUE
+}

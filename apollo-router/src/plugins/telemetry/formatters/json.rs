@@ -20,6 +20,7 @@ use tracing_subscriber::registry::SpanRef;
 
 use super::get_trace_and_span_id;
 use super::EventFormatter;
+use super::APOLLO_CONNECTOR_PREFIX;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config::AttributeValue;
@@ -128,7 +129,9 @@ where
             if let Some(otel_attributes) = otel_attributes {
                 for (key, value) in otel_attributes.iter().filter(|(key, _)| {
                     let key_name = key.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
+                        && !self.1.contains(&key_name)
                 }) {
                     serializer.serialize_entry(key.as_str(), &value.as_str())?;
                 }
@@ -147,7 +150,9 @@ where
                 };
                 for kv in custom_attributes.iter().filter(|kv| {
                     let key_name = kv.key.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
+                        && !self.1.contains(&key_name)
                 }) {
                     match &kv.value {
                         Value::Bool(value) => {
@@ -403,6 +408,7 @@ where
                             .filter(|(key, _)| {
                                 let key_name = key.as_str();
                                 !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
                                     && include_attributes.contains(key_name)
                             })
                             .map(|(key, val)| (key.clone(), val.clone())),
@@ -427,6 +433,7 @@ where
                             .filter(|kv| {
                                 let key_name = kv.key.as_str();
                                 !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
                                     && include_attributes.contains(key_name)
                             })
                             .map(|kv| (kv.key.clone(), kv.value.clone())),

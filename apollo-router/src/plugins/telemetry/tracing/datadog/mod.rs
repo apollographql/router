@@ -42,6 +42,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -201,7 +202,7 @@ impl TracingConfigurator for Config {
                     .to_string(),
             )
             .with_http_client(
-                reqwest::Client::builder()
+                reqwest_0_11::Client::builder()
                     // https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/7
                     // Set the idle timeout to something low to prevent termination of connections.
                     .pool_idle_timeout(Duration::from_millis(1))
@@ -219,7 +220,7 @@ impl TracingConfigurator for Config {
                 delegate: exporter,
                 span_metrics,
             },
-            opentelemetry::runtime::Tokio,
+            NamedTokioRuntime::new("datadog-tracing"),
         )
         .with_batch_config(self.batch_processor.clone().into())
         .build()

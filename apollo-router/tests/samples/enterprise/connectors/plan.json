@@ -1,0 +1,40 @@
+{
+  "enterprise": true,
+  "redis": false,
+  "snapshot": true,
+  "actions": [
+    {
+      "type": "Start",
+      "schema_path": "./supergraph.graphql",
+      "configuration_path": "./configuration.yaml",
+      "subgraphs": {
+        "jsonPlaceholder": {
+          "snapshot": {
+            "path": "./http_snapshots.json",
+            "base_url": "https://jsonplaceholder.typicode.com/"
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "query { post(id: 1) { id author { name } title } }"
+      },
+      "expected_response": {
+        "data": {
+          "post": {
+            "id": 1,
+            "author": {
+              "name": "Leanne Graham"
+            },
+            "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"
+          }
+        }
+      }
+    },
+    {
+      "type": "Stop"
+    }
+  ]
+}

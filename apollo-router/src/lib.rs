@@ -81,6 +81,9 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+#[doc(hidden)]
+pub mod otel_compat;
+
 pub use crate::axum_factory::unsupported_set_axum_router_callback;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
@@ -97,6 +100,10 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::SnapshotServer;
 pub use crate::test_harness::make_fake_batch;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
