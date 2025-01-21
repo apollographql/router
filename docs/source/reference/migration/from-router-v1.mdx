@@ -176,6 +176,32 @@ telemetry:
 
 - `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
 
+### Context Keys
+
+The router request context is used to share data across stages of the request pipeline. The keys have been renamed for consistency and to better indicate which pipeline stage or plugin populates the data. If you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, update your context keys to account for the new names:
+
+- `operation_name` -> `apollo::supergraph::operation_name`
+- `operation_kind` -> `apollo::supergraph::operation_kind`
+- `apollo_operation_id` -> `apollo::supergraph::operation_id`
+- `apollo_authentication::JWT::claims` -> `apollo::authentication::jwt_claims`
+- `apollo_authorization::authenticated::required` -> `apollo::authorization::authentication_required`
+- `apollo_authorization::scopes::required` -> `apollo::authorization::required_scopes`
+- `apollo_authorization::policies::required` -> `apollo::authorization::required_policies`
+- `cost.estimated` -> `apollo::demand_control::estimated_cost`
+- `cost.actual` -> `apollo::demand_control::actual_cost`
+- `cost.result` -> `apollo::demand_control::result`
+- `cost.strategy` -> `apollo::demand_control::strategy`
+- `experimental::expose_query_plan.plan` -> `apollo::expose_query_plan::plan`
+- `experimental::expose_query_plan.formatted_plan` -> `apollo::expose_query_plan::formatted_plan`
+- `experimental::expose_query_plan.enabled` -> `apollo::expose_query_plan::enabled`
+- `apollo_override::unresolved_labels` -> `apollo::progressive_override::unresolved_labels`
+- `apollo_override::labels_to_override` -> `apollo::progressive_override::labels_to_override`
+- `apollo_telemetry::client_name` -> `apollo::telemetry::client_name`
+- `apollo_telemetry::client_version` -> `apollo::telemetry::client_version`
+- `persisted_query_register` -> `apollo::apq::registered`
+- `persisted_query_hit` -> `apollo::apq::cache_hit`
+- `apollo_router::supergraph::first_event` -> `apollo::supergraph::first_event`
+
 ### Tracing
 
 `jaeger` exporter has been removed as Jaeger fully supports to OTLP format. To use the `otlp` exporter change your router config:
