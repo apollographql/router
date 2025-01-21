@@ -50,6 +50,7 @@ use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::ListenAddr;
 
 type InstanceFactory =
@@ -80,6 +81,9 @@ pub struct PluginInit<T> {
     pub(crate) launch_id: Option<Arc<String>>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
+
+    /// User's license's state, including any limits for use
+    pub(crate) license: LicenseState,
 }
 
 impl<T> PluginInit<T>
@@ -98,6 +102,7 @@ where
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
+            .license(LicenseState::default())
             .build()
     }
 
@@ -122,6 +127,7 @@ where
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
+            .license(LicenseState::default())
             .build()
     }
 
@@ -141,6 +147,7 @@ where
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
+            .license(LicenseState::default())
             .build()
     }
 
@@ -178,6 +185,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Self {
         PluginInit {
             config,
@@ -187,6 +195,7 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
             notify,
+            license,
         }
     }
 
@@ -203,6 +212,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -213,6 +223,7 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify,
+            license,
         })
     }
 
@@ -226,6 +237,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
+        license: LicenseState,
     ) -> Self {
         PluginInit {
             config,
@@ -236,6 +248,7 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
+            license,
         }
     }
 }
@@ -253,6 +266,7 @@ impl PluginInit<serde_json::Value> {
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
+            .license(self.license)
             .build()
     }
 }
@@ -340,6 +354,7 @@ impl PluginFactory {
         (self.instance_factory)(
             PluginInit::fake_builder()
                 .config(configuration.clone())
+                .license(LicenseState::default())
                 .build(),
         )
         .await

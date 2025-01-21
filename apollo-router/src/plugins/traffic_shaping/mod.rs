@@ -449,6 +449,7 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::spec::Schema;
+    use crate::uplink::license_enforcement::LicenseState;
     use crate::Configuration;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -734,9 +735,14 @@ mod test {
         )
         .unwrap();
 
-        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
-            .await
-            .unwrap();
+        let shaping_config = TrafficShaping::new(
+            PluginInit::fake_builder()
+                .config(config)
+                .license(LicenseState::default())
+                .build(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             shaping_config.subgraph_client_config("products"),

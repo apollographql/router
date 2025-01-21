@@ -24,6 +24,7 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 use crate::Notify;
 
@@ -120,6 +121,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                     .collect(),
             ))
             .notify(Notify::default())
+            .license(LicenseState::default())
             .build();
 
         let plugin = factory

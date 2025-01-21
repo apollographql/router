@@ -26,13 +26,6 @@ pub(crate) struct RouterLimits {
     pub(crate) tps: TpsLimitConf,
 }
 
-impl RouterLimits {
-    pub(crate) fn set_tps(&mut self, capacity: NonZeroU64, interval: Duration) {
-        self.tps.capacity = capacity;
-        self.tps.interval = interval;
-    }
-}
-
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TpsLimitConf {
@@ -46,9 +39,23 @@ pub(crate) struct TpsLimitConf {
 impl PluginPrivate for RouterLimits {
     type Config = ();
 
-    async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        // TODO: figure out what to do here
-        unreachable!()
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let limits = if let Some(limits) = init.license.get_limits() {
+            limits
+        } else {
+            tracing::warn!("License limits found during plugin initialization but failed to get_limits() during plugin initialization");
+            // FIXME: panic, figure out whether to default here or to where
+            panic!()
+        };
+
+        Ok(Self {
+            tps: TpsLimitConf {
+                // FIXME: unwrap
+                capacity: NonZeroU64::new(limits.tps.unwrap().capacity as u64).unwrap(),
+                // FIXME: unwrap
+                interval: limits.tps.unwrap().interval,
+            },
+        })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {

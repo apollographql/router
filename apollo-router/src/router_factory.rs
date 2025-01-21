@@ -173,6 +173,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .supergraph_schema_id(schema.schema_id.clone().into_inner())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
+                                .license(license)
                                 .build(),
                         )
                         .await
@@ -517,6 +518,7 @@ pub(crate) async fn add_plugin(
     notify: &crate::notification::Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
+    license: LicenseState,
 ) {
     match factory
         .create_instance(
@@ -528,6 +530,7 @@ pub(crate) async fn add_plugin(
                 .subgraph_schemas(subgraph_schemas)
                 .launch_id(launch_id)
                 .notify(notify.clone())
+                .license(license)
                 .build(),
         )
         .await
@@ -589,6 +592,7 @@ pub(crate) async fn create_plugins(
                 &configuration.notify.clone(),
                 &mut plugin_instances,
                 &mut errors,
+                license.clone(),
             )
             .await;
         }};
@@ -603,13 +607,18 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(mut plugin_config) = $opt_plugin_config {
+                    // If any of the mandatory plugins need special treatment, then we'll
+                    // perform it here.
                     if name == "apollo.telemetry" {
                         // The apollo.telemetry" plugin isn't happy with empty config, so we
-                        // give it some. If any of the other mandatory plugins need special
-                        // treatment, then we'll have to perform it here.
+                        // give it some.
                         // This is *required* by the telemetry module or it will fail...
                         inject_schema_id(&supergraph_schema_id, &mut plugin_config);
                     }
+                    if name == "apollo.router_limits" {
+                        todo!()
+                    }
+
                     add_plugin!(name.to_string(), factory, plugin_config);
                 }
             }
