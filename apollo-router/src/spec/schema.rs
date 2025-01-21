@@ -33,7 +33,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) schema_id: SchemaHash,
+    pub(crate) schema_id: SchemaId,
     pub(crate) launch_id: Option<Arc<String>>,
 }
 
@@ -152,8 +152,8 @@ impl Schema {
     }
 
     /// Compute the Schema ID for an SDL string.
-    pub(crate) fn schema_id(sdl: &str) -> SchemaHash {
-        SchemaHash::new(sdl)
+    pub(crate) fn schema_id(sdl: &str) -> SchemaId {
+        SchemaId::new(sdl)
     }
 
     /// Extracts a string containing the entire [`Schema`].
@@ -369,7 +369,7 @@ impl std::ops::Deref for ApiSchema {
 /// That means that differences in whitespace and comments affect the hash, not only semantic
 /// differences in the schema.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct SchemaHash(
+pub(crate) struct SchemaId(
     /// The internal representation is a pointer to a string.
     /// This is not ideal, it might be better eg. to just have a fixed-size byte array that can be
     /// turned into a string as needed.
@@ -377,7 +377,7 @@ pub(crate) struct SchemaHash(
     /// essentially a backwards compatibility decision.
     Arc<String>
 );
-impl SchemaHash {
+impl SchemaId {
     pub(crate) fn new(sdl: &str) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(sdl);
@@ -407,7 +407,7 @@ impl SchemaHash {
     }
 }
 
-impl Display for SchemaHash {
+impl Display for SchemaId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.as_str())
     }

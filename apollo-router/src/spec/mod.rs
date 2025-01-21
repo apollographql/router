@@ -16,7 +16,7 @@ pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
 pub(crate) use schema::QueryHash;
 pub(crate) use schema::Schema;
-pub(crate) use schema::SchemaHash;
+pub(crate) use schema::SchemaId;
 pub(crate) use selection::*;
 use serde::Deserialize;
 use serde::Serialize;
