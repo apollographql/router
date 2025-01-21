@@ -553,7 +553,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
-    let supergraph_schema_id = schema.schema_id.clone();
+    let supergraph_schema_id = Arc::new(schema.schema_id.to_string());
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -610,10 +610,7 @@ pub(crate) async fn create_plugins(
                         // give it some. If any of the other mandatory plugins need special
                         // treatment, then we'll have to perform it here.
                         // This is *required* by the telemetry module or it will fail...
-                        inject_schema_id(
-                            Some(&Schema::schema_id(&schema.raw_sdl)),
-                            &mut plugin_config,
-                        );
+                        inject_schema_id(Some(&supergraph_schema_id), &mut plugin_config);
                     }
                     add_plugin!(name.to_string(), factory, plugin_config);
                 }

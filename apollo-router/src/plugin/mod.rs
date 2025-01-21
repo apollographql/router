@@ -120,7 +120,7 @@ where
                         BoxError::from(e.errors.to_string())
                     })?,
             ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::SchemaHash(&supergraph_sdl).to_string())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()

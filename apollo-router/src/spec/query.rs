@@ -32,7 +32,6 @@ use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::fetch::QueryHash;
 use crate::services::layers::query_analysis::get_operation;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -40,6 +39,7 @@ use crate::spec::schema::ApiSchema;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
@@ -266,19 +266,12 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let hash = QueryHashVisitor::hash_query(
-            schema.supergraph_schema(),
-            &schema.raw_sdl,
-            &executable_document,
-            operation_name,
-        )
-        .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-
+        let hash = schema.schema_id.operation_hash(query, operation_name);
         ParsedDocumentInner::new(
             ast,
             Arc::new(executable_document),
             operation_name,
-            Arc::new(QueryHash(hash)),
+            Arc::new(hash),
         )
     }
 

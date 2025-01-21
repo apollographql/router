@@ -1,6 +1,7 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -14,6 +15,8 @@ use apollo_federation::Supergraph;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
+use serde::Deserialize;
+use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -30,7 +33,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) schema_id: Arc<String>,
+    pub(crate) schema_id: Arc<SchemaHash>,
     pub(crate) launch_id: Option<Arc<String>>,
 }
 
@@ -112,7 +115,7 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(&raw_sdl.sdl));
+        let schema_id = Arc::new(SchemaHash::new(&raw_sdl.sdl));
 
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
@@ -146,12 +149,6 @@ impl Schema {
 
     pub(crate) fn supergraph_schema(&self) -> &Valid<apollo_compiler::Schema> {
         self.supergraph.schema.schema()
-    }
-
-    pub(crate) fn schema_id(sdl: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(sdl.as_bytes());
-        format!("{:x}", hasher.finalize())
     }
 
     /// Extracts a string containing the entire [`Schema`].
@@ -359,6 +356,66 @@ impl std::ops::Deref for ApiSchema {
 
     fn deref(&self) -> &Self::Target {
         self.0.schema()
+    }
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct SchemaHash(#[serde(with = "hex")] Vec<u8>);
+impl SchemaHash {
+    pub fn new(sdl: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(sdl);
+        Self(hasher.finalize().as_slice().into())
+    }
+
+    pub fn operation_hash(&self, query: &str, operation_name: Option<&str>) -> QueryHash {
+        let mut hasher = Sha256::new();
+        hasher.update(self.0);
+        // byte separator between each part that is hashed
+        hasher.update(&[0xFF][..]);
+        hasher.update(query);
+        hasher.update(&[0xFF][..]);
+        hasher.update(operation_name.unwrap_or("-"));
+        QueryHash(hasher.finalize().as_slice().into())
+    }
+}
+
+impl std::fmt::Debug for SchemaHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SchemaHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl Display for SchemaHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
+// FIXME: rename to OperationHash since it include operation name
+#[derive(Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct QueryHash(#[serde(with = "hex")] Vec<u8>);
+
+impl std::fmt::Debug for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueryHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl Display for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
+#[cfg(test)]
+impl Default for QueryHash {
+    fn default() -> Self {
+        Self(Default::default())
     }
 }
 

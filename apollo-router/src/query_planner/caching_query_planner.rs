@@ -22,7 +22,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::fetch::QueryHash;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
@@ -44,6 +43,7 @@ use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -630,7 +630,6 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
-    pub(crate) schema_id: Arc<String>,
     pub(crate) operation: Option<String>,
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,

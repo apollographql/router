@@ -31,7 +31,7 @@ use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::fetch::QueryHash;
+use crate::spec::QueryHash;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;

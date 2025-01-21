@@ -34,6 +34,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
@@ -243,23 +244,6 @@ impl std::fmt::Debug for SubgraphOperation {
 impl std::fmt::Display for SubgraphOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self.as_serialized(), f)
-    }
-}
-
-#[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
-
-impl std::fmt::Debug for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("QueryHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-impl Display for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
     }
 }
 
@@ -697,9 +681,8 @@ impl FetchNode {
             supergraph_schema_hash,
             doc,
             self.operation_name.as_deref(),
-        ) {
-            self.schema_aware_hash = Arc::new(QueryHash(hash));
-        }
+        ) {}
+        self.schema_aware_hash = Arc::new(QueryHash::new(hash));
         Ok(())
     }
 

@@ -48,7 +48,6 @@ use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::dual_query_planner::BothModeComparisonJob;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -56,8 +55,8 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::operation_limits::OperationLimits;
-use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Query;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -616,18 +615,16 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         .to_executable_validate(api_schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .map_err(|e| SpecError::ValidationError(e.into()))?;
-                    let hash = QueryHashVisitor::hash_query(
-                        this.schema.supergraph_schema(),
-                        &this.schema.raw_sdl,
-                        &executable_document,
+                    let hash = QueryHash::new(
+                        &this.schema,
+                        &modified_query.to_string(),
                         operation_name.as_deref(),
-                    )
-                    .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+                    );
                     doc = ParsedDocumentInner::new(
                         modified_query,
                         Arc::new(executable_document),
                         operation_name.as_deref(),
-                        Arc::new(QueryHash(hash)),
+                        Arc::new(hash),
                     )?;
                 }
             }
@@ -731,22 +728,18 @@ impl BridgeQueryPlanner {
         };
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
-            key.filtered_query = new_doc.to_string();
+            let new_query = new_doc.to_string();
+            let new_hash = QueryHash::new(&self.schema, &new_query, key.operation_name.as_deref());
+
+            key.filtered_query = new_query;
             let executable_document = new_doc
                 .to_executable_validate(self.schema.api_schema())
                 .map_err(|e| SpecError::ValidationError(e.into()))?;
-            let hash = QueryHashVisitor::hash_query(
-                self.schema.supergraph_schema(),
-                &self.schema.raw_sdl,
-                &executable_document,
-                key.operation_name.as_deref(),
-            )
-            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
             doc = ParsedDocumentInner::new(
                 new_doc,
                 Arc::new(executable_document),
                 key.operation_name.as_deref(),
-                Arc::new(QueryHash(hash)),
+                Arc::new(new_hash),
             )?;
             selections.unauthorized.paths = unauthorized_paths;
         }
