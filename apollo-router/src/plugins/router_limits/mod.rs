@@ -22,16 +22,21 @@ use crate::plugin::PluginPrivate;
 use crate::services::router;
 use crate::services::RouterResponse;
 
+/// The limits placed on a router in virtue of what's in a user's license
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RouterLimits {
+    /// Transactions per second allowed based on license tier
     pub(crate) tps: TpsLimitConf,
 }
 
+/// Configuration for transactions per second
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TpsLimitConf {
+    /// THe number of operations allowed during a certain interval
     pub(crate) capacity: NonZeroU64,
+    /// The interval as specied in the user's license; this is in milliseconds
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     pub(crate) interval: Duration,

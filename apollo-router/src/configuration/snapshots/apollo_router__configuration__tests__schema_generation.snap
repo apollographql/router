@@ -8726,6 +8726,9 @@ expression: "&schema"
       "$ref": "#/definitions/Conf7",
       "description": "#/definitions/Conf7"
     },
+    "router_limits": {
+      "type": "null"
+    },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
       "description": "#/definitions/Sandbox"
