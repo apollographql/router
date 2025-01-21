@@ -39,7 +39,6 @@ use crate::spec::schema::ApiSchema;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
-use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;

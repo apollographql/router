@@ -395,15 +395,11 @@ impl SchemaId {
         self.0.as_str()
     }
 
-    pub(crate) fn operation_hash(&self, query: &str, operation_name: Option<&str>) -> QueryHash {
-        let mut hasher = Sha256::new();
-        hasher.update(self.0.as_bytes());
-        // byte separator between each part that is hashed
-        hasher.update(&[0xFF][..]);
-        hasher.update(query);
-        hasher.update(&[0xFF][..]);
-        hasher.update(operation_name.unwrap_or("-"));
-        QueryHash(hasher.finalize().as_slice().into())
+    /// Compute the hash for an executable document and operation name against this schema.
+    ///
+    /// See [QueryHash] for details of what's included.
+    pub(crate) fn operation_hash(&self, query_text: &str, operation_name: Option<&str>) -> QueryHash {
+        QueryHash::new(self, query_text, operation_name)
     }
 }
 
@@ -413,9 +409,37 @@ impl Display for SchemaId {
     }
 }
 
-// FIXME: rename to OperationHash since it include operation name
+/// A query hash is a unique hash for an operation from an executable document against a particular
+/// schema.
+///
+/// For a document with two queries A and B, queries A and B will result in a different hash even
+/// if the document text is identical.
+/// If query A is then executed against two different versions of the schema, the hash will be
+/// different again, depending on the [SchemaId].
+///
+/// A query hash can be obtained from a schema ID using [SchemaId::operation_hash].
+// FIXME: rename to OperationHash since it include operation name?
 #[derive(Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct QueryHash(#[serde(with = "hex")] Vec<u8>);
+pub(crate) struct QueryHash(
+    /// Unlike SchemaId, the query hash has no backwards compatibility motivations for the internal
+    /// type, as it's fully private. We could consider making this a fixed-size byte array rather
+    /// than a Vec, but it shouldn't make a huge difference.
+    #[serde(with = "hex")] Vec<u8>
+);
+
+impl QueryHash {
+    /// This constructor is not public, see [SchemaId::operation_hash] instead.
+    fn new(schema_id: &SchemaId, query_text: &str, operation_name: Option<&str>) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(schema_id.as_str());
+        // byte separator between each part that is hashed
+        hasher.update(&[0xFF][..]);
+        hasher.update(query_text);
+        hasher.update(&[0xFF][..]);
+        hasher.update(operation_name.unwrap_or("-"));
+        Self(hasher.finalize().as_slice().into())
+    }
+}
 
 impl std::fmt::Debug for QueryHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
