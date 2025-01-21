@@ -216,8 +216,9 @@ async fn execute(
             .unwrap_or(None);
         (debug, request_limit)
     });
+    let original_request = Arc::new(&request);
 
-    let requests = make_requests(request, connector, debug).map_err(BoxError::from)?;
+    let requests = make_requests(&request, connector, debug).map_err(BoxError::from)?;
 
     let tasks = requests.into_iter().map(
         move |Request {
@@ -238,6 +239,7 @@ async fn execute(
             }
             let original_subgraph_name = original_subgraph_name.clone();
             let request_limit = request_limit.clone();
+            let original_request = original_request.clone();
             async move {
                 let res = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
                     ConnectorResponse {
@@ -281,7 +283,9 @@ async fn execute(
                     res
                 };
 
-                Ok::<_, BoxError>(process_response(res, connector, &context, debug).await)
+                Ok::<_, BoxError>(
+                    process_response(res, connector, &context, debug, original_request).await,
+                )
             }
         },
     );

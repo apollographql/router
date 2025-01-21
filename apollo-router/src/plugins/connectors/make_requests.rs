@@ -45,7 +45,7 @@ impl RequestInputs {
         config: Option<&CustomConfiguration>,
         context: &Context,
         status: Option<u16>,
-        original_request: Option<&connect::Request>,
+        original_request: Option<Arc<&connect::Request>>,
         response_parts: Option<&Parts>,
     ) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
@@ -210,7 +210,7 @@ impl From<&ResponseKey> for Path {
 }
 
 pub(crate) fn make_requests(
-    request: connect::Request,
+    request: &connect::Request,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
@@ -238,7 +238,7 @@ fn request_params_to_requests(
                 connector.config.as_ref(),
                 &original_request.context,
                 None,
-                Some(original_request),
+                Some(Arc::new(original_request)),
                 None,
             ),
             original_request,
@@ -2712,7 +2712,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        let requests: Vec<_> = super::make_requests(req, &connector, &None)
+        let requests: Vec<_> = super::make_requests(&req, &connector, &None)
             .unwrap()
             .into_iter()
             .map(|req| {
