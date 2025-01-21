@@ -412,7 +412,10 @@ impl Display for QueryHash {
     }
 }
 
-#[cfg(test)]
+// FIXME: It seems bad that you can create an empty hash easily and use it in security-critical
+// places. This impl should be deleted outright and we should update usage sites.
+// If the query hash is truly not required to contain data in those usage sites, we should use
+// something like an Option instead.
 impl Default for QueryHash {
     fn default() -> Self {
         Self(Default::default())

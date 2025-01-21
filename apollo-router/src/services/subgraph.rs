@@ -102,7 +102,9 @@ impl Request {
             subgraph_name,
             subscription_stream,
             connection_closed_signal,
-            query_hash: Default::default(),
+            // XXX: This seems wrong and bad?
+            // We should figure out how this is used.
+            query_hash: QueryHash::default(),
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId::new(),
