@@ -375,7 +375,7 @@ pub(crate) struct SchemaId(
     /// turned into a string as needed.
     /// But `Arc<String>` is used in the public plugin interface and other places, so this is
     /// essentially a backwards compatibility decision.
-    Arc<String>
+    Arc<String>,
 );
 impl SchemaId {
     pub(crate) fn new(sdl: &str) -> Self {
@@ -398,7 +398,11 @@ impl SchemaId {
     /// Compute the hash for an executable document and operation name against this schema.
     ///
     /// See [QueryHash] for details of what's included.
-    pub(crate) fn operation_hash(&self, query_text: &str, operation_name: Option<&str>) -> QueryHash {
+    pub(crate) fn operation_hash(
+        &self,
+        query_text: &str,
+        operation_name: Option<&str>,
+    ) -> QueryHash {
         QueryHash::new(self, query_text, operation_name)
     }
 }
@@ -424,7 +428,8 @@ pub(crate) struct QueryHash(
     /// Unlike SchemaId, the query hash has no backwards compatibility motivations for the internal
     /// type, as it's fully private. We could consider making this a fixed-size byte array rather
     /// than a Vec, but it shouldn't make a huge difference.
-    #[serde(with = "hex")] Vec<u8>
+    #[serde(with = "hex")]
+    Vec<u8>,
 );
 
 impl QueryHash {

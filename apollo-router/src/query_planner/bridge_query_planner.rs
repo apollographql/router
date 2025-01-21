@@ -56,7 +56,6 @@ use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
-use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -452,7 +451,7 @@ impl BridgeQueryPlanner {
         )?;
 
         let (fragments, operation, defer_stats, schema_aware_hash) =
-            Query::extract_query_information(&self.schema, executable, operation_name)?;
+            Query::extract_query_information(&self.schema, &query, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -615,11 +614,10 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         .to_executable_validate(api_schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .map_err(|e| SpecError::ValidationError(e.into()))?;
-                    let hash = QueryHash::new(
-                        &this.schema,
-                        &modified_query.to_string(),
-                        operation_name.as_deref(),
-                    );
+                    let hash = self
+                        .schema
+                        .schema_id
+                        .operation_hash(&modified_query.to_string(), operation_name.as_deref());
                     doc = ParsedDocumentInner::new(
                         modified_query,
                         Arc::new(executable_document),
@@ -729,7 +727,10 @@ impl BridgeQueryPlanner {
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             let new_query = new_doc.to_string();
-            let new_hash = self.schema.schema_id.operation_hash(&new_query, key.operation_name.as_deref());
+            let new_hash = self
+                .schema
+                .schema_id
+                .operation_hash(&new_query, key.operation_name.as_deref());
 
             key.filtered_query = new_query;
             let executable_document = new_doc

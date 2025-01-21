@@ -56,6 +56,7 @@ pub struct QueryPlan {
 #[buildstructor::buildstructor]
 impl QueryPlan {
     #[builder]
+    #[cfg(test)]
     pub(crate) fn fake_new(
         root: Option<PlanNode>,
         usage_reporting: Option<UsageReporting>,

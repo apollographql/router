@@ -682,7 +682,9 @@ impl FetchNode {
             doc,
             self.operation_name.as_deref(),
         ) {}
-        self.schema_aware_hash = Arc::new(todo!("Here we need either schema.operation_hash() or the advanced query-aware hash")); // QueryHash::new(hash));
+        self.schema_aware_hash = Arc::new(todo!(
+            "Here we need either schema.operation_hash() or the advanced query-aware hash"
+        )); // QueryHash::new(hash));
         Ok(())
     }
 
