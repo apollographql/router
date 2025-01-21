@@ -24,7 +24,9 @@ The exact image version to use depends on which release you wish to use. In the 
 
 To run the router, your Docker container must have the [`APOLLO_GRAPH_REF`](/router/configuration/overview#apollo_graph_ref) and [`APOLLO_KEY`](/router/configuration/overview#apollo_key) environment variables set to your graph ref and API key, respectively.
 
-Here's a basic example of running a router image in Docker. Make sure to replace `<router-image-version>` with whichever version you want to use, such as `v1.32.0`.
+Below is a basic example of running a router image with Docker, either with `docker run` or `docker compose`. It downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
+
+You can use `docker run` with the following example command:
 
 ```bash title="Docker"
 docker run -p 4000:4000 \
@@ -34,7 +36,20 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/router:<router-image-version>
 ```
 
-This command downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
+You can also use `docker compose` with the following example `compose.yaml`:
+
+```yaml title="compose.yaml"
+services:
+  apollo-router:
+    image: ghcr.io/apollographql/router:<router-image-version>
+    ports:
+      - "4000:4000"
+    environment:
+      APOLLO_GRAPH_REF: "<your-graph-ref>"
+      APOLLO_KEY: "<your-graph-api-key>"
+```
+
+Whether you use `docker run` or `docker compose`, make sure to replace `<router-image-version>` with whichever version you want to use, such as `v1.58.0`, and `<your-graph-ref>` and `<your-graph-api-key>` with your graph reference and API key, respectively.
 
 For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/router/configuration/overview/).
 
