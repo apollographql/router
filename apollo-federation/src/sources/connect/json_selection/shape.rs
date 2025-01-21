@@ -175,10 +175,10 @@ impl ComputeOutputShape for PathList {
         dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
     ) -> Shape {
-        match self {
-            Self::Var(ranged_var_name, tail) => {
+        let current_shape = match self {
+            Self::Var(ranged_var_name, _) => {
                 let var_name = ranged_var_name.as_ref();
-                let var_shape = if var_name == &KnownVariable::AtSign {
+                if var_name == &KnownVariable::AtSign {
                     input_shape
                 } else if var_name == &KnownVariable::Dollar {
                     dollar_shape.clone()
@@ -186,136 +186,84 @@ impl ComputeOutputShape for PathList {
                     shape.clone()
                 } else {
                     Shape::name(var_name.as_str())
-                };
-                tail.compute_output_shape(var_shape, dollar_shape, named_shapes)
+                }
             }
 
             // For the first key in a path, PathSelection::compute_output_shape
             // will have set our input_shape equal to its dollar_shape, thereby
             // ensuring that some.nested.path is equivalent to
             // $.some.nested.path.
-            Self::Key(key, rest) => match input_shape.case() {
-                // At runtime we abandon evaluating the PathList when we
-                // encounter None, so we do not want to call
-                // rest.compute_output_shape recursively when the
-                // input_shape.is_none(), and we also want to pass through None
-                // as a member of any Shape::one input unions.
-                ShapeCase::None => input_shape,
-                ShapeCase::One(cases) => Shape::one(cases.iter().map(|case| {
-                    if case.is_none() {
-                        case.clone()
-                    } else {
-                        rest.compute_output_shape(
-                            case.field(key.as_str()),
-                            dollar_shape.clone(),
-                            named_shapes,
-                        )
-                    }
-                })),
+            Self::Key(key, _) => input_shape.field(key.as_str()),
 
-                ShapeCase::Array { prefix, tail } => {
-                    // Map rest.compute_output_shape over the prefix and rest
-                    // elements of the array shape, so we don't have to map
-                    // array shapes for the other PathList variants.
-                    let mapped_prefix = prefix
-                        .iter()
-                        .map(|shape| {
-                            if shape.is_none() {
-                                shape.clone()
-                            } else {
-                                rest.compute_output_shape(
-                                    shape.field(key.as_str()),
-                                    dollar_shape.clone(),
-                                    named_shapes,
-                                )
-                            }
-                        })
-                        .collect::<Vec<_>>();
+            Self::Expr(expr, _) => {
+                expr.compute_output_shape(input_shape, dollar_shape.clone(), named_shapes)
+            }
 
-                    let mapped_rest = if tail.is_none() {
-                        tail.clone()
-                    } else {
-                        rest.compute_output_shape(
-                            tail.field(key.as_str()),
-                            dollar_shape.clone(),
-                            named_shapes,
-                        )
-                    };
-
-                    Shape::array(mapped_prefix, mapped_rest)
-                }
-
-                _ => rest.compute_output_shape(
-                    input_shape.field(key.as_str()),
-                    dollar_shape.clone(),
-                    named_shapes,
-                ),
-            },
-
-            Self::Expr(expr, tail) => tail.compute_output_shape(
-                expr.compute_output_shape(input_shape, dollar_shape.clone(), named_shapes),
-                dollar_shape.clone(),
-                named_shapes,
-            ),
-
-            Self::Method(method_name, method_args, tail) => {
-                if input_shape.is_none() {
-                    // Following WithRange<PathList>::apply_to_path, we do not
-                    // want to apply methods to missing input data.
-                    return input_shape;
-                }
-
+            Self::Method(method_name, method_args, _) => {
                 if let Some(method) = ArrowMethod::lookup(method_name) {
-                    let method_result_shape = match input_shape.case() {
-                        // At runtime we never invoke an arrow method with an
-                        // input_shape of None, so we avoid calling method.shape
-                        // when the input_shape is None, or for None members of
-                        // Shape::one unions (though the None member is passed
-                        // through to the resulting Shape::one union).
-                        ShapeCase::None => input_shape,
-                        ShapeCase::One(cases) => Shape::one(cases.iter().map(|case| {
-                            if case.is_none() {
-                                case.clone()
-                            } else {
-                                method.shape(
-                                    method_name,
-                                    method_args.as_ref(),
-                                    case.clone(),
-                                    dollar_shape.clone(),
-                                    named_shapes,
-                                )
-                            }
-                        })),
-                        _ => method.shape(
-                            method_name,
-                            method_args.as_ref(),
-                            input_shape,
-                            dollar_shape.clone(),
-                            named_shapes,
-                        ),
-                    };
-
-                    if method_result_shape.is_none() {
-                        method_result_shape.clone()
-                    } else {
-                        tail.compute_output_shape(
-                            method_result_shape,
-                            dollar_shape.clone(),
-                            named_shapes,
-                        )
-                    }
+                    method.shape(
+                        method_name,
+                        method_args.as_ref(),
+                        input_shape,
+                        dollar_shape.clone(),
+                        named_shapes,
+                    )
                 } else {
                     let message = format!("Method ->{} not found", method_name.as_str());
-                    Shape::error_with_range(message.as_str(), method_name.range())
+                    return Shape::error_with_range(message.as_str(), method_name.range());
                 }
             }
 
             Self::Selection(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape.clone(), named_shapes)
             }
 
             Self::Empty => input_shape,
-        }
+        };
+
+        compute_tail_shape(self, current_shape, dollar_shape.clone(), named_shapes)
+    }
+}
+
+fn compute_tail_shape(
+    path: &PathList,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_shapes: &IndexMap<String, Shape>,
+) -> Shape {
+    match input_shape.case() {
+        ShapeCase::None => input_shape,
+        ShapeCase::One(shapes) => Shape::one(shapes.iter().map(|shape| {
+            compute_tail_shape(path, shape.clone(), dollar_shape.clone(), named_shapes)
+        })),
+        ShapeCase::All(shapes) => Shape::all(shapes.iter().map(|shape| {
+            compute_tail_shape(path, shape.clone(), dollar_shape.clone(), named_shapes)
+        })),
+        ShapeCase::Error(error) => ShapeCase::Error(shape::Error {
+            message: error.message.clone(),
+            range: error.range.clone(),
+            partial: error.partial.as_ref().map(|shape| {
+                compute_tail_shape(path, shape.clone(), dollar_shape.clone(), named_shapes)
+            }),
+        })
+        .simplify(),
+        _ => match path {
+            PathList::Var(_, tail)
+            | PathList::Key(_, tail)
+            | PathList::Expr(_, tail)
+            | PathList::Method(_, _, tail) => match input_shape.case() {
+                ShapeCase::None => {
+                    if tail.is_empty() {
+                        input_shape
+                    } else {
+                        Shape::error_with_range("Path applied to nothing", tail.range())
+                    }
+                }
+                _ => tail.compute_output_shape(input_shape, dollar_shape, named_shapes),
+            },
+            PathList::Selection(_) => input_shape,
+            PathList::Empty => input_shape,
+        },
     }
 }
 
