@@ -10,11 +10,10 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
-use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::QueryPlannerService;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
@@ -94,8 +93,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             let schema = Schema::parse(schema, &config).unwrap();
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
-            let introspection = Arc::new(IntrospectionCache::new(&config));
-            let planner = BridgeQueryPlanner::new(schema.into(), Arc::new(config), introspection)
+            let planner = QueryPlannerService::new(schema.into(), Arc::new(config))
                 .await
                 .unwrap();
             (sdl, supergraph, planner.subgraph_schemas())
@@ -112,7 +110,12 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
-            .subgraph_schemas(subgraph_schemas)
+            .subgraph_schemas(Arc::new(
+                subgraph_schemas
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.schema.clone()))
+                    .collect(),
+            ))
             .notify(Notify::default())
             .build();
 

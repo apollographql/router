@@ -1,0 +1,29 @@
+# rover supergraph compose --config apollo-router/tests/samples/enterprise/connectors-defer/supergraph.yaml > apollo-router/tests/samples/enterprise/connectors-defer/supergraph.graphql
+federation_version: =2.10.0-preview.3
+subgraphs:
+  connectors: # required for snapshot overrides
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "test", http: {baseURL: "http://localhost:4007/"})
+
+        type Query {
+          e(id: ID!): E @connect(source: "test", http: { GET: "/e/{$$args.id}" }, selection: "f", entity: true)
+        }
+
+        type Mutation {
+          m: M @connect(source: "test", http: { POST: "/" }, selection: "f entity { id }")
+        }
+
+        type M {
+          f: ID
+          entity: E
+        }
+
+        type E @key(fields: "id") {
+          id: ID!
+          f: ID
+        }

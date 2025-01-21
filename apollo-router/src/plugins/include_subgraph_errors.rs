@@ -1,14 +1,20 @@
 use std::collections::HashMap;
+use std::future;
 
+use futures::stream;
+use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::execution;
+use crate::services::fetch::SubgraphNameExt;
 use crate::services::subgraph;
 use crate::services::SubgraphResponse;
 
@@ -84,6 +90,34 @@ impl Plugin for IncludeSubgraphErrors {
             })
             .boxed()
     }
+
+    // TODO: promote fetch_service to a plugin hook
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let all = self.config.all;
+        let subgraphs = self.config.subgraphs.clone();
+        ServiceBuilder::new()
+            .map_response(move |mut response: execution::Response| {
+                response.response = response.response.map(move |response| {
+                    response
+                        .flat_map(move |mut response| {
+                            response.errors.iter_mut().for_each(|error| {
+                                if let Some(subgraph_name) = error.subgraph_name() {
+                                    if !*subgraphs.get(&subgraph_name).unwrap_or(&all) {
+                                        tracing::info!("redacted subgraph({subgraph_name}) error");
+                                        error.message = REDACTED_ERROR_MESSAGE.to_string();
+                                        error.extensions = Object::default();
+                                    }
+                                }
+                            });
+                            stream::once(future::ready(response))
+                        })
+                        .boxed()
+                });
+                response
+            })
+            .service(service)
+            .boxed()
+    }
 }
 
 #[cfg(test)]
@@ -101,7 +135,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlannerPool;
+    use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -210,11 +244,17 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Schema::parse(schema, &configuration).unwrap();
 
-        let planner = BridgeQueryPlannerPool::new(schema.into(), Arc::clone(&configuration))
+        let planner = QueryPlannerService::new(schema.into(), Arc::clone(&configuration))
             .await
             .unwrap();
         let schema = planner.schema();
-        let subgraph_schemas = planner.subgraph_schemas();
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 

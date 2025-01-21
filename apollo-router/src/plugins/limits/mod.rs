@@ -194,7 +194,6 @@ impl LimitsPlugin {
         match resp {
             Ok(r) => {
                 if r.response.status() == StatusCode::PAYLOAD_TOO_LARGE {
-                    Self::increment_legacy_metric();
                     Ok(BodyLimitError::PayloadTooLarge.into_response(ctx))
                 } else {
                     Ok(r)
@@ -209,25 +208,10 @@ impl LimitsPlugin {
 
                 match root_cause.downcast_ref::<BodyLimitError>() {
                     None => Err(e),
-                    Some(_) => {
-                        Self::increment_legacy_metric();
-                        Ok(BodyLimitError::PayloadTooLarge.into_response(ctx))
-                    }
+                    Some(_) => Ok(BodyLimitError::PayloadTooLarge.into_response(ctx)),
                 }
             }
         }
-    }
-
-    fn increment_legacy_metric() {
-        // Remove this eventually
-        // This is already handled by the telemetry plugin via the http.server.request metric.
-        u64_counter!(
-            "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
-            1,
-            status = StatusCode::PAYLOAD_TOO_LARGE.as_u16() as i64,
-            error = BodyLimitError::PayloadTooLarge.to_string()
-        );
     }
 }
 
@@ -261,7 +245,6 @@ mod test {
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
-    use crate::services::router::body::get_body_bytes;
 
     #[tokio::test]
     async fn test_body_content_length_limit_exceeded() {
@@ -269,12 +252,12 @@ mod test {
         let resp = plugin
             .call_router(
                 router::Request::fake_builder()
-                    .body("This is a test")
+                    .body(router::body::from_bytes("This is a test"))
                     .build()
                     .unwrap(),
                 |r| async {
                     let body = r.router_request.into_body();
-                    let _ = get_body_bytes(body).await?;
+                    let _ = router::body::into_bytes(body).await?;
                     panic!("should have failed to read stream")
                 },
             )
@@ -284,7 +267,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -299,10 +282,13 @@ mod test {
         let plugin = plugin().await;
         let resp = plugin
             .call_router(
-                router::Request::fake_builder().body("").build().unwrap(),
+                router::Request::fake_builder()
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
                 |r| async {
                     let body = r.router_request.into_body();
-                    let body = get_body_bytes(body).await;
+                    let body = router::body::into_bytes(body).await;
                     assert!(body.is_ok());
                     Ok(router::Response::fake_builder().build().unwrap())
                 },
@@ -314,7 +300,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::OK);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -331,7 +317,7 @@ mod test {
             .call_router(
                 router::Request::fake_builder()
                     .header("Content-Length", "100")
-                    .body("")
+                    .body(router::body::empty())
                     .build()
                     .unwrap(),
                 |_| async { panic!("should have rejected request") },
@@ -342,7 +328,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -359,7 +345,7 @@ mod test {
             .call_router(
                 router::Request::fake_builder()
                     .header("Content-Length", "5")
-                    .body("")
+                    .body(router::body::empty())
                     .build()
                     .unwrap(),
                 |_| async { Ok(router::Response::fake_builder().build().unwrap()) },
@@ -370,7 +356,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::OK);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -386,7 +372,10 @@ mod test {
         let plugin = plugin().await;
         let resp = plugin
             .call_router(
-                router::Request::fake_builder().body("").build().unwrap(),
+                router::Request::fake_builder()
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
                 |_| async { Err(BoxError::from("error")) },
             )
             .await;
@@ -399,7 +388,7 @@ mod test {
         let resp = plugin
             .call_router(
                 router::Request::fake_builder()
-                    .body("This is a test")
+                    .body(router::body::from_bytes("This is a test"))
                     .build()
                     .unwrap(),
                 |r| async move {
@@ -412,7 +401,7 @@ mod test {
                         control.update_limit(100);
                     });
                     let body = r.router_request.into_body();
-                    let _ = get_body_bytes(body).await?;
+                    let _ = router::body::into_bytes(body).await?;
 
                     // Now let's check progress
                     r.context.extensions().with_lock(|lock| {
@@ -429,7 +418,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::OK);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
