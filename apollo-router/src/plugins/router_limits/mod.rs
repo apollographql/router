@@ -22,17 +22,17 @@ use crate::plugin::PluginPrivate;
 use crate::services::router;
 use crate::services::RouterResponse;
 
-/// The limits placed on a router in virtue of what's in a user's license
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+/// The limits placed on a router in virtue of what's in a user's license
 pub(crate) struct RouterLimits {
     /// Transactions per second allowed based on license tier
     pub(crate) tps: TpsLimitConf,
 }
 
-/// Configuration for transactions per second
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+/// Configuration for transactions per second
 pub(crate) struct TpsLimitConf {
     /// The number of operations allowed during a certain interval
     pub(crate) capacity: NonZeroU64,
@@ -42,10 +42,12 @@ pub(crate) struct TpsLimitConf {
     pub(crate) interval: Duration,
 }
 
-/// Here's some description
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub(crate) struct RouterLimitsConfig {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for RouterLimits {
-    type Config = ();
+    type Config = RouterLimitsConfig;
 
     // This will return an error only in cases where the router_limits plugin has been registered
     // but there are no claims in the license for TPS. We _must_ check that there are claims in the
