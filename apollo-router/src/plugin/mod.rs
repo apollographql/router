@@ -96,7 +96,7 @@ where
                 Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
                     .expect("failed to parse supergraph schema"),
             ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
