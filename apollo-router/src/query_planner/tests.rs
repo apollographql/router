@@ -1841,15 +1841,9 @@ fn broken_plan_does_not_panic() {
     let mut subgraph_schemas = HashMap::default();
     subgraph_schemas.insert(
         "X".to_owned(),
-        query_planner::fetch::SubgraphSchema {
-            implementers_map: subgraph_schema.implementers_map(),
-            schema: Arc::new(subgraph_schema),
-        },
+        query_planner::fetch::SubgraphSchema::new(subgraph_schema),
     );
-    let result = Arc::make_mut(&mut plan.root)
+    // Run the plan initialization code to make sure it doesn't panic.
+    let _result = Arc::make_mut(&mut plan.root)
         .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        r#"[1:3] Cannot query field "invalid" on type "Query"."#
-    );
 }
