@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/query_planner/bridge_query_planner.rs
 expression: plan.root
+snapshot_kind: text
 ---
 Fetch(
     FetchNode {
@@ -15,7 +16,7 @@ Fetch(
         output_rewrites: None,
         context_rewrites: None,
         schema_aware_hash: QueryHash(
-            "65e550250ef331b8dc49d9e2da8f4cd5add979720cbe83ba545a0f78ece8d329",
+            "89a95c03e0457b9f6158a0f642cc9a8b19b07ec4fead162e1a9b76ccfcb0cb84",
         ),
         authorization: CacheKeyMetadata {
             is_authenticated: false,

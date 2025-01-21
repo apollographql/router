@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/expose_query_plan.rs
 expression: "serde_json::to_value(response).unwrap()"
+snapshot_kind: text
 ---
 {
   "data": {
@@ -69,7 +70,7 @@ expression: "serde_json::to_value(response).unwrap()"
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "45b4beebcbf1df72ab950db7bd278417712b1aa39119317f44ad5b425bdb6997",
+              "schemaAwareHash": "4454182972c9e14f1a70b967c83413fec5c466e708f1decf6e356b6f3b596fa6",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -109,7 +110,7 @@ expression: "serde_json::to_value(response).unwrap()"
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "645f3f8763133d2376e33ab3d1145be7ded0ccc8e94e20aba1fbaa34a51633da",
+                "schemaAwareHash": "54393309c6bee5d5a6b7d8f70862bf10fffe88bb17f4970b878c01625703d774",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -156,7 +157,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "a79f69245d777abc4afbd7d0a8fc434137fa4fd1079ef082edf4c7746b5a0fcd",
+                    "schemaAwareHash": "455cef144cced4e4ebe26a086102e68fafa8353ff56205aed28f7440f3d1d443",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -200,7 +201,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "5ad94764f288a41312e07745510bf5dade2b63fb82c3d896f7d00408dbbe5cce",
+                    "schemaAwareHash": "6accc51e4e2c72ce715c96d9c33036e0f83391ecd9caf3e78832828b4170054d",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
