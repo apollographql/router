@@ -759,7 +759,6 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(LicenseState::default())
                     .build(),
             )
             .await

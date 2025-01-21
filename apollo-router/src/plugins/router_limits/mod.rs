@@ -108,11 +108,12 @@ mod test {
     use tower::Service;
 
     use super::*;
-    use crate::{
-        plugin::{test::MockRouterService, DynPlugin},
-        services::RouterRequest,
-        uplink::license_enforcement::{LicenseLimits, LicenseState, TpsLimit},
-    };
+    use crate::plugin::test::MockRouterService;
+    use crate::plugin::DynPlugin;
+    use crate::services::RouterRequest;
+    use crate::uplink::license_enforcement::LicenseLimits;
+    use crate::uplink::license_enforcement::LicenseState;
+    use crate::uplink::license_enforcement::TpsLimit;
 
     const APOLLO_ROUTER_LIMITS: &str = "apollo.router_limits";
 
