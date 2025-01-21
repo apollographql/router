@@ -5,7 +5,6 @@ use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -34,9 +33,9 @@ use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
-use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
+use crate::spec::SchemaId;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -99,7 +98,18 @@ pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
 
 pub(crate) struct SubgraphSchema {
     pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
-    pub(crate) implementers_map: HashMap<Name, apollo_compiler::schema::Implementers>,
+    // TODO: Ideally should have separate nominal type for subgraph's schema hash
+    pub(crate) hash: Arc<SchemaId>,
+}
+
+impl SubgraphSchema {
+    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
+        let sdl = schema.to_string();
+        Self {
+            schema: Arc::new(schema),
+            hash: Arc::new(SchemaId::new(&sdl)),
+        }
+    }
 }
 
 /// A fetch node.
@@ -677,22 +687,12 @@ impl FetchNode {
     pub(crate) fn init_parsed_operation_and_hash_subquery(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
-        supergraph_schema_hash: &str,
-    ) -> Result<(), ValidationErrors> {
+    ) {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        let doc = self.operation.init_parsed(&schema.schema)?;
-
-        if let Ok(hash) = QueryHashVisitor::hash_query(
-            &schema.schema,
-            supergraph_schema_hash,
-            &schema.implementers_map,
-            doc,
+        self.schema_aware_hash = Arc::new(schema.hash.operation_hash(
+            self.operation.as_serialized(),
             self.operation_name.as_deref(),
-        ) {}
-        self.schema_aware_hash = Arc::new(todo!(
-            "Here we need either schema.operation_hash() or the advanced query-aware hash"
-        )); // QueryHash::new(hash));
-        Ok(())
+        ));
     }
 
     pub(crate) fn extract_authorization_metadata(

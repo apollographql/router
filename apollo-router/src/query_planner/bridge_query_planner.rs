@@ -369,10 +369,7 @@ impl PlannerMode {
                     .map(|(name, schema)| {
                         (
                             name.to_string(),
-                            SubgraphSchema {
-                                implementers_map: schema.schema().implementers_map(),
-                                schema: Arc::new(schema.schema().clone()),
-                            },
+                            SubgraphSchema::new(schema.schema().clone()),
                         )
                     })
                     .collect())
@@ -384,13 +381,7 @@ impl PlannerMode {
             .map(|(name, schema_str)| {
                 let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
                     .map_err(|errors| SchemaError::Validate(errors.into()))?;
-                Ok((
-                    name,
-                    SubgraphSchema {
-                        implementers_map: schema.implementers_map(),
-                        schema: Arc::new(schema),
-                    },
-                ))
+                Ok((name, SubgraphSchema::new(schema)))
             })
             .collect()
     }
@@ -508,7 +499,7 @@ impl BridgeQueryPlanner {
                     root_node.init_parsed_operations_and_hash_subqueries(
                         &self.subgraph_schemas,
                         &self.schema.raw_sdl,
-                    )?;
+                    );
                     root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
                     Ok(())
                 },
