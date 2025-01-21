@@ -45,6 +45,7 @@ use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
+use crate::spec::SchemaId;
 use crate::spec::SpecError;
 use crate::Configuration;
 
@@ -648,6 +649,10 @@ pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
     pub(crate) hash: Arc<QueryHash>,
+    // XXX(@goto-bus-stop): It's probably correct to remove this, since having it here is
+    // misleading. The schema ID is *not* used in the Redis cache, but it's okay because the QueryHash
+    // is schema-aware.
+    pub(crate) schema_id: SchemaId,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode_hash: Arc<ConfigModeHash>,
