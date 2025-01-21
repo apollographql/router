@@ -624,7 +624,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         .to_executable_validate(api_schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .map_err(|e| SpecError::ValidationError(e.into()))?;
-                    let hash = self
+                    let hash = this
                         .schema
                         .schema_id
                         .operation_hash(&modified_query.to_string(), operation_name.as_deref());
