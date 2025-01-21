@@ -687,6 +687,10 @@ pub(crate) async fn create_plugins(
 
     if let Some(_limits) = license.get_limits() {
         add_optional_apollo_plugin!("router_limits");
+    } else {
+        // If there are no limits and thereby no router_limits plugin, remove it from the registry
+        apollo_plugins_config.remove("apollo.router_limits");
+        apollo_plugin_factories.remove("apollo.router_limits");
     }
 
     add_optional_apollo_plugin!("forbid_mutations");
