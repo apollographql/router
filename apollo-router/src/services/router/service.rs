@@ -946,7 +946,7 @@ impl RouterCreator {
             // NOTE: Buffer is required because the static_page service is not Clone.
             // The buffer should be >= concurrency as per the advice
             // at: https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound
-            .buffered() // XXX: Added temporarily during backpressure fixing
+            .buffered() // XXX: Added during backpressure fixing
             .layer(static_page.clone())
             .service(
                 supergraph_creator

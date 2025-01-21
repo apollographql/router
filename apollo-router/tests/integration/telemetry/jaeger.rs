@@ -104,8 +104,6 @@ async fn test_local_root_no_sample() -> Result<(), BoxError> {
     Ok(())
 }
 
-/*
- * XXX: COMMENTED OUT SO THAT WE CAN SEE WHICH OTHER TESTS ARE FAILING
 #[tokio::test(flavor = "multi_thread")]
 async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -133,7 +131,6 @@ async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
     }
     panic!("tried 100 requests with telemetry sampled at 50%, no traces were found")
 }
-*/
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]

@@ -932,7 +932,7 @@ impl PluggableSupergraphServiceBuilder {
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
         let sb = ServiceBuilder::new()
-            .buffered() // XXX: Added temporarily during backpressure fixing
+            .buffered() // XXX: Added during backpressure fixing
             .layer(content_negotiation::SupergraphLayer::default())
             .service(
                 self.plugins
