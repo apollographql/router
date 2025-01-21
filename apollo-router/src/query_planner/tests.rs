@@ -80,7 +80,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
@@ -141,7 +141,7 @@ async fn fetch_includes_operation_name() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -202,7 +202,7 @@ async fn fetch_makes_post_requests() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -331,7 +331,7 @@ async fn defer() {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             }.into(),
-            query: Arc::new(Query::empty()),
+            query: Arc::new(Query::empty_for_tests()),
             query_metrics: Default::default(),
             estimated_size: Default::default(),
         };
@@ -618,7 +618,7 @@ async fn dependent_mutations() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -1833,7 +1833,7 @@ fn broken_plan_does_not_panic() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };

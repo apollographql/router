@@ -879,7 +879,7 @@ mod tests {
                         referenced_fields_by_type: Default::default(),
                     }
                     .into(),
-                    query: Arc::new(Query::empty()),
+                    query: Arc::new(Query::empty_for_tests()),
                     query_metrics: Default::default(),
                     estimated_size: Default::default(),
                 };

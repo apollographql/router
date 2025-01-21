@@ -56,7 +56,6 @@ pub struct QueryPlan {
 #[buildstructor::buildstructor]
 impl QueryPlan {
     #[builder]
-    #[cfg(test)]
     pub(crate) fn fake_new(
         root: Option<PlanNode>,
         usage_reporting: Option<UsageReporting>,
@@ -70,7 +69,7 @@ impl QueryPlan {
                 .into(),
             root: Arc::new(root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() })),
             formatted_query_plan: Default::default(),
-            query: Arc::new(Query::empty()),
+            query: Arc::new(Query::empty_for_tests()),
             query_metrics: Default::default(),
             estimated_size: Default::default(),
         }

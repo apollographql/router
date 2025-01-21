@@ -91,8 +91,11 @@ pub(crate) struct DeferStats {
 }
 
 impl Query {
-    #[cfg(test)]
-    pub(crate) fn empty() -> Self {
+    /// Returns an empty query. This should be used somewhat carefully and only in tests.
+    /// Other parts of the router may not handle empty queries properly.
+    ///
+    /// FIXME: This should be marked cfg(test) but it's used in places where adding cfg(test) is tricky.
+    pub(crate) fn empty_for_tests() -> Self {
         Self {
             string: String::new(),
             fragments: Fragments {
