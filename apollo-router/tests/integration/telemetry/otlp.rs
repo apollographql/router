@@ -33,9 +33,6 @@ async fn test_trace_error() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
-    if !graph_os_enabled() {
-        panic!("Error: test skipped because GraphOS is not enabled");
-    }
     let mock_server = mock_otlp_server_delayed().await;
     let config = include_str!("fixtures/otlp_invalid_endpoint.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
