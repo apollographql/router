@@ -564,13 +564,12 @@ impl PluginPrivate for AuthenticationPlugin {
         }
     }
 
-    fn http_client_service(
+    fn connector_request_service(
         &self,
-        subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
         if let Some(auth) = &self.connector {
-            auth.http_client_service(subgraph_name, service)
+            auth.connector_request_service(service)
         } else {
             service
         }
