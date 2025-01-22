@@ -39,10 +39,10 @@ fn thread_pool_size() -> usize {
         Some(nb) => nb.parse::<usize>().unwrap_or(all()),
         None => all(),
     };
-    thread_poll_size_for_available_parallelism(available)
+    thread_pool_size_for_available_parallelism(available)
 }
 
-fn thread_poll_size_for_available_parallelism(available: usize) -> usize {
+fn thread_pool_size_for_available_parallelism(available: usize) -> usize {
     let reserved = available.div_ceil(8);
     (available - reserved).max(1)
 }
@@ -144,11 +144,11 @@ mod tests {
 
     #[test]
     fn pool_size() {
-        assert_eq!(thread_poll_size_for_available_parallelism(1), 1);
-        assert_eq!(thread_poll_size_for_available_parallelism(2), 1);
-        assert_eq!(thread_poll_size_for_available_parallelism(3), 2);
-        assert_eq!(thread_poll_size_for_available_parallelism(4), 3);
-        assert_eq!(thread_poll_size_for_available_parallelism(31), 27);
-        assert_eq!(thread_poll_size_for_available_parallelism(32), 28);
+        assert_eq!(thread_pool_size_for_available_parallelism(1), 1);
+        assert_eq!(thread_pool_size_for_available_parallelism(2), 1);
+        assert_eq!(thread_pool_size_for_available_parallelism(3), 2);
+        assert_eq!(thread_pool_size_for_available_parallelism(4), 3);
+        assert_eq!(thread_pool_size_for_available_parallelism(31), 27);
+        assert_eq!(thread_pool_size_for_available_parallelism(32), 28);
     }
 }
