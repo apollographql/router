@@ -687,7 +687,7 @@ impl FetchNode {
     pub(crate) fn init_parsed_operation_and_hash_subquery(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
-    )  -> Result<(), ValidationErrors> {
+    ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
         self.operation.init_parsed(&schema.schema)?;
         self.schema_aware_hash = Arc::new(schema.hash.operation_hash(

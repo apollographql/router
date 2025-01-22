@@ -1844,6 +1844,6 @@ fn broken_plan_does_not_panic() {
         query_planner::fetch::SubgraphSchema::new(subgraph_schema),
     );
     // Run the plan initialization code to make sure it doesn't panic.
-    let _result = Arc::make_mut(&mut plan.root)
-        .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
+    let _result =
+        Arc::make_mut(&mut plan.root).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
 }

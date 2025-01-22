@@ -469,6 +469,7 @@ impl Display for QueryHash {
 // places. This impl should be deleted outright and we should update usage sites.
 // If the query hash is truly not required to contain data in those usage sites, we should use
 // something like an Option instead.
+#[allow(clippy::derivable_impls)] // need a place to add that comment ;)
 impl Default for QueryHash {
     fn default() -> Self {
         Self(Default::default())
