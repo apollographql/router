@@ -5,7 +5,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
-use serde_json::Value;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -67,6 +68,10 @@ pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
     plugin: Box<dyn DynPlugin>,
     phantom: std::marker::PhantomData<T>,
 }
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct EmptyConfig {}
+
 #[buildstructor::buildstructor]
 impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
@@ -79,6 +84,9 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .expect("valid config required for test");
 
         let name = &factory.name.replace("apollo.", "");
+
+        let empty_config = serde_json::to_value(EmptyConfig {}).unwrap();
+
         let config_for_plugin = config
             .validated_yaml
             .clone()
@@ -87,7 +95,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .expect("invalid yaml")
             .get(name)
             .cloned()
-            .unwrap_or(Value::Null);
+            .unwrap_or(empty_config);
 
         let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
             let schema = Schema::parse(schema, &config).unwrap();
