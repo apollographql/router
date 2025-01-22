@@ -38,7 +38,7 @@ snapshot_kind: text
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "9305e1c92eb20ac4467958e1003356b22f2f3537a50cc7745c3c9958add885d9",
+              "schemaAwareHash": "69aefb1c00e6c759f7238b7f4388bf0b5b8351cecf236e59a385165ccd4de986",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -87,7 +87,7 @@ snapshot_kind: text
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "8d4ddefb8baec1535ec6d10d4ec1db38bd0cb05933efab7d7097f069867e7e30",
+                    "schemaAwareHash": "a2d9d5ae511effd9280bdf0cde021c36206e6e578e1d6722a74584cdec287f8b",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_0"
@@ -130,7 +130,7 @@ snapshot_kind: text
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "9bf77af5fd96f9da379241494705d6d5a1c41929975f4dffd83596c5351141c9",
+                    "schemaAwareHash": "eda16e56540e88943000a1936786574f5da632ea4d4ab73b49cea306db8f9b25",
                     "serviceName": "Subgraph2",
                     "variableUsages": []
                   },

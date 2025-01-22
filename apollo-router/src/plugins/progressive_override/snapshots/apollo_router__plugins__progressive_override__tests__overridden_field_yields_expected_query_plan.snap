@@ -25,7 +25,7 @@ snapshot_kind: text
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "bacdca1b756776a43ce8c0a522ad47f4efcbb12a60982060d8244b6408f8549f",
+              "schemaAwareHash": "3c438d69bd20986101e4fb91167d5db4b871b250a5e5b670e19e9305b2756baa",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -64,7 +64,7 @@ snapshot_kind: text
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "4d6b9d9be38f6899559b7b75f3dd53d80b1d81b9e60b51fe7bc49796d2fe9b51",
+                "schemaAwareHash": "fcec2495ee805f82a5712f74f89797ed678eb5118ff8044a1c8fb232d6dd16df",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

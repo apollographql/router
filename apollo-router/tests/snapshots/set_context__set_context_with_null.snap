@@ -30,7 +30,7 @@ snapshot_kind: text
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "e6208acfdfd0841365a3b63a8fcff118daf4ebdffce940c1e951abe6f0e551c4",
+              "schemaAwareHash": "72f6c5c3c41936eba859c4327265e74c9421e41d684ce560f3cc5c0a1bef201f",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -83,7 +83,7 @@ snapshot_kind: text
                     "renameKeyTo": "contextualArgument_1_0"
                   }
                 ],
-                "schemaAwareHash": "42e5f12379b7136efe99706e8569cf56618742fbf4cef43fa44347e441b6a04d",
+                "schemaAwareHash": "2d6f86d4ed32670400197090358c53094c0f83892f3016ac1d067663d215b83a",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

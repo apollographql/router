@@ -104,7 +104,7 @@ pub(crate) struct SubgraphSchema {
 
 impl SubgraphSchema {
     pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
-        let sdl = schema.to_string();
+        let sdl = schema.serialize().no_indent().to_string();
         Self {
             schema: Arc::new(schema),
             hash: Arc::new(SchemaId::new(&sdl)),

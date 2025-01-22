@@ -20,7 +20,7 @@ snapshot_kind: text
           "inputRewrites": null,
           "outputRewrites": null,
           "contextRewrites": null,
-          "schemaAwareHash": "9976b0badd4eda3c5d6a919fd986a679c6e25a33a6b9a8d9a64af6214acf5c3b",
+          "schemaAwareHash": "83a61d8e05a2342e4c13c5b518e1e4a5b4cbc405477fce069c784526eb3b1ae5",
           "authorization": {
             "is_authenticated": false,
             "scopes": [],

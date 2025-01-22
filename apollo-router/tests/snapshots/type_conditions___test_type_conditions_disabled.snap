@@ -80,7 +80,7 @@ snapshot_kind: text
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "ad3dd3ed27be8f5048e968c8295aafc42587e6dafc501a690c4ce0ee5d03e2d2",
+              "schemaAwareHash": "49f8587a3706924dd91c4ed142e4cb7341599769c6f2e7e974b683390c378771",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -138,7 +138,7 @@ snapshot_kind: text
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "6a7d111062f9d804f15c1e4da59dc0f2d0ce88342527b3b172ce973540223ce1",
+                "schemaAwareHash": "2eb874d1637f6040c73f22dc50551f321610897debe931d1a3cb448227cfb679",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
