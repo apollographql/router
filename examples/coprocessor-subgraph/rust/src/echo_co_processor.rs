@@ -116,7 +116,7 @@ impl Service<router::Request> for SimpleEndpoint {
                 let context = context.get_mut("entries").unwrap(); // context always has entries.
                 if let Some(context) = context.as_object_mut() {
                     context.insert(
-                        "apollo_authentication::JWT::claims".to_string(),
+                        "apollo::authentication::jwt_claims".to_string(),
                         json! { true },
                     );
                 }
@@ -126,7 +126,7 @@ impl Service<router::Request> for SimpleEndpoint {
                         "context".to_string(),
                         json! {{
                             "entries": {
-                                "apollo_authentication::JWT::claims": true
+                                "apollo::authentication::jwt_claims": true
                             }
                         }},
                     )
