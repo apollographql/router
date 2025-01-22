@@ -2,10 +2,12 @@ use std::collections::HashSet;
 
 use apollo_federation::sources::connect::expand::Connectors;
 use authentication::AuthIncompatPlugin;
+use headers::HeadersIncompatPlugin;
 
 use crate::Configuration;
 
 mod authentication;
+mod headers;
 
 /// Pair of explicitly configured subgraphs for a plugin
 struct ConfiguredSubgraphs<'a> {
@@ -60,14 +62,21 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
     //
     // Note: Plugin configuration is only populated if the user has specified it,
     // so we can skip any that are missing.
-    let incompatible_plugins: Vec<Box<dyn IncompatiblePlugin>> =
-        vec![AuthIncompatPlugin::from_config(config).map(|a| {
-            let boxed: Box<dyn IncompatiblePlugin> = Box::new(a);
-            boxed
-        })]
-        .into_iter()
-        .flatten()
-        .collect();
+    macro_rules! boxify {
+        () => {
+            |a| {
+                let boxed: Box<dyn IncompatiblePlugin> = Box::new(a);
+                boxed
+            }
+        };
+    }
+    let incompatible_plugins: Vec<Box<dyn IncompatiblePlugin>> = vec![
+        AuthIncompatPlugin::from_config(config).map(boxify!()),
+        HeadersIncompatPlugin::from_config(config).map(boxify!()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
     for plugin in incompatible_plugins {
         // If the plugin is not enabled, no need to process it

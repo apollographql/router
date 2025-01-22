@@ -195,3 +195,82 @@ async fn test_auth_no_incompatible_warnings_with_overrides() -> Result<(), BoxEr
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_headers_incompatible_warnings_on_all() -> Result<(), BoxError> {
+    // Ensure that we have the test keys before running
+    // Note: The [IntegrationTest] ensures that these test credentials get
+    // set before running the router.
+    if std::env::var("TEST_APOLLO_KEY").is_err() || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+    {
+        return Ok(());
+    };
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            headers:
+              all:
+                request:
+                  - propagate:
+                      matching: ^upstream-header-.*
+                  - remove:
+                      named: "x-legacy-account-id"
+        "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .assert_log_contains(r#""subgraph":"connectors","message":"plugin `headers` indirectly targets a connector-enabled subgraph"#)
+        .await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_headers_incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
+    // Ensure that we have the test keys before running
+    // Note: The [IntegrationTest] ensures that these test credentials get
+    // set before running the router.
+    if std::env::var("TEST_APOLLO_KEY").is_err() || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+    {
+        return Ok(());
+    };
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            headers:
+              subgraphs:
+                connectors:
+                  request:
+                    - propagate:
+                        matching: ^upstream-header-.*
+                    - remove:
+                        named: "x-legacy-account-id"
+        "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .assert_log_contains(r#""subgraph":"connectors","message":"plugin `headers` is explicitly configured for connector-enabled subgraph"#)
+        .await;
+
+    Ok(())
+}
