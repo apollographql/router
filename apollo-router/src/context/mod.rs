@@ -270,13 +270,8 @@ impl Context {
     /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
     #[doc(hidden)]
     pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
-        println!("in unsupported_executable_document");
-        let blah = self
-            .extensions()
-            .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()));
-
-        println!("blah: {blah:?}");
-        blah
+        self.extensions()
+            .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()))
     }
 }
 
