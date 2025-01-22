@@ -4207,6 +4207,9 @@ expression: "&schema"
         }
       ]
     },
+    "MyTestPluginConfig": {
+      "type": "object"
+    },
     "Operation": {
       "oneOf": [
         {
@@ -8643,6 +8646,10 @@ expression: "&schema"
     "limits": {
       "$ref": "#/definitions/Config",
       "description": "#/definitions/Config"
+    },
+    "my_test_plugin": {
+      "$ref": "#/definitions/MyTestPluginConfig",
+      "description": "#/definitions/MyTestPluginConfig"
     },
     "override_subgraph_url": {
       "$ref": "#/definitions/Conf6",
