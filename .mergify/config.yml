@@ -8,6 +8,7 @@ pull_request_rules:
           - 1.x
         assignees:
           - "{{ author }}"
+        bot_account: "{{ author }}"
   - name: backport 2.x
     conditions:
       - label = backport-2.x
@@ -17,6 +18,7 @@ pull_request_rules:
           - 2.x
         assignees:
           - "{{ author }}"
+        bot_account: "{{ author }}"
 queue_rules:
   - merge_method: squash
     name: dev
