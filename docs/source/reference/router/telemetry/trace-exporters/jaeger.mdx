@@ -40,13 +40,10 @@ telemetry:
 
 See [OTLP configuration](/router/configuration/telemetry/exporters/tracing/otlp#configuration) for more details on settings.
 
+
 ## Jaeger Native configuration
 
-<Caution>
-
-[Native Jaegar tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the router. Use [Jaeger via OTLP](#jaeger-otlp-configuration) instead.
-
-</Caution>
+<DeprecatedFeature appendText="[Native Jaegar tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the router. Use [Jaeger via OTLP](#jaeger-otlp-configuration) instead." />
 
 The router can be configured to export tracing data to Jaeger either via an agent or HTTP collector.
 
