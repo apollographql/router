@@ -81,7 +81,7 @@ impl RawResponse {
                     connector.config.as_ref(),
                     context,
                     Some(parts.status.as_u16()),
-                    Some(original_request),
+                    original_request,
                     Some(&parts),
                 );
 

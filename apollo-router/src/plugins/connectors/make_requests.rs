@@ -45,7 +45,7 @@ impl RequestInputs {
         config: Option<&CustomConfiguration>,
         context: &Context,
         status: Option<u16>,
-        original_request: Option<Arc<&connect::Request>>,
+        original_request: Arc<&connect::Request>,
         response_parts: Option<&Parts>,
     ) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
@@ -96,23 +96,21 @@ impl RequestInputs {
         }
 
         if variables_used.contains(&Namespace::Request) {
-            if let Some(original_request) = original_request {
-                let headers: Map<ByteString, Value> = original_request
-                    .supergraph_request
-                    .headers()
-                    .iter()
-                    .map(|(key, value)| {
-                        (
-                            key.as_str().into(),
-                            value.to_str().unwrap_or_default().into(),
-                        )
-                    })
-                    .collect();
-                let request_object = json!({
-                    "headers": Value::Object(headers)
-                });
-                map.insert(Namespace::Request.as_str().into(), request_object);
-            }
+            let headers: Map<ByteString, Value> = original_request
+                .supergraph_request
+                .headers()
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.as_str().into(),
+                        value.to_str().unwrap_or_default().into(),
+                    )
+                })
+                .collect();
+            let request_object = json!({
+                "headers": Value::Object(headers)
+            });
+            map.insert(Namespace::Request.as_str().into(), request_object);
         }
 
         if variables_used.contains(&Namespace::Response) {
@@ -238,7 +236,7 @@ fn request_params_to_requests(
                 connector.config.as_ref(),
                 &original_request.context,
                 None,
-                Some(Arc::new(original_request)),
+                Arc::new(original_request),
                 None,
             ),
             original_request,
