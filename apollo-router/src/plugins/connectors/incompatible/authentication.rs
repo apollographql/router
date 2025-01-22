@@ -4,7 +4,6 @@ use apollo_federation::sources::connect::expand::Connectors;
 use itertools::Itertools;
 
 use self::authentication::subgraph::AuthConfig;
-
 use super::ConfiguredSubgraphs;
 use super::IncompatiblePlugin;
 use crate::configuration::connector::ConnectorConfiguration;
