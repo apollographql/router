@@ -45,7 +45,6 @@ use tower::ServiceBuilder;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -75,7 +74,7 @@ pub struct PluginInit<T> {
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 
     /// Launch ID
     pub(crate) launch_id: Option<Arc<String>>,
@@ -176,7 +175,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
@@ -201,7 +200,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
@@ -224,7 +223,7 @@ where
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
@@ -836,7 +835,7 @@ macro_rules! register_plugin {
         };
     };
 
-    ($group: literal, $name: literal, $plugin_type: ident) => {
+    ($group: literal, $name: expr, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
             use $crate::_private::once_cell::sync::Lazy;
@@ -890,7 +889,7 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<router::BoxService, router::Request>,
+    service: Buffer<router::Request, <router::BoxService as Service<router::Request>>::Future>,
 }
 
 impl Handler {

@@ -3,7 +3,7 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
@@ -20,9 +20,9 @@ pub(crate) mod conditions;
 
 pub(crate) mod cache;
 mod conditional;
+pub(crate) mod connector;
 pub(crate) mod cost;
 pub(crate) mod events;
-mod experimental_when_header;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
 pub(crate) mod instruments;
@@ -164,7 +164,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
 pub(crate) fn get_baggage(key: &str) -> Option<opentelemetry::Value> {
     let context = Span::current().context();
     let baggage = context.baggage();
-    baggage.get(key.to_string()).cloned()
+    baggage.get(key).cloned()
 }
 
 pub(crate) trait ToOtelValue {

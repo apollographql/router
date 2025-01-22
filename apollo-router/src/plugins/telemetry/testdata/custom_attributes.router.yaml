@@ -2,51 +2,43 @@ telemetry:
   apollo:
     client_name_header: name_header
     client_version_header: version_header
-  exporters:
-    metrics:
-      common:
-        service_name: apollo-router
-        attributes:
-          supergraph:
-            static:
-              - name: myname
-                value: label_value
-            request:
-              header:
-                - named: test
-                  default: default_value
-                  rename: renamed_value
-                - named: another_test
-                  default: my_default_value
-            response:
-              header:
-                - named: x-custom
-              body:
-                - path: .data.data.my_value
-                  name: my_value
-          subgraph:
-            all:
-              errors:
-                include_messages: true
-                extensions:
-                  - name: subgraph_error_extended_code
-                    path: .code
-                  - name: message
-                    path: .reason
-            subgraphs:
-              my_subgraph_name:
-                request:
-                  body:
-                    - path: .query
-                      name: query_from_request
-                    - path: .data
-                      name: unknown_data
-                      default: default_value
-                    - path: .data2
-                      name: unknown_data_bis
-                response:
-                  body:
-                    - path: .errors[0].extensions.status
-                      name: error
-                context:
-                  - named: my_key
+  instrumentation:
+    instruments:
+      supergraph:
+        http.request:
+          value: event_unit
+          type: counter
+          unit: count
+          description: "supergraph requests"
+          attributes:
+            myname:
+              static: label_value
+            renamed_value:
+              request_header: test
+              default: default_value
+            another_test:
+              request_header: another_test
+              default: my_default_value
+            x-custom:
+              response_header: x-custom
+            my_value:
+              response_data: $.data.my_value
+            error:
+              response_errors: $[0].message
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name:
+              alias: subgraph
+            subgraph.graphql.document:
+              alias: query_from_request
+            status:
+              subgraph_response_status: code
+            subgraph_error_extended_code:
+              subgraph_response_errors: $[0].extensions.code
+            message:
+              error: reason
+            error:
+              subgraph_response_errors: $[0].extensions.status
+            my_key:
+              response_context: my_key

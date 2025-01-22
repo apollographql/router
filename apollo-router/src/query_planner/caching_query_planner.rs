@@ -1,10 +1,8 @@
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 use std::task;
 
-use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
@@ -49,7 +47,7 @@ use crate::Configuration;
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
-pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
+pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
 
 /// A query planner wrapper that caches results.
 ///
@@ -61,7 +59,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     >,
     delegate: T,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode_hash: Arc<QueryHash>,
@@ -94,7 +92,7 @@ where
     pub(crate) async fn new(
         delegate: T,
         schema: Arc<Schema>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
         plugins: Plugins,
     ) -> Result<CachingQueryPlanner<T>, BoxError> {
@@ -339,9 +337,7 @@ where
 }
 
 impl CachingQueryPlanner<QueryPlannerService> {
-    pub(crate) fn subgraph_schemas(
-        &self,
-    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
         self.delegate.subgraph_schemas()
     }
 
