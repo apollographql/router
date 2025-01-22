@@ -138,7 +138,7 @@ struct InsertFromBody {
 
     /// The default if the path in the body did not resolve to an element
     #[schemars(with = "Option<String>", default)]
-    #[serde(deserialize_with = "deserialize_option_header_value")]
+    #[serde(deserialize_with = "deserialize_option_header_value", default)]
     default: Option<HeaderValue>,
 }
 
