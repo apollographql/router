@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/type_conditions.rs
 expression: response
+snapshot_kind: text
 ---
 {
   "data": {
@@ -79,7 +80,7 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "1d2d8b1ab80b4b1293e9753a915997835e6ff5bc54ba4c9b400abe7fa4661386",
+              "schemaAwareHash": "5e7085d44036286e5fca029a1f3fd6be1791fa1665597bff009141ee370ee279",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -140,7 +141,7 @@ expression: response
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "31465e7b7e358ea9407067188249b51fd7342088e6084360ed0df28199cef5cc",
+                    "schemaAwareHash": "3dcb6331dc1a5bb5facf37e13d119d58797bdcce300c9b6c97ec2da69cc84159",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -199,7 +200,7 @@ expression: response
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "550ad525da9bb9497fb0d51bf7a64b7d5d73ade5ee7d2e425573dc7e2e248e99",
+                    "schemaAwareHash": "cac91803ad01fddb5799627a3eaa27f37f8a7583a991353979248f1486a699c7",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
