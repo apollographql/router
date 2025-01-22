@@ -1,5 +1,5 @@
 use derivative::Derivative;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::path::JsonPathInst;
@@ -1739,7 +1739,7 @@ mod test {
     use opentelemetry::trace::TraceState;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
-    use opentelemetry_api::StringValue;
+    use opentelemetry::StringValue;
     use serde_json::json;
     use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;

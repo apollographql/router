@@ -1,6 +1,5 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry::OrderMap;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
@@ -91,14 +90,14 @@ impl SpanDynAttribute for ::tracing::Span {
                                     update_otel_data(otel_data, &key, &value);
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
-                                            Some([(key, value)].into_iter().collect());
+                                            Some([KeyValue::new(key, value)].into_iter().collect());
                                     } else {
                                         otel_data
                                             .builder
                                             .attributes
                                             .as_mut()
                                             .expect("we checked the attributes value in the condition above")
-                                            .insert(key, value);
+                                            .push(KeyValue::new(key, value));
                                     }
                                 }
                                 None => {
@@ -346,13 +345,10 @@ impl EventDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => match &mut otel_data.event_attributes {
                                     Some(event_attributes) => {
-                                        event_attributes
-                                            .extend(attributes.map(|kv| (kv.key, kv.value)));
+                                        event_attributes.extend(attributes);
                                     }
                                     None => {
-                                        otel_data.event_attributes = Some(OrderMap::from_iter(
-                                            attributes.map(|kv| (kv.key, kv.value)),
-                                        ));
+                                        otel_data.event_attributes = Some(attributes.collect());
                                     }
                                 },
                                 None => {

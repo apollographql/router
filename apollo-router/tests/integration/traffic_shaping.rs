@@ -113,7 +113,7 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     assert!(response.contains("REQUEST_TIMEOUT"));
 
     router
-        .assert_log_contains(r#""otel.name":"query UniqueName""#)
+        .wait_for_log_message(r#""otel.name":"query UniqueName""#)
         .await;
 
     router.graceful_shutdown().await;
@@ -127,7 +127,7 @@ async fn test_router_timeout_custom_metric() -> Result<(), BoxError> {
     }
 
     let mut router = IntegrationTest::builder()
-        .telemetry(Telemetry::Jaeger)
+        .telemetry(Telemetry::Otlp { endpoint: None })
         .config(format!(
             r#"
             {PROMETHEUS_CONFIG}

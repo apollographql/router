@@ -207,6 +207,22 @@ telemetry:
               subgraph_response_data: $.test # Heads up, we removed the .data prefix as it's directly targeting data and we added $
 ```
 
+### Tracing
+
+`jaeger` exporter has been removed as Jaeger fully supports to OTLP format. To use the `otlp` exporter change your router config:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        jaeger: true
+      otlp:
+        enabled: true
+```
+
+And ensure that you have enabled OTLP support in your Jaeger instance using `COLLECTOR_OTLP_ENABLED=true` and exposing ports `4317` and or `4318` for gRPC and HTTP respectively.
+
 ### Check CORS configuration
 
 If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.

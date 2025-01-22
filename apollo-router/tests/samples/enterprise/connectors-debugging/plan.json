@@ -12,7 +12,7 @@
           "snapshot": {
             "path": "./http_snapshots.json",
             "base_url": "https://jsonplaceholder.typicode.com/",
-            "port": 59714
+            "port": 61000
           }
         }
       }
@@ -40,7 +40,7 @@
             "data": [
               {
                 "request": {
-                  "url": "http://127.0.0.1:59714/posts/1",
+                  "url": "http://127.0.0.1:61000/posts/1",
                   "method": "GET",
                   "headers": [["x-from", "client-value"]],
                   "body": null
@@ -80,7 +80,7 @@
               },
               {
                 "request": {
-                  "url": "http://127.0.0.1:59714/users/1",
+                  "url": "http://127.0.0.1:61000/users/1",
                   "method": "GET",
                   "headers": [["x-from", "client-value"]],
                   "body": null
