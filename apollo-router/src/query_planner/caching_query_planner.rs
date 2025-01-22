@@ -47,7 +47,7 @@ use crate::Configuration;
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
-pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
+pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
 
 /// A query planner wrapper that caches results.
 ///
