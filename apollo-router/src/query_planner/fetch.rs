@@ -687,12 +687,14 @@ impl FetchNode {
     pub(crate) fn init_parsed_operation_and_hash_subquery(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
-    ) {
+    )  -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
+        self.operation.init_parsed(&schema.schema)?;
         self.schema_aware_hash = Arc::new(schema.hash.operation_hash(
             self.operation.as_serialized(),
             self.operation_name.as_deref(),
         ));
+        Ok(())
     }
 
     pub(crate) fn extract_authorization_metadata(

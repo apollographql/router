@@ -499,7 +499,7 @@ impl BridgeQueryPlanner {
                     root_node.init_parsed_operations_and_hash_subqueries(
                         &self.subgraph_schemas,
                         &self.schema.raw_sdl,
-                    );
+                    )?;
                     root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
                     Ok(())
                 },

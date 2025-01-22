@@ -379,10 +379,10 @@ impl PlanNode {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
-    ) {
+    ) -> Result<(), ValidationErrors> {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.init_parsed_operation_and_hash_subquery(subgraph_schemas);
+                fetch_node.init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
             }
 
             PlanNode::Sequence { nodes } => {
@@ -390,7 +390,7 @@ impl PlanNode {
                     node.init_parsed_operations_and_hash_subqueries(
                         subgraph_schemas,
                         supergraph_schema_hash,
-                    );
+                    )?;
                 }
             }
             PlanNode::Parallel { nodes } => {
@@ -398,26 +398,26 @@ impl PlanNode {
                     node.init_parsed_operations_and_hash_subqueries(
                         subgraph_schemas,
                         supergraph_schema_hash,
-                    );
+                    )?;
                 }
             }
             PlanNode::Flatten(flatten) => flatten.node.init_parsed_operations_and_hash_subqueries(
                 subgraph_schemas,
                 supergraph_schema_hash,
-            ),
+            )?,
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(
                         subgraph_schemas,
                         supergraph_schema_hash,
-                    );
+                    )?;
                 }
                 for deferred_node in deferred {
                     if let Some(node) = &mut deferred_node.node {
                         Arc::make_mut(node).init_parsed_operations_and_hash_subqueries(
                             subgraph_schemas,
                             supergraph_schema_hash,
-                        )
+                        )?
                     }
                 }
             }
@@ -426,7 +426,7 @@ impl PlanNode {
                     node.init_parsed_operations_and_hash_subqueries(
                         subgraph_schemas,
                         supergraph_schema_hash,
-                    );
+                    )?;
                 }
             }
             PlanNode::Condition {
@@ -438,16 +438,17 @@ impl PlanNode {
                     node.init_parsed_operations_and_hash_subqueries(
                         subgraph_schemas,
                         supergraph_schema_hash,
-                    );
+                    )?;
                 }
                 if let Some(node) = else_clause.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(
                         subgraph_schemas,
                         supergraph_schema_hash,
-                    );
+                    )?;
                 }
             }
         }
+        Ok(())
     }
 
     #[cfg(test)]
