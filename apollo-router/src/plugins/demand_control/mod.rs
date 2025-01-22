@@ -504,9 +504,9 @@ mod test {
     use crate::services::subgraph;
     use crate::Context;
 
-    use super::strategy::Strategy;
-    use super::Mode;
-    use super::StrategyConfig;
+    //use super::strategy::Strategy;
+    //use super::Mode;
+    //use super::StrategyConfig;
 
     //#[tokio::test]
     //async fn test_measure_on_execution_request() {
@@ -541,6 +541,7 @@ mod test {
             "fixtures/enforce_on_execution_response.router.yaml"
         ))
         .await;
+        println!("body: {body:?}");
         insta::assert_yaml_snapshot!(body);
     }
 
