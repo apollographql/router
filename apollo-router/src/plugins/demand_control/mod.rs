@@ -356,7 +356,6 @@ impl Plugin for DemandControl {
                     })
                 })
                 .map_response(|mut resp: execution::Response| {
-                    println!("hello?!");
                     let req = resp
                         .context
                         .unsupported_executable_document()
@@ -508,32 +507,32 @@ mod test {
     //use super::Mode;
     //use super::StrategyConfig;
 
-    //#[tokio::test]
-    //async fn test_measure_on_execution_request() {
-    //    let body = test_on_execution(include_str!(
-    //        "fixtures/measure_on_execution_request.router.yaml"
-    //    ))
-    //    .await;
-    //    insta::assert_yaml_snapshot!(body);
-    //}
+    #[tokio::test]
+    async fn test_measure_on_execution_request() {
+        let body = test_on_execution(include_str!(
+            "fixtures/measure_on_execution_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
 
-    //#[tokio::test]
-    //async fn test_enforce_on_execution_request() {
-    //    let body = test_on_execution(include_str!(
-    //        "fixtures/enforce_on_execution_request.router.yaml"
-    //    ))
-    //    .await;
-    //    insta::assert_yaml_snapshot!(body);
-    //}
+    #[tokio::test]
+    async fn test_enforce_on_execution_request() {
+        let body = test_on_execution(include_str!(
+            "fixtures/enforce_on_execution_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
 
-    //#[tokio::test]
-    //async fn test_measure_on_execution_response() {
-    //    let body = test_on_execution(include_str!(
-    //        "fixtures/measure_on_execution_response.router.yaml"
-    //    ))
-    //    .await;
-    //    insta::assert_yaml_snapshot!(body);
-    //}
+    #[tokio::test]
+    async fn test_measure_on_execution_response() {
+        let body = test_on_execution(include_str!(
+            "fixtures/measure_on_execution_response.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
 
     #[tokio::test]
     async fn test_enforce_on_execution_response() {
@@ -545,41 +544,41 @@ mod test {
         insta::assert_yaml_snapshot!(body);
     }
 
-    //#[tokio::test]
-    //async fn test_measure_on_subgraph_request() {
-    //    let body = test_on_subgraph(include_str!(
-    //        "fixtures/measure_on_subgraph_request.router.yaml"
-    //    ))
-    //    .await;
-    //    insta::assert_yaml_snapshot!(body);
-    //}
+    #[tokio::test]
+    async fn test_measure_on_subgraph_request() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/measure_on_subgraph_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
 
-    //#[tokio::test]
-    //async fn test_enforce_on_subgraph_request() {
-    //    let body = test_on_subgraph(include_str!(
-    //        "fixtures/enforce_on_subgraph_request.router.yaml"
-    //    ))
-    //    .await;
-    //    insta::assert_yaml_snapshot!(body);
-    //}
+    #[tokio::test]
+    async fn test_enforce_on_subgraph_request() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/enforce_on_subgraph_request.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
 
-    //#[tokio::test]
-    //async fn test_measure_on_subgraph_response() {
-    //    let body = test_on_subgraph(include_str!(
-    //        "fixtures/measure_on_subgraph_response.router.yaml"
-    //    ))
-    //    .await;
-    //    insta::assert_yaml_snapshot!(body);
-    //}
+    #[tokio::test]
+    async fn test_measure_on_subgraph_response() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/measure_on_subgraph_response.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
 
-    //#[tokio::test]
-    //async fn test_enforce_on_subgraph_response() {
-    //    let body = test_on_subgraph(include_str!(
-    //        "fixtures/enforce_on_subgraph_response.router.yaml"
-    //    ))
-    //    .await;
-    //    insta::assert_yaml_snapshot!(body);
-    //}
+    #[tokio::test]
+    async fn test_enforce_on_subgraph_response() {
+        let body = test_on_subgraph(include_str!(
+            "fixtures/enforce_on_subgraph_response.router.yaml"
+        ))
+        .await;
+        insta::assert_yaml_snapshot!(body);
+    }
 
     #[tokio::test]
     async fn test_operation_metrics() {
@@ -630,27 +629,9 @@ mod test {
             .await;
         let ctx = context();
         let resp = plugin
-            .execution_service(|_req| async {
-                let config = include_str!("fixtures/measure_on_execution_response.router.yaml");
-
-                // TODO: figure out a better way to get the strategy factory for create() below
-                let plugin = PluginTestHarness::<DemandControl>::builder()
-                    .config(config)
-                    .build()
-                    .await;
-
-                let strategy = plugin.strategy_factory.create();
-
-                let ctx = context();
-                // TODO: figure out how to insert the right expectations
-                ctx.insert_demand_control_context(DemandControlContext {
-                    strategy,
-                    variables: Default::default(),
-                });
-
+            .execution_service(|req| async {
                 Ok(execution::Response::fake_builder()
-                    .context(ctx)
-                    //.context(context_for_execution_with_too_high_cost())
+                    .context(req.context)
                     .build()
                     .unwrap())
             })
@@ -694,35 +675,6 @@ mod test {
         resp.response.into_body()
     }
 
-    //fn context_for_execution_with_too_high_cost() -> Context {
-    //    let schema = Schema::parse_and_validate("type Query { f: Int }", "").unwrap();
-    //    let ast = ast::Document::parse("{__typename}", "").unwrap();
-    //    let doc = ast.to_executable_validate(&schema).unwrap();
-    //    let parsed_document =
-    //        ParsedDocumentInner::new(ast, doc.into(), None, Default::default()).unwrap();
-    //    let ctx = Context::new();
-
-    //    // TODO: not sure how to get this in the fn without capturing it (required by
-    //    // execution_service()
-    //    let strategy_config = StrategyConfig::Test {
-    //        stage: TestStage::ExecutionRequest,
-    //        error: TestError::ActualCostTooExpensive,
-    //    };
-
-    //    let strategy = Strategy {
-    //        mode: Mode::Enforce,
-    //        inner: Arc::new(strategy_config),
-    //    };
-
-    //    ctx.insert_demand_control_context(DemandControlContext {
-    //        strategy,
-    //        variables: Default::default(),
-    //    });
-
-    //    ctx.extensions()
-    //        .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_document));
-    //    ctx
-    //}
     fn context() -> Context {
         let schema = Schema::parse_and_validate("type Query { f: Int }", "").unwrap();
         let ast = ast::Document::parse("{__typename}", "").unwrap();
