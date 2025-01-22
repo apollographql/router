@@ -192,7 +192,7 @@ impl QueryPlannerService {
                 .map(|(name, schema)| {
                     (
                         name.to_string(),
-                        SubgraphSchema::new(schema.schema().clone())
+                        SubgraphSchema::new(schema.schema().clone()),
                     )
                 })
                 .collect(),
