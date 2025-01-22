@@ -1,6 +1,18 @@
 limits:
   http_max_request_bytes: 200
 telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
   exporters:
     metrics:
       prometheus:
@@ -21,14 +33,6 @@ telemetry:
                   - 4
                   - 5
                   - 100
-        attributes:
-          subgraph:
-            all:
-              request:
-                header:
-                  - named: "x-custom-header"
-                    rename: "custom_header"
-                    default: "unknown"
 headers:
   all:
     request:

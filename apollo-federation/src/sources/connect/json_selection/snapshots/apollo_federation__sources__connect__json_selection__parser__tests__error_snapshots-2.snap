@@ -1,0 +1,11 @@
+---
+source: apollo-federation/src/sources/connect/json_selection/parser.rs
+expression: "JSONSelection::parse(\"$bogus\")"
+---
+Err(
+    JSONSelectionParseError {
+        message: "Unknown variable",
+        fragment: "$bogus",
+        offset: 0,
+    },
+)

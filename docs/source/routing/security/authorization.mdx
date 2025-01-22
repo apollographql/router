@@ -38,6 +38,7 @@ Services may have their own access controls, but enforcing authorization _in the
       router -.->|"❌ Unauthorized <br/> subquery"| serviceB;
     clients -->|"⚠️ Partially authorized <br/>request"| router;
   ```
+
   - Also, [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) groups requested fields based on their required authorization. Entire groups can be eliminated from the query plan if they don't have the correct authorization.
 
 - **Declarative access rules**: You define access controls at the field level, and GraphOS [composes](#composition-and-federation) them across your services. These rules create graph-native governance without the need for an extra orchestration layer.
@@ -111,6 +112,7 @@ Only the GraphOS Router supports authorization directives&mdash;[`@apollo/gatewa
 </Note>
 
 Before using the authorization directives in your subgraph schemas, you must:
+
 - Validate that your GraphOS Router uses version `1.29.1` or later and is [connected to your GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features)
 - Include **[claims](#configure-request-claims)** in requests made to the router (for `@authenticated` and `@requiresScopes`)
 
@@ -121,7 +123,7 @@ Claims are the individual details of a request's authentication and scope. They 
 To provide the router with the claims it needs, you must either configure JSON Web Token (JWT) authentication or add an external coprocessor that adds claims to a request's context. In some cases (explained below), you may require both.
 
 - **JWT authentication configuration**: If you configure [JWT authentication](/router/configuration/authn-jwt), the GraphOS Router [automatically adds a JWT token's claims](/router/configuration/authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
-- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](/router/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the GraphOS Router's request-handling lifecycle with custom code.
+- **Adding claims via coprocessor**: If you can't use JWT authentication, you can [add claims with a coprocessor](/router/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the GraphOS Router's request-handling lifecycle with custom code.
 - **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](/router/configuration/authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
 
 ## Authorization directives
@@ -140,7 +142,7 @@ authorization:
 
 </MinVersion>
 
-The `@requiresScopes` directive marks fields and types as restricted based on required scopes. 
+The `@requiresScopes` directive marks fields and types as restricted based on required scopes.
 The directive includes a `scopes` argument with an array of the required scopes to declare which scopes are required:
 
 ```graphql
@@ -151,7 +153,7 @@ The directive includes a `scopes` argument with an array of the required scopes 
 
 Use `@requiresScopes` when access to a field or type depends only on claims associated with a claims object or access token.
 
-If your authorization validation logic or data are more complex&mdash;such as checking specific values in headers or looking up  data from other sources such as databases&mdash;and aren't solely based on a claims object or access token, use [`@policy`](#policy) instead.
+If your authorization validation logic or data are more complex&mdash;such as checking specific values in headers or looking up data from other sources such as databases&mdash;and aren't solely based on a claims object or access token, use [`@policy`](#policy) instead.
 
 </Tip>
 
@@ -215,7 +217,9 @@ It is defined as follows:
 
 ```graphql
 scalar federation__Scope
-directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+directive @requiresScopes(
+  scopes: [[federation__Scope!]!]!
+) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 #### Combining required scopes with `AND`/`OR` logic
@@ -243,7 +247,6 @@ You can nest arrays and elements as needed to achieve your desired logic. For ex
 ```
 
 This syntax requires requests to have either (`scope1` **AND** `scope2`) **OR** just `scope3` to be authorized.
-
 
 #### Example `@requiresScopes` use case
 
@@ -308,26 +311,21 @@ The router returns `null` for unauthorized fields and applies the [standard Grap
 {
   "data": {
     "me": null,
-		"post": {
-			"title": "Securing supergraphs",
-		}
+    "post": {
+      "title": "Securing supergraphs"
+    }
   },
   "errors": [
     {
       "message": "Unauthorized field or type",
-      "path": [
-        "me"
-      ],
+      "path": ["me"],
       "extensions": {
         "code": "UNAUTHORIZED_FIELD_OR_TYPE"
       }
     },
     {
       "message": "Unauthorized field or type",
-      "path": [
-        "post",
-        "views"
-      ],
+      "path": ["post", "views"],
       "extensions": {
         "code": "UNAUTHORIZED_FIELD_OR_TYPE"
       }
@@ -392,7 +390,6 @@ type Post {
   content: String!
   views: Int @authenticated #highlight-line
 }
-
 ```
 
 Consider the following query:
@@ -443,26 +440,21 @@ The response retains the initial request's shape but returns `null` for unauthor
 {
   "data": {
     "me": null,
-		"post": {
-			"title": "Securing supergraphs",
-		}
+    "post": {
+      "title": "Securing supergraphs"
+    }
   },
   "errors": [
     {
       "message": "Unauthorized field or type",
-      "path": [
-        "me"
-      ],
+      "path": ["me"],
       "extensions": {
         "code": "UNAUTHORIZED_FIELD_OR_TYPE"
       }
     },
     {
       "message": "Unauthorized field or type",
-      "path": [
-        "post",
-        "views"
-      ],
+      "path": ["post", "views"],
       "extensions": {
         "code": "UNAUTHORIZED_FIELD_OR_TYPE"
       }
@@ -497,12 +489,12 @@ Using the `@policy` directive requires a [Supergraph plugin](/router/customizati
 
 An overview of how `@policy` is processed through the router's request lifecycle:
 
-* At the [`RouterService` level](/graphos/routing/request-lifecycle), the GraphOS Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
+- At the [`RouterService` level](/graphos/routing/request-lifecycle), the GraphOS Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo::authorization::required_policies` as a map `policy -> null|true|false`.
 
-* At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map. 
-If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. If the value is left to `null`, it will be treated as `false` by the router. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
+- At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map.
+  If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. If the value is left to `null`, it will be treated as `false` by the router. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
 
-* If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` and other authorization directives.
+- If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` and other authorization directives.
 
 #### Usage
 
@@ -519,7 +511,9 @@ The `@policy` directive is defined as follows:
 
 ```graphql
 scalar federation__Policy
-directive @policy(policies: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+directive @policy(
+  policies: [[federation__Policy!]!]!
+) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 Using the `@policy` directive requires a [Supergraph plugin](/router/customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](/graphos/routing/customization/rhai/) or [coprocessor](/router/customizations/coprocessor). Refer to the following [example use case](#example-policy-use-case) for more information. (Although a [native plugin](/router/customizations/native) can also evaluate authorization policies, we don't recommend using it.)
@@ -573,7 +567,6 @@ type Post {
   content: String!
   views: Int @authenticated
 }
-
 ```
 
 You can use a [coprocessor](/router/customizations/coprocessor) called at the Supergraph request stage to receive and execute the list of policies.
@@ -592,23 +585,23 @@ A coprocessor can then receive a request with this format:
 
 ```json
 {
-    "version": 1,
-    "stage": "SupergraphRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "apollo_authentication::JWT::claims": {
-                "exp": 10000000000,
-                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
-            },
-            "apollo_authorization::policies::required": {
-                "read_profile": null,
-                "read_credit_card": null
-            }
-        }
-    },
-    "method": "POST"
+  "version": 1,
+  "stage": "SupergraphRequest",
+  "control": "continue",
+  "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+  "context": {
+    "entries": {
+      "apollo_authentication::JWT::claims": {
+        "exp": 10000000000,
+        "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
+      },
+      "apollo::authorization::required_policies": {
+        "read_profile": null,
+        "read_credit_card": null
+      }
+    }
+  },
+  "method": "POST"
 }
 ```
 
@@ -616,28 +609,28 @@ A user can read their own profile, so `read_profile` will succeed. But only the 
 
 ```json
 {
-    "version": 1,
-    "stage": "SupergraphRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "apollo_authentication::JWT::claims": {
-                "exp": 10000000000,
-                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
-            },
-            "apollo_authorization::policies::required": {
-                "read_profile": true,
-                "read_credit_card": false
-            }
-        }
+  "version": 1,
+  "stage": "SupergraphRequest",
+  "control": "continue",
+  "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+  "context": {
+    "entries": {
+      "apollo_authentication::JWT::claims": {
+        "exp": 10000000000,
+        "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
+      },
+      "apollo::authorization::required_policies": {
+        "read_profile": true,
+        "read_credit_card": false
+      }
     }
+  }
 }
 ```
 
 ##### Usage with a Rhai script
 
-For another example, suppose that you want to restrict access for posts to a support user. Given that the `policies` argument is a string, you can set it as a `"<key>:<value>"` format that a Rhai script can parse and evaluate. 
+For another example, suppose that you want to restrict access for posts to a support user. Given that the `policies` argument is a string, you can set it as a `"<key>:<value>"` format that a Rhai script can parse and evaluate.
 
 The relevant part of your schema may look like this:
 
@@ -658,7 +651,7 @@ You can then use the following Rhai script to parse and evaluate the `policies` 
 fn supergraph_service(service) {
   let request_callback = |request| {
     let claims = request.context["apollo_authentication::JWT::claims"];
-    let policies = request.context["apollo_authorization::policies::required"];
+    let policies = request.context["apollo::authorization::required_policies"];
 
     if policies != () {
       for key in policies.keys() {
@@ -676,7 +669,7 @@ fn supergraph_service(service) {
         }
       }
     }
-    request.context["apollo_authorization::policies::required"] = policies;
+    request.context["apollo::authorization::required_policies"] = policies;
   };
   service.map_request(request_callback);
 }
@@ -694,7 +687,6 @@ GraphOS's composition strategy for authorization directives is intentionally acc
 
 If a shared field uses different authorization directives across subgraphs, composition merges them using `AND` logic.
 For example, suppose the `me` query requires `@authenticated` in one subgraph and the `read:user` scope in another subgraph:
-
 
 ```graphql title="Subgraph A"
 type Query {
@@ -763,8 +755,8 @@ Refer to the section on [Combining policies with AND/OR logic](#combining-polici
 Using **OR** logic for shared directives simplifies schema updates.
 If requirements change suddenly, you don't need to update the directive in all subgraphs simultaneously.
 
-
 #### Combining `AND`/`OR` logic with `@requiresScopes`
+
 As with [combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
 
 ```graphql title="Subgraph A"
@@ -783,7 +775,8 @@ Since both subgraphs use the same authorization directive, composition [merges t
 
 ```graphql title="Supergraph"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:others", "read:users"], ["read:profiles"]])
+  users: [User!]!
+    @requiresScopes(scopes: [["read:others", "read:users"], ["read:profiles"]])
 }
 ```
 

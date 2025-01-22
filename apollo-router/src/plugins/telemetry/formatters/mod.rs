@@ -6,11 +6,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::Instant;
 
-use opentelemetry::sdk::Resource;
-use opentelemetry_api::trace::SpanId;
-use opentelemetry_api::trace::TraceContextExt;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::KeyValue;
+use opentelemetry::trace::SpanId;
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceId;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
 use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
@@ -32,6 +32,9 @@ use crate::metrics::layer::METRIC_PREFIX_VALUE;
 use crate::plugins::telemetry::otel::OtelData;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+// FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.
+// The reason this is introduced right now is to directly avoid people relying on these attributes and then creating a breaking change in the future.
+pub(crate) const APOLLO_CONNECTOR_PREFIX: &str = "apollo.connector.";
 // This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
 pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
     "code.filepath",
@@ -240,39 +243,41 @@ pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
         .into_iter()
         .map(|(k, v)| {
             (
-                k.into(),
+                k.to_string(),
                 match v {
-                    opentelemetry::Value::Bool(value) => serde_json::Value::Bool(value),
+                    opentelemetry::Value::Bool(value) => serde_json::Value::Bool(*value),
                     opentelemetry::Value::I64(value) => {
-                        serde_json::Value::Number(Number::from(value))
+                        serde_json::Value::Number(Number::from(*value))
                     }
                     opentelemetry::Value::F64(value) => serde_json::Value::Number(
-                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                        Number::from_f64(*value).unwrap_or(Number::from(0)),
                     ),
-                    opentelemetry::Value::String(value) => serde_json::Value::String(value.into()),
+                    opentelemetry::Value::String(value) => {
+                        serde_json::Value::String(value.to_string())
+                    }
                     opentelemetry::Value::Array(value) => match value {
                         opentelemetry::Array::Bool(array) => serde_json::Value::Array(
-                            array.into_iter().map(serde_json::Value::Bool).collect(),
+                            array.iter().copied().map(serde_json::Value::Bool).collect(),
                         ),
                         opentelemetry::Array::I64(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
-                                .map(|value| serde_json::Value::Number(Number::from(value)))
+                                .iter()
+                                .map(|value| serde_json::Value::Number(Number::from(*value)))
                                 .collect(),
                         ),
                         opentelemetry::Array::F64(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
+                                .iter()
                                 .map(|value| {
                                     serde_json::Value::Number(
-                                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                                        Number::from_f64(*value).unwrap_or(Number::from(0)),
                                     )
                                 })
                                 .collect(),
                         ),
                         opentelemetry::Array::String(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
+                                .iter()
                                 .map(|s| serde_json::Value::String(s.to_string()))
                                 .collect(),
                         ),
@@ -318,7 +323,7 @@ where
     if let Some(sampled_span) = ext.get::<SampledSpan>() {
         let (trace_id, span_id) = sampled_span.trace_and_span_id();
         return Some((
-            opentelemetry_api::trace::TraceId::from(trace_id.to_u128()),
+            opentelemetry::trace::TraceId::from(trace_id.to_u128()),
             span_id,
         ));
     }

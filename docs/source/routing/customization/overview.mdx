@@ -13,10 +13,10 @@ You can create **customizations** for the GraphOS Router or Apollo Router Core t
 The GraphOS Router supports the following customization types:
 
 - [**Rhai scripts**](/graphos/routing/customization/rhai/)
-    - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
+  - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
 - [**External co-processing**](/router/customizations/coprocessor/) ([Enterprise feature](/router/enterprise-features/))
-    - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
-    - The router calls your custom code via HTTP, passing it the details of each incoming client request.
+  - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
+  - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 
 The Apollo Router Core supports customization only through [Rhai scripts](/graphos/routing/customization/rhai/).
 
@@ -58,7 +58,7 @@ For responses, the router executes the plugins _after_ the service.
 ```mermaid
 flowchart RL
   subgraph Service
-    coreService["Core <br/>service"] -->|response| Plugin2["Plugin 2"]  -->|response| Plugin1["Plugin 1"]   
+    coreService["Core <br/>service"] -->|response| Plugin2["Plugin 2"]  -->|response| Plugin1["Plugin 1"]
   end
 
 Plugin1["Plugin 1"] -->|response| Client
@@ -71,15 +71,16 @@ Each request and response object contains a `Context` object, which is carried t
 
 The router expects to execute on a stream of data. In order to work correctly and provide high performance, the following expectations must be met:
 
-* **Request Path**: No buffering before the end of the `router_service` processing step
-* **Response Path**: No buffering
+- **Request Path**: No buffering before the end of the `router_service` processing step
+- **Response Path**: No buffering
 
 > In general, it's best to avoid buffering where possible. If necessary, it is ok to do so on the request path once the `router_service` step is complete.
 
 This guidance applies if you are:
- - Modifying the router
- - Creating a native Rust plugin
- - Creating a custom binary
+
+- Modifying the router
+- Creating a native Rust plugin
+- Creating a custom binary
 
 ## Creating customizations
 

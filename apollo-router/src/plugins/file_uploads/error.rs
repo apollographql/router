@@ -54,6 +54,9 @@ pub(super) enum FileUploadError {
 
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
+
+    #[error("{0}")]
+    AxumError(#[from] axum::Error),
 }
 
 impl From<FileUploadError> for graphql::Error {

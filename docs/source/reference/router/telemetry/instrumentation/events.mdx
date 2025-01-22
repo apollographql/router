@@ -17,7 +17,7 @@ You can configure events for each service in `router.yaml`. Events can be standa
 
 <RouterServices />
 
-The `router`, `supergraph` and `subgraph` sections are used to define custom event configuration for each service:
+The `router`, `supergraph`, `subgraph` and `connector` sections are used to define custom event configuration for each service:
 
 ```yaml title="future.router.yaml"
 telemetry:
@@ -28,6 +28,8 @@ telemetry:
       supergraph: # highlight-line
         # ...
       subgraph: # highlight-line
+        # ...
+      connector: # highlight-line
         # ...
 ```
 
@@ -229,6 +231,8 @@ telemetry:
           # Custom event configuration for supergraph service ...
       subgraph:
           # Custom event configuration for subgraph service ...
+      connector:
+          # Custom event configuration for HTTP connectors ...
 ```
 
 ## Event configuration reference
