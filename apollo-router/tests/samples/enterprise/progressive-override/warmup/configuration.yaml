@@ -11,7 +11,5 @@ telemetry:
       stdout:
         format: text
 
-experimental_query_planner_mode: legacy
-
 plugins:
   experimental.expose_query_plan: true

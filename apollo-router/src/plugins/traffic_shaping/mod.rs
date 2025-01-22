@@ -8,7 +8,6 @@
 //!
 mod deduplication;
 pub(crate) mod rate;
-mod retry;
 pub(crate) mod timeout;
 
 use std::collections::HashMap;
@@ -23,6 +22,7 @@ use http::HeaderValue;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::util::future::EitherResponseFuture;
 use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
@@ -32,7 +32,6 @@ use tower::ServiceExt;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 use self::rate::RateLimited;
-pub(crate) use self::retry::RetryPolicy;
 use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
@@ -68,9 +67,6 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
-    /// Retry configuration
-    //  *experimental feature*: Enables request retry
-    experimental_retry: Option<RetryConfig>,
     /// Enable HTTP2 for subgraphs
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
@@ -102,11 +98,6 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.global_rate_limit.as_ref())
                     .cloned(),
-                experimental_retry: self
-                    .experimental_retry
-                    .as_ref()
-                    .or(fallback.experimental_retry.as_ref())
-                    .cloned(),
                 experimental_http2: self
                     .experimental_http2
                     .as_ref()
@@ -117,42 +108,6 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
-            },
-        }
-    }
-}
-
-/// Retry configuration
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RetryConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "String", default)]
-    /// how long a single deposit should be considered. Must be between 1 and 60 seconds,
-    /// default value is 10 seconds
-    ttl: Option<Duration>,
-    /// minimum rate of retries allowed to accomodate clients that have just started
-    /// issuing requests, or clients that do not issue many requests per window. The
-    /// default value is 10
-    min_per_sec: Option<u32>,
-    /// percentage of calls to deposit that can be retried. This is in addition to any
-    /// retries allowed for via min_per_sec. Must be between 0 and 1000, default value
-    /// is 0.2
-    retry_percent: Option<f32>,
-    /// allows request retries on mutations. This should only be activated if mutations
-    /// are idempotent. Disabled by default
-    retry_mutations: Option<bool>,
-}
-
-impl Merge for RetryConfig {
-    fn merge(&self, fallback: Option<&Self>) -> Self {
-        match fallback {
-            None => self.clone(),
-            Some(fallback) => RetryConfig {
-                ttl: self.ttl.or(fallback.ttl),
-                min_per_sec: self.min_per_sec.or(fallback.min_per_sec),
-                retry_percent: self.retry_percent.or(fallback.retry_percent),
-                retry_mutations: self.retry_mutations.or(fallback.retry_mutations),
             },
         }
     }
@@ -273,8 +228,8 @@ impl Plugin for TrafficShaping {
     }
 }
 
-pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
-    Either<
+pub(crate) type TrafficShapingSubgraphFuture<S> = EitherResponseFuture<
+    EitherResponseFuture<
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
     >,
@@ -390,18 +345,7 @@ impl TrafficShaping {
                         .clone()
                 });
 
-            let retry = config.shaping.experimental_retry.as_ref().map(|config| {
-                let retry_policy = RetryPolicy::new(
-                    config.ttl,
-                    config.min_per_sec,
-                    config.retry_percent,
-                    config.retry_mutations,
-                );
-                tower::retry::RetryLayer::new(retry_policy)
-            });
-
-            Either::A(ServiceBuilder::new()
-
+            Either::Left(ServiceBuilder::new()
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
@@ -435,7 +379,6 @@ impl TrafficShaping {
                         .timeout
                         .unwrap_or(DEFAULT_TIMEOUT),
                     ))
-                    .option_layer(retry)
                     .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
@@ -447,7 +390,7 @@ impl TrafficShaping {
                     req
                 }))
         } else {
-            Either::B(service)
+            Either::Right(service)
         }
     }
 
@@ -471,7 +414,6 @@ register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -487,7 +429,7 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlannerPool;
+    use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -586,14 +528,9 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.clone(),
-            config.clone(),
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
+        let planner = QueryPlannerService::new(schema.clone(), config.clone())
+            .await
+            .unwrap();
         let subgraph_schemas = Arc::new(
             planner
                 .subgraph_schemas()

@@ -41,7 +41,6 @@ pub(crate) struct Instruments {
     i64_up_down_counter: MetricsMap<UpDownCounter<i64>>,
     f64_up_down_counter: MetricsMap<UpDownCounter<f64>>,
     u64_histogram: MetricsMap<Histogram<u64>>,
-    i64_histogram: MetricsMap<Histogram<i64>>,
     f64_histogram: MetricsMap<Histogram<f64>>,
     u64_gauge: MetricsMap<ObservableGauge<u64>>,
 }
@@ -55,7 +54,6 @@ pub(crate) enum InstrumentType {
     UpDownCounterI64(i64),
     UpDownCounterF64(f64),
     HistogramU64(u64),
-    HistogramI64(i64),
     HistogramF64(f64),
     GaugeU64(u64),
 }
@@ -133,14 +131,6 @@ impl Instruments {
                     |rec| rec.record(value, custom_attributes),
                 );
             }
-            InstrumentType::HistogramI64(value) => {
-                update_or_insert(
-                    &self.i64_histogram,
-                    metric_name,
-                    || meter.i64_histogram(metric_name).init(),
-                    |rec| rec.record(value, custom_attributes),
-                );
-            }
             InstrumentType::HistogramF64(value) => {
                 update_or_insert(
                     &self.f64_histogram,
@@ -169,7 +159,7 @@ pub(crate) struct MetricVisitor<'a> {
     attributes_ignored: bool,
 }
 
-impl<'a> MetricVisitor<'a> {
+impl MetricVisitor<'_> {
     fn set_metric(&mut self, name: &'static str, instrument_type: InstrumentType) {
         self.metric = Some((name, instrument_type));
         if self.attributes_ignored {
@@ -181,7 +171,7 @@ impl<'a> MetricVisitor<'a> {
     }
 }
 
-impl<'a> Visit for MetricVisitor<'a> {
+impl Visit for MetricVisitor<'_> {
     fn record_f64(&mut self, field: &Field, value: f64) {
         if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
             self.set_metric(metric_name, InstrumentType::CounterF64(value));
@@ -217,7 +207,14 @@ impl<'a> Visit for MetricVisitor<'a> {
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
             self.set_metric(metric_name, InstrumentType::UpDownCounterI64(value));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
-            self.set_metric(metric_name, InstrumentType::HistogramI64(value));
+            if value < 0 {
+                log_and_panic_in_debug_build!(
+                    metric_name,
+                    "histogram must be u64. This metric will be ignored"
+                );
+            } else {
+                self.set_metric(metric_name, InstrumentType::HistogramU64(value as u64));
+            }
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_VALUE) {
             if value < 0 {
                 log_and_panic_in_debug_build!(
@@ -416,7 +413,7 @@ impl<'a> Visit for MetricVisitor<'a> {
     }
 }
 
-impl<'a> MetricVisitor<'a> {
+impl MetricVisitor<'_> {
     fn finish(self) {
         if let Some((metric_name, instrument_type)) = self.metric {
             self.instruments.update_metric(

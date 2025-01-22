@@ -2,15 +2,15 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::validation::Valid;
-use router_bridge::planner::PlanOptions;
-use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::cache::estimate_size;
 use crate::configuration::Batching;
 use crate::error::CacheResolverError;
@@ -20,6 +20,7 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::SubgraphSchemas;
+use crate::services::query_planner::PlanOptions;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
 use crate::spec::QueryHash;
@@ -354,7 +355,8 @@ impl PlanNode {
                     }
                 }
             }
-            PlanNode::Subscription { primary: _, rest } => {
+            PlanNode::Subscription { primary, rest } => {
+                primary.init_parsed_operation(subgraph_schemas)?;
                 if let Some(node) = rest.as_mut() {
                     node.init_parsed_operations(subgraph_schemas)?;
                 }
@@ -476,6 +478,51 @@ impl PlanNode {
                 }
             },
         }
+    }
+
+    /// A version of `service_usage` that doesn't use recursion
+    /// and returns a `HashSet` instead of an `Iterator`.
+    pub(crate) fn service_usage_set(&self) -> HashSet<&str> {
+        let mut services = HashSet::default();
+        let mut stack = vec![self];
+        while let Some(node) = stack.pop() {
+            match node {
+                Self::Sequence { nodes } | Self::Parallel { nodes } => {
+                    stack.extend(nodes.iter());
+                }
+                Self::Fetch(fetch) => {
+                    services.insert(fetch.service_name.as_ref());
+                }
+                Self::Subscription { primary, rest } => {
+                    services.insert(primary.service_name.as_ref());
+                    if let Some(rest) = rest {
+                        stack.push(rest);
+                    }
+                }
+                Self::Flatten(flatten) => {
+                    stack.push(&flatten.node);
+                }
+                Self::Defer { primary, deferred } => {
+                    if let Some(primary) = primary.node.as_ref() {
+                        stack.push(primary);
+                    }
+                    stack.extend(deferred.iter().flat_map(|d| d.node.as_deref()));
+                }
+                Self::Condition {
+                    if_clause,
+                    else_clause,
+                    ..
+                } => {
+                    if let Some(if_clause) = if_clause {
+                        stack.push(if_clause);
+                    }
+                    if let Some(else_clause) = else_clause {
+                        stack.push(else_clause);
+                    }
+                }
+            }
+        }
+        services
     }
 
     pub(crate) fn extract_authorization_metadata(

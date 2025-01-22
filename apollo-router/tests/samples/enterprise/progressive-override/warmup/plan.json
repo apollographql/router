@@ -11,7 +11,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query progressive1__Subgraph1__0{percent100{__typename id}}",
+                                    "query": "query progressive1__Subgraph1__0 { percent100 { __typename id } }",
                                     "operationName": "progressive1__Subgraph1__0"
                                 }
                             },
@@ -33,7 +33,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query progressive1__Subgraph2__1($representations:[_Any!]!){_entities(representations:$representations){...on T{foo}}}",
+                                    "query": "query progressive1__Subgraph2__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on T { foo } } }",
                                     "operationName": "progressive1__Subgraph2__1",
                                     "variables": {
                                         "representations": [
@@ -60,7 +60,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query progressive2__Subgraph2__0{percent0{foo}}",
+                                    "query": "query progressive2__Subgraph2__0 { percent0 { foo } }",
                                     "operationName": "progressive2__Subgraph2__0"
                                 }
                             },
@@ -106,7 +106,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query progressive1__Subgraph1__0{percent100{__typename id}}",
+                                    "query": "query progressive1__Subgraph1__0 { percent100 { __typename id } }",
                                     "operationName": "progressive1__Subgraph1__0"
                                 }
                             },
@@ -128,7 +128,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query progressive1__Subgraph2__1($representations:[_Any!]!){_entities(representations:$representations){...on T{foo}}}",
+                                    "query": "query progressive1__Subgraph2__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on T { foo } } }",
                                     "operationName": "progressive1__Subgraph2__1",
                                     "variables": {
                                         "representations": [
@@ -155,7 +155,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query progressive2__Subgraph2__0{percent0{foo}}",
+                                    "query": "query progressive2__Subgraph2__0 { percent0 { foo } }",
                                     "operationName": "progressive2__Subgraph2__0"
                                 }
                             },

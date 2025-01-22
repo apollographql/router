@@ -443,6 +443,78 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "http_request"
+          ],
+          "properties": {
+            "http_request": {
+              "type": "object",
+              "required": [
+                "method",
+                "uri"
+              ],
+              "properties": {
+                "body": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "method": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "http_response"
+          ],
+          "properties": {
+            "http_response": {
+              "type": "object",
+              "required": [
+                "body",
+                "status"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "integer",
+                  "format": "uint16",
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },

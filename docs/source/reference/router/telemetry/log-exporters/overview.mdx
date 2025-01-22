@@ -142,32 +142,13 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### Request/Response logging
 
-<ExperimentalFeature appendText="If you want to give feedback or participate in the feature, feel free to join [the discussion on GitHub](https://github.com/apollographql/router/discussions/1961)." />
-
-
 By default, the router _doesn't_ log the following values that might contain sensitive data, even if a sufficient log level is set:
 
  - Request bodies
  - Response bodies
  - Headers 
 
-You can enable selective logging of these values via the `experimental_when_header` option:
-
-```yaml title="router.yaml"
-telemetry:
-  exporters:
-    logging:
-      # If one of these headers matches we will log supergraph and subgraphs requests/responses
-      experimental_when_header:
-        - name: apollo-router-log-request
-          value: my_client
-          headers: true # default: false
-          body: true # default: false
-        # log request for all requests coming from Iphones
-        - name: user-agent
-          match: ^Mozilla/5.0 (iPhone*
-          headers: true
-```
+You can enable selective logging of these values using [standard events](../instrumentation/events) with [conditions](../instrumentation/conditions)
 
 ## Logging common reference
 

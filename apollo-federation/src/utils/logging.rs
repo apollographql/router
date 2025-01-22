@@ -57,7 +57,7 @@ pub(crate) fn make_string<T: ?Sized>(
         writer: fn(&mut std::fmt::Formatter<'_>, &T) -> std::fmt::Result,
     }
 
-    impl<'a, T: ?Sized> std::fmt::Display for Stringify<'a, T> {
+    impl<T: ?Sized> std::fmt::Display for Stringify<'_, T> {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             (self.writer)(f, self.data)
         }

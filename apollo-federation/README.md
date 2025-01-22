@@ -3,10 +3,10 @@
 [![Crates.io](https://img.shields.io/crates/v/apollo-federation.svg?style=flat-square)](https://crates.io/crates/apollo-federation)
 [![docs](https://img.shields.io/static/v1?label=docs&message=apollo-federation&color=blue&style=flat-square)](https://docs.rs/apollo-federation/)
 [![Join the community forum](https://img.shields.io/badge/join%20the%20community-forum-blueviolet)](https://community.apollographql.com)
-[![Join our Discord server](https://img.shields.io/discord/1022972389463687228.svg?color=7389D8&labelColor=6A7EC2&logo=discord&logoColor=ffffff&style=flat-square)](https://discord.gg/graphos)
 
 Apollo Federation
 -----------------
+
 Apollo Federation is an architecture for declaratively composing APIs into a unified graph. Each team can own their slice of the graph independently, empowering them to deliver autonomously and incrementally.
 
 Federation 2 is an evolution of the original Apollo Federation with an improved shared ownership model, enhanced type merging, and cleaner syntax for a smoother developer experience. It’s backwards compatible, requiring no major changes to your subgraphs.

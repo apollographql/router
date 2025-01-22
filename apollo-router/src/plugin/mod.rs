@@ -835,7 +835,7 @@ macro_rules! register_plugin {
         };
     };
 
-    ($group: literal, $name: literal, $plugin_type: ident) => {
+    ($group: literal, $name: expr, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
             use $crate::_private::once_cell::sync::Lazy;
@@ -889,7 +889,7 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<router::BoxService, router::Request>,
+    service: Buffer<router::Request, <router::BoxService as Service<router::Request>>::Future>,
 }
 
 impl Handler {

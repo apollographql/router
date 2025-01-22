@@ -16,9 +16,11 @@ use http::header;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
-use hyper::client::HttpConnector;
+use http_body_util::BodyExt;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioExecutor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -51,9 +53,7 @@ use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
-use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
-use crate::services::router::body::RouterBodyConverter;
 use crate::services::subgraph;
 
 #[cfg(test)]
@@ -67,10 +67,16 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type HTTPClientService = RouterBodyConverter<
+type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
+
+type HTTPClientService = tower::util::MapResponse<
     tower::timeout::Timeout<
-        hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>,
+        hyper_util::client::legacy::Client<
+            HttpsConnector<HttpConnector<AsyncHyperResolver>>,
+            RouterBody,
+        >,
     >,
+    MapFn,
 >;
 
 #[async_trait::async_trait]
@@ -85,9 +91,11 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
 
+        // Enable crypto
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let tls_config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
+            .with_native_roots()?
             .with_no_client_auth();
 
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
@@ -102,17 +110,20 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             builder.wrap_connector(http_connector)
         };
 
-        let http_client = RouterBodyConverter {
-            inner: ServiceBuilder::new()
-                .layer(TimeoutLayer::new(init.config.timeout))
-                .service(
-                    hyper::Client::builder()
-                        .http2_only(experimental_http2 == Http2Config::Http2Only)
-                        .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                        .build(connector),
-                ),
-        };
-
+        let http_client = ServiceBuilder::new()
+            .map_response(
+                |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
+                    let (parts, body) = http_response.into_parts();
+                    http::Response::from_parts(parts, body.map_err(axum::Error::new).boxed_unsync())
+                } as MapFn,
+            )
+            .layer(TimeoutLayer::new(init.config.timeout))
+            .service(
+                hyper_util::client::legacy::Client::builder(TokioExecutor::new())
+                    .http2_only(experimental_http2 == Http2Config::Http2Only)
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .build(connector),
+            );
         CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
 
@@ -341,6 +352,15 @@ struct Conf {
 
 fn default_timeout() -> Duration {
     DEFAULT_EXTERNALIZATION_TIMEOUT
+}
+
+fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
+    f64_histogram!(
+        "apollo.router.operations.coprocessor.duration",
+        "Time spent waiting for the coprocessor to answer, in seconds",
+        duration.as_secs_f64(),
+        coprocessor.stage = stage.to_string()
+    );
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -636,7 +656,7 @@ where
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.router_request.into_parts();
-    let bytes = get_body_bytes(body).await?;
+    let bytes = router::body::into_bytes(body).await?;
 
     let headers_to_send = request_config
         .headers
@@ -671,12 +691,9 @@ where
     let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
+    let duration = start.elapsed();
     drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::RouterRequest,
-    );
+    record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
@@ -749,11 +766,11 @@ where
     // are present in our co_processor_output.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => RouterBody::from(bytes),
-        None => RouterBody::from(bytes),
+        Some(bytes) => router::body::from_bytes(bytes),
+        None => router::body::from_bytes(bytes),
     };
 
-    request.router_request = http::Request::from_parts(parts, new_body.into_inner());
+    request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
         for (key, value) in context.try_into_iter()? {
@@ -798,14 +815,12 @@ where
 
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
-    let (first, rest): (
-        Option<Result<Bytes, hyper::Error>>,
-        crate::services::router::Body,
-    ) = body.into_future().await;
+    let mut stream = body.into_data_stream();
+    let first = stream.next().await.transpose()?;
+    let rest = stream;
 
     // If first is None, or contains an error we return an error
-    let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
-    let bytes = match opt_first {
+    let bytes = match first {
         Some(b) => b,
         None => {
             tracing::error!(
@@ -846,12 +861,9 @@ where
     let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
+    let duration = start.elapsed();
     drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::RouterResponse,
-    );
+    record_coprocessor_duration(PipelineStep::RouterResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -864,11 +876,11 @@ where
     // bits that we sent to the co_processor.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => RouterBody::from(bytes),
-        None => RouterBody::from(bytes),
+        Some(bytes) => router::body::from_bytes(bytes),
+        None => router::body::from_bytes(bytes),
     };
 
-    response.response = http::Response::from_parts(parts, new_body.into_inner());
+    response.response = http::Response::from_parts(parts, new_body);
 
     if let Some(control) = co_processor_output.control {
         *response.response.status_mut() = control.get_http_status()?
@@ -958,16 +970,17 @@ where
 
     // Create our response stream which consists of the bytes from our first body chained with the
     // rest of the responses in our mapped stream.
-    let bytes = get_body_bytes(body).await.map_err(BoxError::from);
-    let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
+    let bytes = router::body::into_bytes(body).await.map_err(BoxError::from);
+    let final_stream = RouterBody::new(http_body_util::StreamBody::new(
+        once(ready(bytes))
+            .chain(mapped_stream)
+            .map(|b| b.map(http_body::Frame::data).map_err(axum::Error::new)),
+    ));
 
     // Finally, return a response which has a Body that wraps our stream of response chunks.
     Ok(router::Response {
         context,
-        response: http::Response::from_parts(
-            parts,
-            RouterBody::wrap_stream(final_stream).into_inner(),
-        ),
+        response: http::Response::from_parts(parts, final_stream),
     })
 }
 // -----------------------------------------------------------------------------------------------------
@@ -1034,12 +1047,9 @@ where
     let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
+    let duration = start.elapsed();
     drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::SubgraphRequest,
-    );
+    record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1193,12 +1203,9 @@ where
     let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
+    let duration = start.elapsed();
     drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::SubgraphResponse,
-    );
+    record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;

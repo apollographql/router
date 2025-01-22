@@ -115,17 +115,12 @@ telemetry:
     tracing:
       propagation:
         trace_context: true
-      jaeger:
+      otlp:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        agent:
-          endpoint: default
+        endpoint: default
     logging:
-      experimental_when_header:
-        - name: content-type
-          value: "application/json"
-          body: true
       stdout:
         format:
           json:

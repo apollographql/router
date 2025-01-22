@@ -7,12 +7,12 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
+use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
@@ -30,7 +30,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::query_planner::BridgeQueryPlannerPool;
+use crate::query_planner::QueryPlannerService;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
@@ -40,7 +40,6 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
-use crate::services::transport;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
@@ -71,29 +70,15 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
-    #[deprecated = "use `from_router_service` instead"]
-    #[allow(deprecated)]
-    pub fn new(path: String, handler: transport::BoxService) -> Self {
-        let router_service = ServiceBuilder::new()
-            .map_request(|request: router::Request| request.router_request)
-            .map_response(|response: transport::Response| response.into())
-            .service(handler)
-            .boxed();
-        Self {
-            path,
-            handler: Handler::new(router_service),
-        }
-    }
-
-    /// Creates an Endpoint given a path and a Boxed Service
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
             handler: Handler::new(handler),
         }
     }
+
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<crate::services::router::Body>| {
+        let handler = move |req: http::Request<axum::body::Body>| {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
@@ -297,20 +282,9 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlannerPool::new(
-            previous_supergraph
-                .as_ref()
-                .map(|router| router.js_planners())
-                .unwrap_or_default(),
-            schema.clone(),
-            configuration.clone(),
-            configuration
-                .supergraph
-                .query_planning
-                .experimental_query_planner_parallelism()?,
-        )
-        .instrument(query_planner_span)
-        .await?;
+        let planner = QueryPlannerService::new(schema.clone(), configuration.clone())
+            .instrument(query_planner_span)
+            .await?;
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
@@ -329,7 +303,7 @@ impl YamlRouterFactory {
         let schema_span = tracing::info_span!("schema");
         let _guard = schema_span.enter();
 
-        let schema = bridge_query_planner.schema();
+        let schema = planner.schema();
         if schema_changed {
             configuration.notify.broadcast_schema(schema.clone());
         }
@@ -340,7 +314,7 @@ impl YamlRouterFactory {
 
         // Process the plugins.
         let subgraph_schemas = Arc::new(
-            bridge_query_planner
+            planner
                 .subgraph_schemas()
                 .iter()
                 .map(|(k, v)| (k.clone(), v.schema.clone()))
@@ -362,10 +336,13 @@ impl YamlRouterFactory {
         );
 
         async {
-            let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+            let mut builder = PluggableSupergraphServiceBuilder::new(planner);
             builder = builder.with_configuration(configuration.clone());
+            let http_service_factory =
+                create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&plugins, &schema, &configuration).await?;
+                create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
+            builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
             }
@@ -381,8 +358,8 @@ impl YamlRouterFactory {
 }
 
 pub(crate) async fn create_subgraph_services(
+    http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
     plugins: &Arc<Plugins>,
-    schema: &Schema,
     configuration: &Configuration,
 ) -> Result<
     IndexMap<
@@ -401,14 +378,6 @@ pub(crate) async fn create_subgraph_services(
     >,
     BoxError,
 > {
-    let tls_root_store: RootCertStore = configuration
-        .tls
-        .subgraph
-        .all
-        .create_certificate_store()
-        .transpose()?
-        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
-
     let subscription_plugin_conf = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
@@ -422,6 +391,42 @@ pub(crate) async fn create_subgraph_services(
         .expect("traffic shaping should always be part of the plugin list");
 
     let mut subgraph_services = IndexMap::default();
+    for (name, http_service_factory) in http_service_factory.iter() {
+        let subgraph_service = shaping.subgraph_service_internal(
+            name.as_ref(),
+            SubgraphService::from_config(
+                name.clone(),
+                configuration,
+                subscription_plugin_conf.clone(),
+                http_service_factory.clone(),
+            )?,
+        );
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
+}
+
+pub(crate) async fn create_http_services(
+    plugins: &Arc<Plugins>,
+    schema: &Schema,
+    configuration: &Configuration,
+) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
+    let tls_root_store: RootCertStore = configuration
+        .tls
+        .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?
+        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
+
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
+
+    let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
@@ -431,20 +436,9 @@ pub(crate) async fn create_subgraph_services(
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
-
-        let subgraph_service = shaping.subgraph_service_internal(
-            name,
-            SubgraphService::from_config(
-                name,
-                configuration,
-                subscription_plugin_conf.clone(),
-                http_service_factory,
-            )?,
-        );
-        subgraph_services.insert(name.clone(), subgraph_service);
+        http_services.insert(name.clone(), http_service_factory);
     }
-
-    Ok(subgraph_services)
+    Ok(http_services)
 }
 
 impl TlsClient {
@@ -468,7 +462,7 @@ pub(crate) fn create_certificate_store(
     })?;
     for certificate in certificates {
         store
-            .add(&certificate)
+            .add(certificate)
             .map_err(|e| ConfigurationError::CertificateAuthorities {
                 error: format!("could not add certificate to root store: {e}"),
             })?;
@@ -482,17 +476,20 @@ pub(crate) fn create_certificate_store(
     }
 }
 
-fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     tracing::debug!("loading root certificates");
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to load certificate".to_string(),
-        )
-    })?;
-    Ok(certs.into_iter().map(rustls::Certificate).collect())
+    rustls_pemfile::certs(&mut certificates.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
+        // instead of replacing it with this generic error message?
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "failed to load certificate".to_string(),
+            )
+        })
 }
 
 /// test only helper method to create a router factory in integration tests
@@ -508,12 +505,9 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
+        r#"failed to initialize the query planner: An internal error has occurred, please report this bug to Apollo.
 
-Details:
-Error: Cannot find type "Review" in subgraph "products"
-caused by
-"#
+Details: Object field "Product.reviews"'s inner type "Review" does not refer to an existing output type."#
     );
 }
 
@@ -700,6 +694,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
+    add_optional_apollo_plugin!("preview_connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();

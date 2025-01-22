@@ -96,7 +96,7 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
+impl traverse::Visitor for AuthenticatedCheckVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if !self.entity_query {
             traverse::operation(self, root_type, node)
@@ -319,7 +319,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
+impl transform::Visitor for AuthenticatedVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -627,7 +627,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,
@@ -1945,7 +1945,7 @@ mod tests {
     #[tokio::test]
     async fn introspection_mixed_with_authenticated_fields() {
         // Note: in https://github.com/apollographql/router/pull/5952/ we moved introspection handling
-        // before authorization filtering in bridge_query_planner.rs, relying on the fact that queries
+        // before authorization filtering in query_planner_service.rs, relying on the fact that queries
         // mixing introspection and concrete fields are not supported, so introspection answers right
         // away. If this ever changes, we should make sure that unauthorized fields are still properly
         // filtered out

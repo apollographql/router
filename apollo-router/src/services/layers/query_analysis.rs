@@ -11,11 +11,11 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
-use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::compute_job;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -118,13 +118,6 @@ impl QueryAnalysisLayer {
                 .message("Must provide query string.".to_string())
                 .extension_code("MISSING_QUERY_STRING")
                 .build()];
-            u64_counter!(
-                "apollo_router_http_requests_total",
-                "Total number of HTTP requests made.",
-                1,
-                status = StatusCode::BAD_REQUEST.as_u16() as i64,
-                error = "Must provide query string"
-            );
 
             return Err(SupergraphResponse::builder()
                 .errors(errors)
@@ -265,9 +258,6 @@ pub(crate) struct ParsedDocumentInner {
     /// Non-meta fields explicitly defined in the schema
     pub(crate) has_explicit_root_fields: bool,
 }
-
-#[derive(Debug)]
-pub(crate) struct RootFieldKinds {}
 
 impl ParsedDocumentInner {
     pub(crate) fn new(

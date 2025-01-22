@@ -3,16 +3,19 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::response::*;
 use axum::Router;
+use bytesize::ByteSize;
 use futures::channel::oneshot;
 use futures::prelude::*;
-use hyper::server::conn::Http;
+use hyper_util::rt::TokioExecutor;
+use hyper_util::rt::TokioIo;
+use hyper_util::rt::TokioTimer;
+use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -30,7 +33,6 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
 
-static SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug)]
@@ -197,12 +199,76 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
+async fn process_error(io_error: std::io::Error) {
+    match io_error.kind() {
+        // this is already handled by mio and tokio
+        //std::io::ErrorKind::WouldBlock => todo!(),
+
+        // should be treated as EAGAIN
+        // https://man7.org/linux/man-pages/man2/accept.2.html
+        // Linux accept() (and accept4()) passes already-pending network
+        // errors on the new socket as an error code from accept().  This
+        // behavior differs from other BSD socket implementations.  For
+        // reliable operation the application should detect the network
+        // errors defined for the protocol after accept() and treat them
+        // like EAGAIN by retrying.  In the case of TCP/IP, these are
+        // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
+        // EOPNOTSUPP, and ENETUNREACH.
+        //
+        // those errors are not supported though: needs the unstable io_error_more feature
+        // std::io::ErrorKind::NetworkDown => todo!(),
+        // std::io::ErrorKind::HostUnreachable => todo!(),
+        // std::io::ErrorKind::NetworkUnreachable => todo!(),
+
+        //ECONNABORTED
+        std::io::ErrorKind::ConnectionAborted|
+        //EINTR
+        std::io::ErrorKind::Interrupted|
+        // EINVAL
+        std::io::ErrorKind::InvalidInput|
+        std::io::ErrorKind::PermissionDenied |
+        std::io::ErrorKind::TimedOut |
+        std::io::ErrorKind::ConnectionReset|
+        std::io::ErrorKind::NotConnected => {
+            // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
+            // we should ignore that and get to the next one
+        }
+
+        // ignored errors, these should not happen with accept()
+        std::io::ErrorKind::NotFound |
+        std::io::ErrorKind::AddrInUse |
+        std::io::ErrorKind::AddrNotAvailable |
+        std::io::ErrorKind::BrokenPipe|
+        std::io::ErrorKind::AlreadyExists |
+        std::io::ErrorKind::InvalidData |
+        std::io::ErrorKind::WriteZero |
+        std::io::ErrorKind::Unsupported |
+        std::io::ErrorKind::UnexpectedEof |
+        std::io::ErrorKind::OutOfMemory => {
+        }
+
+        // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
+        // We match on _ because max open file errors fall under ErrorKind::Uncategorized
+        _ => {
+            match io_error.raw_os_error() {
+                Some(libc::EMFILE) | Some(libc::ENFILE) => {
+                    tracing::error!(
+                        "reached the max open file limit, cannot accept any new connection"
+                    );
+                    MAX_FILE_HANDLES_WARN.store(true, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
-    address: ListenAddr,
     router: axum::Router,
-    main_graphql_port: bool,
-    http_config: Http,
+    opt_max_headers: Option<usize>,
+    opt_max_buf_size: Option<ByteSize>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -215,8 +281,6 @@ pub(super) fn serve_router_on_listen_addr(
         tokio::pin!(shutdown_receiver);
 
         let connection_shutdown = Arc::new(Notify::new());
-
-        let address = address.to_string();
 
         loop {
             tokio::select! {
@@ -234,17 +298,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 tracing::info!("can accept connections again");
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
-                            // We only want to recognise sessions if we are the main graphql port.
-                            if main_graphql_port {
-                                let session_count = SESSION_COUNT.fetch_add(1, Ordering::Acquire)+1;
-                                tracing::info!(
-                                    value.apollo_router_session_count_total = session_count,
-                                    listener = &address
-                                );
-                            }
 
-                            let address = address.clone();
-                            let mut http_config = http_config.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
@@ -263,8 +317,26 @@ pub(super) fn serve_router_on_listen_addr(
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
+                                        let tokio_stream = TokioIo::new(stream);
+                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                            app.clone().call(request)
+                                        });
 
-                                        let connection = http_config.serve_connection(stream, app);
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .timer(TokioTimer::new())
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
+
+                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         tokio::pin!(connection);
                                         tokio::select! {
                                             // the connection finished first
@@ -290,7 +362,24 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
-                                        let connection = http_config.serve_connection(stream, app);
+                                        let tokio_stream = TokioIo::new(stream);
+                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                            app.clone().call(request)
+                                        });
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .timer(TokioTimer::new())
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
+                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -323,12 +412,29 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-                                            let protocol = stream.get_ref().1.alpn_protocol();
-                                            let http2 = protocol == Some(&b"h2"[..]);
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        if stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]) {
+                                            builder = builder.http2_only();
+                                        }
 
+                                        let tokio_stream = TokioIo::new(stream);
+                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                            app.clone().call(request)
+                                        });
+                                        let mut http_connection = builder.http1();
+                                        let http_config = http_connection
+                                                         .keep_alive(true)
+                                                         .timer(TokioTimer::new())
+                                                         .header_read_timeout(Duration::from_secs(10));
+                                        if let Some(max_headers) = opt_max_headers {
+                                            http_config.max_headers(max_headers);
+                                        }
+
+                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                        }
                                         let connection = http_config
-                                            .http2_only(http2)
-                                            .serve_connection(stream, app);
+                                            .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -352,84 +458,9 @@ pub(super) fn serve_router_on_listen_addr(
                                         }
                                     }
                                 }
-
-                                // We only want to recognise sessions if we are the main graphql port.
-                                if main_graphql_port {
-                                    let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Acquire)-1;
-                                    tracing::info!(
-                                        value.apollo_router_session_count_total = session_count,
-                                        listener = &address
-                                    );
-                                }
                             });
                         }
-
-                        Err(e) => match e.kind() {
-                            // this is already handled by moi and tokio
-                            //std::io::ErrorKind::WouldBlock => todo!(),
-
-                            // should be treated as EAGAIN
-                            // https://man7.org/linux/man-pages/man2/accept.2.html
-                            // Linux accept() (and accept4()) passes already-pending network
-                            // errors on the new socket as an error code from accept().  This
-                            // behavior differs from other BSD socket implementations.  For
-                            // reliable operation the application should detect the network
-                            // errors defined for the protocol after accept() and treat them
-                            // like EAGAIN by retrying.  In the case of TCP/IP, these are
-                            // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
-                            // EOPNOTSUPP, and ENETUNREACH.
-                            //
-                            // those errors are not supported though: needs the unstable io_error_more feature
-                            // std::io::ErrorKind::NetworkDown => todo!(),
-                            // std::io::ErrorKind::HostUnreachable => todo!(),
-                            // std::io::ErrorKind::NetworkUnreachable => todo!(),
-
-                            //ECONNABORTED
-                            std::io::ErrorKind::ConnectionAborted|
-                            //EINTR
-                            std::io::ErrorKind::Interrupted|
-                            // EINVAL
-                            std::io::ErrorKind::InvalidInput|
-                            std::io::ErrorKind::PermissionDenied |
-                            std::io::ErrorKind::TimedOut |
-                            std::io::ErrorKind::ConnectionReset|
-                            std::io::ErrorKind::NotConnected => {
-                                // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
-                                // we should ignore that and get to the next one
-                                continue;
-                            }
-
-                            // ignored errors, these should not happen with accept()
-                            std::io::ErrorKind::NotFound |
-                            std::io::ErrorKind::AddrInUse |
-                            std::io::ErrorKind::AddrNotAvailable |
-                            std::io::ErrorKind::BrokenPipe|
-                            std::io::ErrorKind::AlreadyExists |
-                            std::io::ErrorKind::InvalidData |
-                            std::io::ErrorKind::WriteZero |
-                            std::io::ErrorKind::Unsupported |
-                            std::io::ErrorKind::UnexpectedEof |
-                            std::io::ErrorKind::OutOfMemory => {
-                                continue;
-                            }
-
-                            // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
-                            // We match on _ because max open file errors fall under ErrorKind::Uncategorized
-                            _ => {
-                                match e.raw_os_error() {
-                                    Some(libc::EMFILE) | Some(libc::ENFILE) => {
-                                        tracing::error!(
-                                            "reached the max open file limit, cannot accept any new connection"
-                                        );
-                                        MAX_FILE_HANDLES_WARN.store(true, Ordering::SeqCst);
-                                        tokio::time::sleep(Duration::from_millis(1)).await;
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-
-                        }
+                        Err(e) => process_error(e).await
                     }
                 }
             }
@@ -444,12 +475,13 @@ pub(super) fn serve_router_on_listen_addr(
     (server, shutdown_sender)
 }
 
+#[derive(Clone)]
 struct IdleConnectionChecker<S> {
     received_request: Arc<AtomicBool>,
     inner: S,
 }
 
-impl<S> IdleConnectionChecker<S> {
+impl<S: Clone> IdleConnectionChecker<S> {
     fn new(b: Arc<AtomicBool>, service: S) -> Self {
         IdleConnectionChecker {
             received_request: b,
@@ -494,6 +526,7 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
+    use crate::services::router::body;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
@@ -523,7 +556,9 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>("this is a test".to_string().into())
+                    .body::<crate::services::router::Body>(body::from_bytes(
+                        "this is a test".to_string(),
+                    ))
                     .unwrap(),
                 context: req.context,
             })
@@ -562,7 +597,9 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             Ok::<_, BoxError>(router::Response {
                 response: http::Response::builder()
-                    .body::<crate::services::router::Body>("this is a test".to_string().into())
+                    .body::<crate::services::router::Body>(body::from_bytes(
+                        "this is a test".to_string(),
+                    ))
                     .unwrap(),
                 context: req.context,
             })

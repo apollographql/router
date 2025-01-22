@@ -2,12 +2,12 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::sync::LazyLock;
 
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
-use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
 
@@ -133,6 +133,8 @@ pub enum SingleFederationError {
     UnknownOperation,
     #[error("Must provide operation name if query contains multiple operations")]
     OperationNameNotProvided,
+    #[error(r#"{message} in @fromContext substring "{context}""#)]
+    FromContextParseError { context: String, message: String },
     #[error("Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.")]
     UnsupportedSpreadDirective { name: Name },
     #[error("{message}")]
@@ -305,6 +307,8 @@ impl SingleFederationError {
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
+            // Technically it's not invalid graphql, but it is invalid syntax inside graphql...
+            SingleFederationError::FromContextParseError { .. } => ErrorCode::InvalidGraphQL,
             // TODO(@goto-bus-stop): this should have a different error code: it's not invalid,
             // just unsupported due to internal limitations.
             SingleFederationError::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
@@ -740,118 +744,154 @@ impl ErrorCodeCategory<String> {
     }
 }
 
-lazy_static! {
-    static ref INVALID_GRAPHQL: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INVALID_GRAPHQL: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INVALID_GRAPHQL".to_owned(),
         "A schema is invalid GraphQL: it violates one of the rule of the specification.".to_owned(),
         None,
-    );
-
-    static ref DIRECTIVE_DEFINITION_INVALID: ErrorCodeDefinition = ErrorCodeDefinition::new(
+    )
+});
+static DIRECTIVE_DEFINITION_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "DIRECTIVE_DEFINITION_INVALID".to_owned(),
         "A built-in or federation directive has an invalid definition in the schema.".to_owned(),
         Some(ErrorCodeMetadata {
             replaces: &["TAG_DEFINITION_INVALID"],
             ..DEFAULT_METADATA.clone()
         }),
-    );
+    )
+});
 
-    static ref TYPE_DEFINITION_INVALID: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static TYPE_DEFINITION_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "TYPE_DEFINITION_INVALID".to_owned(),
         "A built-in or federation type has an invalid definition in the schema.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref UNSUPPORTED_LINKED_FEATURE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static UNSUPPORTED_LINKED_FEATURE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "UNSUPPORTED_LINKED_FEATURE".to_owned(),
         "Indicates that a feature used in a @link is either unsupported or is used with unsupported options.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref UNKNOWN_FEDERATION_LINK_VERSION: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static UNKNOWN_FEDERATION_LINK_VERSION: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "UNKNOWN_FEDERATION_LINK_VERSION".to_owned(),
         "The version of federation in a @link directive on the schema is unknown.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref UNKNOWN_LINK_VERSION: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static UNKNOWN_LINK_VERSION: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "UNKNOWN_LINK_VERSION".to_owned(),
         "The version of @link set on the schema is unknown.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref FIELDS_HAS_ARGS: ErrorCodeCategory<String> = ErrorCodeCategory::new_federation_directive(
+static FIELDS_HAS_ARGS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
+    ErrorCodeCategory::new_federation_directive(
         "FIELDS_HAS_ARGS".to_owned(),
-        Box::new(|directive| format!("The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).", directive)),
-        None,
-    );
-
-    static ref KEY_FIELDS_HAS_ARGS: ErrorCodeDefinition = FIELDS_HAS_ARGS.create_code("key".to_owned());
-    static ref PROVIDES_FIELDS_HAS_ARGS: ErrorCodeDefinition = FIELDS_HAS_ARGS.create_code("provides".to_owned());
-
-    static ref DIRECTIVE_FIELDS_MISSING_EXTERNAL: ErrorCodeCategory<String> = ErrorCodeCategory::new_federation_directive(
-        "FIELDS_MISSING_EXTERNAL".to_owned(),
-        Box::new(|directive| format!("The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.", directive)),
-        Some(ErrorCodeMetadata {
-            added_in: FED1_CODE,
-            replaces: &[],
-        }),
-    );
-
-    static ref PROVIDES_FIELDS_MISSING_EXTERNAL: ErrorCodeDefinition =
-        DIRECTIVE_FIELDS_MISSING_EXTERNAL.create_code("provides".to_owned());
-    static ref REQUIRES_FIELDS_MISSING_EXTERNAL: ErrorCodeDefinition =
-        DIRECTIVE_FIELDS_MISSING_EXTERNAL.create_code("requires".to_owned());
-
-    static ref DIRECTIVE_UNSUPPORTED_ON_INTERFACE: ErrorCodeCategory<String> = ErrorCodeCategory::new_federation_directive(
-        "UNSUPPORTED_ON_INTERFACE".to_owned(),
         Box::new(|directive| {
-            let suffix = if directive == "key" {
-                "only supported when @linking to federation 2.3+"
-            } else {
-                "not (yet) supported"
-            };
-            format!(
-                "A `@{}` directive is used on an interface, which is {}.",
-                directive, suffix
-            )
+            format!("The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).", directive)
         }),
         None,
-    );
+    )
+});
 
-    static ref KEY_UNSUPPORTED_ON_INTERFACE: ErrorCodeDefinition =
-        DIRECTIVE_UNSUPPORTED_ON_INTERFACE.create_code("key".to_owned());
-    static ref PROVIDES_UNSUPPORTED_ON_INTERFACE: ErrorCodeDefinition =
-        DIRECTIVE_UNSUPPORTED_ON_INTERFACE.create_code("provides".to_owned());
-    static ref REQUIRES_UNSUPPORTED_ON_INTERFACE: ErrorCodeDefinition =
-        DIRECTIVE_UNSUPPORTED_ON_INTERFACE.create_code("requires".to_owned());
+static KEY_FIELDS_HAS_ARGS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| FIELDS_HAS_ARGS.create_code("key".to_owned()));
 
-    static ref DIRECTIVE_IN_FIELDS_ARG: ErrorCodeCategory<String> = ErrorCodeCategory::new_federation_directive(
+static PROVIDES_FIELDS_HAS_ARGS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| FIELDS_HAS_ARGS.create_code("provides".to_owned()));
+
+static DIRECTIVE_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(
+    || {
+        ErrorCodeCategory::new_federation_directive(
+            "FIELDS_MISSING_EXTERNAL".to_owned(),
+            Box::new(|directive| {
+                format!("The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.", directive)
+            }),
+            Some(ErrorCodeMetadata {
+                added_in: FED1_CODE,
+                replaces: &[],
+            }),
+        )
+    },
+);
+
+static PROVIDES_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_FIELDS_MISSING_EXTERNAL.create_code("provides".to_owned()));
+static REQUIRES_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_FIELDS_MISSING_EXTERNAL.create_code("requires".to_owned()));
+
+static DIRECTIVE_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeCategory<String>> =
+    LazyLock::new(|| {
+        ErrorCodeCategory::new_federation_directive(
+            "UNSUPPORTED_ON_INTERFACE".to_owned(),
+            Box::new(|directive| {
+                let suffix = if directive == "key" {
+                    "only supported when @linking to federation 2.3+"
+                } else {
+                    "not (yet) supported"
+                };
+                format!(
+                    "A `@{}` directive is used on an interface, which is {}.",
+                    directive, suffix
+                )
+            }),
+            None,
+        )
+    });
+
+static KEY_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_UNSUPPORTED_ON_INTERFACE.create_code("key".to_owned()));
+static PROVIDES_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_UNSUPPORTED_ON_INTERFACE.create_code("provides".to_owned()));
+static REQUIRES_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_UNSUPPORTED_ON_INTERFACE.create_code("requires".to_owned()));
+
+static DIRECTIVE_IN_FIELDS_ARG: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
+    ErrorCodeCategory::new_federation_directive(
         "DIRECTIVE_IN_FIELDS_ARG".to_owned(),
-        Box::new(|directive| format!("The `fields` argument of a `@{}` directive includes some directive applications. This is not supported", directive)),
+        Box::new(|directive| {
+            format!("The `fields` argument of a `@{}` directive includes some directive applications. This is not supported", directive)
+        }),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref KEY_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("key".to_owned());
-    static ref PROVIDES_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("provides".to_owned());
-    static ref REQUIRES_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("requires".to_owned());
+static KEY_DIRECTIVE_IN_FIELDS_ARGS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_IN_FIELDS_ARG.create_code("key".to_owned()));
+static PROVIDES_DIRECTIVE_IN_FIELDS_ARGS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_IN_FIELDS_ARG.create_code("provides".to_owned()));
+static REQUIRES_DIRECTIVE_IN_FIELDS_ARGS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_IN_FIELDS_ARG.create_code("requires".to_owned()));
 
-    static ref EXTERNAL_UNUSED: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTERNAL_UNUSED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTERNAL_UNUSED".to_owned(),
         "An `@external` field is not being used by any instance of `@key`, `@requires`, `@provides` or to satisfy an interface implementation.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
             replaces: &[],
         }),
-    );
+)
+});
 
-    static ref TYPE_WITH_ONLY_UNUSED_EXTERNAL: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static TYPE_WITH_ONLY_UNUSED_EXTERNAL: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "TYPE_WITH_ONLY_UNUSED_EXTERNAL".to_owned(),
         [
             "A federation 1 schema has a composite type comprised only of unused external fields.".to_owned(),
@@ -859,50 +899,68 @@ lazy_static! {
             "But when federation 1 schema are automatically migrated to federation 2 ones, unused external fields are automatically removed, and in rare case this can leave a type empty. If that happens, an error with this code will be raised".to_owned()
         ].join(" "),
         None,
-    );
+)
+});
 
-    static ref PROVIDES_ON_NON_OBJECT_FIELD: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static PROVIDES_ON_NON_OBJECT_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "PROVIDES_ON_NON_OBJECT_FIELD".to_owned(),
-        "A `@provides` directive is used to mark a field whose base type is not an object type.".to_owned(),
+        "A `@provides` directive is used to mark a field whose base type is not an object type."
+            .to_owned(),
         None,
-    );
+    )
+});
 
-    static ref DIRECTIVE_INVALID_FIELDS_TYPE: ErrorCodeCategory<String> = ErrorCodeCategory::new_federation_directive(
+static DIRECTIVE_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
+    ErrorCodeCategory::new_federation_directive(
         "INVALID_FIELDS_TYPE".to_owned(),
-        Box::new(|directive| format!("The value passed to the `fields` argument of a `@{}` directive is not a string.", directive)),
+        Box::new(|directive| {
+            format!(
+                "The value passed to the `fields` argument of a `@{}` directive is not a string.",
+                directive
+            )
+        }),
         None,
-    );
+    )
+});
 
-    static ref KEY_INVALID_FIELDS_TYPE: ErrorCodeDefinition =
-        DIRECTIVE_INVALID_FIELDS_TYPE.create_code("key".to_owned());
-    static ref PROVIDES_INVALID_FIELDS_TYPE: ErrorCodeDefinition =
-        DIRECTIVE_INVALID_FIELDS_TYPE.create_code("provides".to_owned());
-    static ref REQUIRES_INVALID_FIELDS_TYPE: ErrorCodeDefinition =
-        DIRECTIVE_INVALID_FIELDS_TYPE.create_code("requires".to_owned());
+static KEY_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_INVALID_FIELDS_TYPE.create_code("key".to_owned()));
+static PROVIDES_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_INVALID_FIELDS_TYPE.create_code("provides".to_owned()));
+static REQUIRES_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_INVALID_FIELDS_TYPE.create_code("requires".to_owned()));
 
-    static ref DIRECTIVE_INVALID_FIELDS: ErrorCodeCategory<String> = ErrorCodeCategory::new_federation_directive(
+static DIRECTIVE_INVALID_FIELDS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
+    ErrorCodeCategory::new_federation_directive(
         "INVALID_FIELDS".to_owned(),
-        Box::new(|directive| format!("The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).", directive)),
+        Box::new(|directive| {
+            format!("The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).", directive)
+        }),
         None,
-    );
+    )
+});
 
-    static ref KEY_INVALID_FIELDS: ErrorCodeDefinition =
-        DIRECTIVE_INVALID_FIELDS.create_code("key".to_owned());
-    static ref PROVIDES_INVALID_FIELDS: ErrorCodeDefinition =
-        DIRECTIVE_INVALID_FIELDS.create_code("provides".to_owned());
-    static ref REQUIRES_INVALID_FIELDS: ErrorCodeDefinition =
-        DIRECTIVE_INVALID_FIELDS.create_code("requires".to_owned());
+static KEY_INVALID_FIELDS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_INVALID_FIELDS.create_code("key".to_owned()));
+static PROVIDES_INVALID_FIELDS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_INVALID_FIELDS.create_code("provides".to_owned()));
+static REQUIRES_INVALID_FIELDS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| DIRECTIVE_INVALID_FIELDS.create_code("requires".to_owned()));
 
-    static ref KEY_FIELDS_SELECT_INVALID_TYPE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static KEY_FIELDS_SELECT_INVALID_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "KEY_FIELDS_SELECT_INVALID_TYPE".to_owned(),
         "The `fields` argument of `@key` directive includes a field whose type is a list, interface, or union type. Fields of these types cannot be part of a `@key`".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
             replaces: &[],
         }),
-    );
+)
+});
 
-    static ref ROOT_TYPE_USED: ErrorCodeCategory<SchemaRootKind> = ErrorCodeCategory::new(
+static ROOT_TYPE_USED: LazyLock<ErrorCodeCategory<SchemaRootKind>> = LazyLock::new(|| {
+    ErrorCodeCategory::new(
         Box::new(|element| {
             let kind: String = element.into();
             format!("ROOT_{}_USED", kind.to_uppercase())
@@ -914,371 +972,486 @@ lazy_static! {
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
             replaces: &[],
-        })
+        }),
+    )
+});
 
-    );
+static ROOT_QUERY_USED: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| ROOT_TYPE_USED.create_code(SchemaRootKind::Query));
+static ROOT_MUTATION_USED: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| ROOT_TYPE_USED.create_code(SchemaRootKind::Mutation));
+static ROOT_SUBSCRIPTION_USED: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| ROOT_TYPE_USED.create_code(SchemaRootKind::Subscription));
 
-    static ref ROOT_QUERY_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKind::Query);
-    static ref ROOT_MUTATION_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKind::Mutation);
-    static ref ROOT_SUBSCRIPTION_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKind::Subscription);
-
-    static ref INVALID_SUBGRAPH_NAME: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INVALID_SUBGRAPH_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INVALID_SUBGRAPH_NAME".to_owned(),
-        "A subgraph name is invalid (subgraph names cannot be a single underscore (\"_\")).".to_owned(),
+        "A subgraph name is invalid (subgraph names cannot be a single underscore (\"_\"))."
+            .to_owned(),
         None,
-    );
+    )
+});
 
-    static ref NO_QUERIES: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static NO_QUERIES: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "NO_QUERIES".to_owned(),
         "None of the composed subgraphs expose any query.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref INTERFACE_FIELD_NO_IMPLEM: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INTERFACE_FIELD_NO_IMPLEM: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INTERFACE_FIELD_NO_IMPLEM".to_owned(),
         "After subgraph merging, an implementation is missing a field of one of the interface it implements (which can happen for valid subgraphs).".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref TYPE_KIND_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static TYPE_KIND_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "TYPE_KIND_MISMATCH".to_owned(),
         "A type has the same name in different subgraphs, but a different kind. For instance, one definition is an object type but another is an interface.".to_owned(),
         Some(ErrorCodeMetadata {
             replaces: &["VALUE_TYPE_KIND_MISMATCH", "EXTENSION_OF_WRONG_KIND", "ENUM_MISMATCH_TYPE"],
             ..DEFAULT_METADATA.clone()
         }),
-    );
+    )
+});
 
-    static ref EXTERNAL_TYPE_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTERNAL_TYPE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTERNAL_TYPE_MISMATCH".to_owned(),
         "An `@external` field has a type that is incompatible with the declaration(s) of that field in other subgraphs.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE: ErrorCodeDefinition = ErrorCodeDefinition::new(
-        "EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE".to_owned(),
-        "The @external directive collides with other directives in some situations.".to_owned(),
-        Some(ErrorCodeMetadata {
-            added_in: "2.1.0",
-            replaces: &[],
-        }),
-    );
+static EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE".to_owned(),
+            "The @external directive collides with other directives in some situations.".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.1.0",
+                replaces: &[],
+            }),
+        )
+    });
 
-    static ref EXTERNAL_ARGUMENT_MISSING: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTERNAL_ARGUMENT_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTERNAL_ARGUMENT_MISSING".to_owned(),
         "An `@external` field is missing some arguments present in the declaration(s) of that field in other subgraphs.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref EXTERNAL_ARGUMENT_TYPE_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTERNAL_ARGUMENT_TYPE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTERNAL_ARGUMENT_TYPE_MISMATCH".to_owned(),
         "An `@external` field declares an argument with a type that is incompatible with the corresponding argument in the declaration(s) of that field in other subgraphs.".to_owned(),
         None,
-    );
+    )
+});
 
-
-    static ref EXTERNAL_ARGUMENT_DEFAULT_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTERNAL_ARGUMENT_DEFAULT_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTERNAL_ARGUMENT_DEFAULT_MISMATCH".to_owned(),
         "An `@external` field declares an argument with a default that is incompatible with the corresponding argument in the declaration(s) of that field in other subgraphs.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref EXTERNAL_ON_INTERFACE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTERNAL_ON_INTERFACE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTERNAL_ON_INTERFACE".to_owned(),
         "The field of an interface type is marked with `@external`: as external is about marking field not resolved by the subgraph and as interface field are not resolved (only implementations of those fields are), an \"external\" interface field is nonsensical".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
         "MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL".to_owned(),
         "In a subgraph, a field is both marked @external and has a merged directive applied to it".to_owned(),
         None,
-    );
+    )
+    },
+);
 
-    static ref FIELD_TYPE_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static FIELD_TYPE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "FIELD_TYPE_MISMATCH".to_owned(),
         "A field has a type that is incompatible with other declarations of that field in other subgraphs.".to_owned(),
         Some(ErrorCodeMetadata {
             replaces: &["VALUE_TYPE_FIELD_TYPE_MISMATCH"],
             ..DEFAULT_METADATA.clone()
         }),
-    );
+    )
+});
 
-    static ref FIELD_ARGUMENT_TYPE_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static FIELD_ARGUMENT_TYPE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "FIELD_ARGUMENT_TYPE_MISMATCH".to_owned(),
         "An argument (of a field/directive) has a type that is incompatible with that of other declarations of that same argument in other subgraphs.".to_owned(),
         Some(ErrorCodeMetadata {
             replaces: &["VALUE_TYPE_INPUT_VALUE_MISMATCH"],
             ..DEFAULT_METADATA.clone()
         }),
-    );
+    )
+});
 
-    static ref INPUT_FIELD_DEFAULT_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INPUT_FIELD_DEFAULT_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INPUT_FIELD_DEFAULT_MISMATCH".to_owned(),
         "An input field has a default value that is incompatible with other declarations of that field in other subgraphs.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref FIELD_ARGUMENT_DEFAULT_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static FIELD_ARGUMENT_DEFAULT_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "FIELD_ARGUMENT_DEFAULT_MISMATCH".to_owned(),
         "An argument (of a field/directive) has a default value that is incompatible with that of other declarations of that same argument in other subgraphs.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref EXTENSION_WITH_NO_BASE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTENSION_WITH_NO_BASE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTENSION_WITH_NO_BASE".to_owned(),
         "A subgraph is attempting to `extend` a type that is not originally defined in any known subgraph.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref EXTERNAL_MISSING_ON_BASE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EXTERNAL_MISSING_ON_BASE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EXTERNAL_MISSING_ON_BASE".to_owned(),
         "A field is marked as `@external` in a subgraph but with no non-external declaration in any other subgraph.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref INVALID_FIELD_SHARING: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INVALID_FIELD_SHARING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INVALID_FIELD_SHARING".to_owned(),
-        "A field that is non-shareable in at least one subgraph is resolved by multiple subgraphs.".to_owned(),
+        "A field that is non-shareable in at least one subgraph is resolved by multiple subgraphs."
+            .to_owned(),
         None,
-    );
+    )
+});
 
-    static ref INVALID_SHAREABLE_USAGE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INVALID_SHAREABLE_USAGE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INVALID_SHAREABLE_USAGE".to_owned(),
         "The `@shareable` federation directive is used in an invalid way.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.1.2",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref INVALID_LINK_DIRECTIVE_USAGE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INVALID_LINK_DIRECTIVE_USAGE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INVALID_LINK_DIRECTIVE_USAGE".to_owned(),
-        "An application of the @link directive is invalid/does not respect the specification.".to_owned(),
+        "An application of the @link directive is invalid/does not respect the specification."
+            .to_owned(),
         None,
-    );
+    )
+});
 
-    static ref INVALID_LINK_IDENTIFIER: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INVALID_LINK_IDENTIFIER: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INVALID_LINK_IDENTIFIER".to_owned(),
-        "A url/version for a @link feature is invalid/does not respect the specification.".to_owned(),
+        "A url/version for a @link feature is invalid/does not respect the specification."
+            .to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref LINK_IMPORT_NAME_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static LINK_IMPORT_NAME_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "LINK_IMPORT_NAME_MISMATCH".to_owned(),
         "The import name for a merged directive (as declared by the relevant `@link(import:)` argument) is inconsistent between subgraphs.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref REFERENCED_INACCESSIBLE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static REFERENCED_INACCESSIBLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "REFERENCED_INACCESSIBLE".to_owned(),
         "An element is marked as @inaccessible but is referenced by an element visible in the API schema.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref DEFAULT_VALUE_USES_INACCESSIBLE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static DEFAULT_VALUE_USES_INACCESSIBLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "DEFAULT_VALUE_USES_INACCESSIBLE".to_owned(),
         "An element is marked as @inaccessible but is used in the default value of an element visible in the API schema.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref QUERY_ROOT_TYPE_INACCESSIBLE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static QUERY_ROOT_TYPE_INACCESSIBLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "QUERY_ROOT_TYPE_INACCESSIBLE".to_owned(),
         "An element is marked as @inaccessible but is the query root type, which must be visible in the API schema.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref REQUIRED_INACCESSIBLE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static REQUIRED_INACCESSIBLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "REQUIRED_INACCESSIBLE".to_owned(),
         "An element is marked as @inaccessible but is required by an element visible in the API schema.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref IMPLEMENTED_BY_INACCESSIBLE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static IMPLEMENTED_BY_INACCESSIBLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "IMPLEMENTED_BY_INACCESSIBLE".to_owned(),
         "An element is marked as @inaccessible but implements an element visible in the API schema.".to_owned(),
         None,
-    );
-}
+    )
+});
 
-// The above lazy_static! block hits recursion limit if we try to add more to it, so we start a
-// new block here.
-lazy_static! {
-    static ref DISALLOWED_INACCESSIBLE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static DISALLOWED_INACCESSIBLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "DISALLOWED_INACCESSIBLE".to_owned(),
         "An element is marked as @inaccessible that is not allowed to be @inaccessible.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref ONLY_INACCESSIBLE_CHILDREN: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static ONLY_INACCESSIBLE_CHILDREN: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "ONLY_INACCESSIBLE_CHILDREN".to_owned(),
         "A type visible in the API schema has only @inaccessible children.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref REQUIRED_INPUT_FIELD_MISSING_IN_SOME_SUBGRAPH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static REQUIRED_INPUT_FIELD_MISSING_IN_SOME_SUBGRAPH: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
         "REQUIRED_INPUT_FIELD_MISSING_IN_SOME_SUBGRAPH".to_owned(),
         "A field of an input object type is mandatory in some subgraphs, but the field is not defined in all the subgraphs that define the input object type.".to_owned(),
         None,
-    );
+    )
+    },
+);
 
-    static ref REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
         "REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH".to_owned(),
         "An argument of a field or directive definition is mandatory in some subgraphs, but the argument is not defined in all the subgraphs that define the field or directive definition.".to_owned(),
         None,
-    );
+    )
+    },
+);
 
-    static ref EMPTY_MERGED_INPUT_TYPE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EMPTY_MERGED_INPUT_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EMPTY_MERGED_INPUT_TYPE".to_owned(),
         "An input object type has no field common to all the subgraphs that define the type. Merging that type would result in an invalid empty input object type.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref ENUM_VALUE_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static ENUM_VALUE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "ENUM_VALUE_MISMATCH".to_owned(),
         "An enum type that is used as both an input and output type has a value that is not defined in all the subgraphs that define the enum type.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref EMPTY_MERGED_ENUM_TYPE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static EMPTY_MERGED_ENUM_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "EMPTY_MERGED_ENUM_TYPE".to_owned(),
         "An enum type has no value common to all the subgraphs that define the type. Merging that type would result in an invalid empty enum type.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
         "SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES".to_owned(),
         "A shareable field return type has mismatched possible runtime types in the subgraphs in which the field is declared. As shared fields must resolve the same way in all subgraphs, this is almost surely a mistake.".to_owned(),
         None,
-    );
+    )
+    },
+);
 
-    static ref SATISFIABILITY_ERROR: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static SATISFIABILITY_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "SATISFIABILITY_ERROR".to_owned(),
         "Subgraphs can be merged, but the resulting supergraph API would have queries that cannot be satisfied by those subgraphs.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref OVERRIDE_FROM_SELF_ERROR: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static OVERRIDE_FROM_SELF_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "OVERRIDE_FROM_SELF_ERROR".to_owned(),
-        "Field with `@override` directive has \"from\" location that references its own subgraph.".to_owned(),
+        "Field with `@override` directive has \"from\" location that references its own subgraph."
+            .to_owned(),
         None,
-    );
+    )
+});
 
-    static ref OVERRIDE_SOURCE_HAS_OVERRIDE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static OVERRIDE_SOURCE_HAS_OVERRIDE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "OVERRIDE_SOURCE_HAS_OVERRIDE".to_owned(),
         "Field which is overridden to another subgraph is also marked @override.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
         "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE".to_owned(),
         "The @override directive cannot be used on external fields, nor to override fields with either @external, @provides, or @requires.".to_owned(),
         None,
-    );
+    )
+    },
+);
 
-    static ref OVERRIDE_ON_INTERFACE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static OVERRIDE_ON_INTERFACE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "OVERRIDE_ON_INTERFACE".to_owned(),
         "The @override directive cannot be used on the fields of an interface type.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.3.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref UNSUPPORTED_FEATURE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static UNSUPPORTED_FEATURE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "UNSUPPORTED_FEATURE".to_owned(),
         "Indicates an error due to feature currently unsupported by federation.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref INVALID_FEDERATION_SUPERGRAPH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INVALID_FEDERATION_SUPERGRAPH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INVALID_FEDERATION_SUPERGRAPH".to_owned(),
         "Indicates that a schema provided for an Apollo Federation supergraph is not a valid supergraph schema.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref DOWNSTREAM_SERVICE_ERROR: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static DOWNSTREAM_SERVICE_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "DOWNSTREAM_SERVICE_ERROR".to_owned(),
         "Indicates an error in a subgraph service query during query execution in a federated service.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref DIRECTIVE_COMPOSITION_ERROR: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static DIRECTIVE_COMPOSITION_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "DIRECTIVE_COMPOSITION_ERROR".to_owned(),
         "Error when composing custom directives.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref INTERFACE_OBJECT_USAGE_ERROR: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INTERFACE_OBJECT_USAGE_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INTERFACE_OBJECT_USAGE_ERROR".to_owned(),
         "Error in the usage of the @interfaceObject directive.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.3.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref INTERFACE_KEY_NOT_ON_IMPLEMENTATION: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INTERFACE_KEY_NOT_ON_IMPLEMENTATION: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INTERFACE_KEY_NOT_ON_IMPLEMENTATION".to_owned(),
         "A `@key` is defined on an interface type, but is not defined (or is not resolvable) on at least one of the interface implementations".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.3.0",
             replaces: &[],
         }),
-    );
+    )
+});
 
-    static ref INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
         "INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE".to_owned(),
         "A subgraph has a `@key` on an interface type, but that subgraph does not define an implementation (in the supergraph) of that interface".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.3.0",
             replaces: &[],
         }),
-    );
+    )
+    },
+);
 
-    static ref INTERNAL: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static INTERNAL: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "INTERNAL".to_owned(),
         "An internal federation error occured.".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref UNSUPPORTED_FEDERATION_VERSION: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static UNSUPPORTED_FEDERATION_VERSION: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "UNSUPPORTED_FEDERATION_VERSION".to_owned(),
         "Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater".to_owned(),
         None,
-    );
+    )
+});
 
-    static ref UNSUPPORTED_FEDERATION_DIRECTIVE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+static UNSUPPORTED_FEDERATION_DIRECTIVE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
         "UNSUPPORTED_FEDERATION_DIRECTIVE".to_owned(),
-        "Indicates that the specified specification version is outside of supported range".to_owned(),
+        "Indicates that the specified specification version is outside of supported range"
+            .to_owned(),
         None,
-
-    );
-}
+    )
+});
 
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {

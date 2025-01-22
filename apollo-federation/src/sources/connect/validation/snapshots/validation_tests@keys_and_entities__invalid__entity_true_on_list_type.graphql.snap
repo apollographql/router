@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_entities/invalid/entity_true_on_list_type.graphql
+---
+[
+    Message {
+        code: EntityTypeInvalid,
+        message: "`@connect(entity: true)` on `Query.users` is invalid. Entity connectors must return non-list, nullable, object types. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+        locations: [
+            8:7..8:19,
+        ],
+    },
+]

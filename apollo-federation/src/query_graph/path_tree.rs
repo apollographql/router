@@ -246,6 +246,7 @@ where
             /// trigger: the final trigger value
             ///   - Two equivalent triggers can have minor differences in the sibling_typename.
             ///     This field holds the final trigger value that will be used.
+            ///
             /// PORT_NOTE: The JS QP used the last trigger value. So, we are following that
             ///            to avoid mismatches. But, it can be revisited.
             ///            We may want to keep or merge the sibling_typename values.
@@ -562,6 +563,7 @@ where
 mod tests {
     use std::sync::Arc;
 
+    use apollo_compiler::parser::Parser;
     use apollo_compiler::ExecutableDocument;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
@@ -584,9 +586,9 @@ mod tests {
     fn parse_schema_and_operation(
         schema_and_operation: &str,
     ) -> (ValidFederationSchema, ExecutableDocument) {
-        let (schema, executable_document) =
-            apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql")
-                .unwrap();
+        let (schema, executable_document) = Parser::new()
+            .parse_mixed_validate(schema_and_operation, "document.graphql")
+            .unwrap();
         let executable_document = executable_document.into_inner();
         let schema = ValidFederationSchema::new(schema).unwrap();
         (schema, executable_document)

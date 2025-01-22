@@ -19,14 +19,6 @@ telemetry:
               - 4
               - 5
               - 100
-        attributes:
-          subgraph:
-            all:
-              request:
-                header:
-                  - named: "x-custom-header"
-                    rename: "custom_header"
-                    default: "unknown"
 headers:
   all:
     request:

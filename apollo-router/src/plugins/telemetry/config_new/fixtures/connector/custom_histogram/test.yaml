@@ -1,0 +1,27 @@
+description: Both subgraph and connector HTTP client duration metrics
+events:
+  - - context:
+        map:
+          "apollo_router::connector::info":
+            subgraph_name: users
+            source_name: user_api
+            http_method: GET
+            url_template: "/users"
+    - http_request:
+        uri: "/users"
+        method: GET
+    - http_response:
+        status: 200
+        headers:
+          x-ratelimit-remaining: 999
+        body: |
+          { "username": "foo" }
+    - http_request:
+        uri: "/users"
+        method: GET
+    - http_response:
+        status: 200
+        headers:
+          x-ratelimit-remaining: 500
+        body: |
+          { "username": "foo" }
