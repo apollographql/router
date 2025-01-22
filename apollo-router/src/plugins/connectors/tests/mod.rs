@@ -1473,7 +1473,7 @@ async fn test_variables() {
     let response = execute(
         &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
         &uri,
-        "{ f(arg: \"arg\") { arg context config sibling status extra f(arg: \"arg\") { arg context config sibling status } } }",
+        "{ f(arg: \"arg\") { arg context config sibling status extra request response f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
           "preview_connectors": {
@@ -1516,6 +1516,8 @@ async fn test_variables() {
             "config": "C",
             "status": 200
           },
+          "request": "coolheader",
+          "response": "myothercoolheader",
           "f": {
             "arg": "arg",
             "context": "B",
