@@ -9,6 +9,7 @@ use std::time::Duration;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
 use tower::BoxError;
@@ -42,7 +43,7 @@ pub(crate) struct TpsLimitConf {
     pub(crate) interval: Duration,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
 pub(crate) struct RouterLimitsConfig {}
 
 #[async_trait::async_trait]
@@ -128,7 +129,7 @@ mod test {
     async fn get_router_limits_plugin(
         license: LicenseState,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        let empty_config = serde_json::to_value(()).unwrap();
+        let empty_config = serde_json::to_value(RouterLimitsConfig {}).unwrap();
         let plugin_init = PluginInit::fake_builder()
             .license(license)
             .config(empty_config)
