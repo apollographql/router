@@ -49,6 +49,7 @@ impl<'schema> VariableContext<'schema> {
                     Namespace::Context,
                     Namespace::Status,
                     Namespace::This,
+                    Namespace::Request,
                     Namespace::Response,
                 ]
             }
