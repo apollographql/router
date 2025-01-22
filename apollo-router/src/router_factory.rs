@@ -740,12 +740,12 @@ pub(crate) async fn create_plugins(
     }
 }
 
-fn inject_schema_id(schema_id: &str, configuration: &mut Value) {
-    if let Some(apollo) = configuration.get_mut("apollo") {
-        if let Some(apollo) = apollo.as_object_mut() {
-            apollo.insert("schema_id".to_string(), Value::String(schema_id.to_owned()));
-        }
-    } else {
+fn inject_schema_id(
+    // Ideally we'd use &SchemaId, but we'll need to update a bunch of tests to do so
+    schema_id: &str,
+    configuration: &mut Value,
+) {
+    if configuration.get("apollo").is_none() {
         // Warning: this must be done here, otherwise studio reporting will not work
         if apollo_key().is_some() && apollo_graph_reference().is_some() {
             if let Some(telemetry) = configuration.as_object_mut() {
@@ -753,6 +753,14 @@ fn inject_schema_id(schema_id: &str, configuration: &mut Value) {
             }
         } else {
             return;
+        }
+    }
+    if let Some(apollo) = configuration.get_mut("apollo") {
+        if let Some(apollo) = apollo.as_object_mut() {
+            apollo.insert(
+                "schema_id".to_string(),
+                Value::String(schema_id.to_string()),
+            );
         }
     }
 }
