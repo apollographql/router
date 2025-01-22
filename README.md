@@ -22,6 +22,8 @@ See [the documentation](https://www.apollographql.com/docs/router) for more deta
 
 ## Usage
 
+Needs backporting!
+
 Apollo Router Core requires [a supergraph file](https://www.apollographql.com/docs/rover/commands/supergraphs/) to be passed as the `--supergraph` argument and [an optional configuration file](https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file).
 to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
