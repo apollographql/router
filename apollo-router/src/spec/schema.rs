@@ -33,7 +33,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) schema_id: SchemaId,
+    pub(crate) schema_id: SchemaHash,
     pub(crate) launch_id: Option<Arc<String>>,
 }
 
@@ -152,8 +152,8 @@ impl Schema {
     }
 
     /// Compute the Schema ID for an SDL string.
-    pub(crate) fn schema_id(sdl: &str) -> SchemaId {
-        SchemaId::new(sdl)
+    pub(crate) fn schema_id(sdl: &str) -> SchemaHash {
+        SchemaHash::new(sdl)
     }
 
     /// Extracts a string containing the entire [`Schema`].
@@ -369,7 +369,7 @@ impl std::ops::Deref for ApiSchema {
 /// That means that differences in whitespace and comments affect the hash, not only semantic
 /// differences in the schema.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct SchemaId(
+pub(crate) struct SchemaHash(
     /// The internal representation is a pointer to a string.
     /// This is not ideal, it might be better eg. to just have a fixed-size byte array that can be
     /// turned into a string as needed.
@@ -377,7 +377,7 @@ pub(crate) struct SchemaId(
     /// essentially a backwards compatibility decision.
     Arc<String>,
 );
-impl SchemaId {
+impl SchemaHash {
     pub(crate) fn new(sdl: &str) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(sdl);
@@ -407,7 +407,7 @@ impl SchemaId {
     }
 }
 
-impl Display for SchemaId {
+impl Display for SchemaHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.as_str())
     }
@@ -419,13 +419,13 @@ impl Display for SchemaId {
 /// For a document with two queries A and B, queries A and B will result in a different hash even
 /// if the document text is identical.
 /// If query A is then executed against two different versions of the schema, the hash will be
-/// different again, depending on the [SchemaId].
+/// different again, depending on the [SchemaHash].
 ///
-/// A query hash can be obtained from a schema ID using [SchemaId::operation_hash].
+/// A query hash can be obtained from a schema ID using [SchemaHash::operation_hash].
 // FIXME: rename to OperationHash since it include operation name?
 #[derive(Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct QueryHash(
-    /// Unlike SchemaId, the query hash has no backwards compatibility motivations for the internal
+    /// Unlike SchemaHash, the query hash has no backwards compatibility motivations for the internal
     /// type, as it's fully private. We could consider making this a fixed-size byte array rather
     /// than a Vec, but it shouldn't make a huge difference.
     #[serde(with = "hex")]
@@ -433,8 +433,8 @@ pub(crate) struct QueryHash(
 );
 
 impl QueryHash {
-    /// This constructor is not public, see [SchemaId::operation_hash] instead.
-    fn new(schema_id: &SchemaId, query_text: &str, operation_name: Option<&str>) -> Self {
+    /// This constructor is not public, see [SchemaHash::operation_hash] instead.
+    fn new(schema_id: &SchemaHash, query_text: &str, operation_name: Option<&str>) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(schema_id.as_str());
         // byte separator between each part that is hashed

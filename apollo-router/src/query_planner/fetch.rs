@@ -35,7 +35,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
-use crate::spec::SchemaId;
+use crate::spec::SchemaHash;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -99,7 +99,7 @@ pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
 pub(crate) struct SubgraphSchema {
     pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
     // TODO: Ideally should have separate nominal type for subgraph's schema hash
-    pub(crate) hash: Arc<SchemaId>,
+    pub(crate) hash: Arc<SchemaHash>,
 }
 
 impl SubgraphSchema {
@@ -107,7 +107,7 @@ impl SubgraphSchema {
         let sdl = schema.serialize().no_indent().to_string();
         Self {
             schema: Arc::new(schema),
-            hash: Arc::new(SchemaId::new(&sdl)),
+            hash: Arc::new(SchemaHash::new(&sdl)),
         }
     }
 }

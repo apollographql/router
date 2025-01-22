@@ -741,7 +741,7 @@ pub(crate) async fn create_plugins(
 }
 
 fn inject_schema_id(
-    // Ideally we'd use &SchemaId, but we'll need to update a bunch of tests to do so
+    // Ideally we'd use &SchemaHash, but we'll need to update a bunch of tests to do so
     schema_id: &str,
     configuration: &mut Value,
 ) {
