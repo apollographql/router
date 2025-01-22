@@ -17,19 +17,19 @@ mod test {
 
         async {
             let mut response = test_harness
-                .call_router(
+                .router_service(|_r| async {
+                    tracing::info!("response");
+                    Ok(router::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .data(serde_json::json!({"data": "res"}))
+                        .build()
+                        .expect("expecting valid response"))
+                })
+                .call(
                     router::Request::fake_builder()
                         .body(router::body::from_bytes("query { foo }"))
                         .build()
                         .expect("expecting valid request"),
-                    |_r| async {
-                        tracing::info!("response");
-                        Ok(router::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .data(serde_json::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response"))
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -46,20 +46,19 @@ mod test {
 
         async {
             let mut response = test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    tracing::info!("response");
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .data(serde_json::json!({"data": "res"}))
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .variable("a", "b")
                         .build()
                         .expect("expecting valid request"),
-                    |_r| {
-                        tracing::info!("response");
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .data(serde_json::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -76,7 +75,14 @@ mod test {
 
         async {
             test_harness
-                .call_subgraph(
+                .subgraph_service("subgraph", |_r| async {
+                    tracing::info!("response");
+                    subgraph::Response::fake2_builder()
+                        .header("custom-header", "val1")
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
                         .subgraph_request(http::Request::new(
@@ -85,14 +91,6 @@ mod test {
                                 .build(),
                         ))
                         .build(),
-                    |_r| {
-                        tracing::info!("response");
-                        subgraph::Response::fake2_builder()
-                            .header("custom-header", "val1")
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");

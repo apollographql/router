@@ -8,6 +8,7 @@ use apollo_compiler::validation::Valid;
 use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::plugin::DynPlugin;
@@ -35,23 +36,22 @@ use crate::Notify;
 ///         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder().build().await;
 ///
 ///         async {
-///             let mut response = test_harness
-///                 .call_router(
-///                     router::Request::fake_builder()
-///                         .body("query { foo }")
-///                         .build()
-///                         .expect("expecting valid request"),
-///                     |_r| {
-///                         tracing::info!("response");
-///                         router::Response::fake_builder()
-///                             .header("custom-header", "val1")
-///                             .data(serde_json::json!({"data": "res"}))
-///                             .build()
-///                             .expect("expecting valid response")
-///                     },
-///                 )
-///                 .await
-///                 .expect("expecting successful response");
+///            let test_harness: PluginTestHarness<MyTestPlugin> =
+///             PluginTestHarness::builder().build().await;
+///
+///             let mut service = test_harness.router_service(|_req| async {
+///                 Ok(router::Response::fake_builder()
+///                     .data(serde_json::json!({"data": {"field": "value"}}))
+///                     .header("x-custom-header", "test-value")
+///                     .build()
+///                     .unwrap())
+///                 });
+///
+///             let response = service.call_default().await.unwrap();
+///             assert_eq!(
+///                 response.response.headers().get("x-custom-header"),
+///                 Some(&HeaderValue::from_static("test-value"))
+///             );
 ///
 ///             response.next_response().await;
 ///         }
@@ -87,7 +87,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .expect("invalid yaml")
             .get(name)
             .cloned()
-            .unwrap_or(Value::Object(Default::default()));
+            .unwrap_or(Value::Null);
 
         let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
             let schema = Schema::parse(schema, &config).unwrap();
@@ -130,12 +130,10 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn call_router<F>(
+    pub(crate) fn router_service<F>(
         &self,
-        request: router::Request,
         response_fn: fn(router::Request) -> F,
-    ) -> Result<router::Response, BoxError>
+    ) -> ServiceHandle<router::Request, router::BoxService>
     where
         F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
     {
@@ -144,69 +142,87 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 .service_fn(move |req: router::Request| async move { (response_fn)(req).await }),
         );
 
-        self.plugin.router_service(service).call(request).await
+        ServiceHandle {
+            _phantom: Default::default(),
+            service: self.plugin.router_service(service),
+        }
     }
 
-    pub(crate) async fn call_supergraph(
+    pub(crate) fn supergraph_service<F>(
         &self,
-        request: supergraph::Request,
-        response_fn: fn(supergraph::Request) -> supergraph::Response,
-    ) -> Result<supergraph::Response, BoxError> {
-        let service: supergraph::BoxService = supergraph::BoxService::new(
-            ServiceBuilder::new()
-                .service_fn(move |req: supergraph::Request| async move { Ok((response_fn)(req)) }),
-        );
+        response_fn: fn(supergraph::Request) -> F,
+    ) -> ServiceHandle<supergraph::Request, supergraph::BoxService>
+    where
+        F: Future<Output = Result<supergraph::Response, BoxError>> + Send + 'static,
+    {
+        let service: supergraph::BoxService =
+            supergraph::BoxService::new(ServiceBuilder::new().service_fn(
+                move |req: supergraph::Request| async move { (response_fn)(req).await },
+            ));
 
-        self.plugin.supergraph_service(service).call(request).await
+        ServiceHandle {
+            _phantom: Default::default(),
+            service: self.plugin.supergraph_service(service),
+        }
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn call_execution(
+    pub(crate) fn execution_service<F>(
         &self,
-        request: execution::Request,
-        response_fn: fn(execution::Request) -> execution::Response,
-    ) -> Result<execution::Response, BoxError> {
+        response_fn: fn(execution::Request) -> F,
+    ) -> ServiceHandle<execution::Request, execution::BoxService>
+    where
+        F: Future<Output = Result<execution::Response, BoxError>> + Send + 'static,
+    {
         let service: execution::BoxService = execution::BoxService::new(
             ServiceBuilder::new()
-                .service_fn(move |req: execution::Request| async move { Ok((response_fn)(req)) }),
+                .service_fn(move |req: execution::Request| async move { (response_fn)(req).await }),
         );
 
-        self.plugin.execution_service(service).call(request).await
+        ServiceHandle {
+            _phantom: Default::default(),
+            service: self.plugin.execution_service(service),
+        }
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn call_subgraph(
+    pub(crate) fn subgraph_service<F>(
         &self,
-        request: subgraph::Request,
-        response_fn: fn(subgraph::Request) -> subgraph::Response,
-    ) -> Result<subgraph::Response, BoxError> {
-        let name = request.subgraph_name.clone();
+        subgraph: &str,
+        response_fn: fn(subgraph::Request) -> F,
+    ) -> ServiceHandle<subgraph::Request, subgraph::BoxService>
+    where
+        F: Future<Output = Result<subgraph::Response, BoxError>> + Send + 'static,
+    {
         let service: subgraph::BoxService = subgraph::BoxService::new(
             ServiceBuilder::new()
-                .service_fn(move |req: subgraph::Request| async move { Ok((response_fn)(req)) }),
+                .service_fn(move |req: subgraph::Request| async move { (response_fn)(req).await }),
         );
 
-        self.plugin
-            .subgraph_service(&name.expect("subgraph name must be populated"), service)
-            .call(request)
-            .await
+        ServiceHandle {
+            _phantom: Default::default(),
+            service: self.plugin.subgraph_service(subgraph, service),
+        }
     }
+
     #[allow(dead_code)]
-    pub(crate) async fn call_http_client(
+    pub(crate) fn http_client_service<F>(
         &self,
-        subgraph_name: &str,
-        request: http::HttpRequest,
-        response_fn: fn(http::HttpRequest) -> http::HttpResponse,
-    ) -> Result<http::HttpResponse, BoxError> {
+        subgraph: &str,
+        response_fn: fn(http::HttpRequest) -> F,
+    ) -> ServiceHandle<http::HttpRequest, http::BoxService>
+    where
+        F: Future<Output = Result<http::HttpResponse, BoxError>> + Send + 'static,
+    {
         let service: http::BoxService = http::BoxService::new(
             ServiceBuilder::new()
-                .service_fn(move |req: http::HttpRequest| async move { Ok((response_fn)(req)) }),
+                .service_fn(move |req: http::HttpRequest| async move { (response_fn)(req).await }),
         );
 
-        self.plugin
-            .http_client_service(subgraph_name, service)
-            .call(request)
-            .await
+        ServiceHandle {
+            _phantom: Default::default(),
+            service: self.plugin.http_client_service(subgraph, service),
+        }
     }
 }
 
@@ -221,5 +237,207 @@ where
             .as_any()
             .downcast_ref()
             .expect("plugin should be of type T")
+    }
+}
+
+pub(crate) struct ServiceHandle<Req, S>
+where
+    S: Service<Req>,
+{
+    _phantom: std::marker::PhantomData<Req>,
+    service: S,
+}
+
+impl<Req, S> ServiceHandle<Req, S>
+where
+    S: Service<Req, Error = BoxError>,
+{
+    /// Await the service to be ready and make a call to the service.
+    pub(crate) async fn call(&mut self, request: Req) -> Result<S::Response, BoxError> {
+        self.service.ready().await?.call(request).await
+    }
+
+    pub(crate) async fn call_default(&mut self) -> Result<S::Response, BoxError>
+    where
+        Req: FakeDefault,
+    {
+        self.call(FakeDefault::default()).await
+    }
+}
+
+pub(crate) trait FakeDefault {
+    fn default() -> Self;
+}
+
+impl FakeDefault for router::Request {
+    fn default() -> Self {
+        router::Request::fake_builder().build().unwrap()
+    }
+}
+
+impl FakeDefault for supergraph::Request {
+    fn default() -> Self {
+        supergraph::Request::fake_builder().build().unwrap()
+    }
+}
+
+impl FakeDefault for execution::Request {
+    fn default() -> Self {
+        execution::Request::fake_builder().build()
+    }
+}
+
+impl FakeDefault for subgraph::Request {
+    fn default() -> Self {
+        subgraph::Request::fake_builder().build()
+    }
+}
+
+impl FakeDefault for http::HttpRequest {
+    fn default() -> Self {
+        http::HttpRequest {
+            http_request: Default::default(),
+            context: Default::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_for_harness {
+    use ::http::HeaderMap;
+    use ::http::HeaderValue;
+    use async_trait::async_trait;
+
+    use super::*;
+    use crate::plugin::Plugin;
+    use crate::services::router;
+    use crate::services::router::body;
+    use crate::services::router::BoxService;
+
+    struct MyTestPlugin {}
+    #[async_trait]
+    impl Plugin for MyTestPlugin {
+        type Config = ();
+
+        async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+        where
+            Self: Sized,
+        {
+            Ok(Self {})
+        }
+
+        fn router_service(&self, service: BoxService) -> BoxService {
+            ServiceBuilder::new()
+                .concurrency_limit(1)
+                .service(service)
+                .boxed()
+        }
+    }
+    register_plugin!("testing", "my_test_plugin", MyTestPlugin);
+
+    #[tokio::test]
+    async fn test_router_service() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let mut service = test_harness.router_service(|_req| async {
+            Ok(router::Response::fake_builder()
+                .data(serde_json::json!({"data": {"field": "value"}}))
+                .header("x-custom-header", "test-value")
+                .build()
+                .unwrap())
+        });
+
+        for _ in 0..2 {
+            let response = service.call_default().await.unwrap();
+            assert_eq!(
+                response.response.headers().get("x-custom-header"),
+                Some(&HeaderValue::from_static("test-value"))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_service() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let mut service = test_harness.supergraph_service(|_req| async {
+            Ok(supergraph::Response::fake_builder()
+                .data(serde_json::json!({"data": {"field": "value"}}))
+                .header("x-custom-header", "test-value")
+                .build()
+                .unwrap())
+        });
+
+        let response = service.call_default().await.unwrap();
+        assert_eq!(
+            response.response.headers().get("x-custom-header"),
+            Some(&HeaderValue::from_static("test-value"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_service() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let mut service = test_harness.execution_service(|_req| async {
+            Ok(execution::Response::fake_builder()
+                .data(serde_json::json!({"data": {"field": "value"}}))
+                .header("x-custom-header", "test-value")
+                .build()
+                .unwrap())
+        });
+
+        let response = service.call_default().await.unwrap();
+        assert_eq!(
+            response.response.headers().get("x-custom-header"),
+            Some(&HeaderValue::from_static("test-value"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_service() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let mut service = test_harness.subgraph_service("test_subgraph", |_req| async {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-custom-header", "test-value".parse().unwrap());
+            Ok(subgraph::Response::fake_builder()
+                .data(serde_json::json!({"data": {"field": "value"}}))
+                .headers(headers)
+                .build())
+        });
+
+        let response = service.call_default().await.unwrap();
+        assert_eq!(
+            response.response.headers().get("x-custom-header"),
+            Some(&HeaderValue::from_static("test-value"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_http_client_service() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let mut service = test_harness.http_client_service("test_client", |req| async {
+            Ok(http::HttpResponse {
+                http_response: ::http::Response::builder()
+                    .status(200)
+                    .header("x-custom-header", "test-value")
+                    .body(body::empty())
+                    .expect("valid response"),
+                context: req.context,
+            })
+        });
+
+        let response = service.call_default().await.unwrap();
+        assert_eq!(
+            response.http_response.headers().get("x-custom-header"),
+            Some(&HeaderValue::from_static("test-value"))
+        );
     }
 }
