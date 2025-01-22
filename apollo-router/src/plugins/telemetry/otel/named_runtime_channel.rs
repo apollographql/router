@@ -41,11 +41,14 @@ impl Runtime for NamedTokioRuntime {
     }
 }
 
-impl<T: Debug + Send> RuntimeChannel<T> for NamedTokioRuntime {
-    type Receiver = <Tokio as RuntimeChannel<T>>::Receiver;
-    type Sender = NamedSender<T>;
+impl RuntimeChannel for NamedTokioRuntime {
+    type Receiver<T: Debug + Send> = <Tokio as RuntimeChannel>::Receiver<T>;
+    type Sender<T: Debug + Send> = NamedSender<T>;
 
-    fn batch_message_channel(&self, capacity: usize) -> (Self::Sender, Self::Receiver) {
+    fn batch_message_channel<T: Debug + Send>(
+        &self,
+        capacity: usize,
+    ) -> (Self::Sender<T>, Self::Receiver<T>) {
         let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
         (
             NamedSender::new(self.name, sender),

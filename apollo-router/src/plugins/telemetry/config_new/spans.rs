@@ -186,14 +186,16 @@ mod test {
         );
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+            .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(!values.iter().any(|key_val| key_val.key == URL_PATH));
+            .any(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_VERSION));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+            .any(|key_val| key_val.key.as_str() == URL_PATH));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -212,14 +214,16 @@ mod test {
         );
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+            .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
+            .any(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_VERSION));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == URL_PATH));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+            .any(|key_val| key_val.key.as_str() == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -238,14 +242,16 @@ mod test {
         );
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+            .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD));
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
+            .any(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_VERSION));
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+            .any(|key_val| key_val.key.as_str() == URL_PATH));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -261,7 +267,9 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -277,7 +285,9 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -293,7 +303,9 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -317,7 +329,9 @@ mod test {
                 )
                 .build(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -341,7 +355,9 @@ mod test {
                 )
                 .build(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
