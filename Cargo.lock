@@ -321,6 +321,7 @@ dependencies = [
  "libc",
  "libtest-mimic",
  "linkme",
+ "log",
  "lru",
  "maplit",
  "mediatype",
