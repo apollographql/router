@@ -142,10 +142,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 .service_fn(move |req: router::Request| async move { (response_fn)(req).await }),
         );
 
-        ServiceHandle {
-            _phantom: Default::default(),
-            service: self.plugin.router_service(service),
-        }
+        ServiceHandle::new(self.plugin.router_service(service))
     }
 
     pub(crate) fn supergraph_service<F>(
@@ -160,10 +157,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 move |req: supergraph::Request| async move { (response_fn)(req).await },
             ));
 
-        ServiceHandle {
-            _phantom: Default::default(),
-            service: self.plugin.supergraph_service(service),
-        }
+        ServiceHandle::new(self.plugin.supergraph_service(service))
     }
 
     #[allow(dead_code)]
@@ -179,10 +173,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 .service_fn(move |req: execution::Request| async move { (response_fn)(req).await }),
         );
 
-        ServiceHandle {
-            _phantom: Default::default(),
-            service: self.plugin.execution_service(service),
-        }
+        ServiceHandle::new(self.plugin.execution_service(service))
     }
 
     #[allow(dead_code)]
@@ -198,11 +189,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             ServiceBuilder::new()
                 .service_fn(move |req: subgraph::Request| async move { (response_fn)(req).await }),
         );
-
-        ServiceHandle {
-            _phantom: Default::default(),
-            service: self.plugin.subgraph_service(subgraph, service),
-        }
+        ServiceHandle::new(self.plugin.subgraph_service(subgraph, service))
     }
 
     #[allow(dead_code)]
@@ -219,10 +206,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                 .service_fn(move |req: http::HttpRequest| async move { (response_fn)(req).await }),
         );
 
-        ServiceHandle {
-            _phantom: Default::default(),
-            service: self.plugin.http_client_service(subgraph, service),
-        }
+        ServiceHandle::new(self.plugin.http_client_service(subgraph, service))
     }
 }
 
@@ -242,24 +226,47 @@ where
 
 pub(crate) struct ServiceHandle<Req, S>
 where
-    S: Service<Req>,
+    S: Service<Req, Error = BoxError>,
 {
     _phantom: std::marker::PhantomData<Req>,
-    service: S,
+    service: Arc<tokio::sync::Mutex<S>>,
+}
+
+impl Clone for ServiceHandle<router::Request, router::BoxService> {
+    fn clone(&self) -> Self {
+        Self {
+            _phantom: Default::default(),
+            service: self.service.clone(),
+        }
+    }
 }
 
 impl<Req, S> ServiceHandle<Req, S>
 where
     S: Service<Req, Error = BoxError>,
 {
-    /// Await the service to be ready and make a call to the service.
-    pub(crate) async fn call(&mut self, request: Req) -> Result<S::Response, BoxError> {
-        self.service.ready().await?.call(request).await
+    pub(crate) fn new(service: S) -> Self {
+        Self {
+            _phantom: Default::default(),
+            service: Arc::new(tokio::sync::Mutex::new(service)),
+        }
     }
 
-    pub(crate) async fn call_default(&mut self) -> Result<S::Response, BoxError>
+    /// Await the service to be ready and make a call to the service.
+    pub(crate) async fn call(&self, request: Req) -> Result<S::Response, BoxError> {
+        // This is a bit of a dance to ensure that we wait until the service is readu to call, make
+        // the call and then drop the mutex guard before the call is executed.
+        // This means that other calls to the service can take place.
+        let mut service = self.service.lock().await;
+        let fut = service.ready().await?.call(request);
+        drop(service);
+        fut.await
+    }
+
+    /// Call using the default request for the service.
+    pub(crate) async fn call_default(&self) -> Result<S::Response, BoxError>
     where
-        Req: FakeDefault,
+        Req: FakeDefault + Send + 'static,
     {
         self.call(FakeDefault::default()).await
     }
@@ -309,6 +316,7 @@ mod test_for_harness {
     use async_trait::async_trait;
     use schemars::JsonSchema;
     use serde::Deserialize;
+    use tokio::join;
 
     use super::*;
     use crate::plugin::Plugin;
@@ -335,19 +343,20 @@ mod test_for_harness {
 
         fn router_service(&self, service: BoxService) -> BoxService {
             ServiceBuilder::new()
+                .load_shed()
                 .concurrency_limit(1)
                 .service(service)
                 .boxed()
         }
     }
-    register_plugin!("testing", "my_test_plugin", MyTestPlugin);
+    register_plugin!("apollo_testing", "my_test_plugin", MyTestPlugin);
 
     #[tokio::test]
     async fn test_router_service() {
         let test_harness: PluginTestHarness<MyTestPlugin> =
             PluginTestHarness::builder().build().await;
 
-        let mut service = test_harness.router_service(|_req| async {
+        let service = test_harness.router_service(|_req| async {
             Ok(router::Response::fake_builder()
                 .data(serde_json::json!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
@@ -364,12 +373,36 @@ mod test_for_harness {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_router_service_multi_threaded() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.router_service(|_req| async {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            Ok(router::Response::fake_builder()
+                .data(serde_json::json!({"data": {"field": "value"}}))
+                .header("x-custom-header", "test-value")
+                .build()
+                .unwrap())
+        });
+
+        let f1 = service.call_default();
+        let f2 = service.call_default();
+
+        let (r1, r2) = join!(f1, f2);
+        let results = vec![r1, r2];
+        // One of the calls should succeed, the other should fail due to concurrency limit
+        assert!(results.iter().any(|r| r.is_ok()));
+        assert!(results.iter().any(|r| r.is_err()));
+    }
+
     #[tokio::test]
     async fn test_supergraph_service() {
         let test_harness: PluginTestHarness<MyTestPlugin> =
             PluginTestHarness::builder().build().await;
 
-        let mut service = test_harness.supergraph_service(|_req| async {
+        let service = test_harness.supergraph_service(|_req| async {
             Ok(supergraph::Response::fake_builder()
                 .data(serde_json::json!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
@@ -389,7 +422,7 @@ mod test_for_harness {
         let test_harness: PluginTestHarness<MyTestPlugin> =
             PluginTestHarness::builder().build().await;
 
-        let mut service = test_harness.execution_service(|_req| async {
+        let service = test_harness.execution_service(|_req| async {
             Ok(execution::Response::fake_builder()
                 .data(serde_json::json!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
@@ -409,7 +442,7 @@ mod test_for_harness {
         let test_harness: PluginTestHarness<MyTestPlugin> =
             PluginTestHarness::builder().build().await;
 
-        let mut service = test_harness.subgraph_service("test_subgraph", |_req| async {
+        let service = test_harness.subgraph_service("test_subgraph", |_req| async {
             let mut headers = HeaderMap::new();
             headers.insert("x-custom-header", "test-value".parse().unwrap());
             Ok(subgraph::Response::fake_builder()
@@ -430,7 +463,7 @@ mod test_for_harness {
         let test_harness: PluginTestHarness<MyTestPlugin> =
             PluginTestHarness::builder().build().await;
 
-        let mut service = test_harness.http_client_service("test_client", |req| async {
+        let service = test_harness.http_client_service("test_client", |req| async {
             Ok(http::HttpResponse {
                 http_response: ::http::Response::builder()
                     .status(200)

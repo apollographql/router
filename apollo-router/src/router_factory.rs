@@ -700,9 +700,6 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
 
-    // TODO: figure out a better fix. Whenever we register a plugin, it must be removed via the
-    // macros above or manually (as in the case of the telemetry plugin a few lines above); I'm not
-    // sure what will happen if there's _no_ my_test_plugin
     #[cfg(test)]
     {
         apollo_plugins_config.remove("apollo.my_test_plugin");
