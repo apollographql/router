@@ -307,6 +307,8 @@ mod test_for_harness {
     use ::http::HeaderMap;
     use ::http::HeaderValue;
     use async_trait::async_trait;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
 
     use super::*;
     use crate::plugin::Plugin;
@@ -314,10 +316,15 @@ mod test_for_harness {
     use crate::services::router::body;
     use crate::services::router::BoxService;
 
+    #[derive(JsonSchema)]
     struct MyTestPlugin {}
+
+    #[derive(JsonSchema, Deserialize)]
+    struct MyTestPluginConfig {}
+
     #[async_trait]
     impl Plugin for MyTestPlugin {
-        type Config = ();
+        type Config = MyTestPluginConfig;
 
         async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError>
         where
