@@ -503,10 +503,6 @@ mod test {
     use crate::services::subgraph;
     use crate::Context;
 
-    //use super::strategy::Strategy;
-    //use super::Mode;
-    //use super::StrategyConfig;
-
     #[tokio::test]
     async fn test_measure_on_execution_request() {
         let body = test_on_execution(include_str!(
@@ -540,7 +536,6 @@ mod test {
             "fixtures/enforce_on_execution_response.router.yaml"
         ))
         .await;
-        println!("body: {body:?}");
         insta::assert_yaml_snapshot!(body);
     }
 
@@ -682,7 +677,6 @@ mod test {
         let parsed_document =
             ParsedDocumentInner::new(ast, doc.into(), None, Default::default()).unwrap();
         let ctx = Context::new();
-
         ctx.extensions()
             .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_document));
         ctx
