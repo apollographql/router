@@ -302,6 +302,46 @@ mod tests {
 
     #[rstest]
     #[case("$args.int")]
+    #[case("$config.abc")]
+    #[case("$context.def")]
+    #[case("$request.headers.'apollo-client-name'")]
+    fn valid_variables(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let object = schema.get_object("Query").unwrap();
+        let field = object.fields.get("aField").unwrap();
+        let directive = field.directives.get("connect").unwrap();
+        let coordinate = ConnectDirectiveCoordinate {
+            field_coordinate: FieldCoordinate { field, object },
+            directive,
+        };
+        let context = Context::for_connect_request(&schema_info, coordinate);
+        validate(&expression(selection), &context).unwrap();
+    }
+
+    #[rstest]
+    #[case("$status")]
+    #[case("$response.headers.etag")]
+    fn invalid_variables(#[case] selection: &str) {
+        let schema = Schema::parse(SCHEMA, "schema").unwrap();
+        let connect = name!("connect");
+        let source = name!("source");
+        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
+        let object = schema.get_object("Query").unwrap();
+        let field = object.fields.get("aField").unwrap();
+        let directive = field.directives.get("connect").unwrap();
+        let coordinate = ConnectDirectiveCoordinate {
+            field_coordinate: FieldCoordinate { field, object },
+            directive,
+        };
+        let context = Context::for_connect_request(&schema_info, coordinate);
+        assert!(validate(&expression(selection), &context).is_err());
+    }
+
+    #[rstest]
+    #[case("$args.int")]
     #[case("$args.string")]
     #[case("$args.customScalar")]
     #[case("$args.object.bool")]
