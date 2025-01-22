@@ -364,6 +364,7 @@ subgraph:
     level: error
     on: response
     attributes:
+      static: foobar
       subgraph.name: true
       response_status:
         subgraph_response_status: code

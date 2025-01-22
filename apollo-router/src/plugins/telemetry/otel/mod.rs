@@ -24,6 +24,8 @@ pub(crate) struct OtelData {
     pub(crate) builder: opentelemetry::trace::SpanBuilder,
 
     /// Attributes gathered for the next event
+    // BUG: the code relied on this being an OrderMap so only the last value of an attribute was
+    // retained. Now that it's a Vec, duplicate attributes occur.
     pub(crate) event_attributes: Option<Vec<KeyValue>>,
 
     /// Forced status in case it's coming from the custom attributes
