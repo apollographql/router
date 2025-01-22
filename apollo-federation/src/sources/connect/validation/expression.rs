@@ -53,6 +53,7 @@ impl<'schema> Context<'schema> {
             ),
             (Namespace::Config, Shape::unknown()),
             (Namespace::Context, Shape::unknown()),
+            (Namespace::Request, Shape::unknown()),
         ]
         .into_iter()
         .collect();
