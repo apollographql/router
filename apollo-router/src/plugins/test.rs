@@ -22,6 +22,7 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::Configuration;
+use crate::Context;
 use crate::Notify;
 
 /// Test harness for plugins

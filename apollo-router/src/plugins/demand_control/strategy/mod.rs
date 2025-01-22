@@ -24,7 +24,8 @@ mod test;
 /// It is also responsible for updating metrics on what was rejected.
 #[derive(Clone)]
 pub(crate) struct Strategy {
-    inner: Arc<dyn StrategyImpl>,
+    // FIXME: inner, but not sure what else to do here
+    pub(crate) inner: Arc<dyn StrategyImpl>,
     pub(crate) mode: Mode,
 }
 
