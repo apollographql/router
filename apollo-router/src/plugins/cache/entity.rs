@@ -1220,9 +1220,11 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
+// XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
+// This function can be removed outright later at the cost of invalidating all entity caches.
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
-    digest.update(query_hash.to_string());
+    digest.update(query_hash.as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);

@@ -444,6 +444,11 @@ impl QueryHash {
         hasher.update(operation_name.unwrap_or("-"));
         Self(hasher.finalize().as_slice().into())
     }
+
+    /// Return the hash as a byte slice.
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl std::fmt::Debug for QueryHash {

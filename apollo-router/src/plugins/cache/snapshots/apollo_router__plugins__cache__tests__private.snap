@@ -5,12 +5,12 @@ snapshot_kind: text
 ---
 [
   {
-    "key": "version:1.0:subgraph:orga:type:Organization:entity:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:hash:200c9088cd2d6d58a75191c152012e9e6a4651f239adde83368561c543965c03:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:5811967f540d300d249ab30ae681359a7815fdb5d3dc71a94be1d491006a6b27:hash:274ea7d70a6962f0388f190ff0e165d46f9daf74d41b0385455f296c18ed3c66:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
     "status": "new",
     "cache_control": "private"
   },
   {
-    "key": "version:1.0:subgraph:user:type:Query:hash:9eb492758fca973e2950fee4fa68dddf24d0847686975455d6ed1d44cc2b5d64:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "key": "version:1.0:subgraph:user:type:Query:hash:97e46148fc7415e5341ba63f8023cae426de3df9d176ab0d87f7c68a401134ea:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
     "status": "new",
     "cache_control": "private"
   }
