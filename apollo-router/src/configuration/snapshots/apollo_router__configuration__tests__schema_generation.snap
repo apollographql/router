@@ -6356,25 +6356,6 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "Deprecated, use SubgraphResponseData and SubgraphResponseError instead",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "subgraph_response_body": {
-              "description": "The subgraph response body json path.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "subgraph_response_body"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "properties": {
             "default": {
               "$ref": "#/definitions/AttributeValue",

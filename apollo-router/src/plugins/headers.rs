@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::header::ACCEPT;
 use http::header::ACCEPT_ENCODING;
@@ -23,7 +22,7 @@ use http::HeaderValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json_bytes::path::JsonPathInst;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -32,7 +31,7 @@ use tower_service::Service;
 
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
-use crate::plugin::serde::deserialize_json_query;
+use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
@@ -134,8 +133,8 @@ struct InsertFromBody {
 
     /// The path in the request body
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_json_query")]
-    path: JSONQuery,
+    #[serde(deserialize_with = "deserialize_jsonpath")]
+    path: JsonPathInst,
 
     /// The default if the path in the body did not resolve to an element
     #[schemars(with = "Option<String>", default)]
@@ -316,6 +315,7 @@ where
 impl<S> HeadersService<S> {
     fn modify_request(&self, req: &mut SubgraphRequest) {
         let mut already_propagated: HashSet<&str> = HashSet::new();
+        let mut body_to_value = None;
 
         for operation in &*self.operations {
             match operation {
@@ -345,25 +345,36 @@ impl<S> HeadersService<S> {
                         }
                     }
                     Insert::FromBody(from_body) => {
-                        let output = from_body
-                            .path
-                            .execute(req.supergraph_request.body())
-                            .ok()
-                            .flatten();
-                        if let Some(val) = output {
-                            let header_value = if let Value::String(val_str) = val {
-                                val_str
-                            } else {
-                                val.to_string()
-                            };
-                            match HeaderValue::from_str(&header_value) {
-                                Ok(header_value) => {
+                        if body_to_value.is_none() {
+                            body_to_value =
+                                serde_json_bytes::value::to_value(req.supergraph_request.body())
+                                    .ok();
+                        }
+
+                        if let Some(body_to_value) = &body_to_value {
+                            let output = from_body.path.find(body_to_value);
+                            if let serde_json_bytes::Value::Null = output {
+                                if let Some(default_val) = &from_body.default {
                                     req.subgraph_request
                                         .headers_mut()
-                                        .insert(&from_body.name, header_value);
+                                        .insert(&from_body.name, default_val.clone());
                                 }
-                                Err(err) => {
-                                    tracing::error!("cannot convert from the body into a header value for header name '{}': {:?}", from_body.name, err);
+                            } else {
+                                let header_value =
+                                    if let serde_json_bytes::Value::String(val_str) = output {
+                                        val_str.as_str().to_string()
+                                    } else {
+                                        output.to_string()
+                                    };
+                                match HeaderValue::from_str(&header_value) {
+                                    Ok(header_value) => {
+                                        req.subgraph_request
+                                            .headers_mut()
+                                            .insert(&from_body.name, header_value);
+                                    }
+                                    Err(err) => {
+                                        tracing::error!("cannot convert from the body into a header value for header name '{}': {:?}", from_body.name, err);
+                                    }
                                 }
                             }
                         } else if let Some(default_val) = &from_body.default {
@@ -652,7 +663,7 @@ mod test {
         let mut service = HeadersLayer::new(
             Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
                 name: "header_from_request".try_into()?,
-                path: JSONQuery::parse(".operationName")?,
+                path: JsonPathInst::from_str("$.operationName").unwrap(),
                 default: None,
             }))]),
             Arc::new(RESERVED_HEADERS.iter().collect()),
