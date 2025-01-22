@@ -2,6 +2,8 @@
 title: Router Telemetry
 subtitle: Collect observable data to monitor your router and supergraph
 description: Observe and monitor the health and performance of GraphQL operations in the Apollo GraphOS Router or Apollo Router Core by collecting and exporting telemetry logs, metrics, and traces.
+context:
+  - telemetry
 ---
 
 import TelemetryPerformanceNote from '../../../shared/telemetry-performance.mdx';
@@ -16,9 +18,9 @@ To understand how router telemetry fits into the broader set of GraphOS observab
 
 ## How router telemetry works
 
-By default, the router doesn't collect and export any telemetry beyond [the operation](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router-or-apollo-server) and [field usage](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router) metrics it sends to GraphOS. You configure additional telemetry data to collect and where to export it via your router's configuration file.
+By default, the router doesn't collect or export any telemetry beyond [the operation](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router-or-apollo-server) and [field usage metrics](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router) it sends to GraphOS. You configure which additional telemetry data to collect and where to export it via your router's configuration file.
 
-The router request lifecycle is the primary data source for telemetry data or _signals_. These signals include _logs_, _metrics_, and _traces_. The section on [router telemetry signals](#router-telemetry-signals) explains these data types and gives basic configuration examples. _Exporters_ are responsible for sending telemetry data to your application performance monitoring (APM) and observability tools for storage, visualization, and analysis.
+The router request lifecycle is the primary data source for telemetry data or _signals_. Telemetry signals include _logs_, _metrics_, and _traces_. The section on [router telemetry signals](#router-telemetry-signals) explains these data types and gives basic configuration examples. _Exporters_ are responsible for sending telemetry data to your application performance monitoring (APM) and observability tools for storage, visualization, and analysis.
 
 ```mermaid
 flowchart LR
@@ -29,8 +31,7 @@ flowchart LR
     end
 
     apms["APM, agent,<br/>or collector"]
-    exporters-->apms
-
+    exporters--"OLTP"-->apms
 ```
 
 ### Telemetry exporters
@@ -61,17 +62,15 @@ Selectors allow you define custom data points based on the router's request life
 | **Attribute** | Standard data points that can be attached to spans, instruments, and events. |
 | **Selector** | Custom data points extracted from the router's request lifecycle, tailored to specific needs. |
 
-This configuration snippet enables including a subgraph's name in whatever telemetry data is being collected.
-
-\<example config\>
-
 ### Conditions
 
-You can set conditions for instruments and events to only collect telemetry data [when necessary](#collect-exactly-the-telemetry-you-need). This configuration snippet enables only collecting the relevant telemetry data when 
+You can set conditions for instruments and events to only collect telemetry data [when necessary](#collect-exactly-the-telemetry-you-need). This configuration snippet enables only collecting the configured telemetry data when the `request_header` is equal to "example-value":
 
-\<condition-example\>.
-
-\<example config\>
+```yaml
+eq:
+  - "example-value"
+  - request_header: x-req-header
+```
 
 ## Router telemetry signals
 
@@ -131,14 +130,25 @@ Logs record events in the router's request lifecycle. Examples of logged events 
 
 You can log events to standard output in either text or JSON format. Logs can also be consumed by [logging exporters](/router/configuration/telemetry/exporters/logging/overview) and as part of [spans](/graphos/routing/observability/telemetry#traces-and-spans) via [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview).
 
-\<Mermaid diagram of below\>
-
+```mermaid
+flowchart LR
+    Router --"Emits logs in<br/>text or JSON format"--> stdout
+    stdout --"Exports logs"--> log_store
+    log_store[("Log store")]
+```
 
 #### Example log configuration
 
 This configuration snippet enables stdout logging in JSON:
 
-\<example config\>
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        enabled: true
+        format: json
+```
 
 ### Metrics and instruments
 
@@ -191,19 +201,37 @@ Metric instruments fall into three categories:
 
 This configuration snippet enables OTEL instrumentation for a histogram of request body sizes:
 
-\<example config\>
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.body.size: true
+```
 
 See [Instruments](/router/configuration/telemetry/instrumentation/instruments) for an overview of available instruments and a guide for configuring and customizing instruments.
 
 #### Metric exporters
 
-Metrics can be consumed and monitored by exporters. 
+The router sends [operation](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router-or-apollo-server) and [field usage metrics](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router) metrics to GraphOS. Additionally, metric exporters can consume and monitor other metrics.
 
-\<Mermaid diagram of below\>  
+```mermaid
+flowchart LR
+    Router --"OTEL<br/>metrics"--> APM
+    Router --"Usage/Performance<br/>metrics"--> GraphOS
+```
 
 This configuration snippet enables exporting metrics to a Datadog agent:
 
-\<example config\>
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      oltp:
+        enabled: true
+        temporality: delta
+        endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+```
 
 See [Metrics exporters](/router/configuration/telemetry/exporters/metrics/overview) for an overview of supported exporters.
 
@@ -223,13 +251,25 @@ Examples of spans include:
 
 #### Tracing exporters
 
-Traces are consumed via [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview).
+If you've enabled federated tracing (also known as FTV1 tracing) in your subgraph libraries, the router [sends field-level traces to GraphOS](/graphos/routing/graphos-reporting#reporting-field-level-traces). Additionally, trace exporters can consume and report traces to your APM.
 
-\<Mermaid diagram of below\>
+```mermaid
+flowchart LR
+    Router --"OTEL<br/>traces"--> APM
+    Router --"FTV1 Data"--> GraphOS
+```
 
 This configuration snippet enables exporting traces to a Datadog agent:
 
-\<example config\>
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      oltp:
+        enabled: true
+        temporality: delta
+        endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+```
 
 ## Best practices
 
