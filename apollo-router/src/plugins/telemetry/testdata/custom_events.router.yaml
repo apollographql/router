@@ -146,24 +146,7 @@ telemetry:
               subgraph_response_data: "$.*"
               default: "missing"
       connector:
-        # Standard events
-        request:
-          level: info
-          condition:
-            eq:
-              - connector_http_request_header: x-log-request
-              - "log"
-        response:
-          level: warn
-          condition:
-            all:
-              - eq:
-                - connector_http_response_header: x-log-response
-                - "log"
-              - eq:
-                - subgraph_name: true
-                - "subgraph"
-          error: error
+        # Standard events cannot be tested, because the test harness mocks the service that emits them
 
         # Custom events
         my.disabled_request.event:

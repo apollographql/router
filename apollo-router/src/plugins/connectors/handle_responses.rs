@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::Connector;
-use http_body::Body as HttpBody;
+use axum::body::HttpBody;
+use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
@@ -9,16 +10,26 @@ use tracing::Span;
 
 use crate::graphql;
 use crate::json_ext::Path;
-use crate::plugins::connectors::http::Response as ConnectorResponse;
-use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::ResponseKey;
+use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
+use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEventResponse;
+use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::connect::Response;
+use crate::services::connector;
+use crate::services::connector::request_service::transport::http::HttpResponse;
+use crate::services::connector::request_service::Error;
+use crate::services::connector::request_service::TransportResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
 use crate::Context;
@@ -56,17 +67,17 @@ enum RawResponse {
 }
 
 impl RawResponse {
-    /// Returns a `MappedResponse` with the response data transformed by the
-    /// selection mapping.
+    /// Returns a response with data transformed by the selection mapping.
     ///
     /// As a side effect, this will also write to the debug context.
     fn map_response(
         self,
-        connector: &Connector,
+        result: Result<TransportResponse, Error>,
+        connector: Arc<Connector>,
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-    ) -> MappedResponse {
-        match self {
+    ) -> connector::request_service::Response {
+        let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
             RawResponse::Data {
                 data,
@@ -83,6 +94,8 @@ impl RawResponse {
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
+                let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
+
                 if let Some(ref debug) = debug_context {
                     debug.lock().push_response(
                         debug_request.clone(),
@@ -92,7 +105,7 @@ impl RawResponse {
                             source: connector.selection.to_string(),
                             transformed: key.selection().to_string(),
                             result: res.clone(),
-                            errors: apply_to_errors,
+                            errors: mapping_problems.clone(),
                         }),
                     );
                 }
@@ -100,8 +113,16 @@ impl RawResponse {
                 MappedResponse::Data {
                     key,
                     data: res.unwrap_or_else(|| Value::Null),
+                    problems: mapping_problems,
                 }
             }
+        };
+
+        connector::request_service::Response {
+            context: context.clone(),
+            connector: connector.clone(),
+            transport_result: result,
+            mapped_response,
         }
     }
 
@@ -113,13 +134,14 @@ impl RawResponse {
     // error with the status code.
     fn map_error(
         self,
-        connector: &Connector,
-        _context: &Context,
+        result: Result<TransportResponse, Error>,
+        connector: Arc<Connector>,
+        context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-    ) -> MappedResponse {
+    ) -> connector::request_service::Response {
         use serde_json_bytes::*;
 
-        match self {
+        let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
             RawResponse::Data {
                 key,
@@ -157,12 +179,19 @@ impl RawResponse {
 
                 MappedResponse::Error { error, key }
             }
+        };
+
+        connector::request_service::Response {
+            context: context.clone(),
+            connector: connector.clone(),
+            transport_result: result,
+            mapped_response,
         }
     }
 }
 
 // --- MAPPED RESPONSE ---------------------------------------------------------
-
+#[derive(Debug)]
 pub(crate) enum MappedResponse {
     /// This is equivalent to RawResponse::Error, but it also represents errors
     /// when the request is semantically unsuccessful (e.g. 404, 500).
@@ -170,8 +199,12 @@ pub(crate) enum MappedResponse {
         error: graphql::Error,
         key: ResponseKey,
     },
-    /// The is the response data after applying the selection mapping.
-    Data { data: Value, key: ResponseKey },
+    /// The response data after applying the selection mapping.
+    Data {
+        data: Value,
+        key: ResponseKey,
+        problems: Vec<Problem>,
+    },
 }
 
 impl MappedResponse {
@@ -258,31 +291,39 @@ impl MappedResponse {
 // --- handle_responses --------------------------------------------------------
 
 pub(crate) async fn process_response<T: HttpBody>(
-    response: ConnectorResponse<T>,
-    connector: &Connector,
+    result: Result<http::Response<T>, Error>,
+    response_key: ResponseKey,
+    connector: Arc<Connector>,
     context: &Context,
+    debug_request: Option<ConnectorDebugHttpRequest>,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> MappedResponse {
-    let response_key = response.key;
-    let debug_request = response.debug_request;
-
-    let raw = match response.result {
+) -> connector::request_service::Response {
+    match result {
         // This occurs when we short-circuit the request when over the limit
-        ConnectorResult::Err(error) => RawResponse::Error {
-            error: error.to_graphql_error(connector, Some((&response_key).into())),
-            key: response_key,
-        },
-        ConnectorResult::HttpResponse(response) => {
+        Err(error) => {
+            let raw = RawResponse::Error {
+                error: error.to_graphql_error(connector.clone(), Some((&response_key).into())),
+                key: response_key,
+            };
+            Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+            raw.map_error(Err(error), connector, context, debug_context)
+        }
+        Ok(response) => {
             let (parts, body) = response.into_parts();
+
+            let result = Ok(TransportResponse::Http(HttpResponse {
+                inner: parts.clone(),
+            }));
 
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            match deserialize_response(
+            let raw = match deserialize_response(
                 body,
                 &parts,
-                connector,
-                (&response_key).into(),
+                connector.clone(),
+                context,
+                &response_key,
                 debug_context,
                 &debug_request,
             )
@@ -298,19 +339,19 @@ pub(crate) async fn process_response<T: HttpBody>(
                     error,
                     key: response_key,
                 },
+            };
+            let is_success = match &raw {
+                RawResponse::Error { .. } => false,
+                RawResponse::Data { parts, .. } => parts.status.is_success(),
+            };
+            if is_success {
+                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+                raw.map_response(result, connector, context, debug_context)
+            } else {
+                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                raw.map_error(result, connector, context, debug_context)
             }
         }
-    };
-
-    let is_success = match &raw {
-        RawResponse::Error { .. } => false,
-        RawResponse::Data { parts, .. } => parts.status.is_success(),
-    };
-
-    if is_success {
-        raw.map_response(connector, context, debug_context)
-    } else {
-        raw.map_error(connector, context, debug_context)
     }
 }
 
@@ -358,8 +399,9 @@ pub(crate) fn aggregate_responses(
 async fn deserialize_response<T: HttpBody>(
     body: T,
     parts: &http::response::Parts,
-    connector: &Connector,
-    path: Path,
+    connector: Arc<Connector>,
+    context: &Context,
+    response_key: &ResponseKey,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     debug_request: &Option<ConnectorDebugHttpRequest>,
 ) -> Result<Value, graphql::Error> {
@@ -389,9 +431,95 @@ async fn deserialize_response<T: HttpBody>(
             .add_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
     };
 
+    let path: Path = response_key.into();
     let body = &router::body::into_bytes(body)
         .await
         .map_err(|_| make_err(path.clone()))?;
+
+    let log_response_level = context
+        .extensions()
+        .with_lock(|lock| lock.get::<ConnectorEventResponse>().cloned())
+        .and_then(|event| match event.0.condition() {
+            Some(condition) => {
+                // Create a temporary response here so we can evaluate the condition. This response
+                // is missing any information about the mapped response, because we don't have that
+                // yet. This means that we cannot correctly evaluate any condition that relies on
+                // the mapped response data or mapping problems. But we can't wait until we do have
+                // that information, because this is the only place we have the body bytes (without
+                // making an expensive clone of the body). So we either need to not expose any
+                // selector which can be used as a condition that requires mapping information, or
+                // we must document that such selectors cannot be used as conditions on standard
+                // connectors events.
+
+                let response = connector::request_service::Response {
+                    context: context.clone(),
+                    connector: connector.clone(),
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
+                        inner: parts.clone(),
+                    })),
+                    mapped_response: MappedResponse::Data {
+                        data: Value::Null,
+                        key: response_key.clone(),
+                        problems: vec![],
+                    },
+                };
+                if condition.lock().evaluate_response(&response) {
+                    Some(event.0.level())
+                } else {
+                    None
+                }
+            }
+            None => Some(event.0.level()),
+        });
+
+    if let Some(level) = log_response_level {
+        let mut attrs = Vec::with_capacity(4);
+        #[cfg(test)]
+        let headers = {
+            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                .headers
+                .clone()
+                .into_iter()
+                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .collect();
+            headers.sort_keys();
+            headers
+        };
+        #[cfg(not(test))]
+        let headers = &parts.headers;
+
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_HEADERS,
+            opentelemetry::Value::String(format!("{:?}", headers).into()),
+        ));
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_STATUS,
+            opentelemetry::Value::String(format!("{}", parts.status).into()),
+        ));
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_VERSION,
+            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+        ));
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_BODY,
+            opentelemetry::Value::String(
+                String::from_utf8(body.clone().to_vec())
+                    .unwrap_or_default()
+                    .into(),
+            ),
+        ));
+
+        log_event(
+            level,
+            "connector.response",
+            attrs,
+            &format!(
+                "Response from connector {label:?}",
+                label = connector.id.label
+            ),
+        );
+    }
+
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {
@@ -422,7 +550,6 @@ mod tests {
     use url::Url;
 
     use crate::plugins::connectors::handle_responses::process_response;
-    use crate::plugins::connectors::http::Response as ConnectorResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
@@ -430,7 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
-        let connector = Connector {
+        let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
@@ -453,7 +580,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-        };
+        });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .body(router::body::from_bytes(r#"{"data":"world"}"#))
@@ -475,27 +602,25 @@ mod tests {
 
         let res = super::aggregate_responses(vec![
             process_response(
-                ConnectorResponse {
-                    result: response1.into(),
-                    key: response_key1,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response1),
+                response_key1,
+                connector.clone(),
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
             process_response(
-                ConnectorResponse {
-                    result: response2.into(),
-                    key: response_key2,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response2),
+                response_key2,
+                connector,
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
         ])
         .unwrap();
 
@@ -532,7 +657,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_responses_entities() {
-        let connector = Connector {
+        let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
@@ -555,7 +680,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-        };
+        });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .body(router::body::from_bytes(r#"{"data":{"id": "1"}}"#))
@@ -577,27 +702,25 @@ mod tests {
 
         let res = super::aggregate_responses(vec![
             process_response(
-                ConnectorResponse {
-                    result: response1.into(),
-                    key: response_key1,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response1),
+                response_key1,
+                connector.clone(),
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
             process_response(
-                ConnectorResponse {
-                    result: response2.into(),
-                    key: response_key2,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response2),
+                response_key2,
+                connector,
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
         ])
         .unwrap();
 
@@ -640,7 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_responses_entity_field() {
-        let connector = Connector {
+        let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
@@ -663,7 +786,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-        };
+        });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .body(router::body::from_bytes(r#"{"data":"value1"}"#))
@@ -689,27 +812,25 @@ mod tests {
 
         let res = super::aggregate_responses(vec![
             process_response(
-                ConnectorResponse {
-                    result: response1.into(),
-                    key: response_key1,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response1),
+                response_key1,
+                connector.clone(),
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
             process_response(
-                ConnectorResponse {
-                    result: response2.into(),
-                    key: response_key2,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response2),
+                response_key2,
+                connector,
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
         ])
         .unwrap();
 
@@ -758,7 +879,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_responses_errors() {
-        let connector = Connector {
+        let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
@@ -781,7 +902,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-        };
+        });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
             .body(router::body::from_bytes(r#"plain text"#))
@@ -823,49 +944,45 @@ mod tests {
 
         let res = super::aggregate_responses(vec![
             process_response(
-                ConnectorResponse {
-                    result: response_plaintext.into(),
-                    key: response_key_plaintext,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response_plaintext),
+                response_key_plaintext,
+                connector.clone(),
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
             process_response(
-                ConnectorResponse {
-                    result: response1.into(),
-                    key: response_key1,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response1),
+                response_key1,
+                connector.clone(),
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
             process_response(
-                ConnectorResponse {
-                    result: response2.into(),
-                    key: response_key2,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response2),
+                response_key2,
+                connector.clone(),
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
             process_response(
-                ConnectorResponse {
-                    result: response3.into(),
-                    key: response_key3,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response3),
+                response_key3,
+                connector,
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
         ])
         .unwrap();
 
@@ -1016,7 +1133,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_status() {
         let selection = JSONSelection::parse("$status").unwrap();
-        let connector = Connector {
+        let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
@@ -1039,7 +1156,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: selection.external_variables().collect(),
-        };
+        });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
             .status(201)
@@ -1053,16 +1170,15 @@ mod tests {
 
         let res = super::aggregate_responses(vec![
             process_response(
-                ConnectorResponse {
-                    result: response1.into(),
-                    key: response_key1,
-                    debug_request: None,
-                },
-                &connector,
+                Ok(response1),
+                response_key1,
+                connector,
                 &Context::default(),
+                None,
                 &None,
             )
-            .await,
+            .await
+            .mapped_response,
         ])
         .unwrap();
 
