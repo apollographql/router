@@ -16,10 +16,6 @@ telemetry:
       datadog:
         enabled: true
         endpoint: default
-      jaeger:
-        enabled: true
-        agent:
-          endpoint: default
   instrumentation:
     spans:
       mode: spec_compliant

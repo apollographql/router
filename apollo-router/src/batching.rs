@@ -23,7 +23,6 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
-use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
 use crate::services::router;
@@ -31,6 +30,7 @@ use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::spec::QueryHash;
 use crate::Context;
 
 /// A query that is part of a batch.
@@ -493,7 +493,6 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
     use crate::services::router::body;
@@ -501,6 +500,7 @@ mod tests {
     use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::spec::QueryHash;
     use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;

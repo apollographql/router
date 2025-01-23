@@ -1,5 +1,5 @@
-use opentelemetry_api::Key;
-use opentelemetry_api::KeyValue;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use schemars::JsonSchema;

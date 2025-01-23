@@ -328,8 +328,6 @@ impl InstrumentData {
             "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
             "$..tracing.datadog[?(@.enabled==true)]",
-            opt.tracing.jaeger,
-            "$..tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
             "$..tracing.zipkin[?(@.enabled==true)]",
             opt.events,

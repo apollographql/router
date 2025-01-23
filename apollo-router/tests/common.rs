@@ -26,19 +26,20 @@ use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::testing::trace::NoopSpanExporter;
+use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceId;
+use opentelemetry::trace::TracerProvider as OtherTracerProvider;
+use opentelemetry::Context;
 use opentelemetry::KeyValue;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_api::Context;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::trace::config;
+use opentelemetry_sdk::testing::trace::NoopSpanExporter;
+use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::TracerProvider;
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
@@ -202,7 +203,6 @@ impl Respond for TracedResponder {
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub enum Telemetry {
-    Jaeger,
     Otlp {
         endpoint: Option<String>,
     },
@@ -214,26 +214,12 @@ pub enum Telemetry {
 
 impl Telemetry {
     fn tracer_provider(&self, service_name: &str) -> TracerProvider {
-        let config = config().with_resource(Resource::new(vec![KeyValue::new(
+        let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
             SERVICE_NAME,
             service_name.to_string(),
         )]));
 
         match self {
-            Telemetry::Jaeger => TracerProvider::builder()
-                .with_config(config)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_jaeger::new_agent_pipeline()
-                            .with_service_name(service_name)
-                            .build_sync_agent_exporter()
-                            .expect("jaeger pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
-                    )
-                    .with_scheduled_delay(Duration::from_millis(10))
-                    .build(),
-                )
-                .build(),
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
             } => TracerProvider::builder()
@@ -249,7 +235,11 @@ impl Telemetry {
                         .expect("otlp pipeline failed"),
                         opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -263,7 +253,11 @@ impl Telemetry {
                             .expect("datadog pipeline failed"),
                         opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -277,7 +271,11 @@ impl Telemetry {
                             .expect("zipkin pipeline failed"),
                         opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -292,13 +290,6 @@ impl Telemetry {
         let ctx = tracing::span::Span::current().context();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.inject_context(
-                    &ctx,
-                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
-                )
-            }
             Telemetry::Datadog => {
                 // Get the existing PSR header if it exists. This is because the existing telemetry propagator doesn't support PSR properly yet.
                 // In testing we are manually setting the PSR header, and we don't want to override it.
@@ -348,10 +339,6 @@ impl Telemetry {
             .collect();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.extract_with_context(context, &headers)
-            }
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();
@@ -382,7 +369,7 @@ impl Telemetry {
                 context
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.extract_with_context(context, &headers)
             }
             Telemetry::Zipkin => {
