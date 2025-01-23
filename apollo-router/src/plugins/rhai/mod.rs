@@ -746,15 +746,10 @@ struct Position {
 
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.line.is_none() || self.pos.is_none() {
-            write!(f, "none")
+        if let Some((line, pos)) = self.line.zip(self.pos) {
+            write!(f, "line {}, position {}", line, pos)
         } else {
-            write!(
-                f,
-                "line {}, position {}",
-                self.line.expect("checked above;qed"),
-                self.pos.expect("checked above;qed")
-            )
+            write!(f, "none")
         }
     }
 }

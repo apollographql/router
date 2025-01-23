@@ -40,12 +40,9 @@ pub(crate) fn create_fmt_layer(
             tty_format,
             rate_limit,
         } if *enabled => {
-            let format = if std::io::stdout().is_terminal() && tty_format.is_some() {
-                tty_format
-                    .as_ref()
-                    .expect("checked previously in the if; qed")
-            } else {
-                format
+            let format = match tty_format {
+                Some(tty) if std::io::stdout().is_terminal() => tty,
+                _ => format,
             };
             match format {
                 Format::Json(format_config) => {
@@ -123,24 +120,20 @@ where
             attrs.record(&mut visitor);
         }
         let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<LogAttributes>().is_none() {
+        if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
+            log_attrs.extend(
+                visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }),
+            );
+        } else {
             let mut fields = LogAttributes::default();
             fields.extend(
                 visitor.values.into_iter().filter_map(|(k, v)| {
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
                 }),
             );
-
             extensions.insert(fields);
-        } else if !visitor.values.is_empty() {
-            let log_attrs = extensions
-                .get_mut::<LogAttributes>()
-                .expect("LogAttributes exists, we checked just before");
-            log_attrs.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
         }
     }
 
