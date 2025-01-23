@@ -2,6 +2,8 @@
 title: Debugging Client Requests to GraphOS Router
 subtitle: Options for analyzing and debugging incoming requests
 description: Learn how to use GraphOS router telemetry and GraphOS Insights to inspect and debug incoming HTTP client requests.
+context:
+  - telemetry
 ---
 
 By default, the GraphOS Router operates without generating HTTP request logs or exporting telemetry metrics beyond what it sends to GraphOS.  This minimizes potentially high observability costs that can result from high request volumes.
@@ -30,7 +32,17 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 ### Telemetry spans and traces
 
-Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces have spans labeled `router`. These spans contain the HTTP information for a given client request via [OpenTelemetry standard attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code`.
+Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces can have spans labeled `router`. These spans contain the HTTP information for a given client request via [OpenTelemetry standard attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code`.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          http.response.status_code: true
+          error.type: true
+```
 
 These attributes include helpful information about the request and response. Spans, however, don't include an attribute for the HTTP body text. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or use the other options listed below.
 
@@ -42,18 +54,16 @@ You can include the request body in your telemetry by instrumenting [`events` in
 telemetry:
   instrumentation:
     spans:
-        default_attribute_requirement_level: recommended
-        mode: spec_compliant
+      default_attribute_requirement_level: recommended
+      mode: spec_compliant
     events:
       supergraph:
-        request:
+        "req":
           message: "logged request"
           level: info
-          on: event_request
-            attributes:
-                graphql.document: true
-                request:
-                    request_data: $.*            
+          on: "request"
+          attributes:
+            graphql.document: true       
 ```
 
 ### Debugging router logs
