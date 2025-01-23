@@ -1,6 +1,7 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,6 +18,8 @@ use apollo_federation::Supergraph;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
+use serde::Deserialize;
+use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -34,7 +37,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) schema_id: Arc<String>,
+    pub(crate) schema_id: SchemaHash,
     pub(crate) connectors: Option<Connectors>,
     pub(crate) launch_id: Option<Arc<String>>,
 }
@@ -152,7 +155,7 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(&raw_sdl.sdl));
+        let schema_id = Schema::schema_id(&raw_sdl.sdl);
 
         let api_schema = api_schema.map(Ok).unwrap_or_else(|| {
             supergraph.to_api_schema(api_schema_options).map_err(|e| {
@@ -186,10 +189,9 @@ impl Schema {
         self.supergraph.schema.schema()
     }
 
-    pub(crate) fn schema_id(sdl: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(sdl.as_bytes());
-        format!("{:x}", hasher.finalize())
+    /// Compute the Schema ID for an SDL string.
+    pub(crate) fn schema_id(sdl: &str) -> SchemaHash {
+        SchemaHash::new(sdl)
     }
 
     /// Extracts a string containing the entire [`Schema`].
@@ -401,6 +403,118 @@ impl std::ops::Deref for ApiSchema {
     }
 }
 
+/// A schema ID is the sha256 hash of the schema text.
+///
+/// That means that differences in whitespace and comments affect the hash, not only semantic
+/// differences in the schema.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct SchemaHash(
+    /// The internal representation is a pointer to a string.
+    /// This is not ideal, it might be better eg. to just have a fixed-size byte array that can be
+    /// turned into a string as needed.
+    /// But `Arc<String>` is used in the public plugin interface and other places, so this is
+    /// essentially a backwards compatibility decision.
+    Arc<String>,
+);
+impl SchemaHash {
+    pub(crate) fn new(sdl: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(sdl);
+        let hash = format!("{:x}", hasher.finalize());
+        Self(Arc::new(hash))
+    }
+
+    /// Return the underlying data.
+    pub(crate) fn into_inner(self) -> Arc<String> {
+        self.0
+    }
+
+    /// Return the hash as a hexadecimal string slice.
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Compute the hash for an executable document and operation name against this schema.
+    ///
+    /// See [QueryHash] for details of what's included.
+    pub(crate) fn operation_hash(
+        &self,
+        query_text: &str,
+        operation_name: Option<&str>,
+    ) -> QueryHash {
+        QueryHash::new(self, query_text, operation_name)
+    }
+}
+
+impl Display for SchemaHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.as_str())
+    }
+}
+
+/// A query hash is a unique hash for an operation from an executable document against a particular
+/// schema.
+///
+/// For a document with two queries A and B, queries A and B will result in a different hash even
+/// if the document text is identical.
+/// If query A is then executed against two different versions of the schema, the hash will be
+/// different again, depending on the [SchemaHash].
+///
+/// A query hash can be obtained from a schema ID using [SchemaHash::operation_hash].
+// FIXME: rename to OperationHash since it include operation name?
+#[derive(Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct QueryHash(
+    /// Unlike SchemaHash, the query hash has no backwards compatibility motivations for the internal
+    /// type, as it's fully private. We could consider making this a fixed-size byte array rather
+    /// than a Vec, but it shouldn't make a huge difference.
+    #[serde(with = "hex")]
+    Vec<u8>,
+);
+
+impl QueryHash {
+    /// This constructor is not public, see [SchemaHash::operation_hash] instead.
+    fn new(schema_id: &SchemaHash, query_text: &str, operation_name: Option<&str>) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(schema_id.as_str());
+        // byte separator between each part that is hashed
+        hasher.update(&[0xFF][..]);
+        hasher.update(query_text);
+        hasher.update(&[0xFF][..]);
+        hasher.update(operation_name.unwrap_or("-"));
+        Self(hasher.finalize().as_slice().into())
+    }
+
+    /// Return the hash as a byte slice.
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueryHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl Display for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
+// FIXME: It seems bad that you can create an empty hash easily and use it in security-critical
+// places. This impl should be deleted outright and we should update usage sites.
+// If the query hash is truly not required to contain data in those usage sites, we should use
+// something like an Option instead.
+#[allow(clippy::derivable_impls)] // need a place to add that comment ;)
+impl Default for QueryHash {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,7 +720,7 @@ mod tests {
             let schema = Schema::parse(schema, &Default::default()).unwrap();
 
             assert_eq!(
-                Schema::schema_id(&schema.raw_sdl),
+                Schema::schema_id(&schema.raw_sdl).as_str(),
                 "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }
