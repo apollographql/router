@@ -297,8 +297,6 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_compiler::ExecutableDocument;
-    use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
@@ -321,7 +319,6 @@ mod tests {
     use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::query_planner::fetch::Variables;
     use crate::services::connector::request_service::transport;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
@@ -398,33 +395,11 @@ mod tests {
         http_request: http::Request<RouterBody>,
         mapping_problems: Vec<Problem>,
     ) -> Request {
-        let schema = Arc::new(
-            Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./").unwrap(),
-        );
-
-        let original_request = crate::services::connect::Request::builder()
-            .service_name("subgraph_Query_a_0".into())
-            .context(Context::default())
-            .operation(Arc::new(
-                ExecutableDocument::parse_and_validate(
-                    &schema,
-                    "query { a { f } a2: a { f2: f } }".to_string(),
-                    "./",
-                )
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
                 .unwrap(),
-            ))
-            .variables(Variables {
-                variables: Default::default(),
-                inverted_paths: Default::default(),
-                contextual_arguments: Default::default(),
-            })
-            .supergraph_request(Arc::new(
-                http::Request::builder()
-                    .body(graphql::Request::builder().build())
-                    .unwrap(),
-            ))
-            .build();
-        let original_request = Arc::new(original_request);
+        );
 
         Request {
             context: context(),
@@ -436,7 +411,7 @@ mod tests {
             }),
             key: response_key(),
             mapping_problems,
-            original_request,
+            supergraph_request,
         }
     }
 

@@ -45,7 +45,7 @@ impl RequestInputs {
         config: Option<&CustomConfiguration>,
         context: &Context,
         status: Option<u16>,
-        original_request: Arc<connect::Request>,
+        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
         response_parts: Option<&Parts>,
     ) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
@@ -97,8 +97,7 @@ impl RequestInputs {
 
         // Add headers from the original router request
         if variables_used.contains(&Namespace::Request) {
-            let headers: Map<ByteString, Value> = original_request
-                .supergraph_request
+            let headers: Map<ByteString, Value> = supergraph_request
                 .headers()
                 .iter()
                 .map(|(key, value)| {
@@ -243,7 +242,6 @@ fn request_params_to_requests(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
-    let original_request = Arc::new(original_request);
     for response_key in request_params {
         let connector = connector.clone();
         let (transport_request, mapping_problems) = make_request(
@@ -253,7 +251,7 @@ fn request_params_to_requests(
                 connector.config.as_ref(),
                 &original_request.context,
                 None,
-                original_request.clone(),
+                original_request.supergraph_request.clone(),
                 None,
             ),
             &original_request,
@@ -267,7 +265,7 @@ fn request_params_to_requests(
             transport_request,
             key: response_key,
             mapping_problems,
-            original_request: original_request.clone(),
+            supergraph_request: original_request.supergraph_request.clone(),
         });
     }
 

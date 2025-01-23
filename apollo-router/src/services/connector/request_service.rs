@@ -36,7 +36,6 @@ use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequ
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::consts::CONNECT_REQUEST_SPAN_NAME;
-use crate::services::connect;
 use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
@@ -78,7 +77,8 @@ pub(crate) struct Request {
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
 
-    pub(crate) original_request: Arc<connect::Request>,
+    /// The original supergraph request from the supergraph service
+    pub(crate) supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 }
 
 /// Response type for a connector
@@ -321,7 +321,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                 &request.context,
                 debug_request,
                 &debug,
-                request.original_request,
+                request.supergraph_request,
             )
             .await)
         })
