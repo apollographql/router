@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::ops::Deref;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
@@ -963,6 +963,33 @@ async fn test_span_metrics() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resources() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .operation_name("ExampleQuery")
+        .resource("env", "local1")
+        .resource("service.version", "router_version_override")
+        .resource("service.name", "router")
+        .services(["client", "router", "subgraph"].into())
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 struct DatadogTraceSpec {
     trace_spec: TraceSpec,
 }
@@ -1136,6 +1163,35 @@ impl Verifier for DatadogTraceSpec {
     }
 
     fn verify_span_attributes(&self, _trace: &Value) -> Result<(), BoxError> {
+        Ok(())
+    }
+
+    fn verify_resources(&self, trace: &Value) -> Result<(), BoxError> {
+        if !self.trace_spec.resources.is_empty() {
+            let spans = trace.select_path("$..[?(@.service=='router')]")?;
+            for span in spans {
+                for resource in span.select_path("$.meta")? {
+                    for (key, value) in &self.trace_spec.resources {
+                        let mut found = false;
+                        if let Some(resource) = resource.as_object() {
+                            if let Some(resource_value) = resource.get(*key) {
+                                let resource_value =
+                                    resource_value.as_string().expect("resources are strings");
+                                if resource_value == *value {
+                                    found = true;
+                                }
+                            }
+                        }
+                        if !found {
+                            return Err(BoxError::from(format!(
+                                "resource not found: {}={}",
+                                key, value
+                            )));
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }

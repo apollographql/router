@@ -32,18 +32,18 @@ use opentelemetry::metrics::MetricsError;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
+use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::TextMapCompositePropagator;
-use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -137,6 +137,7 @@ use crate::router_factory::Endpoint;
 use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
 use crate::services::execution;
 use crate::services::http::HttpRequest;
+use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -171,10 +172,10 @@ pub(crate) mod tracing;
 pub(crate) mod utils;
 
 // Tracing consts
-pub(crate) const CLIENT_NAME: &str = "apollo_telemetry::client_name";
-pub(crate) const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
-const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
-pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
+pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
+pub(crate) const STUDIO_EXCLUDE: &str = "apollo::telemetry::studio_exclude";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
@@ -209,7 +210,7 @@ pub(crate) struct Telemetry {
 }
 
 struct TelemetryActivation {
-    tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
+    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
     // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
@@ -402,7 +403,7 @@ impl PluginPrivate for Telemetry {
                         let span = Span::current();
 
                         span.set_span_dyn_attribute(
-                            HTTP_REQUEST_METHOD,
+                            HTTP_REQUEST_METHOD.into(),
                             request.router_request.method().to_string().into(),
                         );
                     }
@@ -986,12 +987,10 @@ impl PluginPrivate for Telemetry {
                 .take()
                 .expect("must have new tracer_provider");
 
-            let tracer = tracer_provider.versioned_tracer(
-                GLOBAL_TRACER_NAME,
-                Some(env!("CARGO_PKG_VERSION")),
-                None::<String>,
-                None,
-            );
+            let tracer = tracer_provider
+                .tracer_builder(GLOBAL_TRACER_NAME)
+                .with_version(env!("CARGO_PKG_VERSION"))
+                .build();
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
@@ -1035,15 +1034,15 @@ impl Telemetry {
         // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
-        if propagation.jaeger || tracing.jaeger.enabled() {
-            propagators.push(Box::<opentelemetry_jaeger::Propagator>::default());
+        if propagation.jaeger {
+            propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
         }
         if propagation.baggage {
-            propagators.push(Box::<opentelemetry::sdk::propagation::BaggagePropagator>::default());
+            propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
         }
         if propagation.trace_context || tracing.otlp.enabled {
             propagators
-                .push(Box::<opentelemetry::sdk::propagation::TraceContextPropagator>::default());
+                .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
@@ -1052,7 +1051,7 @@ impl Telemetry {
             propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
-            propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
+            propagators.push(Box::<opentelemetry_aws::trace::XrayPropagator>::default());
         }
 
         // This propagator MUST come last because the user is trying to override the default behavior of the
@@ -1069,15 +1068,14 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
+    ) -> Result<opentelemetry_sdk::trace::TracerProvider, BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
         let common = &tracing_config.common;
 
         let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config((common).into());
+            opentelemetry_sdk::trace::TracerProvider::builder().with_config((common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, common, spans_config)?;
@@ -1362,7 +1360,7 @@ impl Telemetry {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
-                .get::<_, bool>("persisted_query_hit")
+                .get::<_, bool>(PERSISTED_QUERY_CACHE_HIT)
                 .unwrap_or_default();
 
             if context
@@ -1626,9 +1624,6 @@ impl Telemetry {
         if config.exporters.tracing.datadog.enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
         }
-        if config.exporters.tracing.jaeger.enabled() {
-            attributes.push(KeyValue::new("telemetry.tracing.jaeger", true));
-        }
         if config.exporters.tracing.zipkin.enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
         }
@@ -1643,7 +1638,7 @@ impl Telemetry {
         }
     }
 
-    fn checked_tracer_shutdown(tracer_provider: opentelemetry::sdk::trace::TracerProvider) {
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::TracerProvider) {
         Self::checked_spawn_task(Box::new(move || {
             drop(tracer_provider);
         }));
@@ -2008,14 +2003,14 @@ mod tests {
     use http::StatusCode;
     use insta::assert_snapshot;
     use itertools::Itertools;
-    use opentelemetry_api::propagation::Injector;
-    use opentelemetry_api::propagation::TextMapPropagator;
-    use opentelemetry_api::trace::SpanContext;
-    use opentelemetry_api::trace::SpanId;
-    use opentelemetry_api::trace::TraceContextExt;
-    use opentelemetry_api::trace::TraceFlags;
-    use opentelemetry_api::trace::TraceId;
-    use opentelemetry_api::trace::TraceState;
+    use opentelemetry::propagation::Injector;
+    use opentelemetry::propagation::TextMapPropagator;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry::trace::TraceState;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;

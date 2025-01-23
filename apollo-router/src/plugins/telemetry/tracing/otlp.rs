@@ -1,9 +1,9 @@
 //! Configuration for Otlp tracing.
 use std::result::Result;
 
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
 use opentelemetry_otlp::SpanExporterBuilder;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Builder;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::TracingCommon;

@@ -14,9 +14,9 @@ use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::KeyValue;
-use opentelemetry_api::metrics::MeterProvider as _;
-use opentelemetry_api::metrics::ObservableGauge;
 use serde_json_bytes::Value;
 use tower::Service;
 
