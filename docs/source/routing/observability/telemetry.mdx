@@ -211,23 +211,19 @@ flowchart LR
     Router --"Usage/Performance<br/>metrics"--> GraphOS
 ```
 
-This configuration snippet enables exporting metrics to a Datadog agent:
+This configuration snippet enables exporting metrics to Prometheus:
 
 ```yaml title="router.yaml"
 telemetry:
   exporters:
-    metrics:
-      oltp:
-        enabled: true
-        temporality: delta
-        endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+     metrics:
+       prometheus:
+         enabled: true
+         listen: 127.0.0.1:9090
+         path: /metrics
 ```
 
-See [Metrics exporters](/router/configuration/telemetry/exporters/metrics/overview) for an overview of supported exporters.
-
-#### Dropping metrics using views
-
-Define views to filter out specific metrics before export, ensuring only relevant data is captured.
+Learn more about [sending metrics to Prometheus](/graphos/reference/router/telemetry/metrics-exporters/prometheus) and [metric exporters](/graphos/reference/router/telemetry/metrics-exporters/overview) in general.
 
 ### Traces and spans
 
@@ -249,17 +245,41 @@ flowchart LR
     Router --"FTV1 Data"--> GraphOS
 ```
 
-This configuration snippet enables exporting traces to a Datadog agent:
+This configuration snippet enables
+- setting attributes that Datadog uses to organize its APM view
+- exporting traces to a Datadog agent:
 
 ```yaml title="router.yaml"
 telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          otel.name: router
+          operation.name: "router"
+          resource.name:
+            request_method: true
+      supergraph:
+        attributes:
+          otel.name: supergraph
+          operation.name: "supergraph"
+          resource.name:
+            operation_name: string
+      subgraph:
+        attributes:
+          otel.name: subgraph
+          operation.name: "subgraph"
+          resource.name:
+            subgraph_operation_name: string
   exporters:
     tracing:
-      oltp:
+      otlp:
         enabled: true
-        temporality: delta
         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 ```
+
+Learn more about [sending traces to DataDog](/graphos/reference/router/telemetry/trace-exporters/datadog) and [trace exporters](/graphos/reference/router/telemetry/trace-exporters/overview) in general.
 
 ## Best practices
 
