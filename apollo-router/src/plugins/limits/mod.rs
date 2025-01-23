@@ -374,7 +374,7 @@ mod test {
         assert!(resp.is_err());
     }
 
-    //#[tokio::test]
+    #[tokio::test]
     async fn test_limits_dynamic_update() {
         let plugin = plugin().await;
         let resp = plugin
