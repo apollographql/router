@@ -4207,6 +4207,10 @@ expression: "&schema"
         }
       ]
     },
+    "MyTestPluginConfig": {
+      "description": "Config for the test plugin",
+      "type": "object"
+    },
     "Operation": {
       "oneOf": [
         {
@@ -4350,6 +4354,10 @@ expression: "&schema"
     "Plugins": {
       "additionalProperties": false,
       "properties": {
+        "apollo_testing.my_test_plugin": {
+          "$ref": "#/definitions/MyTestPluginConfig",
+          "description": "#/definitions/MyTestPluginConfig"
+        },
         "experimental.broken": {
           "$ref": "#/definitions/Config2",
           "description": "#/definitions/Config2"
