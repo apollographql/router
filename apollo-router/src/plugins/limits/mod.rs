@@ -424,6 +424,7 @@ mod test {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::new(
             Some(include_str!("fixtures/content_length_limit.router.yaml")),
             None,
+            None,
         )
         .await;
         plugin

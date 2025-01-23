@@ -114,11 +114,13 @@ register_private_plugin!("apollo", "router_limits", RouterLimits);
 #[cfg(test)]
 mod test {
     use serde_json::json;
+    use tokio::time::timeout;
     use tower::Service;
 
     use super::*;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::DynPlugin;
+    use crate::plugins::test::PluginTestHarness;
     use crate::services::RouterRequest;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
@@ -229,5 +231,55 @@ mod test {
             .unwrap();
 
         assert_eq!(StatusCode::OK, response.response.status());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tps_limits_multi_threaded() {
+        // GIVEN
+        // * a license with tps limits set to 1 req per 200ms
+        // * the router limits plugin
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: Some(TpsLimit {
+                    capacity: 1,
+                    interval: Duration::from_millis(150),
+                }),
+            }),
+        };
+
+        let test_harness: PluginTestHarness<RouterLimits> =
+            PluginTestHarness::builder().license(license).build().await;
+
+        let service = test_harness.router_service(|_req| async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            Ok(router::Response::fake_builder()
+                .data(serde_json::json!({"data": {"field": "value"}}))
+                .header("x-custom-header", "test-value")
+                .build()
+                .unwrap())
+        });
+
+        // WHEN
+        // * three reqs happen concurrently
+        // * one delayed enough to be outside of rate limiting interval
+        let f1 = service.call_default();
+        let f2 = service.call_default();
+        let f3 = async {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            service.call_default()
+        };
+
+        let (r1, r2, r3) = tokio::join!(f1, f2, f3);
+
+        // THEN
+        // * the first succeeds
+        // * the second gets rate limited
+        // * the third, delayed req succeeds
+
+        assert!(r1.is_ok_and(|resp| resp.response.status().is_success()));
+        assert!(r2.is_ok_and(|resp| resp.response.status() == StatusCode::TOO_MANY_REQUESTS));
+        assert!(r3
+            .await
+            .is_ok_and(|resp| resp.response.status().is_success()));
     }
 }

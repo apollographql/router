@@ -74,7 +74,11 @@ pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
 #[buildstructor::buildstructor]
 impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
-    pub(crate) async fn new<'a, 'b>(config: Option<&'a str>, schema: Option<&'b str>) -> Self {
+    pub(crate) async fn new<'a, 'b>(
+        config: Option<&'a str>,
+        schema: Option<&'b str>,
+        license: Option<LicenseState>,
+    ) -> Self {
         let factory = crate::plugin::plugins()
             .find(|factory| factory.type_id == TypeId::of::<T>())
             .expect("plugin not registered");
@@ -121,7 +125,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                     .collect(),
             ))
             .notify(Notify::default())
-            .license(LicenseState::default())
+            .license(license.unwrap_or_default())
             .build();
 
         let plugin = factory
