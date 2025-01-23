@@ -43,11 +43,10 @@ use crate::Context;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-pub(crate) static COST_ESTIMATED_KEY: &str = "cost.estimated";
-pub(crate) static COST_ACTUAL_KEY: &str = "cost.actual";
-pub(crate) static COST_DELTA_KEY: &str = "cost.delta";
-pub(crate) static COST_RESULT_KEY: &str = "cost.result";
-pub(crate) static COST_STRATEGY_KEY: &str = "cost.strategy";
+pub(crate) static COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
+pub(crate) static COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
+pub(crate) static COST_RESULT_KEY: &str = "apollo::demand_control::result";
+pub(crate) static COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]

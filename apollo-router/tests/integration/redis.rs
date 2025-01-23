@@ -778,7 +778,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     let context = Context::new();
     context
         .insert(
-            "apollo_authorization::scopes::required",
+            "apollo::authorization::required_scopes",
             json! {["profile", "read:user", "read:name"]},
         )
         .unwrap();
@@ -837,13 +837,13 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     let context = Context::new();
     context
         .insert(
-            "apollo_authorization::scopes::required",
+            "apollo::authorization::required_scopes",
             json! {["profile", "read:user", "read:name"]},
         )
         .unwrap();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            "apollo::authentication::jwt_claims",
             json! {{ "scope": "read:user read:name" }},
         )
         .unwrap();
@@ -882,13 +882,13 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     let context = Context::new();
     context
         .insert(
-            "apollo_authorization::scopes::required",
+            "apollo::authorization::required_scopes",
             json! {["profile", "read:user", "read:name"]},
         )
         .unwrap();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            "apollo::authentication::jwt_claims",
             json! {{ "scope": "read:user profile" }},
         )
         .unwrap();
