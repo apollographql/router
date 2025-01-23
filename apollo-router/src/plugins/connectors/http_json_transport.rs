@@ -18,21 +18,22 @@ use thiserror::Error;
 use url::Url;
 
 use super::form_encoding::encode_json_as_form;
+use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
+use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::services::connect;
+use crate::services::connector::request_service::transport::http::HttpRequest;
+use crate::services::connector::request_service::TransportRequest;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
     inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<(http::Request<RouterBody>, Option<ConnectorDebugHttpRequest>), HttpJsonTransportError>
-{
+) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
     let uri = make_uri(
         transport.source_url.as_ref(),
         &transport.connect_template,
@@ -89,6 +90,8 @@ pub(crate) fn make_request(
         .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
+    let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
+
     let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
             serialize_request(
@@ -101,7 +104,7 @@ pub(crate) fn make_request(
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
                     result: json_body,
-                    errors: apply_to_errors,
+                    errors: mapping_problems.clone(),
                 }),
             )
         } else {
@@ -113,13 +116,19 @@ pub(crate) fn make_request(
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
                     result: json_body.clone(),
-                    errors: apply_to_errors,
+                    errors: mapping_problems.clone(),
                 }),
             )
         }
     });
 
-    Ok((request, debug_request))
+    Ok((
+        TransportRequest::Http(HttpRequest {
+            inner: request,
+            debug: debug_request,
+        }),
+        mapping_problems,
+    ))
 }
 
 fn make_uri(
@@ -704,21 +713,27 @@ mod tests {
 
         assert_debug_snapshot!(req, @r###"
         (
-            Request {
-                method: POST,
-                uri: http://localhost:8080/,
-                version: HTTP/1.1,
-                headers: {
-                    "content-type": "application/json",
-                    "content-length": "8",
+            Http(
+                HttpRequest {
+                    inner: Request {
+                        method: POST,
+                        uri: http://localhost:8080/,
+                        version: HTTP/1.1,
+                        headers: {
+                            "content-type": "application/json",
+                            "content-length": "8",
+                        },
+                        body: UnsyncBoxBody,
+                    },
+                    debug: None,
                 },
-                body: UnsyncBoxBody,
-            },
-            None,
+            ),
+            [],
         )
         "###);
 
-        let body = body::into_string(req.0.into_body()).await.unwrap();
+        let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
+        let body = body::into_string(req.into_body()).await.unwrap();
         insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
 
@@ -756,21 +771,27 @@ mod tests {
 
         assert_debug_snapshot!(req, @r###"
         (
-            Request {
-                method: POST,
-                uri: http://localhost:8080/,
-                version: HTTP/1.1,
-                headers: {
-                    "content-type": "application/x-www-form-urlencoded",
-                    "content-length": "4",
+            Http(
+                HttpRequest {
+                    inner: Request {
+                        method: POST,
+                        uri: http://localhost:8080/,
+                        version: HTTP/1.1,
+                        headers: {
+                            "content-type": "application/x-www-form-urlencoded",
+                            "content-length": "4",
+                        },
+                        body: UnsyncBoxBody,
+                    },
+                    debug: None,
                 },
-                body: UnsyncBoxBody,
-            },
-            None,
+            ),
+            [],
         )
         "###);
 
-        let body = body::into_string(req.0.into_body()).await.unwrap();
+        let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
+        let body = body::into_string(req.into_body()).await.unwrap();
         insta::assert_snapshot!(body, @r#"a=42"#);
     }
 }
