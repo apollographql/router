@@ -1888,6 +1888,10 @@ fn broken_plan_does_not_panic() {
         query_planner::fetch::SubgraphSchema::new(subgraph_schema),
     );
     // Run the plan initialization code to make sure it doesn't panic.
-    let _result =
+    let result =
         Arc::make_mut(&mut plan.root).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        r#"[1:3] Cannot query field "invalid" on type "Query"."#
+    );
 }
