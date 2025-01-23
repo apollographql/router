@@ -101,7 +101,7 @@ pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
 pub(crate) struct SubgraphSchema {
     pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
     // TODO: Ideally should have separate nominal type for subgraph's schema hash
-    pub(crate) hash: Arc<SchemaHash>,
+    pub(crate) hash: SchemaHash,
 }
 
 impl SubgraphSchema {
@@ -109,7 +109,7 @@ impl SubgraphSchema {
         let sdl = schema.serialize().no_indent().to_string();
         Self {
             schema: Arc::new(schema),
-            hash: Arc::new(SchemaHash::new(&sdl)),
+            hash: SchemaHash::new(&sdl),
         }
     }
 }
