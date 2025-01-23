@@ -12,8 +12,6 @@ use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::services::connector_service::ConnectorInfo;
-use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
 use crate::Context;
 
 const CONNECTOR_HTTP_METHOD: Key = Key::from_static_str("connector.http.method");
@@ -96,41 +94,46 @@ impl Selectors<ConnectorRequest, ConnectorResponse, ()> for ConnectorAttributes 
     fn on_request(&self, request: &ConnectorRequest) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
 
-        if let Ok(Some(connector_info)) = request
-            .context
-            .get::<&str, ConnectorInfo>(CONNECTOR_INFO_CONTEXT_KEY)
+        if let Some(key) = self
+            .subgraph_name
+            .as_ref()
+            .and_then(|a| a.key(SUBGRAPH_NAME))
         {
-            if let Some(key) = self
-                .subgraph_name
-                .as_ref()
-                .and_then(|a| a.key(SUBGRAPH_NAME))
-            {
-                attrs.push(KeyValue::new(key, connector_info.subgraph_name.to_string()));
-            }
-            if let Some(key) = self
-                .connector_source_name
-                .as_ref()
-                .and_then(|a| a.key(CONNECTOR_SOURCE_NAME))
-            {
-                if let Some(source_name) = connector_info.source_name {
-                    attrs.push(KeyValue::new(key, source_name.to_string()));
-                }
-            }
-            if let Some(key) = self
-                .connector_http_method
-                .as_ref()
-                .and_then(|a| a.key(CONNECTOR_HTTP_METHOD))
-            {
-                attrs.push(KeyValue::new(key, connector_info.http_method));
-            }
-            if let Some(key) = self
-                .connector_url_template
-                .as_ref()
-                .and_then(|a| a.key(CONNECTOR_URL_TEMPLATE))
-            {
-                attrs.push(KeyValue::new(key, connector_info.url_template.to_string()));
+            attrs.push(KeyValue::new(
+                key,
+                request.connector.id.subgraph_name.clone(),
+            ));
+        }
+        if let Some(key) = self
+            .connector_source_name
+            .as_ref()
+            .and_then(|a| a.key(CONNECTOR_SOURCE_NAME))
+        {
+            if let Some(ref source_name) = request.connector.id.source_name {
+                attrs.push(KeyValue::new(key, source_name.clone()));
             }
         }
+        if let Some(key) = self
+            .connector_http_method
+            .as_ref()
+            .and_then(|a| a.key(CONNECTOR_HTTP_METHOD))
+        {
+            attrs.push(KeyValue::new(
+                key,
+                request.connector.transport.method.as_str().to_string(),
+            ));
+        }
+        if let Some(key) = self
+            .connector_url_template
+            .as_ref()
+            .and_then(|a| a.key(CONNECTOR_URL_TEMPLATE))
+        {
+            attrs.push(KeyValue::new(
+                key,
+                request.connector.transport.connect_template.to_string(),
+            ));
+        }
+
         attrs
     }
 

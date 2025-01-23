@@ -31,7 +31,7 @@ use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::fetch::QueryHash;
+use crate::spec::QueryHash;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -102,7 +102,10 @@ impl Request {
             subgraph_name,
             subscription_stream,
             connection_closed_signal,
-            query_hash: Default::default(),
+            // It's NOT GREAT! to have an empty hash value here.
+            // This value is populated based on the subgraph query hash in the query planner code.
+            // At the time of writing it's in `crate::query_planner::fetch::FetchNode::fetch_node`.
+            query_hash: QueryHash::default().into(),
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId::new(),

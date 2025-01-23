@@ -5,7 +5,6 @@ use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -36,8 +35,9 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxService;
 use crate::services::SubgraphRequest;
-use crate::spec::query::change::QueryHashVisitor;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
+use crate::spec::SchemaHash;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -100,7 +100,18 @@ pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
 
 pub(crate) struct SubgraphSchema {
     pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
-    pub(crate) implementers_map: HashMap<Name, apollo_compiler::schema::Implementers>,
+    // TODO: Ideally should have separate nominal type for subgraph's schema hash
+    pub(crate) hash: SchemaHash,
+}
+
+impl SubgraphSchema {
+    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
+        let sdl = schema.serialize().no_indent().to_string();
+        Self {
+            schema: Arc::new(schema),
+            hash: SchemaHash::new(&sdl),
+        }
+    }
 }
 
 /// A fetch node.
@@ -251,23 +262,6 @@ impl std::fmt::Debug for SubgraphOperation {
 impl std::fmt::Display for SubgraphOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self.as_serialized(), f)
-    }
-}
-
-#[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
-
-impl std::fmt::Debug for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("QueryHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-impl Display for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
     }
 }
 
@@ -588,20 +582,13 @@ impl FetchNode {
     pub(crate) fn init_parsed_operation_and_hash_subquery(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
-        supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        let doc = self.operation.init_parsed(&schema.schema)?;
-
-        if let Ok(hash) = QueryHashVisitor::hash_query(
-            &schema.schema,
-            supergraph_schema_hash,
-            &schema.implementers_map,
-            doc,
+        self.operation.init_parsed(&schema.schema)?;
+        self.schema_aware_hash = Arc::new(schema.hash.operation_hash(
+            self.operation.as_serialized(),
             self.operation_name.as_deref(),
-        ) {
-            self.schema_aware_hash = Arc::new(QueryHash(hash));
-        }
+        ));
         Ok(())
     }
 

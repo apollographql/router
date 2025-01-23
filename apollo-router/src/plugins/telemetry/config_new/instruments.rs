@@ -2622,7 +2622,15 @@ mod tests {
 
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::name;
     use apollo_compiler::Name;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::sources::connect::URLTemplate;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -2646,6 +2654,9 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::connectors::handle_responses::MappedResponse;
+    use crate::plugins::connectors::make_requests::ResponseKey;
+    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::cache::CacheInstruments;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -2654,8 +2665,11 @@ mod tests {
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
-    use crate::services::http::HttpRequest;
-    use crate::services::http::HttpResponse;
+    use crate::services::connector::request_service::transport;
+    use crate::services::connector::request_service::Request;
+    use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportRequest;
+    use crate::services::connector::request_service::TransportResponse;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -2765,18 +2779,29 @@ mod tests {
         ResponseField {
             typed_value: TypedValueMirror,
         },
-        HttpRequest {
-            method: String,
+        ConnectorRequest {
+            subgraph_name: String,
+            source_name: String,
+            http_method: String,
+            url_template: String,
             uri: String,
             #[serde(default)]
             headers: HashMap<String, String>,
             body: Option<String>,
+            #[serde(default)]
+            mapping_problems: Vec<Problem>,
         },
-        HttpResponse {
+        ConnectorResponse {
+            subgraph_name: String,
+            source_name: String,
+            http_method: String,
+            url_template: String,
             status: u16,
             #[serde(default)]
             headers: HashMap<String, String>,
             body: String,
+            #[serde(default)]
+            mapping_problems: Vec<Problem>,
         },
     }
 
@@ -3203,21 +3228,69 @@ mod tests {
                                         }
                                     }
                                 }
-                                Event::HttpRequest {
-                                    method,
+                                Event::ConnectorRequest {
+                                    subgraph_name,
+                                    source_name,
+                                    http_method,
+                                    url_template,
                                     uri,
                                     headers,
                                     body,
+                                    mapping_problems,
                                 } => {
                                     let mut http_request = http::Request::builder()
-                                        .method(Method::from_str(&method).expect("method"))
+                                        .method(Method::from_str(&http_method).expect("method"))
                                         .uri(Uri::from_str(&uri).expect("uri"))
                                         .body(body.map(body::from_bytes).unwrap_or(body::empty()))
                                         .unwrap();
                                     *http_request.headers_mut() = convert_http_headers(headers);
-                                    let request = HttpRequest {
-                                        http_request,
-                                        context: context.clone(),
+                                    let transport_request =
+                                        TransportRequest::Http(transport::http::HttpRequest {
+                                            inner: http_request,
+                                            debug: None,
+                                        });
+                                    let connector = Connector {
+                                        id: ConnectId::new(
+                                            subgraph_name,
+                                            Some(source_name),
+                                            name!(Query),
+                                            name!(field),
+                                            0,
+                                            "label",
+                                        ),
+                                        transport: HttpJsonTransport {
+                                            source_url: None,
+                                            connect_template: URLTemplate::from_str(
+                                                url_template.as_str(),
+                                            )
+                                            .unwrap(),
+                                            method: HTTPMethod::from_str(http_method.as_str())
+                                                .unwrap(),
+                                            headers: Default::default(),
+                                            body: None,
+                                        },
+                                        selection: JSONSelection::empty(),
+                                        config: None,
+                                        max_requests: None,
+                                        entity_resolver: None,
+                                        spec: ConnectSpec::V0_1,
+                                        request_variables: Default::default(),
+                                        response_variables: Default::default(),
+                                    };
+                                    let response_key = ResponseKey::RootField {
+                                        name: "hello".to_string(),
+                                        inputs: Default::default(),
+                                        selection: Arc::new(
+                                            JSONSelection::parse("$.data").unwrap(),
+                                        ),
+                                    };
+                                    let request = Request {
+                                        context: Context::default(),
+                                        connector: Arc::new(connector),
+                                        service_name: Default::default(),
+                                        transport_request,
+                                        key: response_key.clone(),
+                                        mapping_problems,
                                     };
                                     connector_instruments = Some({
                                         let connector_instruments = config
@@ -3228,23 +3301,75 @@ mod tests {
                                         connector_instruments
                                     });
                                 }
-                                Event::HttpResponse {
+                                Event::ConnectorResponse {
+                                    subgraph_name,
+                                    source_name,
+                                    http_method,
+                                    url_template,
                                     status,
                                     headers,
                                     body,
+                                    mapping_problems,
                                 } => {
+                                    let connector = Connector {
+                                        id: ConnectId::new(
+                                            subgraph_name,
+                                            Some(source_name),
+                                            name!(Query),
+                                            name!(field),
+                                            0,
+                                            "label",
+                                        ),
+                                        transport: HttpJsonTransport {
+                                            source_url: None,
+                                            connect_template: URLTemplate::from_str(
+                                                url_template.as_str(),
+                                            )
+                                            .unwrap(),
+                                            method: HTTPMethod::from_str(http_method.as_str())
+                                                .unwrap(),
+                                            headers: Default::default(),
+                                            body: None,
+                                        },
+                                        selection: JSONSelection::empty(),
+                                        config: None,
+                                        max_requests: None,
+                                        entity_resolver: None,
+                                        spec: ConnectSpec::V0_1,
+                                        request_variables: Default::default(),
+                                        response_variables: Default::default(),
+                                    };
+                                    let response_key = ResponseKey::RootField {
+                                        name: "hello".to_string(),
+                                        inputs: Default::default(),
+                                        selection: Arc::new(
+                                            JSONSelection::parse("$.data").unwrap(),
+                                        ),
+                                    };
                                     let mut http_response = http::Response::builder()
                                         .status(StatusCode::from_u16(status).expect("status"))
                                         .body(router::body::from_bytes(body))
                                         .unwrap();
                                     *http_response.headers_mut() = convert_http_headers(headers);
-                                    let response = HttpResponse {
-                                        http_response,
-                                        context: context.clone(),
+                                    let response = Response {
+                                        context: Context::default(),
+                                        connector: connector.into(),
+                                        transport_result: Ok(TransportResponse::Http(
+                                            transport::http::HttpResponse {
+                                                inner: http_response.into_parts().0,
+                                            },
+                                        )),
+                                        mapped_response: MappedResponse::Data {
+                                            data: json!({})
+                                                .try_into()
+                                                .expect("expecting valid JSON"),
+                                            key: response_key,
+                                            problems: mapping_problems,
+                                        },
                                     };
                                     connector_instruments
                                         .take()
-                                        .expect("http request must have been made first")
+                                        .expect("connector request must have been made first")
                                         .on_response(&response);
                                 }
                             }

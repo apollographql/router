@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
@@ -340,6 +341,21 @@ impl HTTPMethod {
             HTTPMethod::Patch => "PATCH",
             HTTPMethod::Put => "PUT",
             HTTPMethod::Delete => "DELETE",
+        }
+    }
+}
+
+impl FromStr for HTTPMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "GET" => Ok(HTTPMethod::Get),
+            "POST" => Ok(HTTPMethod::Post),
+            "PATCH" => Ok(HTTPMethod::Patch),
+            "PUT" => Ok(HTTPMethod::Put),
+            "DELETE" => Ok(HTTPMethod::Delete),
+            _ => Err(format!("Invalid HTTP method: {s}")),
         }
     }
 }
