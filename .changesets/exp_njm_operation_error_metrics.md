@@ -8,6 +8,6 @@ Adds a new experimental OpenTelemetry metric that includes error counts at a per
 * Client version
 * Error code
 
-This metric is currently only sent to GraphOS and is not available in 3rd-party OTel destinations.
+This metric is currently only sent to GraphOS and is not available in 3rd-party OTel destinations. The metric can be enabled using the configuration `telemetry.apollo.errors.experimental_otlp_error_metrics: enabled`.
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/6443
