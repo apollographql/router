@@ -447,14 +447,17 @@
         {
           "type": "object",
           "required": [
-            "http_request"
+            "connector_request"
           ],
           "properties": {
-            "http_request": {
+            "connector_request": {
               "type": "object",
               "required": [
-                "method",
-                "uri"
+                "http_method",
+                "source_name",
+                "subgraph_name",
+                "uri",
+                "url_template"
               ],
               "properties": {
                 "body": {
@@ -470,10 +473,26 @@
                     "type": "string"
                   }
                 },
-                "method": {
+                "http_method": {
+                  "type": "string"
+                },
+                "mapping_problems": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Problem"
+                  }
+                },
+                "source_name": {
+                  "type": "string"
+                },
+                "subgraph_name": {
                   "type": "string"
                 },
                 "uri": {
+                  "type": "string"
+                },
+                "url_template": {
                   "type": "string"
                 }
               },
@@ -485,14 +504,18 @@
         {
           "type": "object",
           "required": [
-            "http_response"
+            "connector_response"
           ],
           "properties": {
-            "http_response": {
+            "connector_response": {
               "type": "object",
               "required": [
                 "body",
-                "status"
+                "http_method",
+                "source_name",
+                "status",
+                "subgraph_name",
+                "url_template"
               ],
               "properties": {
                 "body": {
@@ -505,10 +528,29 @@
                     "type": "string"
                   }
                 },
+                "http_method": {
+                  "type": "string"
+                },
+                "mapping_problems": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Problem"
+                  }
+                },
+                "source_name": {
+                  "type": "string"
+                },
                 "status": {
                   "type": "integer",
                   "format": "uint16",
                   "minimum": 0.0
+                },
+                "subgraph_name": {
+                  "type": "string"
+                },
+                "url_template": {
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -526,6 +568,28 @@
         "mutation",
         "subscription"
       ]
+    },
+    "Problem": {
+      "description": "A mapping problem",
+      "type": "object",
+      "required": [
+        "count",
+        "message",
+        "path"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
     },
     "TypedValueMirror": {
       "oneOf": [
