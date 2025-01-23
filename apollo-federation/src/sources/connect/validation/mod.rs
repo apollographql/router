@@ -39,6 +39,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::SchemaBuilder;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -94,7 +95,10 @@ pub struct ValidationResult {
 pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
     // TODO: Use parse_and_validate (adding in directives as needed)
     // TODO: Handle schema errors rather than relying on JavaScript to catch it later
-    let schema = Schema::parse(source_text, file_name)
+    let schema = SchemaBuilder::new()
+        .adopt_orphan_extensions()
+        .parse(source_text, file_name)
+        .build()
         .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
     let connect_identity = ConnectSpec::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
