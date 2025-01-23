@@ -43,31 +43,34 @@ pub(crate) enum LitExpr {
 
 impl LitExpr {
     // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
-    // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
-        tuple((
-            spaces_or_comments,
-            alt((
-                map(parse_string_literal, |s| s.take_as(Self::String)),
-                Self::parse_number,
-                map(ranged_span("true"), |t| {
-                    WithRange::new(Self::Bool(true), t.range())
-                }),
-                map(ranged_span("false"), |f| {
-                    WithRange::new(Self::Bool(false), f.range())
-                }),
-                map(ranged_span("null"), |n| {
-                    WithRange::new(Self::Null, n.range())
-                }),
-                Self::parse_object,
-                Self::parse_array,
-                map(PathSelection::parse, |p| {
-                    let range = p.range();
-                    WithRange::new(Self::Path(p), range)
-                }),
-            )),
+        let (input, _) = spaces_or_comments(input)?;
+        alt((
+            Self::parse_primitive,
+            Self::parse_object,
+            Self::parse_array,
+            map(PathSelection::parse, |p| {
+                let range = p.range();
+                WithRange::new(Self::Path(p), range)
+            }),
         ))(input)
-        .map(|(input, (_, value))| (input, value))
+    }
+
+    // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
+    fn parse_primitive(input: Span) -> ParseResult<WithRange<Self>> {
+        alt((
+            map(parse_string_literal, |s| s.take_as(Self::String)),
+            Self::parse_number,
+            map(ranged_span("true"), |t| {
+                WithRange::new(Self::Bool(true), t.range())
+            }),
+            map(ranged_span("false"), |f| {
+                WithRange::new(Self::Bool(false), f.range())
+            }),
+            map(ranged_span("null"), |n| {
+                WithRange::new(Self::Null, n.range())
+            }),
+        ))(input)
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
@@ -160,37 +163,32 @@ impl LitExpr {
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
     fn parse_object(input: Span) -> ParseResult<WithRange<Self>> {
-        tuple((
-            spaces_or_comments,
-            ranged_span("{"),
-            spaces_or_comments,
-            map(
-                opt(tuple((
-                    Self::parse_property,
-                    many0(preceded(
-                        tuple((spaces_or_comments, char(','))),
-                        Self::parse_property,
-                    )),
-                    opt(tuple((spaces_or_comments, char(',')))),
-                ))),
-                |properties| {
-                    let mut output = IndexMap::default();
-                    if let Some(((first_key, first_value), rest, _trailing_comma)) = properties {
-                        output.insert(first_key, first_value);
-                        for (key, value) in rest {
-                            output.insert(key, value);
-                        }
-                    }
-                    Self::Object(output)
-                },
-            ),
-            spaces_or_comments,
-            ranged_span("}"),
-        ))(input)
-        .map(|(input, (_, open_brace, _, output, _, close_brace))| {
-            let range = merge_ranges(open_brace.range(), close_brace.range());
-            (input, WithRange::new(output, range))
-        })
+        let (input, _) = spaces_or_comments(input)?;
+        let (input, open_brace) = ranged_span("{")(input)?;
+        let (mut input, _) = spaces_or_comments(input)?;
+
+        let mut output = IndexMap::default();
+
+        if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+            output.insert(key, value);
+            input = remainder;
+
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+                input = remainder;
+                if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+                    output.insert(key, value);
+                    input = remainder;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let (input, _) = spaces_or_comments(input)?;
+        let (input, close_brace) = ranged_span("}")(input)?;
+
+        let range = merge_ranges(open_brace.range(), close_brace.range());
+        Ok((input, WithRange::new(Self::Object(output), range)))
     }
 
     // LitProperty ::= Key ":" LitExpr
