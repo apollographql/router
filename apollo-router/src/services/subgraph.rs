@@ -60,8 +60,7 @@ pub struct Request {
 
     pub context: Context,
 
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
+    /// Name of the subgraph
     pub(crate) subgraph_name: String,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
@@ -208,8 +207,7 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
     pub response: http::Response<graphql::Response>,
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
+    /// Name of the subgraph
     pub(crate) subgraph_name: String,
     pub context: Context,
     /// unique id matching the corresponding field in the request
