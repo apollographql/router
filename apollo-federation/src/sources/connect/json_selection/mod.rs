@@ -17,3 +17,5 @@ pub(crate) use location::Ranged;
 pub use parser::*;
 #[cfg(test)]
 pub(crate) use pretty::*;
+#[cfg(test)]
+mod fixtures;
