@@ -20,11 +20,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-<<<<<<< HEAD
-use super::fetch::QueryHash;
-=======
-use crate::apollo_studio_interop::UsageReporting;
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
@@ -145,7 +140,6 @@ where
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
         let mut hasher = StructHasher::new();
-<<<<<<< HEAD
         match configuration.experimental_query_planner_mode {
             crate::configuration::QueryPlannerMode::New => {
                 "PLANNER-NEW".hash(&mut hasher);
@@ -177,11 +171,7 @@ where
                     .hash(&mut hasher);
             }
         };
-        let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
-=======
-        configuration.rust_query_planner_config().hash(&mut hasher);
         let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
 
         Ok(Self {
             cache,

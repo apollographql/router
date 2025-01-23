@@ -263,27 +263,6 @@ impl std::fmt::Display for SubgraphOperation {
     }
 }
 
-<<<<<<< HEAD
-#[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
-
-impl std::fmt::Debug for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("QueryHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-impl Display for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
-    }
-}
-
-=======
-#[derive(Default)]
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
 pub(crate) struct Variables {
     pub(crate) variables: Object,
     pub(crate) inverted_paths: Vec<Vec<Path>>,

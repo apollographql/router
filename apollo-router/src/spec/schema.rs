@@ -33,12 +33,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-<<<<<<< HEAD
-    pub(crate) schema_id: Arc<String>,
-=======
     pub(crate) schema_id: SchemaHash,
-    pub(crate) connectors: Option<Connectors>,
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
     pub(crate) launch_id: Option<Arc<String>>,
 }
 

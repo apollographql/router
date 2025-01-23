@@ -45,11 +45,7 @@ use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
-<<<<<<< HEAD:apollo-router/src/query_planner/bridge_query_planner.rs
 use crate::query_planner::dual_query_planner::BothModeComparisonJob;
-use crate::query_planner::fetch::QueryHash;
-=======
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622)):apollo-router/src/query_planner/query_planner_service.rs
 use crate::query_planner::fetch::SubgraphSchema;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
@@ -373,10 +369,7 @@ impl PlannerMode {
                     .map(|(name, schema)| {
                         (
                             name.to_string(),
-                            SubgraphSchema {
-                                implementers_map: schema.schema().implementers_map(),
-                                schema: Arc::new(schema.schema().clone()),
-                            },
+                            SubgraphSchema::new(schema.schema().clone()),
                         )
                     })
                     .collect())
@@ -390,10 +383,7 @@ impl PlannerMode {
                     .map_err(|errors| SchemaError::Validate(errors.into()))?;
                 Ok((
                     name,
-                    SubgraphSchema {
-                        implementers_map: schema.implementers_map(),
-                        schema: Arc::new(schema),
-                    },
+                    SubgraphSchema::new(schema),
                 ))
             })
             .collect()
@@ -411,22 +401,7 @@ impl BridgeQueryPlanner {
         let planner =
             PlannerMode::new(&schema, &configuration, &old_js_planner, rust_planner).await?;
 
-<<<<<<< HEAD:apollo-router/src/query_planner/bridge_query_planner.rs
         let subgraph_schemas = Arc::new(planner.subgraphs().await?);
-=======
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
-                .iter()
-                .map(|(name, schema)| {
-                    (
-                        name.to_string(),
-                        SubgraphSchema::new(schema.schema().clone()),
-                    )
-                })
-                .collect(),
-        );
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622)):apollo-router/src/query_planner/query_planner_service.rs
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
@@ -516,7 +491,6 @@ impl BridgeQueryPlanner {
         doc: &ParsedDocument,
         query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-<<<<<<< HEAD:apollo-router/src/query_planner/bridge_query_planner.rs
         let plan_success = self
             .planner
             .plan(
@@ -525,36 +499,10 @@ impl BridgeQueryPlanner {
                 operation.clone(),
                 plan_options,
                 |root_node| {
-                    root_node.init_parsed_operations_and_hash_subqueries(
-                        &self.subgraph_schemas,
-                        &self.schema.raw_sdl,
-                    )?;
+                    root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
                     root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
                     Ok(())
                 },
-=======
-        let plan_result = self
-            .plan_inner(doc, operation.clone(), plan_options, |root_node| {
-                root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
-                root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
-                Ok(())
-            })
-            .await?;
-        let QueryPlanResult {
-            query_plan_root_node,
-            formatted_query_plan,
-            evaluated_plan_count,
-        } = plan_result;
-
-        // If the query is filtered, we want to generate the signature using the original query and generate the
-        // reference using the filtered query. To do this, we need to re-parse the original query here.
-        let signature_doc = if original_query != filtered_query {
-            Query::parse_document(
-                &original_query,
-                operation.clone().as_deref(),
-                &self.schema,
-                &self.configuration,
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622)):apollo-router/src/query_planner/query_planner_service.rs
             )
             .await?;
 
