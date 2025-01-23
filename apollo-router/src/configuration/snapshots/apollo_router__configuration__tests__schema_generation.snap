@@ -1753,7 +1753,7 @@ expression: "&schema"
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
         },
-        "experimental_otlp_tracing_sampler": {
+        "otlp_tracing_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
         },
