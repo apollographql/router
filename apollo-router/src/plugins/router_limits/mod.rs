@@ -114,7 +114,6 @@ register_private_plugin!("apollo", "router_limits", RouterLimits);
 #[cfg(test)]
 mod test {
     use serde_json::json;
-    use tokio::time::timeout;
     use tower::Service;
 
     use super::*;
@@ -264,6 +263,7 @@ mod test {
         // * one delayed enough to be outside of rate limiting interval
         let f1 = service.call_default();
         let f2 = service.call_default();
+        #[allow(clippy::async_yields_async)]
         let f3 = async {
             tokio::time::sleep(Duration::from_millis(500)).await;
             service.call_default()

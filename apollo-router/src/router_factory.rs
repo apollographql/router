@@ -779,10 +779,9 @@ mod test {
     use serde_json::json;
     use tower_http::BoxError;
 
+    use super::*;
     use crate::configuration::Configuration;
-    use crate::configuration::APOLLO_PLUGIN_PREFIX;
     use crate::plugin::Plugin;
-    use crate::plugin::PluginFactory;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
@@ -792,8 +791,6 @@ mod test {
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::TpsLimit;
-
-    use super::*;
 
     // Always starts and stops plugin
 
