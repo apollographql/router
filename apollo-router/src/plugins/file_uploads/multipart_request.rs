@@ -8,6 +8,7 @@ use std::task::Poll;
 use bytes::Bytes;
 use futures::Stream;
 use http::HeaderMap;
+use http_body_util::BodyExt;
 use itertools::Itertools;
 use multer::Constraints;
 use multer::Multipart;
@@ -74,7 +75,7 @@ impl MultipartRequest {
         limits: MultipartRequestLimits,
     ) -> Self {
         let multer = Multipart::with_constraints(
-            request_body,
+            request_body.into_data_stream(),
             boundary,
             Constraints::new().size_limit(SizeLimit::new().for_field("map", MAP_SIZE_LIMIT)),
         );

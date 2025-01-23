@@ -6,6 +6,9 @@ telemetry:
         header_name: apollo-custom-trace-id
       common:
         service_name: router
+        resource:
+          env: local1
+          service.version: router_version_override
       otlp:
         enabled: true
         protocol: http

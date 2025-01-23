@@ -27,7 +27,7 @@ async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 500);
     assert_yaml_snapshot!(response.text().await?);
-    router.assert_log_contains("INTERNAL_SERVER_ERROR").await;
+    router.wait_for_log_message("INTERNAL_SERVER_ERROR").await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -223,9 +223,9 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
         "stage": "ExecutionRequest",
         "context": {
             "entries": {
-                "cost.estimated": 10.0,
-                "cost.result": "COST_OK",
-                "cost.strategy": "static_estimated"
+                "apollo::demand_control::estimated_cost": 10.0,
+                "apollo::demand_control::result": "COST_OK",
+                "apollo::demand_control::strategy": "static_estimated"
             }}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                         "version":1,
@@ -242,10 +242,10 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
         .and(body_partial_json(json!({
             "stage": "SupergraphResponse",
             "context": {"entries": {
-            "cost.actual": 3.0,
-            "cost.estimated": 10.0,
-            "cost.result": "COST_OK",
-            "cost.strategy": "static_estimated"
+            "apollo::demand_control::actual_cost": 3.0,
+            "apollo::demand_control::estimated_cost": 10.0,
+            "apollo::demand_control::result": "COST_OK",
+            "apollo::demand_control::strategy": "static_estimated"
         }}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                         "version":1,

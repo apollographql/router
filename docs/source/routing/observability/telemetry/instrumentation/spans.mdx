@@ -14,7 +14,7 @@ A **span** captures contextual information about requests and responses as they'
 
 <RouterServices />
 
-The `router`, `supergraph` and `subgraph` sections are used to define custom span configuration for each service:
+The `router`, `supergraph`, `subgraph` and `connector` sections are used to define custom span configuration for each service:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -27,6 +27,9 @@ telemetry:
         attributes: {}
           # ...
       subgraph: # highlight-line
+        attributes: {}
+          # ...      
+      connector: # highlight-line
         attributes: {}
           # ...      
 ```
@@ -236,6 +239,9 @@ telemetry:
         attributes: {}
           # ...
       subgraph:
+        attributes: {}
+          # ...      
+      connector:
         attributes: {}
           # ...      
 ```
